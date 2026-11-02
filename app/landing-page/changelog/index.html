@@ -113,6 +113,19 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a>[Unreleased]</h2>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
+<li><p><strong>The Mac app's chat renders the agent's Markdown tables.</strong> The chat
+used to run the issue/PR-body parser, so a pipe table showed as raw
+<code>|</code> text. Session messages now parse with <code>ChatMarkdown</code>
+(<code>SWECore/Hub/ChatMarkdown.swift</code>), a port of the phone's chat parser
+(<code>SWERemote/Hub/Markdown.swift</code>, the same one the web app's <code>md()</code>
+ports): a pipe table draws as a grid that scrolls sideways inside its
+own box (bounded at 24 columns and 200 rows, with a note for the
+rest), a lone <code>![alt](src)</code> image or a harness-drawn <code>&lt;json-render&gt;</code>
+view folds into a note chip, and a link to the agent's own files —
+like the ones Codex ends a turn with — shows as a code-styled file
+name instead of a dead link, on user, reply, thinking and error text
+alike.</p>
+</li>
 <li><p><strong><code>SWE_MACHINE_NAME</code> names this machine in <code>swe sync</code> commits.</strong>
 Sync's commit and merge messages say <code>swe sync from &lt;hostname&gt;</code>; set
 <code>SWE_MACHINE_NAME</code> to use another name, for a demo recording or a
