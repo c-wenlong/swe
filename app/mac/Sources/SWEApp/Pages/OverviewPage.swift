@@ -86,9 +86,11 @@ private struct OverviewContent: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .animation(.easeOut(duration: 0.25), value: model.summary == nil)
         }
-        .task(id: model.period) {
-            if model.summary?.period != model.period { await model.reloadPeriod() }
-        }
+        // Background scans rebuild the period only while the page shows;
+        // opening it brings back what they left for it.
+        .onAppear { model.pageVisible = true }
+        .onDisappear { model.pageVisible = false }
+        .task(id: model.period) { await model.refreshForPage() }
     }
 
     @ViewBuilder private func main(_ summary: OverviewSummary) -> some View {

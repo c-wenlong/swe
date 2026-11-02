@@ -7,8 +7,8 @@ import Observation
 /// Enabling means handing a `SearchIndexer` to the ledger (`setIndexer`):
 /// every scan then feeds the FTS index off the same transcript read the
 /// usage ledger already performs, so the feature rides the scan path the
-/// app always had. While enabled a reconcile task re-runs that entry —
-/// `overview.load(scan:recentLimit:)` capped to each source's newest
+/// app always had. While enabled a reconcile task re-runs that scan —
+/// `overview.backgroundScan(recentLimit:)` capped to each source's newest
 /// files — on a short cycle so sessions running now become searchable
 /// within a minute; a poll task keeps the status line
 /// honest — every couple of seconds while a scan runs, slower once it
@@ -77,8 +77,9 @@ public final class SearchIndexModel {
     /// Nil when the ledger never opened (the app reports that separately):
     /// every attach then shows the reason instead of an index.
     private let ledger: Ledger?
-    /// The scan entry every trigger uses — enabling, the reconcile tick and
-    /// the app's own refresh all run the same `load(scan:)`.
+    /// The scan entry every trigger uses: enabling and resync run
+    /// `load(scan:)`, the reconcile tick `backgroundScan(recentLimit:)`,
+    /// which rebuilds figures only when the scan read something.
     private let overview: OverviewModel?
     /// How often the index piggybacks a scan while enabled.
     private let reconcileInterval: Duration
@@ -322,8 +323,8 @@ public final class SearchIndexModel {
         }
     }
 
-    /// Keeps the index current: the app's `load(scan:)`, capped to each
-    /// source's `recentPerAgent` newest files and run on a short cycle
+    /// Keeps the index current: the overview's `backgroundScan`, capped to
+    /// each source's `recentPerAgent` newest files and run on a short cycle
     /// while enabled, so a session that ends now is searchable within a
     /// minute. The capped pass is not a census — the app's own refresh
     /// still sweeps the backlog whole.
@@ -333,7 +334,7 @@ public final class SearchIndexModel {
             while !Task.isCancelled {
                 guard let self else { return }
                 do { try await Task.sleep(for: reconcileInterval) } catch { return }
-                await overview?.load(scan: true, recentLimit: Self.recentPerAgent)
+                await overview?.backgroundScan(recentLimit: Self.recentPerAgent)
             }
         }
     }

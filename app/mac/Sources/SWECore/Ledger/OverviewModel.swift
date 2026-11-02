@@ -171,8 +171,41 @@ public final class OverviewModel {
     /// Sources the last scan skipped, e.g. a database its app had locked or
     /// was rebuilding. Shown as a note, not a failure: everything else read.
     public private(set) var scanNotes: [String] = []
-    /// Successful scans so far; other views reload their ledger figures when it changes.
+    /// Scans that may have moved the ledger's figures: every scan a `load`
+    /// ran (launch, a refresh button), and a `backgroundScan` only when it
+    /// read new usage or a new price list. Other views reload their ledger
+    /// figures when it changes, so a background tick that read nothing
+    /// costs them nothing.
     public private(set) var completedScans = 0
+    /// Every successful scan, whether or not it read anything. Tests read it.
+    private(set) var scansRun = 0
+    /// Whether the Overview page is on screen. The page sets it on appear
+    /// and disappear. While it is, a background scan that read new usage
+    /// rebuilds the selected period too; while it isn't, the period waits
+    /// for `refreshForPage()`.
+    @ObservationIgnored public var pageVisible = false
+    /// `activityRows` before the last 30 days were last read before a
+    /// background scan wrote new usage. Those scans refresh only the recent
+    /// days; the page's next `refreshForPage()` (or a new day's first
+    /// background scan) reads the half year whole again.
+    private(set) var activityStale = false
+    /// The local day the spend and activity figures were built on, so a
+    /// background scan that read nothing still rebuilds them after midnight.
+    private var figuresDay: Date?
+    /// When the spend and recent days were last rebuilt. Their 30-day
+    /// window rolls, so a background scan rebuilds them (and moves
+    /// `completedScans` for Pricing's rolling periods) once they are
+    /// `rollingRefresh` old, even when it read nothing.
+    private var figuresBuiltAt: Date?
+    static let rollingRefresh: TimeInterval = 600
+    /// A whole half-year read lost its write to a newer rebuild that only
+    /// merged the recent days, so the older days may predate it (a Rescan's
+    /// new price list, say). The next background rebuild reads it whole.
+    private(set) var wholeActivityOwed = false
+    /// A scan failed or was cancelled after the ledger may have changed (a
+    /// new price list, files committed before the throw): the next
+    /// successful scan rebuilds and counts even if it reads nothing itself.
+    private(set) var pendingChange = false
     /// Whether a full scan (no `recentLimit`) has finished. The search
     /// index's capped reconcile scans also count in `completedScans` and can
     /// finish while the first full scan is still running, so the launch
@@ -198,7 +231,8 @@ public final class OverviewModel {
     @ObservationIgnored var scanWatchSleep: @Sendable (Duration) async throws -> Void = {
         try await Task.sleep(for: $0)
     }
-    /// Bumped by every full load: only the newest writes spend and activity.
+    /// Bumped as each load or background rebuild starts reading: only the
+    /// newest writes spend and activity.
     private var loadGeneration = 0
     /// Bumped by every load and period reload: only the newest writes the summary.
     private var summaryGeneration = 0
@@ -286,63 +320,41 @@ public final class OverviewModel {
         await load(scan: false)
     }
 
-    /// Optionally scan the logs for new usage, then rebuild every figure.
-    /// `recentLimit` caps the scan to each source's newest files — the
-    /// search index's reconcile tick passes a small one so live sessions
-    /// re-index without a full backlog sweep; nil scans everything.
+    /// Optionally scan the logs for new usage, then rebuild every figure
+    /// and warm every period. For launch and the refresh buttons; the
+    /// timers use `backgroundScan`, which rebuilds only what changed.
+    /// `recentLimit` caps the scan to each source's newest files; nil
+    /// scans everything.
     public func load(scan: Bool, recentLimit: Int? = nil) async {
         let fullScan = scan && recentLimit == nil
         if fullScan {
             guard await beginFullScan() else { return }
         }
         defer { if fullScan { endFullScan() } }
-        loadGeneration += 1
-        summaryGeneration += 1
         warming?.cancel()
-        let mine = loadGeneration
-        let mySummary = summaryGeneration
         inFlight += 1
         defer { inFlight -= 1 }
         if scan {
-            if let catalog = await refreshPricing() {
-                await ledger.setPricing(catalog)
-                revision += 1
-            }
-            let watcher = recentLimit == nil ? watchScan() : nil
-            if watcher != nil { scanWatchers += 1 }
-            defer {
-                if let watcher {
-                    watcher.cancel()
-                    scanWatchers -= 1
-                    if scanWatchers == 0 { scanProgress = nil }
-                }
-            }
-            do {
-                let report = try await ledger.scan(roots: roots(), recentLimit: recentLimit)
-                error = nil
-                scanNotes = report.notes
-                completedScans += 1
-                if recentLimit == nil { fullScanFinished = true }
-                if report.filesRead + report.filesRescanned + report.databasesRead > 0 {
-                    revision += 1
-                }
-            } catch is CancellationError {
-                // Stopped partway: files may have committed before the throw.
-                revision += 1
-                return
-            } catch {
-                revision += 1
-                self.error = "Couldn't read your usage logs: \(error.localizedDescription)"
-                return
-            }
+            guard await runScan(recentLimit: recentLimit) != nil else { return }
+            completedScans += 1
+            pendingChange = false
         }
+        // Both taken after the scan: of two loads, or a load and a
+        // background rebuild, the one that read the ledger last writes the
+        // figures. A period switch while the scan ran is older than this
+        // load's summary, which is for the period picked by then; one that
+        // starts while the summary is read still wins.
+        loadGeneration += 1
+        let mine = loadGeneration
+        summaryGeneration += 1
+        let mySummary = summaryGeneration
 
         let now = now()
         let ledger = self.ledger
         let calendar = self.calendar
         let todayStart = calendar.startOfDay(for: now)
         let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart) ?? todayStart
-        let halfYear = DateInterval(start: calendar.date(byAdding: .day, value: -182, to: todayStart) ?? todayStart, end: now)
+        let halfYear = Self.halfYear(now: now, calendar: calendar)
         // The same rolling range as the Overview's "30 days", to the minute.
         let thirtyDays = OverviewPeriod.thirtyDays.range(now: now, calendar: calendar)
         // The ledger answers these on read connections of their own, so
@@ -374,14 +386,245 @@ public final class OverviewModel {
         let recentRows = await recentRead
         let recentModels = Self.models(recentRows)
 
-        guard mine == loadGeneration else { return }
+        guard mine == loadGeneration else {
+            wholeActivityOwed = true
+            return
+        }
         self.spend = spend
         self.activity = activity
         self.activityRows = halfYearRows
         self.recentRows = recentRows
         self.recentModels = recentModels
+        activityStale = false
+        wholeActivityOwed = false
+        figuresDay = calendar.startOfDay(for: now)
+        figuresBuiltAt = now
         updatedAt = now
         warmCache()
+    }
+
+    /// What one scan changed, for the caller to decide what to rebuild.
+    private struct ScanOutcome {
+        /// The scan read a file or database: the ledger may hold new usage.
+        var read = false
+        /// A newer price list was set: every past cost may have moved.
+        var repriced = false
+        var changed: Bool { read || repriced }
+    }
+
+    /// Applies a newer price list when one is due, then scans. Nil when
+    /// the scan failed or was cancelled; the revision moves then too,
+    /// since files may have committed before the throw.
+    private func runScan(recentLimit: Int?) async -> ScanOutcome? {
+        var outcome = ScanOutcome()
+        if let catalog = await refreshPricing() {
+            await ledger.setPricing(catalog)
+            revision += 1
+            outcome.repriced = true
+        }
+        let watcher = recentLimit == nil ? watchScan() : nil
+        if watcher != nil { scanWatchers += 1 }
+        defer {
+            if let watcher {
+                watcher.cancel()
+                scanWatchers -= 1
+                if scanWatchers == 0 { scanProgress = nil }
+            }
+        }
+        do {
+            let report = try await ledger.scan(roots: roots(), recentLimit: recentLimit)
+            error = nil
+            scanNotes = report.notes
+            scansRun += 1
+            if recentLimit == nil { fullScanFinished = true }
+            if report.filesRead + report.filesRescanned + report.databasesRead > 0 {
+                revision += 1
+                outcome.read = true
+            }
+            return outcome
+        } catch is CancellationError {
+            // Stopped partway: files may have committed before the throw.
+            revision += 1
+            pendingChange = true
+            return nil
+        } catch {
+            revision += 1
+            pendingChange = true
+            self.error = "Couldn't read your usage logs: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// The timers' scan: the search index's reconcile tick (capped by
+    /// `recentLimit`) and `keepFresh`'s full sweep. It reads new usage and
+    /// rebuilds only what is on show and changed, so an idle tick costs
+    /// the scan alone (#1542):
+    ///
+    /// - Read nothing: no figure query, no `completedScans` bump, no
+    ///   warming. The exceptions: a shown rolling period older than ten
+    ///   minutes is rebuilt; spend and the last 30 days are rebuilt once
+    ///   they are `rollingRefresh` old, and the first scan of a new day
+    ///   also rereads the heatmap, both moving `completedScans` so pages
+    ///   on "today" or a rolling period (Pricing, Calendar) move with them.
+    /// - Read new usage: `completedScans` moves for the other views, and
+    ///   the menu bar's spend, the last 30 days (widgets, the heatmap's
+    ///   recent days) and, while the page shows, the selected period are
+    ///   rebuilt. Other periods and the heatmap's older days wait for the
+    ///   page (`refreshForPage`) instead of being warmed every tick.
+    ///
+    /// Before the first figures exist it is a plain `load`.
+    public func backgroundScan(recentLimit: Int? = nil) async {
+        guard updatedAt != nil else {
+            await load(scan: true, recentLimit: recentLimit)
+            return
+        }
+        let fullScan = recentLimit == nil
+        if fullScan {
+            guard await beginFullScan() else { return }
+        }
+        defer { if fullScan { endFullScan() } }
+        inFlight += 1
+        defer { inFlight -= 1 }
+        guard let outcome = await runScan(recentLimit: recentLimit) else { return }
+        let now = now()
+        let newDay = figuresDay != calendar.startOfDay(for: now)
+        // The 30-day window has slid far enough to drop usage off its start.
+        let slid = figuresBuiltAt.map { now.timeIntervalSince($0) >= Self.rollingRefresh } ?? true
+        // A failed scan before this one may have repriced or committed
+        // files without a rebuild; this one covers it.
+        let pending = pendingChange
+        let rebuild = outcome.changed || newDay || pending || slid
+        if rebuild || wholeActivityOwed {
+            pendingChange = false
+            if rebuild { completedScans += 1 }
+            await refreshShown(wroteUsage: outcome.read || pending,
+                               wholeActivity: outcome.repriced || newDay || pending || wholeActivityOwed,
+                               now: now)
+        } else if pageVisible, cacheEntry(for: period, now: now)?.fresh != true {
+            // Nothing new, but a rolling period on show has slid.
+            await reloadPeriod()
+            updatedAt = now
+        } else {
+            // The figures shown are still the ledger's, as of now.
+            updatedAt = now
+        }
+    }
+
+    /// The background scan's rebuild: spend, the last 30 days and the
+    /// heatmap, plus the selected period while the page shows. The half
+    /// year is read whole only when `wholeActivity`; otherwise its last
+    /// 30 days are replaced from the recent read and the older days kept.
+    private func refreshShown(wroteUsage: Bool, wholeActivity: Bool, now: Date) async {
+        loadGeneration += 1
+        let mine = loadGeneration
+        // Its entries would be stamped with the old revision and dropped.
+        warming?.cancel()
+        let ledger = self.ledger
+        let calendar = self.calendar
+        let todayStart = calendar.startOfDay(for: now)
+        let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart) ?? todayStart
+        let halfYear = Self.halfYear(now: now, calendar: calendar)
+        let thirtyDays = OverviewPeriod.thirtyDays.range(now: now, calendar: calendar)
+        async let todaySpend = ledger.byHarness(in: DateInterval(start: todayStart, end: now))
+        async let yesterdaySpend = ledger.byHarness(in: DateInterval(start: yesterdayStart, end: todayStart))
+        async let thirtyDaySpend = ledger.byHarness(in: thirtyDays)
+        async let recentRead = ledger.daily(in: thirtyDays, calendar: calendar)
+        async let halfYearRead: [DailyUsage]? = wholeActivity
+            ? ledger.daily(in: halfYear, calendar: calendar) : nil
+
+        if pageVisible {
+            summaryGeneration += 1
+            let mySummary = summaryGeneration
+            let summary: OverviewSummary
+            if let cached = cacheEntry(for: period, now: now), cached.fresh {
+                summary = cached.entry.summary
+            } else {
+                let stamped = revision
+                summary = await summarize(period, now: now)
+                if mySummary == summaryGeneration { storeCached(summary, at: now, stamped: stamped) }
+            }
+            if mySummary == summaryGeneration { self.summary = summary }
+        }
+        let spend = [
+            SpendSlice(period: .today, byHarness: await todaySpend),
+            SpendSlice(period: .yesterday, byHarness: await yesterdaySpend),
+            SpendSlice(period: .thirtyDays, byHarness: await thirtyDaySpend),
+        ]
+        let recentRows = await recentRead
+        let wholeRows = await halfYearRead
+
+        guard mine == loadGeneration else {
+            if wholeRows != nil { wholeActivityOwed = true }
+            return
+        }
+        let activityRows = wholeRows ?? Self.merging(
+            activityRows, recent: recentRows, recentStart: thirtyDays.start,
+            since: halfYear.start, calendar: calendar)
+        self.spend = spend
+        self.activity = Self.combineDays(activityRows)
+        self.activityRows = activityRows
+        self.recentRows = recentRows
+        self.recentModels = Self.models(recentRows)
+        if wholeRows != nil {
+            activityStale = false
+            wholeActivityOwed = false
+        } else if wroteUsage {
+            activityStale = true
+        }
+        figuresDay = calendar.startOfDay(for: now)
+        figuresBuiltAt = now
+        updatedAt = now
+    }
+
+    /// The page came on screen or its period changed: the selected period
+    /// (from the cache while it is still valid), the heatmap's older days
+    /// if background scans refreshed only its recent ones, and the other
+    /// periods warmed if a scan moved the ledger since they were cached.
+    public func refreshForPage() async {
+        let now = now()
+        // Until the first load lands, its own (and the launch scan's
+        // partial) figures are on their way; only a period switch asks.
+        // After it, a valid cache entry is put up even when the summary
+        // shown is for the same period: it may be older than the entry.
+        if summary?.period != period || updatedAt != nil {
+            await reloadPeriod()
+        }
+        if activityStale || wholeActivityOwed { await reloadActivity() }
+        guard updatedAt != nil,
+              OverviewPeriod.allCases.contains(where: { cacheEntry(for: $0, now: now) == nil })
+        else { return }
+        warmCache()
+    }
+
+    /// Reads the heatmap's half year whole again.
+    private func reloadActivity() async {
+        let mine = loadGeneration
+        let rows = await ledger.daily(in: Self.halfYear(now: now(), calendar: calendar), calendar: calendar)
+        // A newer load or background rebuild wrote the rows meanwhile.
+        guard mine == loadGeneration else { return }
+        activityRows = rows
+        activity = Self.combineDays(rows)
+        activityStale = false
+        wholeActivityOwed = false
+    }
+
+    /// The heatmap's span: the last 182 days and today.
+    nonisolated static func halfYear(now: Date, calendar: Calendar) -> DateInterval {
+        let todayStart = calendar.startOfDay(for: now)
+        return DateInterval(start: calendar.date(byAdding: .day, value: -182, to: todayStart) ?? todayStart,
+                            end: now)
+    }
+
+    /// `rows` with every day `recent` covers whole replaced by its fresh
+    /// rows, and the days before `since` dropped. `recent` starts at
+    /// `recentStart`, mid-day for a rolling range, so its first day is
+    /// partial and the older rows keep it.
+    nonisolated static func merging(_ rows: [DailyUsage], recent: [DailyUsage], recentStart: Date,
+                                    since start: Date, calendar: Calendar) -> [DailyUsage] {
+        let firstWhole = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: recentStart))
+            ?? recentStart
+        return rows.filter { $0.day >= start && $0.day < firstWhole }
+            + recent.filter { $0.day >= firstWhole }
     }
 
     /// Full-scan loads run one at a time. Two at once (the timer's and the
@@ -564,11 +807,14 @@ public final class OverviewModel {
             .sorted { ($0.totals.totalTokens, $1.model) > ($1.totals.totalTokens, $0.model) }
     }
 
-    /// Reload on a timer until cancelled, scanning for new usage each time.
+    /// Load once, then scan for new usage on a timer until cancelled,
+    /// rebuilding only what each scan changed (`backgroundScan`).
     public func keepFresh(every interval: Duration = .seconds(300)) async {
+        guard !Task.isCancelled else { return }
+        await load(scan: true)
         while !Task.isCancelled {
-            await load(scan: true)
             do { try await Task.sleep(for: interval) } catch { return }
+            await backgroundScan()
         }
     }
 

@@ -1377,6 +1377,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Mac app no longer rebuilds every usage figure each minute.**
+  The search index's 60 s scan and the 300 s ledger timer each re-ran
+  every Overview query, warmed all seven periods (about 30 more grouped
+  reads over the whole ledger) and woke every page that reloads after a
+  scan, whether or not the scan found anything. On a ledger of about
+  400K events that cost 10 s at 200-400% CPU every minute. A timer scan
+  that reads nothing now runs no figure query. One that reads new usage
+  rebuilds the menu bar's spend, the last 30 days the widgets show and,
+  while the Overview is on screen, its selected period; the other
+  periods and the heatmap's older days are rebuilt when the Overview
+  next opens. The Rescan and refresh buttons still rebuild everything.
+  [#1542](https://github.com/c-wenlong/swe/issues/1542).
+
 - **`swe init` links a Codex skills folder that holds only Codex's own
   skills.** Codex 0.166 writes its bundled skills to
   `~/.codex/skills/.system` on start, so on a machine where Codex ran
