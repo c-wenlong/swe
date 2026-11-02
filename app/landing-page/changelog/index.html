@@ -1484,9 +1484,13 @@ that the hub's <code>.gitignore</code> did not list, so a sync committed them. C
 0.166 writes its bundled skills to <code>~/.codex/skills/.system</code>, which is
 <code>~/.swe/skills/.system</code> once linked, so a sync committed about 50 files,
 and <code>swe skills</code> and the Mac Skills page listed them as shared skills.
-The <code>.gitignore</code> <code>swe init</code> writes now ignores all of <code>data/</code> (every
-file there is this machine's own) and <code>skills/.system/</code>. <code>swe sync</code>
-holds both back on a hub whose <code>.gitignore</code> is older, and <code>swe setup --hub</code> adds them to the clone's <code>.git/info/exclude</code>. <code>swe skills</code> skips
+The <code>.gitignore</code> <code>swe init</code> writes now ignores the hub's own <code>/data/</code>
+(every file there is this machine's own; a skill's or plugin's <code>data/</code>
+folder still syncs) and <code>skills/.system/</code>. <code>swe sync</code> holds both back
+on a hub whose <code>.gitignore</code> is older, and <code>swe setup --hub</code> adds them
+to the clone's <code>.git/info/exclude</code>. A store the hub already committed
+is untracked by the next sync, its file left in place, and a merge
+never overwrites this machine's copy with another clone's. <code>swe skills</code> skips
 a <code>.system</code> folder at the top of a skills root; other dot folders are
 still listed. <code>data/web-status-services.json</code> no longer travels between
 machines. Found while rehearsing <code>docs/demo.md</code> segment 10

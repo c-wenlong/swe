@@ -93,8 +93,8 @@ does it support plugins, where do its skills live — is a question for
 `tools.json`, `providers.json`, `stars.json`, and the caches are all listed,
 so a machine's actual state can never land in this repo by accident.
 `~/.swe` carries its own `.gitignore` — written by `swe init` from
-`paths.GITIGNORE_BODY`, and listing `cache/`, `backups/`, `data/` (this
-machine's stores, which the app and swe rewrite while they run: the usage
+`paths.GITIGNORE_BODY`, and listing `cache/`, `backups/`, `/data/` (this
+machine's stores, anchored so a skill's or plugin's own `data/` folder still syncs; which the app and swe rewrite while they run: the usage
 ledgers, the model catalog, the FTS index of session message text, Devin
 session titles, remote state, account link records and their lock files),
 `skills/.system/` (the bundled skills Codex writes into its linked skills
@@ -146,7 +146,10 @@ in each entry's `added` time. When the line merge stops on that file alone,
 machine's value, and any other field both sides changed is still a conflict. Every `git add`
 excludes `paths.GITIGNORE_BODY`'s paths by pathspec, so a hub with an older
 `.gitignore` still never commits `secrets/`, `cache/`, `data/` or `skills/.system/`; those files
-are reported as held back.
+are reported as held back. One the hub already tracks (committed before the
+line was there) is untracked by the next sync commit with its file left in
+place, a conflict with an older clone's edit of it settles as untracked, and
+a merge that still carries one never overwrites this machine's copy.
 
 ## The core idea: one file, many names
 

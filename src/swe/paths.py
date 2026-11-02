@@ -529,8 +529,9 @@ backups/
 # usage ledgers, the model catalog, the search index, Devin cloud sessions,
 # GitHub mirrors, remote-control state, the issue list, account link records
 # and their lock files. Personal, live SQLite or paths that only mean
-# something here, so never versioned.
-data/
+# something here, so never versioned. Anchored: a skill or plugin may ship
+# a data/ folder of its own.
+/data/
 
 # The per-PR checkouts `swe gh pr worktree` manages: each carries its own
 # .git the hub should never see.

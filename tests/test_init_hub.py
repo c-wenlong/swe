@@ -257,7 +257,7 @@ class CloneAroundLocalStateTest(unittest.TestCase):
         clone_hub(self.home, str(self.src))
         self.assertEqual((self.hub_dir / ".gitignore").read_text(), "cache/\n")
         exclude = (self.hub_dir / ".git" / "info" / "exclude").read_text()
-        self.assertIn("data/\n", exclude)
+        self.assertIn("/data/\n", exclude)
         self.assertNotIn("\ncache/\n", exclude)  # the hub already ignores it
         status = subprocess.run(["git", "-C", str(self.hub_dir), "status", "--porcelain"],
                                 capture_output=True, text=True).stdout

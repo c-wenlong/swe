@@ -81,7 +81,8 @@ class LayoutInvariantTest(unittest.TestCase):
         # the model catalog and its WAL, the search index, Devin cloud
         # sessions, remote state, and the issue list's lock all sit under
         # data/ and change while the app runs. None of it is worth a commit.
-        self.assertIn("data/", paths.GITIGNORE_BODY.splitlines())
+        # Anchored: a skill or plugin may ship its own data/ folder.
+        self.assertIn("/data/", paths.GITIGNORE_BODY.splitlines())
         home = Path("/tmp/does-not-exist-home")
         data = paths.data_dir_for(home)
         for store in (paths.search_index_for(home), paths.issues_file_for(home),

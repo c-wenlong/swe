@@ -519,6 +519,74 @@ class NeverSyncedTest(SyncTestBase):
         doc = repo.status(a)
         self.assertEqual((doc["changes"], doc["held_back"]), ([], []))
 
+    def test_a_skill_or_plugin_data_folder_still_syncs(self):
+        # Only the hub's own data/ is machine-local; the rule is anchored.
+        from swe.paths import GITIGNORE_BODY
+
+        a = self.machine("a")
+        hub = a / ".swe"
+        (hub / ".gitignore").write_text(GITIGNORE_BODY)
+        for rel in ("skills/data/SKILL.md", "skills/one/data/table.csv",
+                    "plugins/mine/p/data/defaults.json", "data/issues.json"):
+            (hub / rel).parent.mkdir(parents=True, exist_ok=True)
+            (hub / rel).write_text("x\n")
+        doc = self.sync(a)
+        self.assertEqual(sorted(f["path"] for f in doc["commit"]["files"]),
+                         [".gitignore", "plugins/mine/p/data/defaults.json",
+                          "skills/data/SKILL.md", "skills/one/data/table.csv"])
+        self.assertEqual(doc["held_back"], [])
+
+    def _hub_tracking(self, rel: str, text: str) -> Path:
+        # What an older swe left: an app store committed and pushed.
+        a = self.machine("a")
+        (a / ".swe" / rel).parent.mkdir(parents=True, exist_ok=True)
+        (a / ".swe" / rel).write_text(text)
+        git(a / ".swe", "add", "-f", rel)
+        git(a / ".swe", "commit", "-q", "-m", "older swe committed it")
+        git(a / ".swe", "push", "-q", "origin", "main")
+        return a
+
+    def test_a_store_the_hub_already_tracks_is_untracked_and_kept(self):
+        rel = "data/account-links.json"
+        a = self._hub_tracking(rel, "a v1\n")
+        b = self.machine("b")
+        (a / ".swe" / rel).write_text("a v2\n")
+        doc = self.sync(a)
+        self.assertEqual(doc["commit"]["files"],
+                         [{"status": "D", "path": rel, "group": "config"}])
+        self.assertEqual((a / ".swe" / rel).read_text(), "a v2\n")
+        self.assertEqual(repo.status(a)["changes"], [])
+        # b, also on this swe: its own commit untracks the file first, so
+        # the merge agrees and b's copy stays b's.
+        (b / ".swe" / rel).write_text("b v2\n")
+        (b / ".swe" / "AGENTS.md").write_text("# from b\n")
+        doc = self.sync(b)
+        self.assertEqual(doc["result"], "synced")
+        self.assertEqual((b / ".swe" / rel).read_text(), "b v2\n")
+        tracked = git(self.remote, "ls-tree", "-r", "--name-only", "main").splitlines()
+        self.assertNotIn(rel, tracked)
+        self.assertIn("AGENTS.md", tracked)
+
+    def test_an_older_clone_editing_a_store_never_blocks_or_overwrites(self):
+        rel = "data/account-links.json"
+        a = self._hub_tracking(rel, "v1\n")
+        old = self.machine("old")
+        # An older swe on another machine commits its copy of the store,
+        # while this machine untracks its own: a modify/delete conflict.
+        (old / ".swe" / rel).write_text("old's copy\n")
+        (old / ".swe" / "skills" / "one" / "SKILL.md").write_text("from old\n")
+        git(old / ".swe", "commit", "-q", "-am", "older swe sync")
+        git(old / ".swe", "push", "-q", "origin", "main")
+        (a / ".swe" / rel).write_text("a's own\n")
+        doc = self.sync(a)
+        self.assertEqual(doc["result"], "synced")
+        self.assertEqual(doc["merges"][0]["resolved"], [rel])
+        self.assertEqual((a / ".swe" / rel).read_text(), "a's own\n")
+        self.assertEqual((a / ".swe" / "skills" / "one" / "SKILL.md").read_text(),
+                         "from old\n")
+        self.assertNotIn(rel, git(self.remote, "ls-tree", "-r", "--name-only",
+                                  "main").splitlines())
+
     def test_never_synced_list_tracks_the_gitignore_body(self):
         names = repo.never_synced()
         for name in ("secrets", "cache", "data", "skills/.system", "mcp/servers"):
