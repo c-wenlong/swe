@@ -20,7 +20,32 @@ public enum MarkdownBlock: Equatable, Sendable {
     case code(String, String?)
     case quote([MarkdownBlock])
     case list([MarkdownListItem])
+    case table(MarkdownTable)
     case rule
+    /// An image on its own line. The app can't open the agent's
+    /// local file, so it shows as a labelled chip.
+    case image(alt: String, source: String)
+    /// A view a harness drew (Droid's `<json-render>`): no way to draw
+    /// it here, so it folds into a note.
+    case rendered(String)
+}
+
+/// A pipe table's grid: header cells, per-column alignment, then rows.
+/// `ChatMarkdown` emits these; `GitHubMarkdown` still flattens tables
+/// to bullets for issue and PR bodies.
+public struct MarkdownTable: Equatable, Sendable {
+    public enum Align: Equatable, Sendable { case leading, center, trailing }
+    public var header: [String]
+    public var align: [Align]
+    public var rows: [[String]]
+
+    public var columnCount: Int { max(header.count, rows.map(\.count).max() ?? 0) }
+
+    public init(header: [String], align: [Align], rows: [[String]]) {
+        self.header = header
+        self.align = align
+        self.rows = rows
+    }
 }
 
 public struct MarkdownListItem: Equatable, Sendable {
