@@ -64,6 +64,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DEMO_FORK`, `DEMO_A` and `DEMO_B` lines to paste or `eval`, and
   leaves `swe setup` to the demo. Part of
   [#524](https://github.com/c-wenlong/swe/issues/524).
+- **`scripts/demo_vm.sh record DIR` films the primitives demo.** It
+  starts a throwaway run of the demo VM, runs every bash block of
+  `docs/demo.md` segments 1 to 10 typed out in Terminal while it clicks
+  SWE.app to each segment's page, and saves a voiceless 1920 by 1080
+  `swe-demo-voiceless.mov` with `voiceover.md` and `voiceover.json`: the
+  narration from `scripts/demo_recording/narration.json`, timed to that
+  take. The VM's base now also builds the recorder, checks Terminal's
+  Screen Recording and Accessibility grants, keeps its display awake and
+  unlocked, and gets a short typeable password; a VM start that UTM drops
+  is retried once after relaunching UTM. Part of
+  [#524](https://github.com/c-wenlong/swe/issues/524).
 - **`scripts/demo_vm.sh`: record the primitives demo in a UTM VM.** SWE.app
   reads the logged-in account's real `~/.swe`, so a take needs an account
   of its own. The script builds a macOS 27 guest in UTM (`create`: restore

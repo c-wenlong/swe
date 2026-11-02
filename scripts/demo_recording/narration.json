@@ -1,0 +1,156 @@
+{
+  "title": "SWE: every text primitive in one hub",
+  "words_per_second": 2.5,
+  "cues": [
+    {
+      "segment": 1,
+      "at": "start",
+      "offset": 0.5,
+      "text": "This is a fresh Mac account. My hub is a git repo with my instructions, skills, plugins, MCP servers and hooks. One command brings it in."
+    },
+    {
+      "segment": 1,
+      "at": "cmd2",
+      "offset": 1.0,
+      "text": "AGENTS.md and the skills folder are now linked into every harness, the plugin is installed and the MCP server is synced. The hook is ignored, because the hub ships it switched off."
+    },
+    {
+      "segment": 2,
+      "at": "start",
+      "offset": 0.5,
+      "text": "One AGENTS.md, written as chapters. Claude Code reads it as CLAUDE.md, Codex as AGENTS.md."
+    },
+    {
+      "segment": 2,
+      "at": "cmd1",
+      "offset": 3.0,
+      "text": "Both are links to the same file, and it's current."
+    },
+    {
+      "segment": 3,
+      "at": "start",
+      "offset": 0.5,
+      "text": "The hub's three skills sit in one shared folder, and every harness loads them from there."
+    },
+    {
+      "segment": 3,
+      "at": "cmd1",
+      "offset": 3.0,
+      "text": "The fourth one comes with a plugin. That's next."
+    },
+    {
+      "segment": 4,
+      "at": "start",
+      "offset": 0.5,
+      "text": "The hub carries its own plugin marketplace."
+    },
+    {
+      "segment": 4,
+      "at": "cmd1",
+      "offset": 1.0,
+      "text": "Setup registered the marketplace and installed its plugin in both harnesses. Turning one off is a choice per harness."
+    },
+    {
+      "segment": 5,
+      "at": "start",
+      "offset": 0.5,
+      "text": "mcp.json in the hub lists two servers. Secrets stay out of git: the GitHub server only holds a reference to a GitHub token."
+    },
+    {
+      "segment": 5,
+      "at": "cmd1",
+      "offset": 2.0,
+      "text": "Setup synced context7 into every harness already, and left github out until the token has a value."
+    },
+    {
+      "segment": 6,
+      "at": "start",
+      "offset": 0.5,
+      "text": "The hook is in the hub, but switched off. We'll turn it on in a minute."
+    },
+    {
+      "segment": 7,
+      "at": "start",
+      "offset": 0.5,
+      "text": "Now I change one skill and one chapter, in one place."
+    },
+    {
+      "segment": 7,
+      "at": "view:agents",
+      "offset": 1.0,
+      "text": "AGENTS.md is now stale. One build fixes that."
+    },
+    {
+      "segment": 7,
+      "at": "cmd2",
+      "offset": 4.5,
+      "text": "And it's current again."
+    },
+    {
+      "segment": 8,
+      "at": "start",
+      "offset": 0.5,
+      "text": "Nothing was copied. Both harnesses read the same files."
+    },
+    {
+      "segment": 8,
+      "at": "cmd2",
+      "offset": 1.0,
+      "text": "And each harness sees the plugin and the MCP server for itself, without logging in."
+    },
+    {
+      "segment": 9,
+      "at": "start",
+      "offset": 0.5,
+      "text": "Now the hook. One command turns it on and links it into Claude Code."
+    },
+    {
+      "segment": 9,
+      "at": "cmd2",
+      "offset": 2.0,
+      "text": "Claude Code only runs a hook its settings declare, so we declare it."
+    },
+    {
+      "segment": 9,
+      "at": "view:hooks",
+      "offset": 0.8,
+      "text": "The check agrees, and the hook now sits on Claude Code's PreToolUse lane."
+    },
+    {
+      "segment": 9,
+      "at": "cmd3",
+      "offset": 1.0,
+      "text": "Hand it a force push, and it blocks it."
+    },
+    {
+      "segment": 10,
+      "at": "start",
+      "offset": 0.5,
+      "text": "Everything so far is one commit away from my other Mac."
+    },
+    {
+      "segment": 10,
+      "at": "cmd1",
+      "offset": 2.0,
+      "text": "One sync commits the changes and pushes them."
+    },
+    {
+      "segment": 10,
+      "at": "cmd2",
+      "offset": 2.0,
+      "text": "My second machine starts from the same repo. It gets the edited skill, the rebuilt AGENTS.md and the hook."
+    },
+    {
+      "segment": 10,
+      "at": "cmd3",
+      "offset": 2.0,
+      "text": "A new skill on the first machine, a sync on each, and it's on both."
+    },
+    {
+      "segment": 10,
+      "at": "end",
+      "offset": -4.5,
+      "text": "One repo, every harness, every machine."
+    }
+  ]
+}

@@ -12,6 +12,7 @@
 #   scripts/demo_vm.sh reset       stop the VM and put the clean base back
 #   scripts/demo_vm.sh ssh [CMD]   run CMD, or a shell, in the running VM
 #   scripts/demo_vm.sh shot FILE   bring SWE.app to the front and screenshot the VM
+#   scripts/demo_vm.sh record DIR  record a voiceless take of docs/demo.md, with its voiceover
 #   scripts/demo_vm.sh all         create, provision and save, in that order
 #
 # Each step is safe to run again: one that already happened says so and
@@ -26,10 +27,15 @@
 # Apple ID to download it with. The first `create` asks macOS to let your
 # terminal control UTM; allow it.
 #
-# Two settings only a click can change, both once: Screen Recording for
-# Terminal in the guest (`provision` opens the page and says so), and the
-# display size, which UTM's scripting cannot set: with the VM stopped, Edit
-# it in UTM, Display, turn off Dynamic Resolution and pick 1920 x 1080.
+# Settings only a click can change, once each: Screen Recording and
+# Accessibility for Terminal in the guest (`provision` opens each page and
+# says what to turn on; type the password from SWE_DEMO_VM_STATE, since
+# nothing can be pasted in), and the display size, which UTM's scripting
+# cannot set: with the VM stopped, Edit it in UTM, Display, turn off Dynamic
+# Resolution and pick 1920 x 1080.
+#
+# `record` drives SWE.app by clicking at fixed points, measured at that
+# display size; scripts/demo_recording/driver.py lists them.
 #
 # The guest is isolated on purpose: no shared folders, no clipboard sharing,
 # no Apple ID, and no credentials or tokens. Nothing is copied from your
@@ -219,13 +225,29 @@ wait_for_status() {
     die "$VM did not reach $1 (it is $(vm_status))."
 }
 
-# utmctl start exits 0 even when UTM never started the VM (an Apple Event
-# timeout while a UTM dialog is open, say), so check that it did.
+# utmctl start exits 0 even when UTM never started the VM: after a VM
+# stops, UTM 5.0.8 sometimes times out every later start (Apple Event
+# -1712) until it is relaunched. So check, and relaunch UTM once (only
+# while no VM runs in it) before giving up. A first boot reads the
+# password on stdin, so each attempt opens $start_stdin afresh.
 start_vm() {
-    utmctl start "$VM" "$@" || true
-    for _ in $(seq 1 30); do
-        [ "$(vm_status)" = started ] && return 0
-        sleep 2
+    for attempt in 1 2; do
+        utmctl start "$VM" "$@" < "${start_stdin:-/dev/null}" || true
+        for _ in $(seq 1 30); do
+            [ "$(vm_status)" = started ] && return 0
+            sleep 2
+        done
+        [ "$attempt" = 1 ] && [ "$(vm_status)" = stopped ] || break
+        # Quitting UTM would stop every VM in it; only do it when none runs.
+        if utmctl list 2>/dev/null | awk -v vm="$VM" 'NR > 1 && $2 != "stopped" && $3 != vm' | grep -q .; then
+            die "UTM did not start $VM, and another VM is running in UTM, so it was not
+relaunched. Quit and reopen UTM yourself when that VM can stop, then run this again."
+        fi
+        say "UTM did not start $VM; relaunching UTM and trying again ..."
+        osascript -e 'tell application "UTM" to quit' >/dev/null 2>&1 || true
+        for _ in $(seq 1 15); do pgrep -x UTM >/dev/null || break; sleep 1; done
+        open -g -a UTM
+        sleep 4
     done
     die "UTM did not start $VM (it is $(vm_status)); check UTM's window for a dialog, then run this again."
 }
@@ -238,11 +260,12 @@ cmd_create() {
     chmod 700 "$STATE"
     [ -f "$key" ] || ssh-keygen -q -t ed25519 -N '' -C "$VM" -f "$key"
     if [ ! -f "$password_file" ]; then
-        # A bounded read: `tr </dev/urandom | head` would end on SIGPIPE,
-        # which pipefail turns into a failed step.
-        password="$(head -c 512 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9')"
-        [ "${#password}" -ge 20 ] || die "couldn't make a password from /dev/urandom."
-        (umask 077; printf '%s' "${password:0:20}" > "$password_file")
+        # Short and typeable: nothing can be pasted into the guest, and its
+        # privacy switches ask for the password by hand. A bounded read, as
+        # `tr </dev/urandom | head` would end on SIGPIPE under pipefail.
+        password="$(head -c 512 /dev/urandom | LC_ALL=C tr -dc 'a-z0-9')"
+        [ "${#password}" -ge 8 ] || die "couldn't make a password from /dev/urandom."
+        (umask 077; printf 'demo-%s' "${password:0:8}" > "$password_file")
     fi
 
     if vm_exists; then
@@ -287,8 +310,8 @@ EOF
             # it in automatically and turns on Remote Login; it applies
             # only to that one start and is never saved.
             say "First boot: creating the $GUEST_USER account ..."
-            start_vm --provision-username="$GUEST_USER" --provision-full-name="Demo" \
-                --provision-password-stdin --provision-auto-login --provision-ssh < "$password_file"
+            start_stdin="$password_file" start_vm --provision-username="$GUEST_USER" \
+                --provision-full-name="Demo" --provision-password-stdin --provision-auto-login --provision-ssh
         fi
     fi
     ip="$(wait_for_ssh)"
@@ -419,37 +442,76 @@ EOF
             || sudo ln -sf '/var/db/timezone/zoneinfo/$tz' /etc/localtime"
     fi
 
+    # A take is recorded, and a dialog only a click can answer has to be
+    # seen: the guest's display never sleeps, dims or locks. sysadminctl
+    # wants the account's password to turn the lock off.
+    guest 'sudo pmset -a displaysleep 0 sleep 0 disksleep 0
+        defaults -currentHost write com.apple.screensaver idleTime -int 0
+        sudo sysadminctl -screenLock off -password "$(cat)" >/dev/null 2>&1' < "$password_file"
+
     check_stage
 
-    if ! guest_capture /tmp/swe-demo-check.png; then
-        # Screen Recording can only be granted by a click, and only to an
-        # app that asked: the failed capture above put Terminal in the list.
-        # Stopping here keeps `all` from saving a base without it.
-        guest 'open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture"'
-        die "screenshots need one click in $VM's window: in the System Settings it
-opened (Screen & System Audio Recording), turn on Terminal and enter the demo
-password ($password_file). Then check with scripts/demo_vm.sh shot, allow
-the prompt it shows in the VM, and run scripts/demo_vm.sh save."
-    fi
+    # `record` films the guest with this, built here because the guest has
+    # the Command Line Tools and the host's build would need its own copy.
+    say "Building the screen recorder in $VM ..."
+    guest 'cat > /tmp/screenrec.swift' < "$repo/scripts/demo_recording/screenrec.swift"
+    guest 'mkdir -p ~/Library/Application\ Support/swe-demo
+        swiftc -O /tmp/screenrec.swift -o ~/Library/Application\ Support/swe-demo/screenrec >/dev/null' \
+        || die "the screen recorder did not build in $VM."
+
+    check_terminal_grants
     say "Provisioned. Next: scripts/demo_vm.sh save"
 }
 
-# A screenshot of the guest's screen, at PATH in the guest. An SSH session
-# has no display, so Terminal takes it in the logged-in session; Terminal
-# needs Screen Recording, which `provision` asks for.
-guest_capture() {
-    guest "cat > /tmp/swe-demo-capture.command" <<EOF
-#!/bin/sh
-open -a "\$HOME/Applications/SWE.app"
-sleep 2
-screencapture -x '$1' && touch '$1.done'
-# Close this window once its shell has exited, so it never asks to.
-nohup sh -c 'sleep 1; osascript -e "tell application \\"Terminal\\" to close (every window whose name contains \\"swe-demo-capture\\")"' >/dev/null 2>&1 &
+# Runs the script on stdin in Terminal in the guest's logged-in session, the
+# only place Terminal's Screen Recording and Accessibility apply (an SSH
+# session has no display), and waits up to $1 seconds for it. Each job has
+# files and a window name of its own; its window closes once it is done, and
+# one that runs out of time is stopped.
+guest_terminal() {
+    job="swe-demo-job-$$-$RANDOM"
+    guest "cat > /tmp/$job.sh"
+    guest "cat > /tmp/$job.command; chmod +x /tmp/$job.command" <<EOF
+#!/bin/bash
+bash /tmp/$job.sh > /tmp/$job.log 2>&1
+echo \$? > /tmp/$job.done
+nohup sh -c 'sleep 1; osascript -e "tell application \\"Terminal\\" to close (every window whose name contains \\"$job\\")"' >/dev/null 2>&1 &
 EOF
-    guest "chmod +x /tmp/swe-demo-capture.command; rm -f '$1' '$1.done'
-        open -a Terminal /tmp/swe-demo-capture.command
-        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do test -f '$1.done' && exit 0; sleep 1; done
-        exit 1"
+    guest "open -a Terminal /tmp/$job.command
+        for _ in \$(seq 1 $1); do
+            test -f /tmp/$job.done && exit \"\$(cat /tmp/$job.done)\"
+            sleep 1
+        done
+        pkill -f '/tmp/$job' 2>/dev/null
+        exit 124"
+}
+
+# A screenshot of the guest's screen, with SWE.app in front, at PATH there.
+guest_capture() {
+    printf '%s\n' 'open -a "$HOME/Applications/SWE.app"' 'sleep 2' "screencapture -x '$1'" \
+        | guest_terminal 20
+}
+
+# Screen Recording (for `shot` and `record`) and Accessibility (for `record`'s
+# clicks in SWE.app) can only be granted by a click in the guest, and only to
+# an app that asked: a check that fails puts Terminal in the list. Stopping
+# here keeps `all` from saving a base without them.
+check_terminal_grants() {
+    if ! guest_capture /tmp/swe-demo-check.png; then
+        guest 'open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture"'
+        die "screenshots need a click in $VM's window: in the System Settings it opened
+(Screen & System Audio Recording), turn on Terminal and enter the guest password
+(in $password_file). Then run scripts/demo_vm.sh provision again, and allow the
+prompt it shows in the VM."
+    fi
+    if ! printf '%s\n' 'osascript -e "tell application \"System Events\" to get name of every menu bar item of menu bar 1 of process \"Finder\""' \
+        | guest_terminal 30; then
+        guest 'open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility"'
+        die "clicking in SWE.app needs two clicks in $VM's window: Allow on \"Terminal wants
+access to control System Events\", then, in the System Settings it opened
+(Accessibility), turn on Terminal and enter the guest password (in
+$password_file). Then run scripts/demo_vm.sh provision again."
+    fi
 }
 
 cmd_shot() {
@@ -526,6 +588,43 @@ cmd_take() {
     say "Stop it when the take is done: scripts/demo_vm.sh reset"
 }
 
+# One voiceless take of docs/demo.md, recorded in a throwaway run of the
+# base, and its voiceover timed to it. See scripts/demo_recording/.
+cmd_record() {
+    need_host
+    [ -n "${1:-}" ] || die "record needs a folder for the take: scripts/demo_vm.sh record DIR"
+    [ "$(vm_status)" = stopped ] || die "$VM is $(vm_status); stop it first (scripts/demo_vm.sh reset)."
+    command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH; the driver and voiceover need it."
+    mkdir -p "$1"
+    out="$(cd "$1" && pwd -P)"
+    driver="$(mktemp)"
+    python3 -I "$repo/scripts/demo_recording/driver.py" "$repo/docs/demo.md" "$driver"
+
+    start_vm --disposable
+    wait_for_ssh >/dev/null
+    for _ in $(seq 1 60); do guest 'who | grep -q console' && break; sleep 2; done
+    # Let the desktop finish appearing after the automatic login.
+    sleep 15
+    guest 'test -x ~/Library/Application\ Support/swe-demo/screenrec' \
+        || die "$VM has no screen recorder; run provision and save again."
+    guest 'cat > /tmp/record_take.sh' < "$driver"
+    rm -f "$driver"
+    say "Recording a take of docs/demo.md (about five minutes) ..."
+    guest 'rm -rf /tmp/take
+        printf "#!/bin/bash\nexec /bin/bash /tmp/record_take.sh\n" > /tmp/record.command
+        chmod +x /tmp/record.command; open -a Terminal /tmp/record.command
+        for _ in $(seq 1 900); do test -f /tmp/take/done && exit 0; sleep 1; done
+        exit 1' || die "the take did not finish in 15 minutes; $VM is still running, for a look."
+    guest 'grep -qx done /tmp/take/done' \
+        || die "the recorder did not start: $(guest 'cat /tmp/take/screenrec.log' 2>/dev/null)"
+    guest 'cat /tmp/take/take.mov' > "$out/swe-demo-voiceless.mov"
+    guest 'cat /tmp/take/marks.tsv' > "$out/marks.tsv"
+    python3 -I "$repo/scripts/demo_recording/voiceover.py" \
+        "$repo/scripts/demo_recording/narration.json" "$out/marks.tsv" "$out"
+    cmd_reset
+    say "Saved the take in $out: swe-demo-voiceless.mov, voiceover.md and voiceover.json."
+}
+
 cmd_reset() {
     need_host
     if [ "$(vm_status)" != stopped ]; then
@@ -548,6 +647,7 @@ case "$cmd" in
     reset) cmd_reset ;;
     ssh) need_host; wait_for_ssh >/dev/null; guest "$@" ;;
     shot) cmd_shot "$@" ;;
+    record) cmd_record "$@" ;;
     all) cmd_create; cmd_provision; cmd_save ;;
     -h | --help | help) usage ;;
     "") usage; exit 1 ;;
