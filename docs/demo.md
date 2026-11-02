@@ -46,7 +46,8 @@ Part of [#524](https://github.com/c-wenlong/swe/issues/524).
   so a temporary HOME cannot point it at the demo hub. A dedicated account
   keeps your own `~/.swe`, `~/.claude` and `~/.codex` out of the recording
   and out of harm's way. Launch the app once before recording and dismiss its
-  first-run prompts.
+  first-run prompts. A macOS virtual machine works as that account and
+  resets itself after every take; see [Record in a UTM VM](#record-in-a-utm-vm).
 - **Screen recording**: macOS screen recording (Shift-Command-5) or any
   recorder, set to 1920 by 1080. Put the app on the left two thirds of the
   screen and a terminal on the right third, with a large font (16 pt or more)
@@ -558,6 +559,62 @@ or `~/.codex`, since every command runs through `on_a` or `on_b`. The
 commands themselves take well under a minute: a scripted run of every block,
 including the clone from GitHub and `claude mcp list` fetching `context7`,
 took 23 seconds. Reading the output as you go is what takes the time.
+
+## Record in a UTM VM
+
+Instead of a second account on your own Mac, record in a macOS virtual
+machine. [`scripts/demo_vm.sh`](../scripts/demo_vm.sh) builds one in
+[UTM](https://mac.getutm.app) with a `demo` account, swe, Claude Code,
+Codex, a clone of this repo and SWE.app, and saves it as a clean base.
+Each take runs without saving changes, so stopping the VM is the reset.
+It needs macOS 27 on Apple silicon (the guest account is set up on first
+boot, which only 27 offers), UTM 5.0.6 or later with `utmctl` on `PATH`,
+and Xcode, because SWE.app is built on your Mac and copied in.
+
+Once, from the root of this repo:
+
+```bash
+scripts/demo_vm.sh all
+```
+
+That is `create` (download the newest macOS restore image, about 25 GB,
+install it and create the account; allow your terminal to control UTM when
+macOS asks), `provision` (everything the demo needs, over SSH) and `save`
+(shut it down and snapshot it). Most of the time goes to the download, the
+install and the Command Line Tools. Each step can be run on its own and
+run again.
+
+Two settings take a click, once each:
+
+- **Screen Recording for Terminal in the guest**, so `scripts/demo_vm.sh
+  shot FILE` can screenshot the VM. The first `provision` stops and opens
+  the page: in the VM's window turn on Terminal, enter the password from
+  `~/Library/Application Support/swe-demo-vm/demo-password`, run `shot`
+  once and allow the prompt it shows, then run `save`.
+- **The display size.** UTM's scripting cannot set it. With the VM stopped,
+  edit it in UTM, open Display, turn off Dynamic Resolution and pick 1920
+  by 1080.
+
+The guest shares nothing with your Mac: no shared folders, no clipboard,
+no Apple ID, and no token, so `GITHUB_TOKEN` stays unset as segment 5
+expects. Its SSH key and password are made for it and kept in
+`~/Library/Application Support/swe-demo-vm`.
+
+For each take:
+
+```bash
+scripts/demo_vm.sh take
+```
+
+Then, in the VM's window, open Terminal and follow [Before you
+record](#before-you-record) from `cd ~/swe`. Record the VM window, or
+record inside the guest. `scripts/demo_vm.sh ssh` gives a shell in it from
+your own terminal, for checks off camera, and `scripts/demo_vm.sh shot
+FILE` saves a screenshot of it on your Mac. When the take is done:
+
+```bash
+scripts/demo_vm.sh reset
+```
 
 ## Reset and clean up
 

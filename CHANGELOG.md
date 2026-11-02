@@ -51,6 +51,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DEMO_FORK`, `DEMO_A` and `DEMO_B` lines to paste or `eval`, and
   leaves `swe setup` to the demo. Part of
   [#524](https://github.com/c-wenlong/swe/issues/524).
+- **`scripts/demo_vm.sh`: record the primitives demo in a UTM VM.** SWE.app
+  reads the logged-in account's real `~/.swe`, so a take needs an account
+  of its own. The script builds a macOS 27 guest in UTM (`create`: restore
+  image, install, and a `demo` account with autologin and SSH set up on
+  first boot), installs swe from main, Claude Code, Codex, Node and a clone
+  of this repo over SSH, copies in SWE.app built from `origin/main` on the
+  host (`provision`), and snapshots it as a clean base with no `~/.swe`
+  (`save`). `take` starts it without saving changes and `reset` stops it
+  and restores the snapshot; `shot FILE` screenshots it. No shared folders,
+  clipboard, Apple ID or tokens in the guest. `docs/demo.md` gains a
+  "Record in a UTM VM" section. Part of
+  [#524](https://github.com/c-wenlong/swe/issues/524).
 - **Overview across machines (web and iPhone).** Satellites now add
   their daily token and cost totals per harness to the usage report
   they post every five minutes (`daily_usage`, from their own ledger,
