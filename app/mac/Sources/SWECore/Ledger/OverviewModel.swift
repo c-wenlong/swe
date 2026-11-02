@@ -192,6 +192,16 @@ public final class OverviewModel {
     /// The local day the spend and activity figures were built on, so a
     /// background scan that read nothing still rebuilds them after midnight.
     private var figuresDay: Date?
+    /// When the spend and recent days were last rebuilt. Their 30-day
+    /// window rolls, so a background scan rebuilds them (and moves
+    /// `completedScans` for Pricing's rolling periods) once they are
+    /// `rollingRefresh` old, even when it read nothing.
+    private var figuresBuiltAt: Date?
+    static let rollingRefresh: TimeInterval = 600
+    /// A whole half-year read lost its write to a newer rebuild that only
+    /// merged the recent days, so the older days may predate it (a Rescan's
+    /// new price list, say). The next background rebuild reads it whole.
+    private(set) var wholeActivityOwed = false
     /// A scan failed or was cancelled after the ledger may have changed (a
     /// new price list, files committed before the throw): the next
     /// successful scan rebuilds and counts even if it reads nothing itself.
@@ -376,14 +386,19 @@ public final class OverviewModel {
         let recentRows = await recentRead
         let recentModels = Self.models(recentRows)
 
-        guard mine == loadGeneration else { return }
+        guard mine == loadGeneration else {
+            wholeActivityOwed = true
+            return
+        }
         self.spend = spend
         self.activity = activity
         self.activityRows = halfYearRows
         self.recentRows = recentRows
         self.recentModels = recentModels
         activityStale = false
+        wholeActivityOwed = false
         figuresDay = calendar.startOfDay(for: now)
+        figuresBuiltAt = now
         updatedAt = now
         warmCache()
     }
@@ -446,10 +461,11 @@ public final class OverviewModel {
     /// the scan alone (#1542):
     ///
     /// - Read nothing: no figure query, no `completedScans` bump, no
-    ///   warming. Two exceptions: a shown rolling period older than ten
-    ///   minutes is rebuilt, and the first scan of a new day rebuilds the
-    ///   spend and heatmap and moves `completedScans`, so pages showing
-    ///   "today" (Pricing, Calendar) move on to the new day too.
+    ///   warming. The exceptions: a shown rolling period older than ten
+    ///   minutes is rebuilt; spend and the last 30 days are rebuilt once
+    ///   they are `rollingRefresh` old, and the first scan of a new day
+    ///   also rereads the heatmap, both moving `completedScans` so pages
+    ///   on "today" or a rolling period (Pricing, Calendar) move with them.
     /// - Read new usage: `completedScans` moves for the other views, and
     ///   the menu bar's spend, the last 30 days (widgets, the heatmap's
     ///   recent days) and, while the page shows, the selected period are
@@ -472,14 +488,18 @@ public final class OverviewModel {
         guard let outcome = await runScan(recentLimit: recentLimit) else { return }
         let now = now()
         let newDay = figuresDay != calendar.startOfDay(for: now)
+        // The 30-day window has slid far enough to drop usage off its start.
+        let slid = figuresBuiltAt.map { now.timeIntervalSince($0) >= Self.rollingRefresh } ?? true
         // A failed scan before this one may have repriced or committed
         // files without a rebuild; this one covers it.
         let pending = pendingChange
-        if outcome.changed || newDay || pending {
+        let rebuild = outcome.changed || newDay || pending || slid
+        if rebuild || wholeActivityOwed {
             pendingChange = false
-            completedScans += 1
+            if rebuild { completedScans += 1 }
             await refreshShown(wroteUsage: outcome.read || pending,
-                               wholeActivity: outcome.repriced || newDay || pending, now: now)
+                               wholeActivity: outcome.repriced || newDay || pending || wholeActivityOwed,
+                               now: now)
         } else if pageVisible, cacheEntry(for: period, now: now)?.fresh != true {
             // Nothing new, but a rolling period on show has slid.
             await reloadPeriod()
@@ -533,7 +553,10 @@ public final class OverviewModel {
         let recentRows = await recentRead
         let wholeRows = await halfYearRead
 
-        guard mine == loadGeneration else { return }
+        guard mine == loadGeneration else {
+            if wholeRows != nil { wholeActivityOwed = true }
+            return
+        }
         let activityRows = wholeRows ?? Self.merging(
             activityRows, recent: recentRows, recentStart: thirtyDays.start,
             since: halfYear.start, calendar: calendar)
@@ -544,10 +567,12 @@ public final class OverviewModel {
         self.recentModels = Self.models(recentRows)
         if wholeRows != nil {
             activityStale = false
+            wholeActivityOwed = false
         } else if wroteUsage {
             activityStale = true
         }
         figuresDay = calendar.startOfDay(for: now)
+        figuresBuiltAt = now
         updatedAt = now
     }
 
@@ -564,7 +589,7 @@ public final class OverviewModel {
         if summary?.period != period || updatedAt != nil {
             await reloadPeriod()
         }
-        if activityStale { await reloadActivity() }
+        if activityStale || wholeActivityOwed { await reloadActivity() }
         guard updatedAt != nil,
               OverviewPeriod.allCases.contains(where: { cacheEntry(for: $0, now: now) == nil })
         else { return }
@@ -580,6 +605,7 @@ public final class OverviewModel {
         activityRows = rows
         activity = Self.combineDays(rows)
         activityStale = false
+        wholeActivityOwed = false
     }
 
     /// The heatmap's span: the last 182 days and today.

@@ -1027,6 +1027,69 @@ final class WatchTicks: Sendable {
         #expect(await ledger.figureReads == reads)
     }
 
+    @Test func idleTicksRebuildTheRollingFiguresEveryTenMinutes() async throws {
+        let ledger = FakeLedger()
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)], days: usage(today: 1, old: 5))
+        let model = model(ledger)
+        await model.load(scan: false)
+        await model.warming?.value
+        let harnessReads = await ledger.ranges.count
+        let dailyReads = await ledger.dailyRanges.count
+
+        // Usage slid off the 30-day window's start.
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 0.5)], days: usage(today: 1, old: 5))
+        clock.now = clock.now.addingTimeInterval(OverviewModel.rollingRefresh)
+        await model.backgroundScan(recentLimit: 12)
+        // Spend and the last 30 days only, and Pricing's rolling periods
+        // hear about it.
+        #expect(model.completedScans == 1)
+        #expect(await ledger.ranges.count == harnessReads + 3)
+        #expect(await ledger.dailyRanges.count == dailyReads + 1)
+        #expect(model.spend?.last?.costUSD == 0.5)
+
+        // A minute on, the next idle tick reads nothing again.
+        let reads = await ledger.figureReads
+        clock.now = clock.now.addingTimeInterval(60)
+        await model.backgroundScan(recentLimit: 12)
+        #expect(model.completedScans == 1)
+        #expect(await ledger.figureReads == reads)
+    }
+
+    // A parked query left waiting hangs here; fail instead.
+    @Test(.timeLimit(.minutes(1)))
+    func aWholeHeatmapReadThatLosesToATickIsReadAgain() async throws {
+        let ledger = FakeLedger()
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)], days: usage(today: 1, old: 5))
+        let model = model(ledger)
+        await model.load(scan: false)
+        await model.warming?.value
+        // A Rescan reprices an old day; its spend reads park, so a capped
+        // tick that read usage starts its rebuild after it and wins.
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)], days: usage(today: 1, old: 50))
+        await ledger.holdHarnessQueries(fromCall: await ledger.ranges.count + 1)
+        let rescan = Task { await model.load(scan: false) }
+        try #require(await ledger.harnessParks.reach(3))
+        await readUsage(ledger)
+        let tick = Task { await model.backgroundScan(recentLimit: 12) }
+        try #require(await ledger.harnessParks.reach(6))
+        await ledger.releaseHarnessQueries()
+        await rescan.value
+        await tick.value
+        // The tick merged only the recent days into the old rows.
+        #expect(model.activity.map(\.totals.totalTokens) == [5, 1])
+        #expect(model.wholeActivityOwed)
+
+        // The next tick, idle, reads the half year whole.
+        await ledger.set(report: ScanReport())
+        let dailyReads = await ledger.dailyRanges.count
+        let scans = model.completedScans
+        await model.backgroundScan(recentLimit: 12)
+        #expect(await ledger.dailyRanges.count == dailyReads + 2)
+        #expect(model.activity.map(\.totals.totalTokens) == [50, 1])
+        #expect(!model.wholeActivityOwed)
+        #expect(model.completedScans == scans)
+    }
+
     @Test func aNewPriceListBeforeAFailedScanIsRebuiltByTheNextTick() async throws {
         let ledger = FakeLedger()
         await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)])
