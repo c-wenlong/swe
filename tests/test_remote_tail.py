@@ -562,6 +562,15 @@ class TestSnapshotChangeGate(unittest.TestCase):
             src.poll()
             self.assertEqual(rt.call_count, 2)
 
+    def test_devin_token_never_expires(self):
+        src = tail.SnapshotSource(self._session("devin"))
+        token = ((5, 5), (2,))
+        with patch.object(tail, "_devin_token", return_value=token), \
+                patch.object(tail, "SNAPSHOT_RECHECK_S", 0.0), \
+                patch.object(tail._tr, "read_transcript_tail", return_value=_Transcript(["a"])) as rt:
+            src.poll(); src.poll(); src.poll()
+            self.assertEqual(rt.call_count, 1, "an unchanged Devin token is trusted past the recheck window")
+
     def test_devin_token_reads_one_sessions_rows(self):
         import sqlite3
         db = self.tmp / "sessions.db"
@@ -569,7 +578,8 @@ class TestSnapshotChangeGate(unittest.TestCase):
         conn.executescript(
             "CREATE TABLE sessions(id TEXT PRIMARY KEY, main_chain_id INTEGER);"
             "CREATE TABLE message_nodes(row_id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT,"
-            " node_id INTEGER, parent_node_id INTEGER, chat_message TEXT, created_at INTEGER);"
+            " node_id INTEGER, parent_node_id INTEGER, chat_message TEXT, created_at INTEGER,"
+            " UNIQUE(session_id, node_id));"
             "INSERT INTO sessions VALUES ('s1', 1), ('s2', 1);"
             "INSERT INTO message_nodes(session_id, node_id, chat_message, created_at)"
             " VALUES ('s1', 1, '{}', 0), ('s2', 1, '{}', 0);"
@@ -581,6 +591,13 @@ class TestSnapshotChangeGate(unittest.TestCase):
             conn.commit()
             self.assertEqual(tail._devin_token("s1"), before, "another session's write leaves s1's token alone")
             conn.execute("INSERT INTO message_nodes(session_id, node_id, chat_message, created_at) VALUES ('s1', 2, '{}', 0)")
+            conn.commit()
+            self.assertNotEqual(tail._devin_token("s1"), before)
+            # Devin rewrites a message with INSERT OR REPLACE: the row
+            # comes back under a new row_id, so the token moves.
+            before = tail._devin_token("s1")
+            conn.execute("INSERT OR REPLACE INTO message_nodes(session_id, node_id, chat_message, created_at)"
+                         " VALUES ('s1', 1, '{\"edited\": 1}', 0)")
             conn.commit()
             self.assertNotEqual(tail._devin_token("s1"), before)
         conn.close()
