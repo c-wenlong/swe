@@ -1390,6 +1390,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next opens. The Rescan and refresh buttons still rebuild everything.
   [#1542](https://github.com/c-wenlong/swe/issues/1542).
 
+- **`swe init` links a Codex skills folder that holds only Codex's own
+  skills.** Codex 0.166 writes its bundled skills to
+  `~/.codex/skills/.system` on start, so on a machine where Codex ran
+  before `swe init`, init and `swe setup` read that folder as five skills
+  that exist nowhere else and left `~/.codex/skills` unlinked: Codex never
+  saw the hub's skills. A `.system` folder at the top of a skills root
+  that carries Codex's `.codex-system-skills.marker` no longer counts as
+  your content, so the root is absorbed like any folder of copies: backed
+  up to `~/.swe/backups/`, then replaced with the link, and Codex writes
+  `.system` again through it. A `.system` without the marker, or one
+  deeper in the tree, is still treated as your skills.
+
 - **`swe sync` no longer commits the app's stores or Codex's own
   skills.** While SWE.app runs it writes `~/.swe/data/catalog/catalog.sqlite`
   (and its WAL), `data/issues.json.lock` and other files under `data/`
