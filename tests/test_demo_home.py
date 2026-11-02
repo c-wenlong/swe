@@ -76,7 +76,11 @@ class DemoHomeTest(unittest.TestCase):
         swe.write_text(f'#!/bin/sh\nPYTHONPATH={shlex.quote(str(SRC))} '
                        f'exec {shlex.quote(sys.executable)} -m swe.cli "$@"\n')
         swe.chmod(0o755)
-        self.path = f"{self.bin}:/usr/bin:/bin"
+        # /usr/bin and /bin are empty inside a Nix build sandbox, so the
+        # script's mkdir/sed/... calls need each tool's real dir on PATH.
+        tool_dirs = {os.path.dirname(shutil.which(tool) or f"/usr/bin/{tool}")
+                     for tool in ("mkdir", "mktemp", "rm", "touch", "sed")}
+        self.path = ":".join([str(self.bin), *sorted(tool_dirs), "/usr/bin", "/bin"])
         (self.scratch / "tmp").mkdir()
         (self.scratch / "presenter").mkdir()
 

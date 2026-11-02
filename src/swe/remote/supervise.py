@@ -321,8 +321,9 @@ def launch_tmux(
         # tmux hands a lone command argument to default-shell -c, which
         # is the PATH rebuild above, and splits a binary path with a
         # space in it. Two or more arguments are exec'd as given, so a
-        # bare launch goes through env.
-        command = ["/usr/bin/env", binary]
+        # bare launch goes through env. /usr/bin/env is not there on NixOS
+        # (or its build sandbox), so resolve it through PATH first.
+        command = [shutil.which("env") or "/usr/bin/env", binary]
     args += command
     try:
         if _tmux(*args).returncode != 0:

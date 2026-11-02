@@ -36,6 +36,12 @@
               # these the sandbox checkPhase dies on FileNotFoundError.
               ./scripts
               ./.github/ISSUE_TEMPLATE
+              # The suite also reads the clients it must stay in step
+              # with: mac scripts and SWECore Swift sources (setup-machine,
+              # doctor, plan/provider parity tests) and the generated
+              # landing pages (docs_site). app/ios is app-only.
+              ./app/mac
+              ./app/landing-page
             ];
           };
 

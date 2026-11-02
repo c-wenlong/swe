@@ -1761,6 +1761,14 @@ rc's sourced files, globs and <code>for</code>-loop variables (bounded), and a
 not-sourced rc that can't be written shows the line to copy into the
 generating config instead of the button.</p>
 </li>
+<li><p><strong>Remote: tmux launches no longer assume <code>/usr/bin/env</code> exists.</strong> A
+bare <code>swe remote</code> launch wraps its command in <code>env</code> so tmux never
+hands a lone argument to <code>default-shell -c</code> (zsh's startup files can
+rebuild <code>PATH</code> there, and a binary path with a space splits), but the
+wrapper was hardcoded to <code>/usr/bin/env</code>, which is absent on NixOS and
+in the Nix build sandbox. It now resolves <code>env</code> through <code>PATH</code> first,
+falling back to <code>/usr/bin/env</code>.</p>
+</li>
 </ul>
 <h3 id="security"><a class="anchor" href="#security"></a>Security</h3>
 <ul>
