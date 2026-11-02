@@ -1351,6 +1351,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated and the next `swe instructions build` replaces the edit. It
   now says to edit the chapters and run `swe instructions build`.
 
+- **The web app's Model menu keeps your pick across a harness round
+  trip.** On New session, a task's New agent session, Open in session
+  and Resolve with agent, picking `sonnet`, switching to Gemini and back
+  used to land on Claude's newest model instead. On New session it
+  happened without a click: typing a folder whose partial path matched
+  one last used with Gemini flipped the harness away and back, and Start
+  sent the newest model. The menu now remembers a picked recent model
+  until you pick something else from it. A harness that lists it shows
+  it; one that doesn't shows and sends its own default, and the next
+  harness that lists it gets it back. What the menu shows is still what
+  gets sent, and a recent model is sent trimmed. The same rule as the
+  Mac app's fix in [#951](https://github.com/c-wenlong/quiver/pull/951).
+
 - **Hub marketplaces skip archived harnesses.** `swe setup --hub`,
   `swe init --hub` and `swe sync` registered the hub's plugin
   marketplaces in every installed harness, including ones the registry

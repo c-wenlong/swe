@@ -180,6 +180,26 @@ const optionsOf = (sel) => [...sel._html.matchAll(/<option value="([^"]*)"[^>]*>
 const labels = (sel) => sel ? optionsOf(sel).map((o) => o[1]) : null;
 const picked = (sel) => { const o = sel && optionsOf(sel).find((x) => x[0] === sel.value); return o ? o[1] : null; };
 const choose = (sel, label) => { sel.value = optionsOf(sel).find((x) => x[1] === label)[0]; sel.onchange(); };
+/* A picked recent model across a harness round trip (#951's rule): pick
+ * sonnet on claude, go through gemini (no model) and codex (no sonnet),
+ * launching on codex, then come back to claude and launch again. `menu`
+ * reads the select fresh, `start` resolves to the launch's POST call. */
+async function roundTrip(out, harness, menu, start) {
+  harness("claude");
+  choose(menu(), "sonnet");
+  harness("gemini");
+  out.rtHidden = !menu();
+  harness("claude");
+  out.rtGemini = picked(menu());
+  harness("codex");
+  out.rtMiddle = picked(menu());
+  const mid = await start();
+  out.rtMiddlePost = mid && [mid.body.harness, mid.body.model];
+  harness("claude");
+  out.rtBack = picked(menu());
+  const back = await start();
+  out.rtBackPost = back && [back.body.harness, back.body.model];
+}
 """
 
 STUB += app_js_function("currentRoute") + app_js_function("bindSearch", MANAGE_JS)
@@ -269,6 +289,7 @@ fetchRoutes.push(["/v1/issues/resolve",
   out.clearedKept = picked(el("tk-model"));
   const post2 = await start();
   out.emptyHasNoModel = !("model" in (post2 && post2.body || {}));
+  await roundTrip(out, harness, () => el("tk-model"), start);
   process.stdout.write(JSON.stringify(out));
 })().catch((e) => { console.error(e); process.exit(1); });
 """
@@ -359,6 +380,11 @@ fetchRoutes.push(
   q("#gh-session-start").onclick();
   await tick();
   out.errorShown = d._html.includes("cannot take a model pick");
+  await roundTrip(out, harness, () => q("#gh-session-model"), async () => {
+    q("#gh-session-start").onclick();
+    await tick();
+    return fetchCalls.filter((c) => c.path === "/v1/sessions").pop();
+  });
   process.stdout.write(JSON.stringify(out));
 })().catch((e) => { console.error(e); process.exit(1); });
 """
@@ -483,6 +509,11 @@ ISSUE_FLOW = ISSUE_SETUP + r"""
   await tick();
   out.noRepost = posts("/v1/issues/comment").length === comments
     && posts("/v1/issues/resolve").length === 2;
+  await roundTrip(out, harness, () => q("#gh-resolve-model"), async () => {
+    q("#gh-resolve-start").onclick();
+    await tick();
+    return posts("/v1/issues/resolve").pop();
+  });
   // A fresh panel defaults again; an explicit Harness default survives
   // a switch and sends no key; a cleared prompt is left to the hub.
   q("#gh-resolve-cancel").onclick();
@@ -725,6 +756,30 @@ const out = {};
   out.flipShowsRow = picked(menu());
   out.yoloFlipOn = yolo() && "checked" in yolo().attrs;
   out.folderNodeKeptOn = q("#ns-folder") === folder2;
+  // A pick survives a typed folder flipping the harness away and back:
+  // on the way to /tmp/gem2 the box passes /tmp/gem, last used with
+  // gemini, then matches nothing and lands on claude again. The hub
+  // refuses each launch so the sheet stays open for the next step.
+  fetchRoutes.unshift(["/v1/sessions", { status: 409, body: { error: {
+    code: "launch_failed", message: "not this time" } } }]);
+  await openNewSession();
+  await tick();
+  const folder3 = q("#ns-folder");
+  folder3.value = "/tmp/wt"; folder3.oninput(); await tick();
+  q("#ns-prompt").value = "say ok"; q("#ns-prompt").oninput();
+  choose(menu(), "sonnet");
+  folder3.value = "/tmp/gem"; folder3.oninput(); await tick();
+  out.typedFlipHides = menu() == null;
+  folder3.value = "/tmp/gem2"; folder3.oninput(); await tick();
+  out.typedFlipBack = picked(menu());
+  out.typedFolderKept = q("#ns-folder") === folder3;
+  const nsStartPost = async () => {
+    q("#ns-start").onclick(); await tick();
+    return fetchCalls.filter((c) => c.path === "/v1/sessions").pop();
+  };
+  const typed = await nsStartPost();
+  out.typedFlipPost = typed && [typed.body.harness, typed.body.model];
+  await roundTrip(out, (h) => chip(h).onclick(), menu, nsStartPost);
   process.stdout.write(JSON.stringify(out));
 })().catch((e) => { console.error(e); process.exit(1); });
 """
@@ -735,13 +790,39 @@ const out = {};
 const st = ModelMenu.fresh();
 ModelMenu.redefault(st, ["a", "b"]);
 out.untouched = [st.kind, ModelMenu.value(st)];
-st.kind = "recent"; st.recent = "b"; st.dirty = true;
+// A pick from the menu: what bind's onchange does, through the select.
+const pick = (list, label) => {
+  const sel = { value: "", focus() {} };
+  ModelMenu.bind({ querySelector: () => sel }, st, list, "m", () => {});
+  sel.value = label === "Other…" ? "other" : label === "Harness default" ? "default" : `r${list.indexOf(label)}`;
+  sel.onchange();
+};
+pick(["a", "b"], "b");
 ModelMenu.redefault(st, ["c", "b"]);
 out.sharedRecentKept = [st.kind, ModelMenu.value(st), st.dirty];
 ModelMenu.redefault(st, ["c"]);
 out.foreignRecent = [st.kind, ModelMenu.value(st), st.dirty];
 ModelMenu.redefault(st, []);
 out.noRecents = [st.kind, ModelMenu.value(st)];
+// The pick survives lists that lack it and comes back on one that has it,
+// bare (a picked provider) included.
+ModelMenu.redefault(st, ["x", "b"]);
+out.restored = [st.kind, ModelMenu.value(st), st.dirty];
+ModelMenu.redefault(st, ["x"], true);
+out.bareForeign = [st.kind, ModelMenu.value(st), st.dirty];
+ModelMenu.redefault(st, ["x", "b"], true);
+out.bareRestored = [st.kind, ModelMenu.value(st)];
+// Picking anything else forgets it: Harness default stays sticky, and
+// Other… after another recent pick leaves nothing to bring back.
+pick(["x", "b"], "Harness default");
+ModelMenu.redefault(st, ["b"]);
+out.defaultForgets = [st.kind, ModelMenu.value(st), st.remembered];
+pick(["b", "y"], "y");
+pick(["b", "y"], "Other…");
+ModelMenu.redefault(st, ["y"]);
+out.otherForgets = [st.kind, st.remembered];
+// A recent model posts trimmed, as the old text field did.
+out.trimmed = ModelMenu.value({ kind: "recent", recent: " sonnet ", typed: "", dirty: true, remembered: "" });
 out.recents = [ModelMenu.recents(undefined, "x"), ModelMenu.recents(null, ""),
   ModelMenu.recents(["a", "", "a", "b"], "a"), ModelMenu.recents([], "x")];
 out.harnessRecents = [ModelMenu.harnessRecents({ launch_model: false, recent_models: ["a"] }),
@@ -795,9 +876,22 @@ class TestLaunchModelMenu(unittest.TestCase):
                          "an explicit Harness default stays across a switch")
         self.assertTrue(out["emptyHasNoModel"], "Harness default must send no model key")
 
+    def assert_round_trip(self, out: dict):
+        """A picked recent model is remembered across harnesses that
+        don't list it, and only ever posted to one that does."""
+        self.assertTrue(out["rtHidden"], "gemini takes no model, so the menu hides")
+        self.assertEqual(out["rtGemini"], "sonnet", "the pick comes back after gemini")
+        self.assertEqual(out["rtMiddle"], "gpt-5-codex",
+                         "a harness without the pick shows its own default")
+        self.assertEqual(out["rtMiddlePost"], ["codex", "gpt-5-codex"],
+                         "the launch in between sends what the menu shows, not the pick")
+        self.assertEqual(out["rtBack"], "sonnet", "the pick comes back after codex")
+        self.assertEqual(out["rtBackPost"], ["claude", "sonnet"])
+
     def test_tasks_new_agent_session(self):
         out = self.run_flow("tasks.js", TASKS_FLOW)
         self.assert_walk(out)
+        self.assert_round_trip(out)
         self.assertEqual(out["postHarness"], "codex")
         self.assertTrue(out["errorShown"], "the refusal should show in the sheet")
         self.assertTrue(out["blankOtherNoModel"], "a blank Other… sends no model key")
@@ -807,6 +901,7 @@ class TestLaunchModelMenu(unittest.TestCase):
     def test_repositories_open_in_session(self):
         out = self.run_flow("repositories.js", REPOS_FLOW)
         self.assert_walk(out)
+        self.assert_round_trip(out)
         self.assertTrue(out["sheetOpened"])
         self.assertTrue(out["routeSheet"], "the PR sheet is a bodySheet")
         self.assertEqual(out["postCwd"], "/tmp/wt")
@@ -817,6 +912,7 @@ class TestLaunchModelMenu(unittest.TestCase):
     def test_repositories_resolve_issue(self):
         out = self.run_flow("repositories.js", ISSUE_FLOW)
         self.assert_walk(out)
+        self.assert_round_trip(out)
         self.assertTrue(out["rowIsButton"], "an issue row opens the sheet, not github.com")
         self.assertTrue(out["sheetOpened"])
         self.assertTrue(out["routeSheet"], "the issue sheet is a bodySheet")
@@ -868,6 +964,7 @@ class TestLaunchModelMenu(unittest.TestCase):
                             + SESSIONS_FLOW)
         self.assertTrue(out["sheetOpened"])
         self.assert_walk(out, old_hub_model="opus-m2")
+        self.assert_round_trip(out)
         self.assertTrue(out["yoloShown"], "the Autonomy box shows on a yolo_at_launch row")
         self.assertTrue(out["yoloOn"], "the box is ticked by default")
         self.assertTrue(out["yoloOff"], "a non-yolo harness shows the box off and disabled")
@@ -912,6 +1009,11 @@ class TestLaunchModelMenu(unittest.TestCase):
                         "a folder re-defaulting to a yolo harness ticks the box again")
         self.assertTrue(out["folderNodeKeptOn"],
                         "the folder input is rebuilt when the row returns, so focus is lost")
+        self.assertTrue(out["typedFlipHides"], "/tmp/gem flips the harness to gemini")
+        self.assertEqual(out["typedFlipBack"], "sonnet",
+                         "typing on past /tmp/gem brings claude and the pick back")
+        self.assertTrue(out["typedFolderKept"], "the flips redraw the model row only")
+        self.assertEqual(out["typedFlipPost"], ["claude", "sonnet"])
 
     def test_sessions_no_machine_note(self):
         """A hub that answers ``launchable: []`` is current, so the sheet
@@ -948,6 +1050,13 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(out["sharedRecentKept"], ["recent", "b", True])
         self.assertEqual(out["foreignRecent"], ["recent", "c", False])
         self.assertEqual(out["noRecents"], ["default", ""])
+        self.assertEqual(out["restored"], ["recent", "b", True],
+                         "a pick hidden by lists that lack it comes back on one that has it")
+        self.assertEqual(out["bareForeign"], ["default", "", False])
+        self.assertEqual(out["bareRestored"], ["recent", "b"])
+        self.assertEqual(out["defaultForgets"], ["default", "", ""])
+        self.assertEqual(out["otherForgets"], ["other", ""])
+        self.assertEqual(out["trimmed"], "sonnet")
         self.assertEqual(out["recents"], [["x"], [], ["a", "b"], []])
         self.assertEqual(out["harnessRecents"], [[], ["z"], []])
         self.assertEqual(out["busy"], 2, "busy disables the select and the box")

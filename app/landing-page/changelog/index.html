@@ -1483,6 +1483,19 @@ harness's instructions, but with <code>AGENTS_MD/index.txt</code> that file is
 generated and the next <code>swe instructions build</code> replaces the edit. It
 now says to edit the chapters and run <code>swe instructions build</code>.</p>
 </li>
+<li><p><strong>The web app's Model menu keeps your pick across a harness round
+trip.</strong> On New session, a task's New agent session, Open in session
+and Resolve with agent, picking <code>sonnet</code>, switching to Gemini and back
+used to land on Claude's newest model instead. On New session it
+happened without a click: typing a folder whose partial path matched
+one last used with Gemini flipped the harness away and back, and Start
+sent the newest model. The menu now remembers a picked recent model
+until you pick something else from it. A harness that lists it shows
+it; one that doesn't shows and sends its own default, and the next
+harness that lists it gets it back. What the menu shows is still what
+gets sent, and a recent model is sent trimmed. The same rule as the
+Mac app's fix in <a href="https://github.com/c-wenlong/quiver/pull/951">#951</a>.</p>
+</li>
 <li><p><strong>Hub marketplaces skip archived harnesses.</strong> <code>swe setup --hub</code>,
 <code>swe init --hub</code> and <code>swe sync</code> registered the hub's plugin
 marketplaces in every installed harness, including ones the registry
