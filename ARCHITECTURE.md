@@ -62,9 +62,8 @@ half never mix:
   mcp/servers/       server checkouts, ~2.7 GB of nested repos (gitignored)
   reports/           generated daily and weekly reports
   completions/       generated shell completion scripts
-  data/ledger/       app usage ledger + daily backups          (gitignored)
-  data/devin-cloud/  Devin cloud sessions synced by the app    (gitignored)
-  data/search/       app-built FTS index of session text       (gitignored)
+  data/              this machine's stores: ledgers, catalog,   (gitignored)
+                     search index, Devin cloud, remote state
   cache/             sessions, rate limits, counts             (gitignored)
   backups/           pre-overwrite copies                      (gitignored)
 ```
@@ -94,11 +93,13 @@ does it support plugins, where do its skills live — is a question for
 `tools.json`, `providers.json`, `stars.json`, and the caches are all listed,
 so a machine's actual state can never land in this repo by accident.
 `~/.swe` carries its own `.gitignore` — written by `swe init` from
-`paths.GITIGNORE_BODY`, and listing `cache/`, `backups/`, `data/ledger/` (the
-app's usage ledger: personal and ~30 MB), `data/devin-cloud/` (your Devin
-session titles and links), `data/search/` (the app's FTS index of session
-message text), `secrets/` (provider API keys and MCP credential
-values) and `mcp/servers/` —
+`paths.GITIGNORE_BODY`, and listing `cache/`, `backups/`, `data/` (this
+machine's stores, which the app and swe rewrite while they run: the usage
+ledgers, the model catalog, the FTS index of session message text, Devin
+session titles, remote state, account link records and their lock files),
+`skills/.system/` (the bundled skills Codex writes into its linked skills
+folder), `secrets/` (provider API keys and MCP credential values) and
+`mcp/servers/` —
 plus its own git history, independent of this one. `swe init` writes that
 file only when there is none, so it never rewrites one the operator has
 edited; a root created before `secrets/` joined the list has to add the line
@@ -144,7 +145,7 @@ in each entry's `added` time. When the line merge stops on that file alone,
 `added` keeps the earlier time, `version` and `discovered_via` keep this
 machine's value, and any other field both sides changed is still a conflict. Every `git add`
 excludes `paths.GITIGNORE_BODY`'s paths by pathspec, so a hub with an older
-`.gitignore` still never commits `secrets/`, `cache/` or the listed `data/` stores; those files
+`.gitignore` still never commits `secrets/`, `cache/`, `data/` or `skills/.system/`; those files
 are reported as held back.
 
 ## The core idea: one file, many names

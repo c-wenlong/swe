@@ -18,7 +18,7 @@ working tree changes. A refused sync leaves the repo exactly as it was.
 Nothing is ever force-pushed.
 
 What is never committed: everything ``paths.GITIGNORE_BODY`` lists
-(``secrets/``, ``cache/``, the ledgers, ``data/remote/`` ...) is excluded
+(``secrets/``, ``cache/``, ``data/``, ``skills/.system/`` ...) is excluded
 by pathspec on every ``git add``, so a hub whose own ``.gitignore`` is
 older than this swe still keeps them out. They are reported as held back.
 

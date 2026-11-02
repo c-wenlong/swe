@@ -589,9 +589,10 @@ to use their own login state and environment."""
 
   Every merge is tried first without touching the repo. On a conflict sync
   lists the files and stops with ~/.swe exactly as it was. It never
-  force-pushes, and never commits secrets/, cache/, the data/ stores swe's
-  .gitignore lists (ledgers, search, remote, github) or anything else
-  it lists, even when the hub's own .gitignore is older.
+  force-pushes, and never commits secrets/, cache/, data/ (this machine's
+  ledgers, catalog, search index, remote state), Codex's skills/.system/
+  or anything else swe's .gitignore lists, even when the hub's own
+  .gitignore is older.
 
   Commit messages name this machine by its hostname; set
   {c('cyan', 'SWE_MACHINE_NAME')}=<name> to use another name.

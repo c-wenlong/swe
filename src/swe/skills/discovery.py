@@ -4,7 +4,7 @@ import os
 import re
 from pathlib import Path
 
-from swe.paths import expand_user, skills_dir_for
+from swe.paths import HARNESS_SKILL_DIRS, expand_user, skills_dir_for
 from swe.skills.catalogs import load_skill_catalogs
 from swe.skills.layout import SHARED_REL, shared_scopes_for_skill
 
@@ -125,7 +125,10 @@ def discover_skills(home: Path | None = None, cwd: Path | None = None,
             root_real = root.resolve()
         except Exception:
             continue
-        for dirpath, _dirnames, filenames in os.walk(root_real):
+        for dirpath, dirnames, filenames in os.walk(root_real):
+            if dirpath == str(root_real):
+                # Codex's .system: its own bundled skills, not the root's.
+                dirnames[:] = [d for d in dirnames if d not in HARNESS_SKILL_DIRS]
             if "SKILL.md" not in filenames:
                 continue
             md = Path(dirpath) / "SKILL.md"

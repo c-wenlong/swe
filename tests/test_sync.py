@@ -480,9 +480,48 @@ class NeverSyncedTest(SyncTestBase):
         self.assertEqual(doc["held_back"], [])
         self.assertEqual([f["path"] for f in doc["commit"]["files"]], ["AGENTS.md"])
 
+    def test_app_stores_and_codex_system_skills_stay_out(self):
+        # SWE.app writes the model catalog and the issue lock under data/
+        # while it runs; Codex writes its bundled skills into
+        # ~/.codex/skills/.system, which is skills/.system once linked.
+        # The seed's .gitignore names neither (data/remote/ only).
+        a = self.machine("a")
+        hub = a / ".swe"
+        app_files = ("data/catalog/catalog.sqlite", "data/catalog/catalog.sqlite-wal",
+                     "data/issues.json.lock", "data/account-links.json")
+        codex_files = ("skills/.system/.codex-system-skills.marker",
+                       "skills/.system/imagegen/SKILL.md")
+        for rel in app_files + codex_files:
+            (hub / rel).parent.mkdir(parents=True, exist_ok=True)
+            (hub / rel).write_text("x\n")
+        (hub / "skills" / "two").mkdir()
+        (hub / "skills" / "two" / "SKILL.md").write_text("two\n")
+        self.assertEqual(repo.status(a)["groups"], {"skills": 1})
+        doc = self.sync(a)
+        self.assertEqual([f["path"] for f in doc["commit"]["files"]], ["skills/two/SKILL.md"])
+        self.assertEqual(doc["commit"]["message"],
+                         f"swe sync from {repo.machine_name()}: 1 file (skills 1)")
+        self.assertEqual(sorted(doc["held_back"]), sorted(app_files + codex_files))
+        tracked = git(self.remote, "ls-tree", "-r", "--name-only", "main").splitlines()
+        self.assertFalse([p for p in tracked if p.startswith(("data/", "skills/.system/"))])
+
+    def test_a_current_gitignore_holds_nothing_back(self):
+        from swe.paths import GITIGNORE_BODY
+
+        a = self.machine("a")
+        hub = a / ".swe"
+        (hub / ".gitignore").write_text(GITIGNORE_BODY)
+        self.sync(a)
+        for rel in ("data/catalog/catalog.sqlite", "data/issues.json.lock",
+                    "skills/.system/imagegen/SKILL.md"):
+            (hub / rel).parent.mkdir(parents=True, exist_ok=True)
+            (hub / rel).write_text("x\n")
+        doc = repo.status(a)
+        self.assertEqual((doc["changes"], doc["held_back"]), ([], []))
+
     def test_never_synced_list_tracks_the_gitignore_body(self):
         names = repo.never_synced()
-        for name in ("secrets", "cache", "data/ledger", "data/remote", "mcp/servers"):
+        for name in ("secrets", "cache", "data", "skills/.system", "mcp/servers"):
             self.assertIn(name, names)
 
 

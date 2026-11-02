@@ -60,6 +60,21 @@ class SkillsDiscoveryTest(unittest.TestCase):
         self.assertIn("shared", scopes)
         self.assertIn("cursor-builtin", scopes)
 
+    def test_codex_system_skills_in_the_shared_tree_are_not_listed(self):
+        # ~/.codex/skills links to the shared tree, so Codex's bundled
+        # skills land in ~/.swe/skills/.system. Other dot folders are
+        # still skills the user put there.
+        self._write_skill(self.skills, "alpha", "alpha", "Hub skill")
+        self._write_skill(self.skills, ".system/imagegen", "imagegen", "Codex's own")
+        self._write_skill(self.skills, ".sources/beta", "beta", "Private copy")
+        self._write_skill(self.skills, "team/.system", "gamma", "Not at the top")
+        (self.home / ".codex").mkdir()
+        (self.home / ".codex" / "skills").symlink_to(self.skills)
+
+        with patch("swe.skills.discovery.load_skill_catalogs", return_value=[]):
+            found = discover_skills(home=self.home, cwd=self.home)
+        self.assertEqual(sorted(s["name"] for s in found), ["alpha", "beta", "gamma"])
+
 
 if __name__ == "__main__":
     unittest.main()

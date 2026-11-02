@@ -1477,6 +1477,21 @@ raw editor. <code>swe hooks list --json</code> rows now carry <code>summary</cod
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong><code>swe sync</code> no longer commits the app's stores or Codex's own
+skills.</strong> While SWE.app runs it writes <code>~/.swe/data/catalog/catalog.sqlite</code>
+(and its WAL), <code>data/issues.json.lock</code> and other files under <code>data/</code>
+that the hub's <code>.gitignore</code> did not list, so a sync committed them. Codex
+0.166 writes its bundled skills to <code>~/.codex/skills/.system</code>, which is
+<code>~/.swe/skills/.system</code> once linked, so a sync committed about 50 files,
+and <code>swe skills</code> and the Mac Skills page listed them as shared skills.
+The <code>.gitignore</code> <code>swe init</code> writes now ignores all of <code>data/</code> (every
+file there is this machine's own) and <code>skills/.system/</code>. <code>swe sync</code>
+holds both back on a hub whose <code>.gitignore</code> is older, and <code>swe setup --hub</code> adds them to the clone's <code>.git/info/exclude</code>. <code>swe skills</code> skips
+a <code>.system</code> folder at the top of a skills root; other dot folders are
+still listed. <code>data/web-status-services.json</code> no longer travels between
+machines. Found while rehearsing <code>docs/demo.md</code> segment 10
+(<a href="https://github.com/c-wenlong/swe/issues/524">#524</a>).</p>
+</li>
 <li><p><strong><code>swe init</code> points at the chapters when the hub has them.</strong> Its
 summary always said to edit <code>~/.swe/AGENTS.md</code> to change every
 harness's instructions, but with <code>AGENTS_MD/index.txt</code> that file is
