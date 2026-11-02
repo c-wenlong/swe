@@ -21,6 +21,22 @@ public struct HubSyncChange: Decodable, Sendable, Equatable {
 /// is from the remote, and what a sync would commit. A hub sync can't
 /// work with carries only `path`, `ready: false` and `problem`.
 public struct HubSyncStatus: Decodable, Sendable, Equatable {
+    /// Whether a change at `path` (relative to `~/.swe`) can change what
+    /// `swe sync status` reports: a tracked file, or git's own idea of the
+    /// branch and the remote (`HEAD`, `refs/`, `packed-refs`). Not the
+    /// stores git never sees (`data/`, `cache/`, `secrets/`) nor the rest
+    /// of `.git`: reading the status rewrites `.git/index`, and following
+    /// it would read the status again forever.
+    public static func affects(_ path: String) -> Bool {
+        for ignored in ["data", "cache", "secrets"] where path == ignored || path.hasPrefix(ignored + "/") {
+            return false
+        }
+        guard path == ".git" || path.hasPrefix(".git/") else { return true }
+        let inGit = path.dropFirst(".git/".count)
+        return inGit == "HEAD" || inGit == "packed-refs" || inGit.hasPrefix("refs/")
+    }
+
+
     public let path: String
     public let ready: Bool
     public let problem: String?

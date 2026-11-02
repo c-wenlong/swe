@@ -1523,6 +1523,15 @@ raw editor. <code>swe hooks list --json</code> rows now carry <code>summary</cod
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>The Mac app's AGENTS.md strip and Hub sync card keep up with the
+terminal.</strong> After <code>swe instructions build</code> in a terminal, the AGENTS.md
+page's Generated strip kept saying Stale until the page was opened
+again, the app was brought to the front or ⌘R was pressed; after
+<code>swe sync</code>, Settings › Files kept listing the files it had just
+committed. Both now watch <code>~/.swe</code> while they are on screen (the
+chapters and the generated file; tracked files and git's refs) and read
+again when it changes, as <code>docs/demo.md</code> segments 7 and 10 show.</p>
+</li>
 <li><p><strong>The Mac app no longer rebuilds every usage figure each minute.</strong>
 The search index's 60 s scan and the 300 s ledger timer each re-ran
 every Overview query, warmed all seven periods (about 30 more grouped
