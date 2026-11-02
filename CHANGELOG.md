@@ -1167,6 +1167,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The hub stops re-reading idle Devin sessions every minute.** A
+  snapshot tailer trusted "nothing changed" for 60 s, then re-read the
+  newest 1,000 chain nodes anyway. Devin's change token (the session's
+  newest row, row count and chain head) already sees every write, since
+  Devin rewrites a message with `INSERT OR REPLACE`, which gives it a new
+  row id. Devin sessions now re-read only when that token moves, which
+  saves about 2.5% of a core with 50 idle Devin sessions tailed. Closes
+  [#1563](https://github.com/c-wenlong/swe/issues/1563).
 - **Devin status checks stop forking `ps` for stale locks.** The hub's
   status pass asked `ps` about every pid named by a single Devin
   session lock, and most of those pids are long dead: 131 forks and
@@ -1396,7 +1404,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   committed. Both now watch `~/.swe` while they are on screen (the
   chapters and the generated file; tracked files and git's refs) and read
   again when it changes, as `docs/demo.md` segments 7 and 10 show.
-
+- **The MCP servers page sends you to Settings › Files.** With the
+  servers folder missing, it said to set the folder in Settings › Paths,
+  a section the Mac app no longer has; the setting is under Files. The
+  Mac README and the web app's MCP notes said Paths too.
 - **The Mac app no longer rebuilds every usage figure each minute.**
   The search index's 60 s scan and the 300 s ledger timer each re-ran
   every Overview query, warmed all seven periods (about 30 more grouped

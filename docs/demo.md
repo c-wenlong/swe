@@ -361,6 +361,9 @@ on_a codex mcp list
 
 ```text
   ❯ git-helpers@starter
+    Version: 0.1.0
+    Read from: …/.swe/plugins/starter/git-helpers
+    Scope: user
     Status: ✔ enabled
 
 context7: npx -y @upstash/context7-mcp - ✔ Connected
@@ -382,13 +385,12 @@ on_a swe hooks enable block-force-push.py
 
 ```text
   ✓ enabled block-force-push.py: ~/.swe/hooks/claude/block-force-push.py
+  linked back in (swe hooks shows any link it could not place); the harness runs it again wherever its settings declare it
 ```
 
-A dim note about declarations and a missing script follows. It is written
-for `disable`, not `enable`; ignore it.
-
-That links the script into `~/.claude/hooks`, but Claude Code only runs a
-hook its settings declare, and swe never edits your settings. Declare it:
+That links the script into `~/.claude/hooks`, but, as the second line
+says, Claude Code only runs a hook its settings declare, and swe never
+edits your settings. Declare it:
 
 ```bash
 on_a python3 - <<'EOF'

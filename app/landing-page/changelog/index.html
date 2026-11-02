@@ -1293,6 +1293,15 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The hub stops re-reading idle Devin sessions every minute.</strong> A
+snapshot tailer trusted &quot;nothing changed&quot; for 60 s, then re-read the
+newest 1,000 chain nodes anyway. Devin's change token (the session's
+newest row, row count and chain head) already sees every write, since
+Devin rewrites a message with <code>INSERT OR REPLACE</code>, which gives it a new
+row id. Devin sessions now re-read only when that token moves, which
+saves about 2.5% of a core with 50 idle Devin sessions tailed. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1563">#1563</a>.</p>
+</li>
 <li><p><strong>Devin status checks stop forking <code>ps</code> for stale locks.</strong> The hub's
 status pass asked <code>ps</code> about every pid named by a single Devin
 session lock, and most of those pids are long dead: 131 forks and
@@ -1531,6 +1540,11 @@ again, the app was brought to the front or ⌘R was pressed; after
 committed. Both now watch <code>~/.swe</code> while they are on screen (the
 chapters and the generated file; tracked files and git's refs) and read
 again when it changes, as <code>docs/demo.md</code> segments 7 and 10 show.</p>
+</li>
+<li><p><strong>The MCP servers page sends you to Settings › Files.</strong> With the
+servers folder missing, it said to set the folder in Settings › Paths,
+a section the Mac app no longer has; the setting is under Files. The
+Mac README and the web app's MCP notes said Paths too.</p>
 </li>
 <li><p><strong>The Mac app no longer rebuilds every usage figure each minute.</strong>
 The search index's 60 s scan and the 300 s ledger timer each re-ran
