@@ -521,6 +521,14 @@ class DevinStatusTest(StatusTestBase):
             self.assertEqual(INTERRUPTED, session_status(s, now=NOW))
         ps.assert_not_called()
 
+    def test_oversized_lock_pid_is_dead(self):
+        # An unrelated lock past pid_t's range must not end the pass.
+        self._tool_head_db("d20")
+        self._write_lock("d20", str(2 ** 22))
+        self._write_lock("garbage", "9999999999\n")
+        s = _session("devin", "d20", age_s=9999)
+        self.assertEqual(INTERRUPTED, session_status(s, now=NOW))
+
     def test_host_pids_skipped_when_no_row_needs_them(self):
         # A fresh transcript proves the turn alive on its own.
         self._tool_head_db("d17")

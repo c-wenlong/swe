@@ -332,7 +332,8 @@ def _pid_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True  # alive, just not ours to signal
-    except OSError:
+    except (OSError, OverflowError):
+        # OverflowError: a lock file naming a pid past pid_t's range.
         return False
 
 
