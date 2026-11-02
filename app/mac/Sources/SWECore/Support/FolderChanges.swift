@@ -65,7 +65,13 @@ public enum FolderChanges {
                 FSEventStreamEventId(kFSEventStreamEventIdSinceNow), latency, flags) else { return false }
             self.stream = stream
             FSEventStreamSetDispatchQueue(stream, queue)
-            return FSEventStreamStart(stream)
+            guard FSEventStreamStart(stream) else {
+                FSEventStreamInvalidate(stream)
+                FSEventStreamRelease(stream)
+                self.stream = nil
+                return false
+            }
+            return true
         }
 
         func stop() {

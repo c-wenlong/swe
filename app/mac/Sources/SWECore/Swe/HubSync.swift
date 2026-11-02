@@ -23,18 +23,22 @@ public struct HubSyncChange: Decodable, Sendable, Equatable {
 public struct HubSyncStatus: Decodable, Sendable, Equatable {
     /// Whether a change at `path` (relative to `~/.swe`) can change what
     /// `swe sync status` reports: a tracked file, or git's own idea of the
-    /// branch and the remote (`HEAD`, `refs/`, `packed-refs`). Not the
-    /// stores git never sees (`data/`, `cache/`, `secrets/`) nor the rest
-    /// of `.git`: reading the status rewrites `.git/index`, and following
-    /// it would read the status again forever.
+    /// branch and the remote (`HEAD`, `config`, `refs/`, `packed-refs`).
+    /// Not the folders the hub's .gitignore keeps out (`GITIGNORE_BODY` in
+    /// paths.py: stores, checkouts and builds that change all the time)
+    /// nor the rest of `.git`: reading the status rewrites `.git/index`,
+    /// and following it would read the status again forever.
     public static func affects(_ path: String) -> Bool {
-        for ignored in ["data", "cache", "secrets"] where path == ignored || path.hasPrefix(ignored + "/") {
+        for ignored in ignoredFolders where path == ignored || path.hasPrefix(ignored + "/") {
             return false
         }
         guard path == ".git" || path.hasPrefix(".git/") else { return true }
         let inGit = path.dropFirst(".git/".count)
-        return inGit == "HEAD" || inGit == "packed-refs" || inGit.hasPrefix("refs/")
+        return inGit == "HEAD" || inGit == "config" || inGit == "packed-refs" || inGit.hasPrefix("refs/")
     }
+
+    private static let ignoredFolders = ["data", "cache", "backups", "secrets", "worktrees",
+                                         "mcp/servers", "skills/.system"]
 
 
     public let path: String

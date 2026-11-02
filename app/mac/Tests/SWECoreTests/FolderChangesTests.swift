@@ -73,13 +73,17 @@ import Testing
 
     @Test func hubStatusFollowsTrackedFilesAndRefsNotWhatReadingWrites() {
         for path in ["AGENTS.md", "skills/explain-a-diff/SKILL.md", "config/harness.json", ".gitignore",
-                     ".git/HEAD", ".git/refs/heads/main", ".git/refs/remotes/origin/main", ".git/packed-refs"] {
+                     ".git/HEAD", ".git/config", ".git/refs/heads/main", ".git/refs/remotes/origin/main",
+                     ".git/packed-refs", "mcp.json", "mcp/README.md"] {
             #expect(HubSyncStatus.affects(path), "\(path)")
         }
         // Reading the status rewrites .git/index; the app writes data/ and
-        // cache/ itself; secrets/ never reaches git.
+        // cache/ itself; the rest are folders the hub's .gitignore keeps out,
+        // some of them busy with builds and agent edits.
         for path in [".git/index", ".git/index.lock", ".git/objects/ab/cdef", ".git/logs/HEAD", ".git/FETCH_HEAD",
-                     "data/catalog/catalog.sqlite-wal", "cache/install/lock", "secrets/GITHUB_TOKEN", "data"] {
+                     "data/catalog/catalog.sqlite-wal", "cache/install/lock", "secrets/GITHUB_TOKEN", "data",
+                     "backups/2026-11-01.tar", "worktrees/swe-1567/app/mac/.build/x.o",
+                     "mcp/servers/github/node_modules/x.js", "skills/.system/imagegen/SKILL.md"] {
             #expect(!HubSyncStatus.affects(path), "\(path)")
         }
     }
