@@ -224,11 +224,13 @@ import Testing
         let s = try stack(reconcileInterval: .milliseconds(30))
         s.model.enabled = true
         await s.model.apply()
-        // Every apply is done here, so the next scan bump is the tick's.
-        let scanned = s.overview.completedScans
+        // Every apply is done here, so the next scan is the tick's.
+        // A tick that reads nothing leaves `completedScans` alone, so the
+        // count of every scan is the one to watch.
+        let scanned = s.overview.scansRun
 
         // The timeout turns a missing tick into a failure, not a hang.
-        #expect(await observe { s.overview.completedScans > scanned })
+        #expect(await observe { s.overview.scansRun > scanned })
     }
 
     @Test func theKeyNameIsSharedWithTheCLI() {

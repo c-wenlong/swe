@@ -105,9 +105,16 @@ actor FakeLedger: LedgerQuerying {
 
     func harnessByAccount(in range: DateInterval) async -> [String: String] { accountHarnesses }
 
+    /// Every `daily` range asked, in order.
+    private(set) var dailyRanges: [DateInterval] = []
+
     func daily(in range: DateInterval, calendar: Calendar) async -> [DailyUsage] {
-        days.filter { range.contains($0.day) }
+        dailyRanges.append(range)
+        return days.filter { range.contains($0.day) }
     }
+
+    /// Every figure query so far: `byHarness` and `daily` calls.
+    var figureReads: Int { ranges.count + dailyRanges.count }
 }
 
 struct ScanFailed: Error, LocalizedError {
@@ -816,5 +823,200 @@ final class WatchTicks: Sendable {
         await ledger.releaseScan()
         await scan.value
         #expect(model.scanWatchers == 0)
+    }
+}
+
+/// The timers' scan (#1542): an idle tick costs the scan alone, and one
+/// that read usage rebuilds only what is on show.
+@MainActor
+@Suite struct OverviewBackgroundScanTests {
+    let clock = OverviewClock()
+    var calendar: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "Asia/Singapore")!
+        return c
+    }
+    let oct11 = Date(timeIntervalSince1970: 1_791_648_000)   // 2026-10-11 00:00 SGT
+    let sep1 = Date(timeIntervalSince1970: 1_788_192_000)    // 40 days back
+
+    func model(_ ledger: FakeLedger,
+               refreshPricing: @escaping @Sendable () async -> PricingCatalog? = { nil }) -> OverviewModel {
+        OverviewModel(ledger: ledger, roots: { LedgerRoots() }, accountLabel: { $0 },
+                      refreshPricing: refreshPricing,
+                      now: { [clock] in clock.now }, calendar: calendar)
+    }
+
+    func usage(today: Int, old: Int) -> [DailyUsage] {
+        [DailyUsage(day: sep1, harness: "claude", model: "a", totals: totals(tokens: old, cost: 0)),
+         DailyUsage(day: oct11, harness: "claude", model: "a", totals: totals(tokens: today, cost: 0))]
+    }
+
+    func readUsage(_ ledger: FakeLedger) async {
+        var report = ScanReport()
+        report.filesRead = 1
+        await ledger.set(report: report)
+    }
+
+    @Test(arguments: [12, nil] as [Int?])
+    func anIdleTickAsksNoFiguresAndCountsNoScan(recentLimit: Int?) async throws {
+        let ledger = FakeLedger()
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)], days: usage(today: 1, old: 5))
+        let model = model(ledger)
+        await model.load(scan: false)
+        await model.warming?.value
+        let reads = await ledger.figureReads
+        let revision = model.revision
+        clock.now = clock.now.addingTimeInterval(60)
+
+        await model.backgroundScan(recentLimit: recentLimit)
+        await model.warming?.value
+        #expect(await ledger.scans == 1)
+        #expect(model.scansRun == 1)
+        // Nothing for the other views to reload, and nothing re-read.
+        #expect(model.completedScans == 0)
+        #expect(model.revision == revision)
+        #expect(await ledger.figureReads == reads)
+        // The figures shown are still the ledger's, as of this scan.
+        #expect(model.updatedAt == clock.now)
+    }
+
+    @Test func aTickThatReadUsageRebuildsSpendAndRecentDaysOnly() async throws {
+        let ledger = FakeLedger()
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)], days: usage(today: 1, old: 5))
+        let model = model(ledger)
+        await model.load(scan: false)
+        await model.warming?.value
+        // Today's new usage, and an old day's the recent read can't see.
+        await ledger.set(harnesses: ["claude": totals(tokens: 9, cost: 9)], days: usage(today: 9, old: 50))
+        await readUsage(ledger)
+        let harnessReads = await ledger.ranges.count
+        let dailyReads = await ledger.dailyRanges.count
+
+        await model.backgroundScan(recentLimit: 12)
+        await model.warming?.value
+        // The other views reload (Codex usage, account history, Sessions...).
+        #expect(model.completedScans == 1)
+        // Three spend slices and the last 30 days: no summary while the
+        // page is hidden, no half year, no warming.
+        #expect(await ledger.ranges.count == harnessReads + 3)
+        #expect(await ledger.dailyRanges.count == dailyReads + 1)
+        #expect(model.spend?.first?.byHarness["claude"]?.totalTokens == 9)
+        #expect(model.recentModels.first?.totals.totalTokens == 9)
+        // The heatmap's recent days are fresh, its older ones kept.
+        #expect(model.activity.map(\.totals.totalTokens) == [5, 9])
+        #expect(model.activityRows.map(\.day) == [sep1, oct11])
+        #expect(model.activityStale)
+        #expect(model.summary?.totals.totalTokens == 1)
+
+        // Opening the page brings back what the tick left for it.
+        await model.refreshForPage()
+        await model.warming?.value
+        #expect(model.summary?.totals.totalTokens == 9)
+        #expect(model.activity.map(\.totals.totalTokens) == [50, 9])
+        #expect(!model.activityStale)
+        // Every period is warm again: switching asks nothing.
+        let warmed = await ledger.figureReads
+        for period in OverviewPeriod.allCases {
+            model.period = period
+            await model.refreshForPage()
+            #expect(model.summary?.period == period)
+        }
+        #expect(await ledger.figureReads == warmed)
+    }
+
+    @Test func whileThePageShowsATickThatReadUsageRebuildsItsPeriod() async throws {
+        let ledger = FakeLedger()
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)])
+        let model = model(ledger)
+        model.pageVisible = true
+        await model.load(scan: false)
+        await model.warming?.value
+        await ledger.set(harnesses: ["claude": totals(tokens: 9, cost: 9)])
+        await readUsage(ledger)
+        let harnessReads = await ledger.ranges.count
+
+        await model.backgroundScan(recentLimit: 12)
+        await model.warming?.value
+        #expect(model.summary?.totals.totalTokens == 9)
+        // The period and three spend slices; the other periods aren't warmed.
+        #expect(await ledger.ranges.count == harnessReads + 4)
+    }
+
+    @Test func anIdleTickAfterMidnightRebuildsSpendAndTheHalfYear() async throws {
+        let ledger = FakeLedger()
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)], days: usage(today: 1, old: 5))
+        let model = model(ledger)
+        await model.load(scan: false)
+        await model.warming?.value
+        let harnessReads = await ledger.ranges.count
+        let dailyReads = await ledger.dailyRanges.count
+        clock.now = clock.now.addingTimeInterval(86_400)
+
+        await model.backgroundScan(recentLimit: 12)
+        #expect(model.completedScans == 0)
+        // Today's spend is a new day's; the half year slid by one.
+        #expect(await ledger.ranges.count == harnessReads + 3)
+        #expect(await ledger.dailyRanges.count == dailyReads + 2)
+        #expect(model.updatedAt == clock.now)
+    }
+
+    @Test func aNewPriceListOnATickCountsAndRepricesTheHalfYear() async throws {
+        let ledger = FakeLedger()
+        let model = model(ledger, refreshPricing: { .empty })
+        await model.load(scan: false)
+        await model.warming?.value
+        let dailyReads = await ledger.dailyRanges.count
+
+        await model.backgroundScan(recentLimit: 12)
+        #expect(await ledger.pricingUpdates == 1)
+        #expect(model.completedScans == 1)
+        // Every past cost moved: the last 30 days and the whole half year.
+        #expect(await ledger.dailyRanges.count == dailyReads + 2)
+        #expect(!model.activityStale)
+    }
+
+    @Test func aTickBeforeTheFirstFiguresIsAFullLoad() async throws {
+        let ledger = FakeLedger()
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)])
+        let model = model(ledger)
+        await model.backgroundScan(recentLimit: 12)
+        await model.warming?.value
+        #expect(model.summary?.totals.totalTokens == 1)
+        #expect(model.spend != nil)
+        #expect(model.completedScans == 1)
+        #expect(model.cachedPeriods == Set(OverviewPeriod.allCases))
+    }
+
+    @Test func aFailedTickRebuildsNothing() async throws {
+        let ledger = FakeLedger()
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)])
+        let model = model(ledger)
+        await model.load(scan: false)
+        await model.warming?.value
+        let reads = await ledger.figureReads
+        await ledger.failScans(with: ScanFailed())
+
+        await model.backgroundScan(recentLimit: 12)
+        #expect(model.error == "Couldn't read your usage logs: disk unreadable")
+        #expect(model.completedScans == 0)
+        #expect(await ledger.figureReads == reads)
+    }
+
+    @Test func mergingKeepsOlderDaysAndTakesTheRecentReadsWholeDays() {
+        let calendar = calendar
+        let oct11 = oct11
+        let day: (Int) -> Date = { calendar.date(byAdding: .day, value: $0, to: oct11)! }
+        let row: (Date, Int) -> DailyUsage = {
+            DailyUsage(day: $0, harness: "claude", model: "a", totals: totals(tokens: $1, cost: 0))
+        }
+        // The rolling 30 days start mid-afternoon 30 days back: that day is
+        // partial in the recent read, so the older rows keep it.
+        let recentStart = clock.now.addingTimeInterval(-30 * 86_400)
+        let old = [row(day(-200), 1), row(day(-40), 2), row(day(-30), 3), row(day(-29), 4), row(day(0), 5)]
+        let recent = [row(day(-30), 30), row(day(-29), 40), row(day(-1), 60)]
+        let merged = OverviewModel.merging(old, recent: recent, recentStart: recentStart,
+                                           since: day(-182), calendar: calendar)
+        #expect(merged.map(\.day) == [day(-40), day(-30), day(-29), day(-1)])
+        #expect(merged.map(\.totals.totalTokens) == [2, 3, 40, 60])
     }
 }
