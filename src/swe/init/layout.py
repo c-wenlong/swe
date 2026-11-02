@@ -344,8 +344,34 @@ def skill_root_label(
 # plugin drift check (find/plugin_drift.py's MAX_ENTRIES).
 _WALK_DIR_CAP = 20_000
 
+# The file a harness leaves in each folder of ``paths.HARNESS_SKILL_DIRS``
+# it writes. Codex puts a hash of what it laid down in this one, so its
+# presence proves the folder is Codex's own copy, rewritten on every start,
+# and not a user's. A folder with no known marker stays user content.
+HARNESS_SKILL_MARKERS: dict[str, str] = {
+    ".system": ".codex-system-skills.marker",
+}
 
-def _skill_mds(root: Path) -> tuple[dict[str, list[Path]], bool]:
+
+def _harness_owned_dirs(root: Path) -> frozenset[str]:
+    """Names of the top-level folders under ``root`` a harness owns.
+
+    Codex writes ``.system`` into ``~/.codex/skills`` on start, so a machine
+    that ran Codex before ``swe init`` has a real root holding only that.
+    Classifying it as the user's would keep the root unlinked for good.
+    Only the top level counts: a ``.system`` deeper in is someone's folder.
+    """
+    owned = set()
+    for name in _paths.HARNESS_SKILL_DIRS:
+        marker = HARNESS_SKILL_MARKERS.get(name)
+        if marker and (root / name).is_dir() and (root / name / marker).is_file():
+            owned.add(name)
+    return frozenset(owned)
+
+
+def _skill_mds(
+    root: Path, skip: frozenset[str] = frozenset()
+) -> tuple[dict[str, list[Path]], bool]:
     """(dir-name -> SKILL.md paths, complete) for skill folders under ``root``.
 
     One name can map to several folders — ``live/alpha`` and
@@ -357,7 +383,8 @@ def _skill_mds(root: Path) -> tuple[dict[str, list[Path]], bool]:
     link cycle or a link out to a huge tree cannot make init scan it
     all. A capped scan returns ``complete=False``: callers that decide
     deletion must treat a partial view as "unknown", never as
-    "everything matched".
+    "everything matched". ``skip`` names top-level folders to leave out
+    (``_harness_owned_dirs``).
     """
     import os
 
@@ -366,6 +393,8 @@ def _skill_mds(root: Path) -> tuple[dict[str, list[Path]], bool]:
         return out, True
     seen: set[tuple[int, int]] = set()
     for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        if dirpath == os.fspath(root):
+            dirnames[:] = [d for d in dirnames if d not in skip]
         try:
             st = os.stat(dirpath)
         except OSError:
@@ -406,7 +435,7 @@ def skill_folder_names(root: Path) -> set[str]:
     return skill_folder_scan(root)[0]
 
 
-def _tree_is_empty(root: Path) -> bool:
+def _tree_is_empty(root: Path, skip: frozenset[str] = frozenset()) -> bool:
     """True when the tree holds no files at all — dirs alone don't count.
 
     Follows symlinks like ``_skill_mds``, with the same (dev, ino) visit
@@ -417,6 +446,8 @@ def _tree_is_empty(root: Path) -> bool:
 
     seen: set[tuple[int, int]] = set()
     for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        if dirpath == os.fspath(root):
+            dirnames[:] = [d for d in dirnames if d not in skip]
         try:
             st = os.stat(dirpath)
         except OSError:
@@ -463,7 +494,9 @@ def _same_skill(private_md: Path, shared_md: Path) -> bool:
     )
 
 
-def _files_outside_skills(root: Path, mds: dict[str, list[Path]]) -> bool:
+def _files_outside_skills(
+    root: Path, mds: dict[str, list[Path]], skip: frozenset[str] = frozenset()
+) -> bool:
     """True when ``root`` holds any file not inside a discovered skill dir.
 
     ``absorb`` removes the root wholesale — a private ``notes.txt`` sitting
@@ -474,6 +507,8 @@ def _files_outside_skills(root: Path, mds: dict[str, list[Path]]) -> bool:
     skill_dirs = [md.parent for paths in mds.values() for md in paths]
     seen: set[tuple[int, int]] = set()
     for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        if dirpath == os.fspath(root):
+            dirnames[:] = [d for d in dirnames if d not in skip]
         try:
             st = os.stat(dirpath)
         except OSError:
@@ -498,7 +533,10 @@ def classify_skill_root(path: Path, home: Path | None = None) -> tuple[str, str]
     Splits the old catch-all "conflict" into two very different cases. A real
     directory holding only copies of skills already in the shared tree can be
     replaced with nothing lost. One holding skills that exist nowhere else must
-    never be replaced silently, however tempting the tidiness.
+    never be replaced silently, however tempting the tidiness. A folder a
+    harness owns (``_harness_owned_dirs``) is neither: the absorb backs it up
+    with the rest of the root, and the harness writes it again through the
+    link.
     """
     home = home or Path.home()
     shared = skills_dir(home)
@@ -520,7 +558,8 @@ def classify_skill_root(path: Path, home: Path | None = None) -> tuple[str, str]
             return "conflict", "real file, needs --force"
         return "create", ""
 
-    mds, complete = _skill_mds(path)
+    owned = _harness_owned_dirs(path)
+    mds, complete = _skill_mds(path, owned)
     if not complete:
         # A capped scan saw only part of the tree: a unique skill could be
         # sitting past the cap, invisible to the checks below. "keep" is
@@ -529,8 +568,10 @@ def classify_skill_root(path: Path, home: Path | None = None) -> tuple[str, str]
     if not mds:
         # Files that are not skills are user data: report the root rather
         # than deleting it. Only a genuinely empty tree is absorbable.
-        if not _tree_is_empty(path):
+        if not _tree_is_empty(path, owned):
             return "keep", "files but no skills"
+        if owned:
+            return "absorb", f"only {_owned_label(owned)}"
         return "absorb", "empty"
 
     shared_mds, shared_complete = _skill_mds(shared)
@@ -549,11 +590,19 @@ def classify_skill_root(path: Path, home: Path | None = None) -> tuple[str, str]
                 for md in copies
             )
         }
-    if not unique and _files_outside_skills(path, mds):
+    if not unique and _files_outside_skills(path, mds, owned):
         return "keep", "files besides the shared skills"
     if not unique:
-        return "absorb", f"{len(mds)} skills, all already shared"
+        detail = f"{len(mds)} skills, all already shared"
+        if owned:
+            detail += f", plus {_owned_label(owned)}"
+        return "absorb", detail
     return "keep", f"{len(unique)} of {len(mds)} skills exist nowhere else"
+
+
+def _owned_label(owned: frozenset[str]) -> str:
+    """`.system, which Codex rewrites`: the absorb detail's harness part."""
+    return f"{', '.join(sorted(owned))}, which Codex rewrites"
 
 
 SEED_AGENTS_MD = """# Agent instructions
