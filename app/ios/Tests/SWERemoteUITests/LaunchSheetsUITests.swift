@@ -172,15 +172,28 @@ final class LaunchSheetsUITests: XCTestCase {
         pick(picked)
         expectMenu(picked, "the picked model did not show")
 
-        guard let away = otherChip(than: harnesses) else {
-            throw XCTSkip("the hub offers no alternate harness to switch to")
+        // Away has to be a harness that lacks the pick: one that lists it
+        // kept the pick before the fix too, so it proves nothing. Those
+        // are checked on the way (they must show the pick) and skipped.
+        let candidates = harnesses.map(chip).filter { $0.exists && !$0.isSelected }
+        try XCTSkipIf(candidates.isEmpty, "the hub offers no alternate harness to switch to")
+        var hidden = false
+        for away in candidates {
+            away.tap()
+            // A harness that can't take a model (Kilo) disables the menu.
+            let there = modelMenu.isEnabled ? try menuRecents() : []
+            if there.contains(picked) {
+                expectMenu(picked, "a harness that lists the pick did not keep it")
+                continue
+            }
+            if modelMenu.isEnabled {
+                expectMenu(there.first ?? "Harness default",
+                           "a harness that lacks the pick did not show its own default")
+            }
+            hidden = true
+            break
         }
-        away.tap()
-        if modelMenu.isEnabled {
-            let there = try menuRecents()
-            let expected = there.contains(picked) ? picked : (there.first ?? "Harness default")
-            expectMenu(expected, "away from home the menu showed neither the pick nor that harness's default")
-        }
+        try XCTSkipUnless(hidden, "every other harness lists \(picked), so no switch hides it")
 
         home.tap()
         expectMenu(picked, "the picked model was forgotten after a round trip")
