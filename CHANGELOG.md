@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The Mac app's chat renders the agent's Markdown tables.** The chat
+  used to run the issue/PR-body parser, so a pipe table showed as raw
+  `|` text. Session messages now parse with `ChatMarkdown`
+  (`SWECore/Hub/ChatMarkdown.swift`), a port of the phone's chat parser
+  (`SWERemote/Hub/Markdown.swift`, the same one the web app's `md()`
+  ports): a pipe table draws as a grid that scrolls sideways inside its
+  own box (bounded at 24 columns and 200 rows, with a note for the
+  rest), a lone `![alt](src)` image or a harness-drawn `<json-render>`
+  view folds into a note chip, and a link to the agent's own files —
+  like the ones Codex ends a turn with — shows as a code-styled file
+  name instead of a dead link, on user, reply, thinking and error text
+  alike.
+
 - **`SWE_MACHINE_NAME` names this machine in `swe sync` commits.**
   Sync's commit and merge messages say `swe sync from <hostname>`; set
   `SWE_MACHINE_NAME` to use another name, for a demo recording or a
