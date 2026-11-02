@@ -129,7 +129,8 @@ in `mcp.json` (removed ones are a note). The branch decides the mode. On
 `device/<machine>` it merges `origin/device/<machine>` and then the remote's
 default branch, and pushes only the device branch, so `main` changes only when
 someone merges into it on purpose. On any other branch every machine shares
-it.
+it. Commit and merge messages name the machine by its hostname, or by
+`SWE_MACHINE_NAME` when that is set.
 
 Sync merges and never rebases, and each merge is tried first with `git
 merge-tree --write-tree` on unreferenced commits built from a scratch index.

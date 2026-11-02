@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`SWE_MACHINE_NAME` names this machine in `swe sync` commits.**
+  Sync's commit and merge messages say `swe sync from <hostname>`; set
+  `SWE_MACHINE_NAME` to use another name, for a demo recording or a
+  hostname you would rather keep out of the hub's history. The
+  `docs/demo.md` helpers set it to `machine-a` and `machine-b`.
+
 - **`swe setup --hub` brings the hub's plugins and MCP servers in too.**
   After cloning the hub and registering its plugin marketplaces, setup
   installs every plugin those marketplaces list into Claude Code and

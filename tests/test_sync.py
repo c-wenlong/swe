@@ -704,5 +704,27 @@ class CommandTest(SyncTestBase):
         self.assertIn("swe init", err)
 
 
+class MachineNameTest(unittest.TestCase):
+    """What sync's commit messages call this machine."""
+
+    def test_the_hostname_by_default(self):
+        with mock.patch.dict(os.environ, {}, clear=False), \
+                mock.patch.object(repo.socket, "gethostname", return_value="box.local"):
+            os.environ.pop("SWE_MACHINE_NAME", None)
+            self.assertEqual(repo.machine_name(), "box")
+
+    def test_swe_machine_name_overrides_it(self):
+        with mock.patch.dict(os.environ, {"SWE_MACHINE_NAME": "  machine-a  "}), \
+                mock.patch.object(repo.socket, "gethostname", return_value="box.local"):
+            self.assertEqual(repo.machine_name(), "machine-a")
+
+    def test_a_blank_or_multi_line_value_cannot_break_the_message(self):
+        with mock.patch.object(repo.socket, "gethostname", return_value="box"):
+            with mock.patch.dict(os.environ, {"SWE_MACHINE_NAME": "   "}):
+                self.assertEqual(repo.machine_name(), "box")
+            with mock.patch.dict(os.environ, {"SWE_MACHINE_NAME": "demo\nsecond line"}):
+                self.assertEqual(repo.machine_name(), "demo")
+
+
 if __name__ == "__main__":
     unittest.main()

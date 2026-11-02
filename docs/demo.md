@@ -58,12 +58,15 @@ Logged in as the demo account, from the root of this repo:
 
 ```bash
 eval "$(scripts/demo_home.sh --root=/tmp/swe-demo --home="$HOME")"
-on_a() { env -i PATH="$PATH" TERM="$TERM" HOME="$DEMO_A" "$@"; }
-on_b() { env -i PATH="$PATH" TERM="$TERM" HOME="$DEMO_B" "$@"; }
+on_a() { env -i PATH="$PATH" TERM="$TERM" HOME="$DEMO_A" SWE_MACHINE_NAME=machine-a "$@"; }
+on_b() { env -i PATH="$PATH" TERM="$TERM" HOME="$DEMO_B" SWE_MACHINE_NAME=machine-b "$@"; }
 ```
 
 `--home="$HOME"` makes the demo account's own home machine A, so the app and
-the terminal see the same `~/.swe`. The script refuses if `~/.swe` already
+the terminal see the same `~/.swe`. `SWE_MACHINE_NAME` makes `swe sync` call
+the two machines `machine-a` and `machine-b` in its commit messages instead of
+printing this Mac's hostname on camera; Sync pressed in the app still uses the
+hostname, so run sync from the terminal pane. The script refuses if `~/.swe` already
 holds a hub. It sets four variables:
 
 | Variable | What it is |
@@ -436,7 +439,7 @@ on_a swe sync
 
 ```text
 Hub sync  single branch main, shared by every machine
-  ✓ committed 5 file(s): swe sync from <host>: 5 files (AGENTS.md 2, config 1, hooks 1, skills 1)
+  ✓ committed 5 file(s): swe sync from machine-a: 5 files (AGENTS.md 2, config 1, hooks 1, skills 1)
     M AGENTS.md
     M AGENTS_MD/02-response-style.md
     A config/harness.json
@@ -486,7 +489,7 @@ on_b swe skills -d
   ✓ Created explain-a-diff: …/machine-a/.swe/skills/explain-a-diff/SKILL.md
 
 Hub sync  single branch main, shared by every machine
-  ✓ committed 1 file(s): swe sync from <host>: 1 file (skills 1)
+  ✓ committed 1 file(s): swe sync from machine-a: 1 file (skills 1)
     A skills/explain-a-diff/SKILL.md
   ✓ pushed main
 
@@ -545,8 +548,8 @@ steps, and build both machines under a temporary root instead of your home:
 
 ```bash
 eval "$(scripts/demo_home.sh --root=/tmp/swe-demo)"
-on_a() { env -i PATH="$PATH" TERM="$TERM" HOME="$DEMO_A" "$@"; }
-on_b() { env -i PATH="$PATH" TERM="$TERM" HOME="$DEMO_B" "$@"; }
+on_a() { env -i PATH="$PATH" TERM="$TERM" HOME="$DEMO_A" SWE_MACHINE_NAME=machine-a "$@"; }
+on_b() { env -i PATH="$PATH" TERM="$TERM" HOME="$DEMO_B" SWE_MACHINE_NAME=machine-b "$@"; }
 ```
 
 Then run every bash block of segments 1 to 10 in order. Machine A is

@@ -136,6 +136,12 @@ def _count(root: Path, rng: str) -> int:
 
 
 def machine_name() -> str:
+    """What sync's commit and merge messages call this machine: the
+    hostname, or ``SWE_MACHINE_NAME`` when set (a demo recording, or a
+    hostname you would rather not publish in the hub's history)."""
+    override = (os.environ.get("SWE_MACHINE_NAME") or "").strip().splitlines()
+    if override and override[0].strip():
+        return override[0].strip()
     return socket.gethostname().split(".", 1)[0] or "this machine"
 
 
