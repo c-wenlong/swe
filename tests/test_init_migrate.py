@@ -76,20 +76,24 @@ class LayoutInvariantTest(unittest.TestCase):
         self.assertEqual(paths.MCP_SERVERS_DIR.parent, paths.MCP_DIR)
         self.assertIn("mcp/servers/", paths.GITIGNORE_BODY)
 
-    def test_usage_ledger_is_gitignored(self):
-        # The app keeps it under data/, which is otherwise versioned, but it
-        # holds personal usage (project paths, session ids) and ~30 MB of
-        # SQLite rewritten on every scan.
-        self.assertIn("data/ledger/", paths.GITIGNORE_BODY)
+    def test_machine_data_is_gitignored(self):
+        # The usage ledgers (personal rows, ~30 MB rewritten on every scan),
+        # the model catalog and its WAL, the search index, Devin cloud
+        # sessions, remote state, and the issue list's lock all sit under
+        # data/ and change while the app runs. None of it is worth a commit.
+        # Anchored: a skill or plugin may ship its own data/ folder.
+        self.assertIn("/data/", paths.GITIGNORE_BODY.splitlines())
+        home = Path("/tmp/does-not-exist-home")
+        data = paths.data_dir_for(home)
+        for store in (paths.search_index_for(home), paths.issues_file_for(home),
+                      paths.github_catalog_for(home), paths.remote_dir_for(home)):
+            self.assertTrue(store.is_relative_to(data), store)
 
-    def test_devin_cloud_sessions_are_gitignored(self):
-        # Titles and links of the user's own Devin sessions.
-        self.assertIn("data/devin-cloud/", paths.GITIGNORE_BODY)
-
-    def test_web_ledger_is_gitignored(self):
-        # The web app's ledger: the same personal rows as data/ledger/. A hub
-        # clone is moved in around it, so the hub must never track it.
-        self.assertIn("data/web-ledger/", paths.GITIGNORE_BODY.splitlines())
+    def test_codex_system_skills_are_gitignored(self):
+        # Codex rewrites ~/.codex/skills/.system, which is the hub's
+        # skills/ once linked.
+        for name in paths.HARNESS_SKILL_DIRS:
+            self.assertIn(f"skills/{name}/", paths.GITIGNORE_BODY.splitlines())
 
     def test_mcp_secrets_are_gitignored(self):
         # Resolved MCP tokens. A user who runs `git init` in ~/.swe must

@@ -1268,6 +1268,14 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>Devin status checks stop forking <code>ps</code> for stale locks.</strong> The hub's
+status pass asked <code>ps</code> about every pid named by a single Devin
+session lock, and most of those pids are long dead: 131 forks and
+about 0.4 s of CPU every 10 s on a machine with 318 locks. It now
+skips dead pids with a signal-0 check, and reads the lock directory
+only when a mid-turn Devin row has a quiet transcript. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1525">#1525</a>.</p>
+</li>
 <li><p><strong>The Mac app is SWE.app now</strong> (SWE Wraps Everything — the product
 takes the <code>swe</code> command's name and Quiver is decommissioned). The
 bundle is <code>SWE.app</code> with bundle id <code>com.cwenlong.swe</code>, its Swift
@@ -1502,6 +1510,25 @@ while the Overview is on screen, its selected period; the other
 periods and the heatmap's older days are rebuilt when the Overview
 next opens. The Rescan and refresh buttons still rebuild everything.
 <a href="https://github.com/c-wenlong/swe/issues/1542">#1542</a>.</p>
+</li>
+<li><p><strong><code>swe sync</code> no longer commits the app's stores or Codex's own
+skills.</strong> While SWE.app runs it writes <code>~/.swe/data/catalog/catalog.sqlite</code>
+(and its WAL), <code>data/issues.json.lock</code> and other files under <code>data/</code>
+that the hub's <code>.gitignore</code> did not list, so a sync committed them. Codex
+0.166 writes its bundled skills to <code>~/.codex/skills/.system</code>, which is
+<code>~/.swe/skills/.system</code> once linked, so a sync committed about 50 files,
+and <code>swe skills</code> and the Mac Skills page listed them as shared skills.
+The <code>.gitignore</code> <code>swe init</code> writes now ignores the hub's own <code>/data/</code>
+(every file there is this machine's own; a skill's or plugin's <code>data/</code>
+folder still syncs) and <code>skills/.system/</code>. <code>swe sync</code> holds both back
+on a hub whose <code>.gitignore</code> is older, and <code>swe setup --hub</code> adds them
+to the clone's <code>.git/info/exclude</code>. A store the hub already committed
+is untracked by the next sync, its file left in place, and a merge
+never overwrites this machine's copy with another clone's. <code>swe skills</code> skips
+a <code>.system</code> folder at the top of a skills root; other dot folders are
+still listed. <code>data/web-status-services.json</code> no longer travels between
+machines. Found while rehearsing <code>docs/demo.md</code> segment 10
+(<a href="https://github.com/c-wenlong/swe/issues/524">#524</a>).</p>
 </li>
 <li><p><strong><code>swe init</code> points at the chapters when the hub has them.</strong> Its
 summary always said to edit <code>~/.swe/AGENTS.md</code> to change every

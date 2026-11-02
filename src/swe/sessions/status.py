@@ -332,7 +332,8 @@ def _pid_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True  # alive, just not ours to signal
-    except OSError:
+    except (OSError, OverflowError):
+        # OverflowError: a lock file naming a pid past pid_t's range.
         return False
 
 
@@ -381,8 +382,22 @@ def _devin_host_pids(locks_dir: str) -> set[int]:
         counts[pid] = counts.get(pid, 0) + 1
     hosts = {pid for pid, n in counts.items() if n > 1}
     for pid in counts.keys() - hosts:
-        if "Devin.app" in _pid_command(pid):
+        # Most locks outlive their process; a dead pid hosts nothing,
+        # and skipping it saves one ``ps`` fork per stale lock.
+        if _pid_alive(pid) and "Devin.app" in _pid_command(pid):
             hosts.add(pid)
+    return hosts
+
+
+def _ctx_devin_host_pids(ctx: dict) -> set[int]:
+    """``_devin_host_pids`` for this pass, computed on first use.
+
+    Only a mid-turn Devin row whose transcript has gone quiet asks, so
+    most passes never read the lock directory at all.
+    """
+    hosts = ctx.get("devin_host_pids")
+    if hosts is None:
+        hosts = ctx["devin_host_pids"] = _devin_host_pids(_devin_locks_dir())
     return hosts
 
 
@@ -928,9 +943,6 @@ def session_statuses(sessions: list[Session], now: float | None = None) -> list[
         "devin_conn": _open_devin_db()
         if any(s.tool_name == "devin" for s in sessions)
         else None,
-        "devin_host_pids": _devin_host_pids(_devin_locks_dir())
-        if any(s.tool_name == "devin" for s in sessions)
-        else set(),
         "opencode_conn": _open_opencode_db()
         if any(s.tool_name == "opencode" for s in sessions)
         else None,
@@ -972,7 +984,7 @@ def _one_status(session: Session, now: float, ctx: dict) -> str:
             alive = alive or session.session_id in ctx["claude_live"]
         elif session.tool_name == "devin":
             alive = alive or _devin_lock_alive(
-                session.session_id, ctx["devin_host_pids"]
+                session.session_id, _ctx_devin_host_pids(ctx)
             )
         elif session.tool_name == "cline":
             alive = alive or _cline_pid_alive(session.session_id)
