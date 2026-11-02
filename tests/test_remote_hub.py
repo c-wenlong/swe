@@ -3934,6 +3934,34 @@ class TestServerHardening(HubBase):
         status, _ = self.srv.request("GET", "/v1/status")
         self.assertEqual(status, 200)
 
+    def test_listen_backlog_survives_a_burst(self):
+        # Behind tailscale serve a browser's parallel asset fetches
+        # become separate backend connections in the same instant; the
+        # stdlib backlog of 5 lets the kernel reset the overflow.
+        self.assertGreaterEqual(self.srv.server.request_queue_size, 64)
+        barrier = threading.Barrier(13)
+        results = []
+
+        def fetch():
+            barrier.wait()
+            conn = http.client.HTTPConnection(
+                "127.0.0.1", self.srv.port, timeout=10
+            )
+            try:
+                conn.request("GET", "/v1/status")
+                results.append(conn.getresponse().status)
+            finally:
+                conn.close()
+
+        threads = [threading.Thread(target=fetch, daemon=True)
+                   for _ in range(12)]
+        for t in threads:
+            t.start()
+        barrier.wait()
+        for t in threads:
+            t.join(timeout=15)
+        self.assertEqual(results, [200] * 12)
+
     def test_open_session_gets_on_demand_tailer(self):
         # Drop all tailers (as if the session were past the cap), then
         # open the messages route — a tailer must appear.
