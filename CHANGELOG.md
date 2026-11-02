@@ -1388,6 +1388,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The MCP servers page sends you to Settings › Files.** With the
+  servers folder missing, it said to set the folder in Settings › Paths,
+  a section the Mac app no longer has; the setting is under Files. The
+  Mac README and the web app's MCP notes said Paths too.
 - **The Mac app no longer rebuilds every usage figure each minute.**
   The search index's 60 s scan and the 300 s ledger timer each re-ran
   every Overview query, warmed all seven periods (about 30 more grouped

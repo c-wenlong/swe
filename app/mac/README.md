@@ -21,7 +21,7 @@ the bundle (`Contents/Resources/swe`, with a standalone Python 3.13 from
 python-build-standalone; see `script/bundle-swe.sh`), so a Mac with no
 Python or swe installed still works. The first build downloads that
 Python (about 25 MB, pinned by checksum) into `~/.swe/cache/build/python`.
-Settings › Paths can point the app at another `swe` instead, such as an
+Settings › Files can point the app at another `swe` instead, such as an
 editable install you're working on. `swift run` builds have no bundle and
 use the `swe` on your login shell's PATH.
 

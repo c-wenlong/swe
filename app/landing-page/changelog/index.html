@@ -1523,6 +1523,11 @@ raw editor. <code>swe hooks list --json</code> rows now carry <code>summary</cod
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>The MCP servers page sends you to Settings › Files.</strong> With the
+servers folder missing, it said to set the folder in Settings › Paths,
+a section the Mac app no longer has; the setting is under Files. The
+Mac README and the web app's MCP notes said Paths too.</p>
+</li>
 <li><p><strong>The Mac app no longer rebuilds every usage figure each minute.</strong>
 The search index's 60 s scan and the 300 s ledger timer each re-ran
 every Overview query, warmed all seven periods (about 30 more grouped
