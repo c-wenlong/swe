@@ -14,9 +14,13 @@
 const ModelMenu = (() => {
   /* `kind` is "default", "recent" (`recent` names the model) or "other"
    * (`typed` holds the box). `dirty` is set by any pick the user makes,
-   * Harness default included, and keeps it across re-defaults. */
+   * Harness default included, and keeps it across re-defaults.
+   * `remembered` is the recent model the user last picked from the menu:
+   * a switch to a harness that doesn't list it hides it but keeps it, so
+   * the next harness that lists it gets it back; picking anything else
+   * drops it. The Mac's `ModelPick.remembered` (#951). */
   function fresh() {
-    return { kind: "default", recent: "", typed: "", dirty: false };
+    return { kind: "default", recent: "", typed: "", dirty: false, remembered: "" };
   }
 
   /* The harness's recent models, newest first, deduped. An old hub sends
@@ -35,16 +39,27 @@ const ModelMenu = (() => {
     return h && h.launch_model ? recents(h.recent_models, h.last_model) : [];
   }
 
-  /* A harness or machine change: an untouched menu moves to the new
-   * harness's newest model (or Harness default when it has none). A
-   * picked recent model the new harness hasn't used counts as untouched,
-   * so the sheet never sends another harness's model. `bare` makes the
-   * untouched default Harness default even when the list has models: a
-   * launch on a picked provider (#526), whose recent models came from
-   * other providers' launches. The menu still lists them to pick. */
+  /* A harness or machine change, `list` being the new pair's recent
+   * models. A picked Harness default or Other… stays. A remembered
+   * recent model shows wherever the list has it; elsewhere the menu
+   * shows the list's default, as if untouched, and keeps the model for a
+   * later list that has it. The menu only ever holds a model its list
+   * offers, so the sheet never sends another harness's model. An
+   * untouched menu moves to the newest model (or Harness default when
+   * the list is empty). `bare` makes that untouched default Harness
+   * default even when the list has models: a launch on a picked provider
+   * (#526), whose recent models came from other providers' launches.
+   * The menu still lists them to pick. Mirrors the Mac's
+   * `ModelPick.refit` (#951). */
   function redefault(st, list, bare) {
-    if (st.dirty && st.kind === "recent" && !list.includes(st.recent)) st.dirty = false;
-    if (st.dirty) return;
+    if (st.dirty && st.kind !== "recent") return;
+    if (st.remembered && list.includes(st.remembered)) {
+      st.kind = "recent";
+      st.recent = st.remembered;
+      st.dirty = true;
+      return;
+    }
+    st.dirty = false;
     const auto = bare ? "" : (list[0] || "");
     st.kind = auto ? "recent" : "default";
     st.recent = auto;
@@ -52,7 +67,7 @@ const ModelMenu = (() => {
 
   /* The model to post: "" sends no `model` key. */
   function value(st) {
-    if (st.kind === "recent") return st.recent;
+    if (st.kind === "recent") return st.recent.trim();
     if (st.kind === "other") return st.typed.trim();
     return "";
   }
@@ -83,8 +98,9 @@ const ModelMenu = (() => {
   function choose(st, list, v) {
     st.dirty = true;
     const i = /^r\d+$/.test(v) ? Number(v.slice(1)) : -1;
+    st.remembered = "";
     if (v === "other") st.kind = "other";
-    else if (i >= 0 && i < list.length) { st.kind = "recent"; st.recent = list[i]; }
+    else if (i >= 0 && i < list.length) { st.kind = "recent"; st.recent = st.remembered = list[i]; }
     else st.kind = "default";
   }
 
