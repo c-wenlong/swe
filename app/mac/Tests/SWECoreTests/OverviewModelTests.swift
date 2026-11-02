@@ -64,6 +64,7 @@ actor FakeLedger: LedgerQuerying {
     }
 
     func failScans(with error: Error) { scanError = error }
+    func stopFailingScans() { scanError = nil }
 
     var progress: ScanProgress?
     func set(progress: ScanProgress?) { self.progress = progress }
@@ -362,6 +363,29 @@ struct ScanFailed: Error, LocalizedError {
         #expect(model.updatedAt != nil)
         // The scan's summary was for the old period; the newer one stays.
         #expect(model.summary?.period == .today)
+    }
+
+    /// A period picked while the scan runs is shown with the scan's figures,
+    /// not the pre-scan ones its own reload read.
+    @Test func aPeriodSwitchDuringAScanShowsThePostScanFigures() async throws {
+        let ledger = FakeLedger()
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)])
+        var report = ScanReport()
+        report.filesRead = 1
+        await ledger.set(report: report)
+        await ledger.holdNextScan()
+        let model = model(ledger)
+        let scan = Task { await model.load(scan: true) }
+        try #require(await ledger.scanParks.reach(1))
+        model.period = .today
+        await model.reloadPeriod()
+        #expect(model.summary?.totals.totalTokens == 1)
+        // The scan commits new usage.
+        await ledger.set(harnesses: ["claude": totals(tokens: 9, cost: 9)])
+        await ledger.releaseScan()
+        await scan.value
+        #expect(model.summary?.period == .today)
+        #expect(model.summary?.totals.totalTokens == 9)
     }
 
     @Test func aNewerPriceListIsAppliedBeforeScanning() async {
@@ -953,7 +977,8 @@ final class WatchTicks: Sendable {
         clock.now = clock.now.addingTimeInterval(86_400)
 
         await model.backgroundScan(recentLimit: 12)
-        #expect(model.completedScans == 0)
+        // Pages showing "today" (Pricing, Calendar) move to the new day.
+        #expect(model.completedScans == 1)
         // Today's spend is a new day's; the half year slid by one.
         #expect(await ledger.ranges.count == harnessReads + 3)
         #expect(await ledger.dailyRanges.count == dailyReads + 2)
@@ -1002,6 +1027,38 @@ final class WatchTicks: Sendable {
         #expect(await ledger.figureReads == reads)
     }
 
+    @Test func aNewPriceListBeforeAFailedScanIsRebuiltByTheNextTick() async throws {
+        let ledger = FakeLedger()
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)])
+        let prices = PricesOnce()
+        let model = model(ledger, refreshPricing: { prices.next() })
+        await model.load(scan: false)
+        await model.warming?.value
+        // The tick sets the new price list, then its scan fails.
+        await ledger.failScans(with: ScanFailed())
+        await model.backgroundScan(recentLimit: 12)
+        #expect(await ledger.pricingUpdates == 1)
+        #expect(model.completedScans == 0)
+        #expect(model.pendingChange)
+
+        // The retry reads nothing and gets no catalog, but still rebuilds
+        // the repriced figures and tells the other views.
+        await ledger.stopFailingScans()
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 7)])
+        let dailyReads = await ledger.dailyRanges.count
+        await model.backgroundScan(recentLimit: 12)
+        #expect(model.completedScans == 1)
+        #expect(!model.pendingChange)
+        #expect(model.spend?.first?.costUSD == 7)
+        #expect(await ledger.dailyRanges.count == dailyReads + 2)
+
+        // Covered now: the tick after is idle again.
+        let reads = await ledger.figureReads
+        await model.backgroundScan(recentLimit: 12)
+        #expect(model.completedScans == 1)
+        #expect(await ledger.figureReads == reads)
+    }
+
     @Test func mergingKeepsOlderDaysAndTakesTheRecentReadsWholeDays() {
         let calendar = calendar
         let oct11 = oct11
@@ -1018,5 +1075,17 @@ final class WatchTicks: Sendable {
                                            since: day(-182), calendar: calendar)
         #expect(merged.map(\.day) == [day(-40), day(-30), day(-29), day(-1)])
         #expect(merged.map(\.totals.totalTokens) == [2, 3, 40, 60])
+    }
+}
+
+/// Hands out one new price list, then none, as a due refresh does.
+final class PricesOnce: Sendable {
+    private let given = Mutex(false)
+
+    func next() -> PricingCatalog? {
+        given.withLock { given in
+            defer { given = true }
+            return given ? nil : .empty
+        }
     }
 }

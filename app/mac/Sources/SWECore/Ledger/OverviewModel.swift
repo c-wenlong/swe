@@ -192,6 +192,10 @@ public final class OverviewModel {
     /// The local day the spend and activity figures were built on, so a
     /// background scan that read nothing still rebuilds them after midnight.
     private var figuresDay: Date?
+    /// A scan failed or was cancelled after the ledger may have changed (a
+    /// new price list, files committed before the throw): the next
+    /// successful scan rebuilds and counts even if it reads nothing itself.
+    private(set) var pendingChange = false
     /// Whether a full scan (no `recentLimit`) has finished. The search
     /// index's capped reconcile scans also count in `completedScans` and can
     /// finish while the first full scan is still running, so the launch
@@ -317,19 +321,23 @@ public final class OverviewModel {
             guard await beginFullScan() else { return }
         }
         defer { if fullScan { endFullScan() } }
-        summaryGeneration += 1
         warming?.cancel()
-        let mySummary = summaryGeneration
         inFlight += 1
         defer { inFlight -= 1 }
         if scan {
             guard await runScan(recentLimit: recentLimit) != nil else { return }
             completedScans += 1
+            pendingChange = false
         }
-        // Taken after the scan: of two loads, or a load and a background
-        // rebuild, the one that read the ledger last writes the figures.
+        // Both taken after the scan: of two loads, or a load and a
+        // background rebuild, the one that read the ledger last writes the
+        // figures. A period switch while the scan ran is older than this
+        // load's summary, which is for the period picked by then; one that
+        // starts while the summary is read still wins.
         loadGeneration += 1
         let mine = loadGeneration
+        summaryGeneration += 1
+        let mySummary = summaryGeneration
 
         let now = now()
         let ledger = self.ledger
@@ -422,9 +430,11 @@ public final class OverviewModel {
         } catch is CancellationError {
             // Stopped partway: files may have committed before the throw.
             revision += 1
+            pendingChange = true
             return nil
         } catch {
             revision += 1
+            pendingChange = true
             self.error = "Couldn't read your usage logs: \(error.localizedDescription)"
             return nil
         }
@@ -436,8 +446,10 @@ public final class OverviewModel {
     /// the scan alone (#1542):
     ///
     /// - Read nothing: no figure query, no `completedScans` bump, no
-    ///   warming. After midnight the spend and recent days are rebuilt
-    ///   anyway, and a shown rolling period older than ten minutes.
+    ///   warming. Two exceptions: a shown rolling period older than ten
+    ///   minutes is rebuilt, and the first scan of a new day rebuilds the
+    ///   spend and heatmap and moves `completedScans`, so pages showing
+    ///   "today" (Pricing, Calendar) move on to the new day too.
     /// - Read new usage: `completedScans` moves for the other views, and
     ///   the menu bar's spend, the last 30 days (widgets, the heatmap's
     ///   recent days) and, while the page shows, the selected period are
@@ -460,9 +472,14 @@ public final class OverviewModel {
         guard let outcome = await runScan(recentLimit: recentLimit) else { return }
         let now = now()
         let newDay = figuresDay != calendar.startOfDay(for: now)
-        if outcome.changed || newDay {
-            if outcome.changed { completedScans += 1 }
-            await refreshShown(wroteUsage: outcome.read, wholeActivity: outcome.repriced || newDay, now: now)
+        // A failed scan before this one may have repriced or committed
+        // files without a rebuild; this one covers it.
+        let pending = pendingChange
+        if outcome.changed || newDay || pending {
+            pendingChange = false
+            completedScans += 1
+            await refreshShown(wroteUsage: outcome.read || pending,
+                               wholeActivity: outcome.repriced || newDay || pending, now: now)
         } else if pageVisible, cacheEntry(for: period, now: now)?.fresh != true {
             // Nothing new, but a rolling period on show has slid.
             await reloadPeriod()
@@ -542,8 +559,9 @@ public final class OverviewModel {
         let now = now()
         // Until the first load lands, its own (and the launch scan's
         // partial) figures are on their way; only a period switch asks.
-        if summary?.period != period
-            || (updatedAt != nil && cacheEntry(for: period, now: now)?.fresh != true) {
+        // After it, a valid cache entry is put up even when the summary
+        // shown is for the same period: it may be older than the entry.
+        if summary?.period != period || updatedAt != nil {
             await reloadPeriod()
         }
         if activityStale { await reloadActivity() }
