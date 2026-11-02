@@ -511,6 +511,43 @@ class DevinStatusTest(StatusTestBase):
         ):
             self.assertEqual(ACTIVE, session_status(s, now=NOW))
 
+    def test_dead_single_lock_pid_skips_ps(self):
+        # Stale locks pile up; a dead pid can't be the host, so it must
+        # not cost a ``ps`` fork.
+        self._tool_head_db("d16")
+        self._write_lock("d16", str(2 ** 22))
+        s = _session("devin", "d16", age_s=9999)
+        with patch("swe.sessions.status._pid_command") as ps:
+            self.assertEqual(INTERRUPTED, session_status(s, now=NOW))
+        ps.assert_not_called()
+
+    def test_host_pids_skipped_when_no_row_needs_them(self):
+        # A fresh transcript proves the turn alive on its own.
+        self._tool_head_db("d17")
+        self._write_lock("d17", str(os.getpid()))
+        s = _session("devin", "d17", age_s=0)
+        with patch("swe.sessions.status._devin_host_pids") as hosts:
+            self.assertEqual(ACTIVE, session_status(s, now=NOW))
+        hosts.assert_not_called()
+
+    def test_host_pids_read_once_per_pass(self):
+        self._write_devin_db(
+            [("d18", "n2"), ("d19", "n4")],
+            [("n1", None, "d18", self._mk("assistant", tool_calls=[{"id": "t"}])),
+             ("n2", "n1", "d18", self._mk("tool", tool_call_id="t", content="o")),
+             ("n3", None, "d19", self._mk("assistant", tool_calls=[{"id": "t"}])),
+             ("n4", "n3", "d19", self._mk("tool", tool_call_id="t", content="o"))],
+        )
+        rows = [_session("devin", "d18", age_s=9999),
+                _session("devin", "d19", age_s=9999)]
+        with patch(
+            "swe.sessions.status._devin_host_pids", return_value=set()
+        ) as hosts:
+            self.assertEqual(
+                [INTERRUPTED, INTERRUPTED], session_statuses(rows, now=NOW)
+            )
+        hosts.assert_called_once()
+
     def test_missing_lock_file_is_interrupted(self):
         self._tool_head_db("d8")
         s = _session("devin", "d8", age_s=9999)
