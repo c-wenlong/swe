@@ -455,7 +455,8 @@ class TestTmuxHelpers(unittest.TestCase):
         with patch.object(supervise, "tmux_bin", return_value="/usr/bin/tmux"), \
              patch.object(supervise, "tmux_alive", side_effect=[False, True]), \
              patch.object(supervise.shutil, "which",
-                          return_value="/Users/a b/bin/claude"), \
+                          side_effect={"claude": "/Users/a b/bin/claude",
+                                       "env": "/usr/bin/env"}.get), \
              patch.object(supervise.time, "sleep"), \
              patch.dict(supervise.os.environ, {"PATH": "/usr/bin"}), \
              patch.object(supervise, "_tmux", return_value=self._cp()) as t:

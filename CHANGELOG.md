@@ -1613,6 +1613,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rc's sourced files, globs and `for`-loop variables (bounded), and a
   not-sourced rc that can't be written shows the line to copy into the
   generating config instead of the button.
+- **Remote: tmux launches no longer assume `/usr/bin/env` exists.** A
+  bare `swe remote` launch wraps its command in `env` so tmux never
+  hands a lone argument to `default-shell -c` (zsh's startup files can
+  rebuild `PATH` there, and a binary path with a space splits), but the
+  wrapper was hardcoded to `/usr/bin/env`, which is absent on NixOS and
+  in the Nix build sandbox. It now resolves `env` through `PATH` first,
+  falling back to `/usr/bin/env`.
 
 ### Security
 

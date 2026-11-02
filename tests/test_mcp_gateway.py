@@ -305,7 +305,12 @@ class GatewayHardeningTest(GatewayServerTest):
 
             def close(self):
                 if not self.closed:
-                    os.close(write_end)
+                    # The reader thread's child.close() races this one:
+                    # whoever loses finds the fd already gone.
+                    try:
+                        os.close(write_end)
+                    except OSError:
+                        pass
                 self.closed = True
 
         class Proc:

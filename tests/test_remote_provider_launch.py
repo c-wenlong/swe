@@ -4,6 +4,7 @@ records, machine rows, the command journal or the hub's replies."""
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import unittest
@@ -60,7 +61,8 @@ class TestProviderExec(unittest.TestCase):
 
     def _run(self, provider="groq", harness="opencode", extra_env=None):
         argv = launch_provider.wrap_argv(
-            harness, provider, ["/usr/bin/env"], keys_file=self.keys, reg={})
+            harness, provider, [shutil.which("env") or "/usr/bin/env"],
+            keys_file=self.keys, reg={})
         _assert_no_secret(self, argv)
         env = {"PATH": os.environ.get("PATH", ""), "HOME": str(self.home),
                **(extra_env or {})}
