@@ -148,8 +148,10 @@ excludes `paths.GITIGNORE_BODY`'s paths by pathspec, so a hub with an older
 `.gitignore` still never commits `secrets/`, `cache/`, `data/` or `skills/.system/`; those files
 are reported as held back. One the hub already tracks (committed before the
 line was there) is untracked by the next sync commit with its file left in
-place, a conflict with an older clone's edit of it settles as untracked, and
-a merge that still carries one never overwrites this machine's copy.
+place. An incoming ref that still tracks one, from an older clone, is merged
+through a child commit that stops tracking it, so neither side of the merge
+has the path and git never writes this machine's file (a store the app has
+open, a secret behind an incoming symlink).
 
 ## The core idea: one file, many names
 

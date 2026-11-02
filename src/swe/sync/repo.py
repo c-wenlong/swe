@@ -22,7 +22,8 @@ What is never committed: everything ``paths.GITIGNORE_BODY`` lists
 by pathspec on every ``git add``, so a hub whose own ``.gitignore`` is
 older than this swe still keeps them out. They are reported as held back.
 One the hub already tracks is untracked by the next sync commit, its file
-left in place, and a merge never overwrites this machine's copy.
+left in place, and an incoming ref that still tracks one is merged through
+a child commit that stops tracking it, so git never writes that file here.
 
 One conflict sync settles itself: ``config/harness.json``, merged harness
 by harness (``registry.merge_registries``) when git's line merge stops on
@@ -433,6 +434,7 @@ def _trial(state: RepoState, changes, message: str) -> tuple[list[dict], list[st
         if not new:
             continue
         merges.append({"ref": ref, "commits": new})
+        ref = _without_never_synced(state, ref)
         if tip is None or _is_ancestor(state.root, tip, ref):
             tip = _out(state.root, "rev-parse", ref)
             continue
@@ -461,6 +463,27 @@ def _trial(state: RepoState, changes, message: str) -> tuple[list[dict], list[st
     return merges, []
 
 
+def _without_never_synced(state: RepoState, ref: str) -> str:
+    """``ref`` itself, or a child commit of it that stops tracking the
+    never-synced paths it still tracks (an older swe committed them).
+
+    Merging that child leaves those paths out of both HEAD and the merge
+    result, so git never writes the working files there: another clone's
+    copy never lands on this machine's store, a live SQLite file is never
+    swapped under the app, and an incoming symlink can't redirect one."""
+    sha = _out(state.root, "rev-parse", f"{ref}^{{commit}}")
+    raw = _git(state.root, "ls-tree", "-r", "-z", "--name-only", sha, "--",
+               *never_synced()).stdout
+    paths = [p for p in raw.split("\0") if p]
+    if not paths:
+        return ref
+    tree = _with_files(state, f"{sha}^{{tree}}", dict.fromkeys(paths))
+    return _commit_tree(state, tree, [sha],
+                        f"Stop tracking paths that never sync, from {ref}\n\n"
+                        f"swe sync from {state.machine}: " + ", ".join(sorted(paths)[:5])
+                        + (" ..." if len(paths) > 5 else ""))
+
+
 def _parse_stages(raw: str) -> dict[str, dict[int, tuple[str, str]]]:
     """``{path: {stage: (mode, blob)}}`` from ``-z`` conflict entries
     (``<mode> <blob> <stage>\\t<path>``, as merge-tree and ``ls-files -u``
@@ -475,20 +498,12 @@ def _parse_stages(raw: str) -> dict[str, dict[int, tuple[str, str]]]:
     return stages
 
 
-def _resolve(root: Path, stages: dict) -> dict[str, str | None] | None:
-    """The merged text of every conflicted path (None: keep it untracked),
-    or None when any one of them is not something sync settles.
-
-    A never-synced path stays untracked: this side stopped tracking it,
-    the other side (an older swe) changed it. Otherwise it settles only
-    ``REGISTRY_PATH``, as a plain file both sides still have, whose
-    versions are JSON objects ``merge_registries`` can merge (a side that
-    added it merges against {})."""
-    out: dict[str, str | None] = {p: None for p in stages if _is_never_synced(p)}
-    rest = set(stages) - set(out)
-    if not rest:
-        return out
-    if rest != {REGISTRY_PATH}:
+def _resolve(root: Path, stages: dict) -> dict[str, str] | None:
+    """The merged text of every conflicted path, or None when any one of
+    them is not something sync settles. It settles only ``REGISTRY_PATH``,
+    as a plain file both sides still have, whose versions are JSON objects
+    ``merge_registries`` can merge (a side that added it merges against {})."""
+    if set(stages) != {REGISTRY_PATH}:
         return None
     blobs = stages[REGISTRY_PATH]
     if 2 not in blobs or 3 not in blobs:
@@ -511,7 +526,7 @@ def _resolve(root: Path, stages: dict) -> dict[str, str | None] | None:
     merged = merge_registries(*docs)
     if merged is None:
         return None
-    return {**out, REGISTRY_PATH: registry_text(merged)}
+    return {REGISTRY_PATH: registry_text(merged)}
 
 
 def _with_files(state: RepoState, tree: str, files: dict[str, str | None]) -> str:
@@ -539,58 +554,26 @@ def _merge(state: RepoState, merge: dict, message: str) -> None:
     and commit the merge. Anything else left unmerged raises, and the
     caller rolls the sync back."""
     ref = merge["ref"]
-    with _local_copies_kept(state, ref):
-        if not merge.get("resolved"):
-            _git(state.root, "merge", "--quiet", "--no-edit", "-m", message, ref)
-            return
-        done = _git(state.root, "merge", "--quiet", "--no-edit", "-m", message, ref,
-                    check=False)
-        if done.returncode == 0:
-            return
-        stages = _parse_stages(_git(state.root, "ls-files", "-u", "-z").stdout)
-        resolved = _resolve(state.root, stages) if stages else None
-        if resolved is None:
-            raise SyncError(f"git merge of {ref} stopped on conflicts swe sync could not "
-                            "settle: " + (", ".join(sorted(stages)) or "none listed"))
-        # Into the index first, then out to the file, so git writes it the
-        # way the merge wrote everything else.
-        for path, text in resolved.items():
-            if text is None:
-                _git(state.root, "update-index", "--force-remove", "--", path)
-                continue
-            blob = _out(state.root, "hash-object", "-w", "--stdin", input=text)
-            _git(state.root, "update-index", "--cacheinfo", f"100644,{blob},{path}")
-            _git(state.root, "checkout-index", "--force", "--", path)
-        _git(state.root, "commit", "--quiet", "-m", message)
-
-
-@contextlib.contextmanager
-def _local_copies_kept(state: RepoState, ref: str):
-    """Keep this machine's never-synced files out of a merge of ``ref``
-    that still tracks them (an older swe committed them). Git overwrites
-    an ignored file as expendable and refuses over an untracked one, so
-    each untracked copy steps aside for the merge and comes back after,
-    whatever the merge wrote there."""
-    raw = _git(state.root, "diff", "--name-only", "-z", "HEAD", ref, "--",
-               *never_synced(), check=False).stdout
-    tracked = set(_tracked_never_synced(state.root))
-    kept: dict[Path, bytes] = {}
-    for rel in filter(None, raw.split("\0")):
-        path = state.root / rel
-        if rel not in tracked and path.is_file() and not path.is_symlink():
-            kept[path] = path.read_bytes()
-    try:
-        for path in kept:
-            path.unlink()
-        yield
-    except BaseException:
-        # Abort before the copies come back, so the abort can't take them.
-        _git(state.root, "merge", "--abort", check=False)
-        raise
-    finally:
-        for path, data in kept.items():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
+    target = _without_never_synced(state, ref)
+    if not merge.get("resolved"):
+        _git(state.root, "merge", "--quiet", "--no-edit", "-m", message, target)
+        return
+    done = _git(state.root, "merge", "--quiet", "--no-edit", "-m", message, target,
+                check=False)
+    if done.returncode == 0:
+        return
+    stages = _parse_stages(_git(state.root, "ls-files", "-u", "-z").stdout)
+    resolved = _resolve(state.root, stages) if stages else None
+    if resolved is None:
+        raise SyncError(f"git merge of {ref} stopped on conflicts swe sync could not "
+                        "settle: " + (", ".join(sorted(stages)) or "none listed"))
+    # Into the index first, then out to the file, so git writes it the way
+    # the merge wrote everything else.
+    for path, text in resolved.items():
+        blob = _out(state.root, "hash-object", "-w", "--stdin", input=text)
+        _git(state.root, "update-index", "--cacheinfo", f"100644,{blob},{path}")
+        _git(state.root, "checkout-index", "--force", "--", path)
+    _git(state.root, "commit", "--quiet", "-m", message)
 
 
 def _rollback(state: RepoState, head: str | None, mid: str | None, index_tree: str) -> None:

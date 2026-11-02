@@ -567,25 +567,47 @@ class NeverSyncedTest(SyncTestBase):
         self.assertNotIn(rel, tracked)
         self.assertIn("AGENTS.md", tracked)
 
-    def test_an_older_clone_editing_a_store_never_blocks_or_overwrites(self):
-        rel = "data/account-links.json"
+    def test_an_older_clone_editing_a_store_never_blocks_or_touches_it(self):
+        rel = "data/catalog/catalog.sqlite"
         a = self._hub_tracking(rel, "v1\n")
         old = self.machine("old")
         # An older swe on another machine commits its copy of the store,
-        # while this machine untracks its own: a modify/delete conflict.
+        # while this machine untracks its own.
         (old / ".swe" / rel).write_text("old's copy\n")
         (old / ".swe" / "skills" / "one" / "SKILL.md").write_text("from old\n")
         git(old / ".swe", "commit", "-q", "-am", "older swe sync")
         git(old / ".swe", "push", "-q", "origin", "main")
-        (a / ".swe" / rel).write_text("a's own\n")
+        store = a / ".swe" / rel
+        store.write_text("a's own\n")
+        inode = store.stat().st_ino  # the app may hold it open
         doc = self.sync(a)
         self.assertEqual(doc["result"], "synced")
-        self.assertEqual(doc["merges"][0]["resolved"], [rel])
-        self.assertEqual((a / ".swe" / rel).read_text(), "a's own\n")
+        self.assertEqual((store.read_text(), store.stat().st_ino), ("a's own\n", inode))
         self.assertEqual((a / ".swe" / "skills" / "one" / "SKILL.md").read_text(),
                          "from old\n")
         self.assertNotIn(rel, git(self.remote, "ls-tree", "-r", "--name-only",
                                   "main").splitlines())
+
+    def test_an_incoming_link_at_a_never_synced_path_is_never_checked_out(self):
+        # A commit that tracks secrets/example as a link to AGENTS.md must
+        # not reach this machine's secrets/example, or what it points at.
+        a, b = self.machine("a"), self.machine("b")
+        (b / ".swe" / "secrets").mkdir()
+        os.symlink("../AGENTS.md", b / ".swe" / "secrets" / "example")
+        git(b / ".swe", "add", "-f", "secrets/example")
+        git(b / ".swe", "commit", "-q", "-m", "a link where a secret lives")
+        git(b / ".swe", "push", "-q", "origin", "main")
+        secret = a / ".swe" / "secrets" / "example"
+        secret.parent.mkdir()
+        secret.write_text("TOKEN=1\n")
+        (a / ".swe" / "skills" / "one" / "SKILL.md").write_text("edited\n")
+        doc = self.sync(a)
+        self.assertEqual(doc["result"], "synced")
+        self.assertFalse(secret.is_symlink())
+        self.assertEqual(secret.read_text(), "TOKEN=1\n")
+        self.assertEqual((a / ".swe" / "AGENTS.md").read_text(), "# shared\n")
+        self.assertNotIn("secrets/example", git(self.remote, "ls-tree", "-r",
+                                                "--name-only", "main").splitlines())
 
     def test_never_synced_list_tracks_the_gitignore_body(self):
         names = repo.never_synced()
