@@ -584,13 +584,17 @@ macOS asks), `provision` (everything the demo needs, over SSH) and `save`
 install and the Command Line Tools. Each step can be run on its own and
 run again.
 
-Two settings take a click, once each:
+Three settings take a click, once each. Nothing can be pasted into the
+guest, so type its password, from
+`~/Library/Application Support/swe-demo-vm/demo-password`, where asked:
 
-- **Screen Recording for Terminal in the guest**, so `scripts/demo_vm.sh
-  shot FILE` can screenshot the VM. The first `provision` stops and opens
-  the page: in the VM's window turn on Terminal, enter the password from
-  `~/Library/Application Support/swe-demo-vm/demo-password`, run `shot`
-  once and allow the prompt it shows, then run `save`.
+- **Screen Recording for Terminal in the guest**, for `shot` and `record`.
+  The first `provision` stops and opens the page: in the VM's window turn on
+  Terminal, then run `provision` again and allow the prompt it shows.
+- **Accessibility for Terminal in the guest**, so `record` can click
+  through SWE.app. `provision` stops again: allow Terminal to control
+  System Events, turn Terminal on in the Accessibility page it opened, and
+  run `provision` again. Then `save`.
 - **The display size.** UTM's scripting cannot set it. With the VM stopped,
   edit it in UTM, open Display, turn off Dynamic Resolution and pick 1920
   by 1080.
@@ -615,6 +619,36 @@ FILE` saves a screenshot of it on your Mac. When the take is done:
 ```bash
 scripts/demo_vm.sh reset
 ```
+
+### A scripted take and its voiceover
+
+`record` films a whole take for you, with no voice:
+
+```bash
+scripts/demo_vm.sh record ~/Movies/swe-demo
+```
+
+It starts a throwaway run of the base, sets the screen out as
+[Prerequisites](#prerequisites) asks, and runs every bash block of
+segments 1 to 10 in order, typed out after a `$` prompt, while it clicks
+SWE.app to the page each segment shows. No segment starts before its time
+in the table above, so the take lasts about five minutes. The folder gets:
+
+| File | What it is |
+|---|---|
+| `swe-demo-voiceless.mov` | The take, 1920 by 1080, no audio |
+| `voiceover.md` | The narration to read, each line with its start time |
+| `voiceover.json` | The same lines, for a narration tool |
+| `marks.tsv` | When each segment, command and page switch happened |
+
+The narration is in
+[`scripts/demo_recording/narration.json`](../scripts/demo_recording/narration.json):
+the Say lines above, each anchored to an event in the take, so its times
+come from this take rather than the table. The commands come from this
+page, so editing a block changes the next take; the clicks are screen
+positions listed in
+[`scripts/demo_recording/driver.py`](../scripts/demo_recording/driver.py),
+and need measuring again if SWE.app's sidebar or a page moves.
 
 ## Reset and clean up
 

@@ -47,7 +47,7 @@ class DemoVmTest(unittest.TestCase):
     def test_help_lists_every_step(self):
         run = self._script("--help")
         self.assertEqual(run.returncode, 0, run.stderr)
-        for step in ("create", "provision", "save", "take", "reset", "ssh", "shot", "all"):
+        for step in ("create", "provision", "save", "take", "reset", "ssh", "shot", "record", "all"):
             self.assertIn(f"scripts/demo_vm.sh {step}", run.stderr)
         self.assertEqual(run.stdout, "")
 
@@ -57,12 +57,12 @@ class DemoVmTest(unittest.TestCase):
         self.assertIn("scripts/demo_vm.sh create", run.stderr)
 
     def test_unknown_step_is_refused(self):
-        run = self._script("record")
+        run = self._script("film")
         self.assertEqual(run.returncode, 1)
-        self.assertIn("demo_vm: unknown command: record", run.stderr)
+        self.assertIn("demo_vm: unknown command: film", run.stderr)
 
     def test_every_step_refuses_without_utm_and_writes_nothing(self):
-        for step in ("create", "provision", "save", "take", "reset", "ssh", "shot", "all"):
+        for step in ("create", "provision", "save", "take", "reset", "ssh", "shot", "record", "all"):
             with self.subTest(step=step):
                 run = self._script(step)
                 self.assertEqual(run.returncode, 1, run.stdout)
@@ -96,7 +96,7 @@ class DemoVmTest(unittest.TestCase):
         self.assertIn(f"SWE_DEMO_VM_IPSW={missing} is not a file", run.stderr)
         self.assertEqual(self.state.stat().st_mode & 0o777, 0o700)
         password = (self.state / "demo-password").read_text()
-        self.assertRegex(password, r"^[A-Za-z0-9]{20}$")
+        self.assertRegex(password, r"^demo-[a-z0-9]{8}$")
         self.assertEqual((self.state / "demo-password").stat().st_mode & 0o777, 0o600)
         self.assertTrue((self.state / "id_ed25519").is_file())
         self.assertTrue((self.state / "id_ed25519.pub").is_file())
