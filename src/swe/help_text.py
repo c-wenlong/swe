@@ -593,6 +593,9 @@ to use their own login state and environment."""
   .gitignore lists (ledgers, search, remote, github) or anything else
   it lists, even when the hub's own .gitignore is older.
 
+  Commit messages name this machine by its hostname; set
+  {c('cyan', 'SWE_MACHINE_NAME')}=<name> to use another name.
+
   Both take {c('cyan', '--json')} for the app's document."""
     ),
     "instructions": (

@@ -113,6 +113,12 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a>[Unreleased]</h2>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
+<li><p><strong><code>SWE_MACHINE_NAME</code> names this machine in <code>swe sync</code> commits.</strong>
+Sync's commit and merge messages say <code>swe sync from &lt;hostname&gt;</code>; set
+<code>SWE_MACHINE_NAME</code> to use another name, for a demo recording or a
+hostname you would rather keep out of the hub's history. The
+<code>docs/demo.md</code> helpers set it to <code>machine-a</code> and <code>machine-b</code>.</p>
+</li>
 <li><p><strong><code>swe setup --hub</code> brings the hub's plugins and MCP servers in too.</strong>
 After cloning the hub and registering its plugin marketplaces, setup
 installs every plugin those marketplaces list into Claude Code and
