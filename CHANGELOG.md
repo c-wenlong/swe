@@ -1396,6 +1396,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The remote hub no longer drops a browser's parallel asset fetches,
+  which left the web app a blank shell behind `tailscale serve`.** A
+  page load fires all of its script requests at once, and serve opens a
+  separate backend connection per stream in the same instant; the
+  stdlib listen backlog of 5 let the kernel reset the overflow before
+  `accept()`, so the proxy answered 502 for `app.js` or `pages.js` and
+  nothing ever rendered. `_BoundedHTTPServer` now listens with a
+  backlog of 128, so every burst connection is accepted.
+
 - **The Mac app no longer rebuilds every usage figure each minute.**
   The search index's 60 s scan and the 300 s ledger timer each re-ran
   every Overview query, warmed all seven periods (about 30 more grouped
