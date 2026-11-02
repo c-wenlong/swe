@@ -753,7 +753,7 @@ private struct McpRepoSection: View {
             ErrorCard(message: error)
         } else if !FileManager.default.fileExists(atPath: root.path) {
             Card {
-                Label("\(displayPath(root)) doesn't exist. Set the folder in Settings > Paths.",
+                Label("\(displayPath(root)) doesn't exist. Set the folder in Settings > Files.",
                       systemImage: "folder.badge.questionmark")
                     .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
             }

@@ -154,6 +154,11 @@ scaffolds; `PageHeader` is the non-scrolling variant used by sheets.
   `ErrorCard`, never as loose text.
 - User-facing strings use Theme text roles and contain no em dashes.
 - Page actions sit in `Page`'s actions with ⌘R on refresh.
+- A view showing something a terminal changes under `~/.swe` follows it
+  while on screen: a `.task` looping over `FolderChanges.stream`, filtered
+  to the paths that decide what it shows (`ChaptersModel.affectsCheck`,
+  `HubSyncStatus.affects`). Never let `data/`, `cache/` or `.git/index`
+  through: the app's own reads write them, and the view reloads in a loop.
 - Decoding `swe` output happens only in `SWECore` decoders, matched to
   fixtures under `app/mac/Tests/SWECoreTests/Fixtures` (see
   [json-contracts.md](json-contracts.md)).
@@ -163,6 +168,8 @@ scaffolds; `PageHeader` is the non-scrolling variant used by sheets.
 ## Gotchas
 
 Non-obvious decisions and traps in `app/mac/`, recorded so they are not re-learned. Read the entry for a file before changing it. The Python side's entries are in [backend-architecture.md](backend-architecture.md#gotchas).
+
+- **FSEvents paths are real paths** (`app/mac/Sources/SWECore/Support/FolderChanges.swift`): events name `/private/var/...` and a linked folder's target, but `URL.resolvingSymlinksInPath()` strips `/private`, so a prefix built from it matches nothing and the watch stays silent with no error. The root goes through `realpath(3)` instead.
 
 - **Accounts history**: usage history on the Accounts page is one switch for the whole page ("Show history", off by default, `accountsShowHistory`), and every card gets the same `AccountHistorySection`, so cards stay alike. SWE's own figures come from `AccountHistory` (one ledger `dailyTokens(for:)` read for every shown card, rebuilt after scans only while the page shows history; keys from `AccountsModel.historyKey`: a profile card sums its own home, a Cursor profile its app data folder, and a harness's own card every other home). Codex alone adds OpenAI's account-wide total (`CodexAccountUsage`); never give one vendor a section the others lack.
 - **Grok Bot in Calendar**: its Bots pass one task between them, so every `grok-bot` session groups into one project, "Grok Bot" (`ProjectResolver.group`), and Bots active within the calendar gap merge into one block. `GrokBotRoster` only titles each session row with its Bot's name; never split blocks by Bot again. Deleting a Bot removes its name from Grok Bot, so `GrokBotRoster` remembers every id and name it reads in `~/.swe/data/grok-bot-names.json` (only the `shared` instance writes it; tests pass a temp `memory:`). An id in neither, while the roster parsed, titles "Deleted Bot (<short id>)".

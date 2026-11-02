@@ -310,7 +310,7 @@ store), and bad shapes are 422. The answer is swe's `--json` report, `{"name", "
 - **Show in Finder and Open in editor** are Mac only; a folder's full path
   shows on hover instead.
 - **The servers folder is always `~/.swe/mcp/servers`.** The Mac app
-  reads a Settings > Paths override from its own preferences, which the
+  reads a Settings > Files override from its own preferences, which the
   web app never reads.
 - **Git state arrives with the list** rather than filling in row by row.
 - **No saved snapshot.** The app shows its last list from disk at launch;

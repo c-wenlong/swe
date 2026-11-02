@@ -180,6 +180,14 @@ public final class ChaptersModel {
         return document
     }
 
+    /// Whether a change at `path` (relative to `~/.swe`) can change what
+    /// `swe instructions check` reports: the generated AGENTS.md and the
+    /// chapters behind it. The page follows these while it is on screen, so
+    /// a build or an edit made in a terminal shows without a refresh.
+    nonisolated public static func affectsCheck(_ path: String) -> Bool {
+        path == "AGENTS.md" || path == "AGENTS_MD" || path.hasPrefix("AGENTS_MD/")
+    }
+
     /// `name` resolved inside `directory` — links in every component, not
     /// just the file's own — or nil when it leaves the folder.
     static func inside(_ name: String, under directory: String) -> URL? {

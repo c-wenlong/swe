@@ -352,7 +352,7 @@ final class MemoryStore: KeyValueStoring, @unchecked Sendable {
     }
 
     @Test func aRecheckAfterTheSwePathChangedIsSavedUnderTheNewPath() async {
-        // A checked, B chosen in Settings > Paths, then SWE active again.
+        // A checked, B chosen in Settings > Files, then SWE active again.
         let swe = FakeSwe(results: ["A": ["claude"], "B": ["codex"]])
         let model = ProviderVisibilityModel(store: MemoryStore(), detect: { try await swe.detect() })
         await swe.use("A"); await model.loadIfNeeded(for: "A")
