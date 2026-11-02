@@ -480,9 +480,138 @@ class NeverSyncedTest(SyncTestBase):
         self.assertEqual(doc["held_back"], [])
         self.assertEqual([f["path"] for f in doc["commit"]["files"]], ["AGENTS.md"])
 
+    def test_app_stores_and_codex_system_skills_stay_out(self):
+        # SWE.app writes the model catalog and the issue lock under data/
+        # while it runs; Codex writes its bundled skills into
+        # ~/.codex/skills/.system, which is skills/.system once linked.
+        # The seed's .gitignore names neither (data/remote/ only).
+        a = self.machine("a")
+        hub = a / ".swe"
+        app_files = ("data/catalog/catalog.sqlite", "data/catalog/catalog.sqlite-wal",
+                     "data/issues.json.lock", "data/account-links.json")
+        codex_files = ("skills/.system/.codex-system-skills.marker",
+                       "skills/.system/imagegen/SKILL.md")
+        for rel in app_files + codex_files:
+            (hub / rel).parent.mkdir(parents=True, exist_ok=True)
+            (hub / rel).write_text("x\n")
+        (hub / "skills" / "two").mkdir()
+        (hub / "skills" / "two" / "SKILL.md").write_text("two\n")
+        self.assertEqual(repo.status(a)["groups"], {"skills": 1})
+        doc = self.sync(a)
+        self.assertEqual([f["path"] for f in doc["commit"]["files"]], ["skills/two/SKILL.md"])
+        self.assertEqual(doc["commit"]["message"],
+                         f"swe sync from {repo.machine_name()}: 1 file (skills 1)")
+        self.assertEqual(sorted(doc["held_back"]), sorted(app_files + codex_files))
+        tracked = git(self.remote, "ls-tree", "-r", "--name-only", "main").splitlines()
+        self.assertFalse([p for p in tracked if p.startswith(("data/", "skills/.system/"))])
+
+    def test_a_current_gitignore_holds_nothing_back(self):
+        from swe.paths import GITIGNORE_BODY
+
+        a = self.machine("a")
+        hub = a / ".swe"
+        (hub / ".gitignore").write_text(GITIGNORE_BODY)
+        self.sync(a)
+        for rel in ("data/catalog/catalog.sqlite", "data/issues.json.lock",
+                    "skills/.system/imagegen/SKILL.md"):
+            (hub / rel).parent.mkdir(parents=True, exist_ok=True)
+            (hub / rel).write_text("x\n")
+        doc = repo.status(a)
+        self.assertEqual((doc["changes"], doc["held_back"]), ([], []))
+
+    def test_a_skill_or_plugin_data_folder_still_syncs(self):
+        # Only the hub's own data/ is machine-local; the rule is anchored.
+        from swe.paths import GITIGNORE_BODY
+
+        a = self.machine("a")
+        hub = a / ".swe"
+        (hub / ".gitignore").write_text(GITIGNORE_BODY)
+        for rel in ("skills/data/SKILL.md", "skills/one/data/table.csv",
+                    "plugins/mine/p/data/defaults.json", "data/issues.json"):
+            (hub / rel).parent.mkdir(parents=True, exist_ok=True)
+            (hub / rel).write_text("x\n")
+        doc = self.sync(a)
+        self.assertEqual(sorted(f["path"] for f in doc["commit"]["files"]),
+                         [".gitignore", "plugins/mine/p/data/defaults.json",
+                          "skills/data/SKILL.md", "skills/one/data/table.csv"])
+        self.assertEqual(doc["held_back"], [])
+
+    def _hub_tracking(self, rel: str, text: str) -> Path:
+        # What an older swe left: an app store committed and pushed.
+        a = self.machine("a")
+        (a / ".swe" / rel).parent.mkdir(parents=True, exist_ok=True)
+        (a / ".swe" / rel).write_text(text)
+        git(a / ".swe", "add", "-f", rel)
+        git(a / ".swe", "commit", "-q", "-m", "older swe committed it")
+        git(a / ".swe", "push", "-q", "origin", "main")
+        return a
+
+    def test_a_store_the_hub_already_tracks_is_untracked_and_kept(self):
+        rel = "data/account-links.json"
+        a = self._hub_tracking(rel, "a v1\n")
+        b = self.machine("b")
+        (a / ".swe" / rel).write_text("a v2\n")
+        doc = self.sync(a)
+        self.assertEqual(doc["commit"]["files"],
+                         [{"status": "D", "path": rel, "group": "config"}])
+        self.assertEqual((a / ".swe" / rel).read_text(), "a v2\n")
+        self.assertEqual(repo.status(a)["changes"], [])
+        # b, also on this swe: its own commit untracks the file first, so
+        # the merge agrees and b's copy stays b's.
+        (b / ".swe" / rel).write_text("b v2\n")
+        (b / ".swe" / "AGENTS.md").write_text("# from b\n")
+        doc = self.sync(b)
+        self.assertEqual(doc["result"], "synced")
+        self.assertEqual((b / ".swe" / rel).read_text(), "b v2\n")
+        tracked = git(self.remote, "ls-tree", "-r", "--name-only", "main").splitlines()
+        self.assertNotIn(rel, tracked)
+        self.assertIn("AGENTS.md", tracked)
+
+    def test_an_older_clone_editing_a_store_never_blocks_or_touches_it(self):
+        rel = "data/catalog/catalog.sqlite"
+        a = self._hub_tracking(rel, "v1\n")
+        old = self.machine("old")
+        # An older swe on another machine commits its copy of the store,
+        # while this machine untracks its own.
+        (old / ".swe" / rel).write_text("old's copy\n")
+        (old / ".swe" / "skills" / "one" / "SKILL.md").write_text("from old\n")
+        git(old / ".swe", "commit", "-q", "-am", "older swe sync")
+        git(old / ".swe", "push", "-q", "origin", "main")
+        store = a / ".swe" / rel
+        store.write_text("a's own\n")
+        inode = store.stat().st_ino  # the app may hold it open
+        doc = self.sync(a)
+        self.assertEqual(doc["result"], "synced")
+        self.assertEqual((store.read_text(), store.stat().st_ino), ("a's own\n", inode))
+        self.assertEqual((a / ".swe" / "skills" / "one" / "SKILL.md").read_text(),
+                         "from old\n")
+        self.assertNotIn(rel, git(self.remote, "ls-tree", "-r", "--name-only",
+                                  "main").splitlines())
+
+    def test_an_incoming_link_at_a_never_synced_path_is_never_checked_out(self):
+        # A commit that tracks secrets/example as a link to AGENTS.md must
+        # not reach this machine's secrets/example, or what it points at.
+        a, b = self.machine("a"), self.machine("b")
+        (b / ".swe" / "secrets").mkdir()
+        os.symlink("../AGENTS.md", b / ".swe" / "secrets" / "example")
+        git(b / ".swe", "add", "-f", "secrets/example")
+        git(b / ".swe", "commit", "-q", "-m", "a link where a secret lives")
+        git(b / ".swe", "push", "-q", "origin", "main")
+        secret = a / ".swe" / "secrets" / "example"
+        secret.parent.mkdir()
+        secret.write_text("TOKEN=1\n")
+        (a / ".swe" / "skills" / "one" / "SKILL.md").write_text("edited\n")
+        doc = self.sync(a)
+        self.assertEqual(doc["result"], "synced")
+        self.assertFalse(secret.is_symlink())
+        self.assertEqual(secret.read_text(), "TOKEN=1\n")
+        self.assertEqual((a / ".swe" / "AGENTS.md").read_text(), "# shared\n")
+        self.assertNotIn("secrets/example", git(self.remote, "ls-tree", "-r",
+                                                "--name-only", "main").splitlines())
+
     def test_never_synced_list_tracks_the_gitignore_body(self):
         names = repo.never_synced()
-        for name in ("secrets", "cache", "data/ledger", "data/remote", "mcp/servers"):
+        for name in ("secrets", "cache", "data", "skills/.system", "mcp/servers"):
             self.assertIn(name, names)
 
 

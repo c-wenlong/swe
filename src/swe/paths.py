@@ -6,6 +6,7 @@ kinds of thing and they are separated so the whole directory can be a git repo:
   authored     AGENTS.md, .linkignore, skills/, plugins/, hooks/,  worth versioning
                mcp/, config/
   regenerable  cache/, backups/              gitignored
+  this machine data/                         gitignored
   credentials  secrets/                      gitignored, mode 700
 
 The root sits in ``$HOME`` rather than ``$HOME/.config`` on purpose. SWE's
@@ -524,32 +525,21 @@ GITIGNORE_BODY = """# Regenerable. Everything else here is worth versioning.
 cache/
 backups/
 
-# The app's usage ledger and its daily backups: one row per model response,
-# with project paths, session ids and account homes. Personal, ~30 MB, and
-# rewritten on every scan, so never versioned.
-data/ledger/
+# This machine's own stores, written by the app and swe while they run: the
+# usage ledgers, the model catalog, the search index, Devin cloud sessions,
+# GitHub mirrors, remote-control state, the issue list, account link records
+# and their lock files. Personal, live SQLite or paths that only mean
+# something here, so never versioned. Anchored: a skill or plugin may ship
+# a data/ folder of its own.
+/data/
 
-# The web app's own usage ledger (a different schema from the app's): the
-# same personal rows, rebuilt from the transcripts by any hub that serves it.
-data/web-ledger/
-
-# Devin cloud sessions the app syncs from the API: titles, links, repos and
-# message times of your own sessions. Personal, and rewritten on each sync.
-data/devin-cloud/
-
-# The full-text search index: message text from every local session.
-# Personal, and rebuilt by the app or `swe session index` when missing.
-data/search/
-
-# The GitHub mirror clones and per-PR checkouts `swe gh pr worktree`
-# manages: regenerable, potentially large, and each worktree carries
-# its own .git the hub should never see.
-data/github/
+# The per-PR checkouts `swe gh pr worktree` manages: each carries its own
+# .git the hub should never see.
 worktrees/
 
-# Remote-control state: paired-device credentials, event journals and
-# staged phone uploads. Personal, and journals rebuild from transcripts.
-data/remote/
+# Codex writes its bundled system skills into ~/.codex/skills/.system, which
+# is this skills/ folder once linked. Codex owns and rewrites them.
+skills/.system/
 
 # Credential values: provider API keys in secrets/providers/ and the values
 # behind mcp.json's ${NAME} references in secrets/mcp/. Keeping them out is
@@ -560,6 +550,11 @@ secrets/
 # mcp.json records what they are, so this can be rebuilt from a clone.
 mcp/servers/
 """
+
+# Folders a harness writes into the shared skills/ through its link, holding
+# its own bundled skills. They are not hub skills: listings skip them and
+# GITIGNORE_BODY keeps them out of the hub's git.
+HARNESS_SKILL_DIRS = (".system",)
 
 # Written into secrets/ itself, so the folder stays out of git even when the
 # root .gitignore above is missing the line or excepts a path under it.

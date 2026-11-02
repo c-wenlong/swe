@@ -18,9 +18,12 @@ working tree changes. A refused sync leaves the repo exactly as it was.
 Nothing is ever force-pushed.
 
 What is never committed: everything ``paths.GITIGNORE_BODY`` lists
-(``secrets/``, ``cache/``, the ledgers, ``data/remote/`` ...) is excluded
+(``secrets/``, ``cache/``, ``data/``, ``skills/.system/`` ...) is excluded
 by pathspec on every ``git add``, so a hub whose own ``.gitignore`` is
 older than this swe still keeps them out. They are reported as held back.
+One the hub already tracks is untracked by the next sync commit, its file
+left in place, and an incoming ref that still tracks one is merged through
+a child commit that stops tracking it, so git never writes that file here.
 
 One conflict sync settles itself: ``config/harness.json``, merged harness
 by harness (``registry.merge_registries``) when git's line merge stops on
@@ -271,15 +274,33 @@ def _changed_paths(state: RepoState, env: dict | None = None) -> list[str]:
     return [p for p in paths if not _is_never_synced(p.rstrip("/"))]
 
 
+def _tracked_never_synced(root: Path, env: dict | None = None) -> list[str]:
+    """Never-synced paths the index still tracks: a hub committed them
+    before swe's .gitignore listed them (all of data/, say)."""
+    raw = _git(root, "ls-files", "-z", "--", *never_synced(), env=env).stdout
+    return [p for p in raw.split("\0") if p]
+
+
 def _stage(state: RepoState, env: dict | None = None) -> None:
     """Stage what changed, path by path. Exclude pathspecs would read
-    better, but git fails the whole add when one names an ignored folder."""
+    better, but git fails the whole add when one names an ignored folder.
+
+    Never-synced paths still tracked are untracked, their files left in
+    place: otherwise their edits are never staged, and a newer copy from
+    another clone stops the merge on this machine's edit."""
+    literal = {**(env or {}), "GIT_LITERAL_PATHSPECS": "1"}
     paths = _changed_paths(state, env)
     if paths:
         # Literal: these are file names from git status, and one such as
         # ":notes.md" must not be read as pathspec magic.
         _git(state.root, "add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul",
-             env={**(env or {}), "GIT_LITERAL_PATHSPECS": "1"}, input="\0".join(paths))
+             env=literal, input="\0".join(paths))
+    tracked = _tracked_never_synced(state.root, env)
+    if tracked:
+        # --force only skips git's staged-content check; --cached never
+        # touches the file.
+        _git(state.root, "rm", "--cached", "--force", "--quiet", "--pathspec-from-file=-",
+             "--pathspec-file-nul", env=literal, input="\0".join(tracked))
 
 
 def _staged(state: RepoState, env: dict | None = None) -> list[tuple[str, str]]:
@@ -413,6 +434,7 @@ def _trial(state: RepoState, changes, message: str) -> tuple[list[dict], list[st
         if not new:
             continue
         merges.append({"ref": ref, "commits": new})
+        ref = _without_never_synced(state, ref)
         if tip is None or _is_ancestor(state.root, tip, ref):
             tip = _out(state.root, "rev-parse", ref)
             continue
@@ -439,6 +461,27 @@ def _trial(state: RepoState, changes, message: str) -> tuple[list[dict], list[st
             merges[-1]["resolved"] = sorted(resolved)
         tip = _commit_tree(state, tree, [tip, ref], f"trial merge {ref}")
     return merges, []
+
+
+def _without_never_synced(state: RepoState, ref: str) -> str:
+    """``ref`` itself, or a child commit of it that stops tracking the
+    never-synced paths it still tracks (an older swe committed them).
+
+    Merging that child leaves those paths out of both HEAD and the merge
+    result, so git never writes the working files there: another clone's
+    copy never lands on this machine's store, a live SQLite file is never
+    swapped under the app, and an incoming symlink can't redirect one."""
+    sha = _out(state.root, "rev-parse", f"{ref}^{{commit}}")
+    raw = _git(state.root, "ls-tree", "-r", "-z", "--name-only", sha, "--",
+               *never_synced()).stdout
+    paths = [p for p in raw.split("\0") if p]
+    if not paths:
+        return ref
+    tree = _with_files(state, f"{sha}^{{tree}}", dict.fromkeys(paths))
+    return _commit_tree(state, tree, [sha],
+                        f"Stop tracking paths that never sync, from {ref}\n\n"
+                        f"swe sync from {state.machine}: " + ", ".join(sorted(paths)[:5])
+                        + (" ..." if len(paths) > 5 else ""))
 
 
 def _parse_stages(raw: str) -> dict[str, dict[int, tuple[str, str]]]:
@@ -486,14 +529,17 @@ def _resolve(root: Path, stages: dict) -> dict[str, str] | None:
     return {REGISTRY_PATH: registry_text(merged)}
 
 
-def _with_files(state: RepoState, tree: str, files: dict[str, str]) -> str:
-    """``tree`` with ``files`` (path -> text) written into it, through a
-    throwaway index."""
+def _with_files(state: RepoState, tree: str, files: dict[str, str | None]) -> str:
+    """``tree`` with ``files`` (path -> text, None to drop it) written into
+    it, through a throwaway index."""
     scratch = tempfile.mkdtemp(prefix="swe-sync-")
     env = {"GIT_INDEX_FILE": str(Path(scratch) / "index")}
     try:
         _git(state.root, "read-tree", tree, env=env)
         for path, text in files.items():
+            if text is None:
+                _git(state.root, "update-index", "--force-remove", "--", path, env=env)
+                continue
             blob = _out(state.root, "hash-object", "-w", "--stdin", input=text)
             _git(state.root, "update-index", "--add", "--cacheinfo",
                  f"100644,{blob},{path}", env=env)
@@ -508,10 +554,12 @@ def _merge(state: RepoState, merge: dict, message: str) -> None:
     and commit the merge. Anything else left unmerged raises, and the
     caller rolls the sync back."""
     ref = merge["ref"]
+    target = _without_never_synced(state, ref)
     if not merge.get("resolved"):
-        _git(state.root, "merge", "--quiet", "--no-edit", "-m", message, ref)
+        _git(state.root, "merge", "--quiet", "--no-edit", "-m", message, target)
         return
-    done = _git(state.root, "merge", "--quiet", "--no-edit", "-m", message, ref, check=False)
+    done = _git(state.root, "merge", "--quiet", "--no-edit", "-m", message, target,
+                check=False)
     if done.returncode == 0:
         return
     stages = _parse_stages(_git(state.root, "ls-files", "-u", "-z").stdout)
@@ -629,7 +677,8 @@ def _sync_locked(home: Path, dry_run: bool, relink) -> dict:
     try:
         if changes:
             _stage(state)
-            leaked = [p for _, p in _staged(state) if _is_never_synced(p)]
+            # A deletion is _stage untracking one; anything else is a leak.
+            leaked = [p for s, p in _staged(state) if s != "D" and _is_never_synced(p)]
             if leaked:
                 raise SyncError("refusing to commit paths that never sync: "
                                 + ", ".join(leaked))

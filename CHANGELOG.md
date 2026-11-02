@@ -1357,6 +1357,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`swe sync` no longer commits the app's stores or Codex's own
+  skills.** While SWE.app runs it writes `~/.swe/data/catalog/catalog.sqlite`
+  (and its WAL), `data/issues.json.lock` and other files under `data/`
+  that the hub's `.gitignore` did not list, so a sync committed them. Codex
+  0.166 writes its bundled skills to `~/.codex/skills/.system`, which is
+  `~/.swe/skills/.system` once linked, so a sync committed about 50 files,
+  and `swe skills` and the Mac Skills page listed them as shared skills.
+  The `.gitignore` `swe init` writes now ignores the hub's own `/data/`
+  (every file there is this machine's own; a skill's or plugin's `data/`
+  folder still syncs) and `skills/.system/`. `swe sync` holds both back
+  on a hub whose `.gitignore` is older, and `swe setup --hub` adds them
+  to the clone's `.git/info/exclude`. A store the hub already committed
+  is untracked by the next sync, its file left in place, and a merge
+  never overwrites this machine's copy with another clone's. `swe skills` skips
+  a `.system` folder at the top of a skills root; other dot folders are
+  still listed. `data/web-status-services.json` no longer travels between
+  machines. Found while rehearsing `docs/demo.md` segment 10
+  ([#524](https://github.com/c-wenlong/swe/issues/524)).
+
 - **`swe init` points at the chapters when the hub has them.** Its
   summary always said to edit `~/.swe/AGENTS.md` to change every
   harness's instructions, but with `AGENTS_MD/index.txt` that file is

@@ -248,7 +248,7 @@ class CloneAroundLocalStateTest(unittest.TestCase):
         self.assertTrue((staging[0] / "hub" / "AGENTS.md").is_file())
 
     def test_this_machines_state_stays_out_of_an_older_hubs_git(self):
-        # A hub whose .gitignore predates data/web-ledger/.
+        # A hub whose .gitignore predates data/.
         (self.src / ".gitignore").write_text("cache/\n")
         _git("add", "-A", cwd=self.src)
         _git("commit", "-q", "-m", "ignore", cwd=self.src)
@@ -257,7 +257,7 @@ class CloneAroundLocalStateTest(unittest.TestCase):
         clone_hub(self.home, str(self.src))
         self.assertEqual((self.hub_dir / ".gitignore").read_text(), "cache/\n")
         exclude = (self.hub_dir / ".git" / "info" / "exclude").read_text()
-        self.assertIn("data/web-ledger/\n", exclude)
+        self.assertIn("/data/\n", exclude)
         self.assertNotIn("\ncache/\n", exclude)  # the hub already ignores it
         status = subprocess.run(["git", "-C", str(self.hub_dir), "status", "--porcelain"],
                                 capture_output=True, text=True).stdout
