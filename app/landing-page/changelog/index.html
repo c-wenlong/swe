@@ -1268,6 +1268,14 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>Devin status checks stop forking <code>ps</code> for stale locks.</strong> The hub's
+status pass asked <code>ps</code> about every pid named by a single Devin
+session lock, and most of those pids are long dead: 131 forks and
+about 0.4 s of CPU every 10 s on a machine with 318 locks. It now
+skips dead pids with a signal-0 check, and reads the lock directory
+only when a mid-turn Devin row has a quiet transcript. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1525">#1525</a>.</p>
+</li>
 <li><p><strong>The Mac app is SWE.app now</strong> (SWE Wraps Everything — the product
 takes the <code>swe</code> command's name and Quiver is decommissioned). The
 bundle is <code>SWE.app</code> with bundle id <code>com.cwenlong.swe</code>, its Swift

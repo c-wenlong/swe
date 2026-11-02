@@ -1143,6 +1143,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Devin status checks stop forking `ps` for stale locks.** The hub's
+  status pass asked `ps` about every pid named by a single Devin
+  session lock, and most of those pids are long dead: 131 forks and
+  about 0.4 s of CPU every 10 s on a machine with 318 locks. It now
+  skips dead pids with a signal-0 check, and reads the lock directory
+  only when a mid-turn Devin row has a quiet transcript. Closes
+  [#1525](https://github.com/c-wenlong/swe/issues/1525).
 - **The Mac app is SWE.app now** (SWE Wraps Everything — the product
   takes the `swe` command's name and Quiver is decommissioned). The
   bundle is `SWE.app` with bundle id `com.cwenlong.swe`, its Swift
