@@ -205,27 +205,36 @@ struct ModelSelection: Equatable {
     /// Set by a pick from the menu; an untouched menu follows the
     /// harness's newest model.
     private(set) var touched = false
+    /// The recent model the user last picked from the menu. A switch to
+    /// a harness that doesn't list it hides it but keeps it, so the next
+    /// harness that lists it gets it back; picking anything else drops
+    /// it. The Mac app's `ModelPick.remembered` (#951) is the same rule.
+    private(set) var remembered: String?
 
     mutating func choose(_ choice: ModelChoice) {
         self.choice = choice
         touched = true
+        if case .recent(let model) = choice { remembered = model } else { remembered = nil }
     }
 
-    /// Run on every harness, machine or provider change. `bare` makes the
-    /// untouched default Harness default even when the harness has recent
-    /// models: a launch on a picked provider (#526), whose recent models
-    /// ran on other providers. The menu still lists them.
+    /// Run on every harness, machine or provider change. A picked
+    /// Harness default or Other stays. A remembered recent model shows
+    /// wherever the new harness lists it; elsewhere the menu shows that
+    /// harness's default, as if untouched, and keeps the model for a
+    /// later switch that lists it. The choice is always one the menu
+    /// offers, so another harness's model is never sent. `bare` makes
+    /// the untouched default Harness default even when the harness has
+    /// recent models: a launch on a picked provider (#526), whose recent
+    /// models ran on other providers. The menu still lists them.
     mutating func follow(_ harness: String?, on machine: Machine, bare: Bool = false) {
-        // A pick survives a switch (Harness default and Other always, a recent model only while the new harness lists it); anything else re-defaults.
-        if touched {
-            switch choice {
-            case .harnessDefault, .other: return
-            case .recent(let model):
-                if NewSessionOptions.recentModels(harness, on: machine).contains(model) { return }
-            }
+        if touched, choice == .harnessDefault || choice == .other { return }
+        if let remembered, NewSessionOptions.recentModels(harness, on: machine).contains(remembered) {
+            choice = .recent(remembered)
+            touched = true
+        } else {
+            choice = bare ? .harnessDefault : NewSessionOptions.defaultModelChoice(harness, on: machine)
+            touched = false
         }
-        choice = bare ? .harnessDefault : NewSessionOptions.defaultModelChoice(harness, on: machine)
-        touched = false
     }
 
     /// The menu's entries for the sheet. A machine-row refresh can push

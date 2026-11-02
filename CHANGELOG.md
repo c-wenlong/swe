@@ -1364,6 +1364,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gets sent, and a recent model is sent trimmed. The same rule as the
   Mac app's fix in [#951](https://github.com/c-wenlong/quiver/pull/951).
 
+- **The iPhone app's Model menu keeps your pick across a harness round
+  trip.** On the New session, Resolve issue, pull request and task
+  session sheets, picking `sonnet` on Claude, switching to Kilo (or any
+  harness that doesn't list it) and back used to land on Claude's
+  newest model instead. The menu now remembers a picked recent model
+  until you pick something else, the rule the Mac app got in
+  [#951](https://github.com/c-wenlong/swe/pull/951). A harness or
+  machine that lists it shows it; one that doesn't shows and sends its
+  own default, and the next one that lists it gets it back. What the
+  menu shows is still what gets sent.
+
 - **Hub marketplaces skip archived harnesses.** `swe setup --hub`,
   `swe init --hub` and `swe sync` registered the hub's plugin
   marketplaces in every installed harness, including ones the registry

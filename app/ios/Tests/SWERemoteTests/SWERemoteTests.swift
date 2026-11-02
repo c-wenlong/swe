@@ -1332,15 +1332,135 @@ final class NewSessionOptionsTests: XCTestCase {
         sel.follow("codex", on: m)
         XCTAssertEqual(sel.choice, .recent("sonnet"))
         XCTAssertEqual(sel.model(for: "codex", on: m), "sonnet")
-        // Codex never ran haiku: re-default instead of sending it.
+        // Codex never ran haiku: show Codex's default instead of sending it.
         sel.follow("claude", on: m)
         sel.choose(.recent("haiku"))
         sel.follow("codex", on: m)
         XCTAssertEqual(sel.choice, .recent("gpt-5"))
         XCTAssertFalse(sel.touched)
-        // Re-defaulted means untouched again: the next switch follows.
+        XCTAssertEqual(sel.model(for: "codex", on: m), "gpt-5")
+        // Codex's shown default follows like an untouched menu: on to Pi,
+        // which has no recent models, it becomes Harness default.
+        sel.follow("pi", on: m)
+        XCTAssertEqual(sel.choice, .harnessDefault)
+        XCTAssertNil(sel.model(for: "pi", on: m))
+    }
+
+    /// The repro: pick sonnet on Claude, switch to a harness that lacks
+    /// it, switch back, and the menu shows sonnet again, not opus. The
+    /// middle harness shows and sends its own default, never sonnet.
+    func testAPickedModelComesBackAfterAHarnessThatLacksIt() {
+        var m = modelMachine()
+        m.recentModels?["codex"] = ["gpt-5", "o3"]
+        var sel = ModelSelection()
+        sel.follow("claude", on: m)
+        sel.choose(.recent("sonnet"))
+
+        sel.follow("codex", on: m)
+        XCTAssertEqual(sel.choice, .recent("gpt-5"))
+        XCTAssertFalse(sel.touched)
+        XCTAssertEqual(sel.model(for: "codex", on: m), "gpt-5")
+        XCTAssertEqual(sel.remembered, "sonnet")
+
+        // A second harness in a row that lacks it keeps the memory too.
+        sel.follow("pi", on: m)
+        XCTAssertEqual(sel.choice, .harnessDefault)
+        XCTAssertNil(sel.model(for: "pi", on: m))
+
+        sel.follow("claude", on: m)
+        XCTAssertEqual(sel.choice, .recent("sonnet"))
+        XCTAssertTrue(sel.touched)
+        XCTAssertEqual(sel.model(for: "claude", on: m), "sonnet")
+    }
+
+    /// A harness that can't take a model at launch (Kilo, here Gemini)
+    /// sends none, whatever its list, and the pick comes back after it.
+    func testAPickedModelComesBackAfterAnUnsupportedHarness() {
+        var m = modelMachine()
+        m.recentModels?["gemini"] = ["gemini-3-pro"]
+        var sel = ModelSelection()
+        sel.follow("claude", on: m)
+        sel.choose(.recent("sonnet"))
+
+        sel.follow("gemini", on: m)
+        XCTAssertEqual(sel.choice, .recent("gemini-3-pro"))
+        XCTAssertNil(sel.model(for: "gemini", on: m))
+
+        sel.follow("claude", on: m)
+        XCTAssertEqual(sel.choice, .recent("sonnet"))
+        XCTAssertEqual(sel.model(for: "claude", on: m), "sonnet")
+    }
+
+    /// A machine switch follows the same rule as a harness switch.
+    func testAPickedModelComesBackAfterAMachineThatLacksIt() {
+        let mac = modelMachine()
+        var server = machine("m2", name: "server", launchable: ["claude"])
+        server.modelAtLaunch = ["claude"]
+        server.recentModels = ["claude": ["opus"]]
+        var sel = ModelSelection()
+        sel.follow("claude", on: mac)
+        sel.choose(.recent("haiku"))
+
+        sel.follow("claude", on: server)
+        XCTAssertEqual(sel.choice, .recent("opus"))
+        XCTAssertEqual(sel.model(for: "claude", on: server), "opus")
+
+        sel.follow("claude", on: mac)
+        XCTAssertEqual(sel.choice, .recent("haiku"))
+        XCTAssertEqual(sel.model(for: "claude", on: mac), "haiku")
+    }
+
+    /// Picking anything else from the menu replaces the remembered model.
+    func testPickingAgainForgetsTheRememberedModel() {
+        let m = modelMachine()
+
+        // Another recent model, here Codex's shown default picked by hand.
+        var sel = ModelSelection()
+        sel.follow("claude", on: m)
+        sel.choose(.recent("haiku"))
+        sel.follow("codex", on: m)
+        sel.choose(.recent("gpt-5"))
+        XCTAssertEqual(sel.remembered, "gpt-5")
         sel.follow("claude", on: m)
         XCTAssertEqual(sel.choice, .recent("opus"))
+        XCTAssertFalse(sel.touched)
+
+        // Harness default, which then stays put.
+        sel = ModelSelection()
+        sel.follow("claude", on: m)
+        sel.choose(.recent("haiku"))
+        sel.choose(.harnessDefault)
+        XCTAssertNil(sel.remembered)
+        sel.follow("codex", on: m)
+        sel.follow("claude", on: m)
+        XCTAssertEqual(sel.choice, .harnessDefault)
+
+        // Other, which stays put the same way, blank text included.
+        sel = ModelSelection()
+        sel.follow("claude", on: m)
+        sel.choose(.recent("haiku"))
+        sel.choose(.other)
+        XCTAssertNil(sel.remembered)
+        sel.follow("codex", on: m)
+        sel.follow("claude", on: m)
+        XCTAssertEqual(sel.choice, .other)
+        XCTAssertEqual(sel.otherText, "")
+        XCTAssertNil(sel.model(for: "claude", on: m))
+    }
+
+    /// A remembered model comes back on a picked provider too: `bare`
+    /// only changes what an untouched menu shows.
+    func testARememberedModelComesBackOnAPickedProvider() {
+        var m = modelMachine()
+        m.recentModels?["codex"] = ["gpt-5"]
+        var sel = ModelSelection()
+        sel.follow("claude", on: m)
+        sel.choose(.recent("sonnet"))
+        sel.follow("codex", on: m, bare: true)
+        XCTAssertEqual(sel.choice, .harnessDefault)
+        XCTAssertNil(sel.model(for: "codex", on: m))
+        sel.follow("claude", on: m, bare: true)
+        XCTAssertEqual(sel.model(for: "claude", on: m), "sonnet")
     }
 
     func testARefreshKeepsTheSelectedModelInTheMenu() {
