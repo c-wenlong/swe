@@ -136,6 +136,41 @@ import Testing
         #expect(ChatMarkdown.blocks("```\nhalf") == [.code("half", nil)])
     }
 
+    @Test func fenceClosesOnMarkerOnlyLine() {
+        // A fence-open line inside a block — the agent quoting a command
+        // back — is content, not a close: "```swift build" stays inside.
+        let blocks = ChatMarkdown.blocks("```text\n```swift build\n```\ndone")
+        #expect(blocks == [.code("```swift build", "text"), .paragraph("done")])
+    }
+
+    @Test func tableStopsAtALineThatOpensABlock() {
+        // `> Warning: a | b` right after a table is a quote, not a row.
+        let blocks = ChatMarkdown.blocks("| a | b |\n|---|---|\n| 1 | 2 |\n> Warning: a | b")
+        #expect(blocks == [
+            .table(MarkdownTable(header: ["a", "b"], align: [.leading, .leading], rows: [["1", "2"]])),
+            .quote([.paragraph("Warning: a | b")]),
+        ])
+        // A fence whose info string contains `|` opens a code block.
+        let fenced = ChatMarkdown.blocks("| a |\n|---|\n| 1 |\n```a|b\nx\n```")
+        #expect(fenced == [
+            .table(MarkdownTable(header: ["a"], align: [.leading], rows: [["1"]])),
+            .code("x", "a|b"),
+        ])
+    }
+
+    @Test func setextHeadingsKeepTheirFormat() {
+        // `Title` + `===` is h1 and `Title` + `---` is h2 — the forms the
+        // body's parser already drew before the chat switched parsers.
+        #expect(ChatMarkdown.blocks("Title\n===") == [.heading(1, "Title")])
+        #expect(ChatMarkdown.blocks("Title\n---") == [.heading(2, "Title")])
+        // No paragraph above: `===` is text, `---` still a rule.
+        #expect(ChatMarkdown.blocks("- item\n===") == [
+            .list([MarkdownListItem(depth: 0, kind: .bullet, text: "item")]),
+            .paragraph("==="),
+        ])
+        #expect(ChatMarkdown.blocks("---") == [.rule])
+    }
+
     @Test func raggedRowsPadToTheWidestRow() {
         guard case .table(let t)? = ChatMarkdown.blocks("| a |\n|---|\n| 1 | 2 | 3 |").first else {
             Issue.record("expected a table"); return
