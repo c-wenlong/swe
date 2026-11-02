@@ -29,6 +29,15 @@ struct HubSyncSection: View {
         }
         // Every visit reads the repo again: a commit made in a terminal counts.
         .task(id: app.swePath) { await load(fetch: false) }
+        // So does one made while the card is on screen, as `swe sync` in a
+        // terminal does. Changes during a read wait for it and read once
+        // more; the Sync button's own run rereads when it ends.
+        .task {
+            let swe = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".swe")
+            for await _ in FolderChanges.stream(root: swe, matches: HubSyncStatus.affects) where !syncing {
+                await load(fetch: false)
+            }
+        }
     }
 
     private func card(_ status: HubSyncStatus) -> some View {

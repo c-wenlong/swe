@@ -1396,6 +1396,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Mac app's AGENTS.md strip and Hub sync card keep up with the
+  terminal.** After `swe instructions build` in a terminal, the AGENTS.md
+  page's Generated strip kept saying Stale until the page was opened
+  again, the app was brought to the front or ⌘R was pressed; after
+  `swe sync`, Settings › Files kept listing the files it had just
+  committed. Both now watch `~/.swe` while they are on screen (the
+  chapters and the generated file; tracked files and git's refs) and read
+  again when it changes, as `docs/demo.md` segments 7 and 10 show.
 - **The MCP servers page sends you to Settings › Files.** With the
   servers folder missing, it said to set the folder in Settings › Paths,
   a section the Mac app no longer has; the setting is under Files. The

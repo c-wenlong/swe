@@ -36,6 +36,15 @@ struct AgentsMdPage: View {
             async let chaptered: () = app.chapters.load(swe: app.swe)
             _ = await (links, chaptered)
         }
+        // A build or chapter edit made in a terminal, while the page is on
+        // screen: the Generated strip and the preview follow it.
+        .task {
+            let swe = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".swe")
+            for await _ in FolderChanges.stream(root: swe, matches: ChaptersModel.affectsCheck) {
+                await app.chapters.load(swe: app.swe)
+                await app.chapters.checkDisk()
+            }
+        }
         // Agents rewrite these files while they work; pick that up on
         // return. The chapter report refreshes too: an `instructions init`
         // run elsewhere swaps which editor this page should be showing.
