@@ -62,7 +62,9 @@ Task { @MainActor in
         recordingConfig.videoCodecType = .h264
         try stream.addRecordingOutput(SCRecordingOutput(configuration: recordingConfig, delegate: finish))
         try await stream.startCapture()
-        print("recording \(display.width)x\(display.height)")
+        // The start time, so a driver can time events from the first frame.
+        print(String(format: "recording %dx%d %.2f", display.width, display.height,
+                     Date().timeIntervalSince1970))
         fflush(stdout)
         while !FileManager.default.fileExists(atPath: stopFile) {
             try await Task.sleep(nanoseconds: 100_000_000)

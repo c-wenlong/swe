@@ -228,7 +228,7 @@ wait_for_status() {
 # utmctl start exits 0 even when UTM never started the VM: after a VM
 # stops, UTM 5.0.8 sometimes times out every later start (Apple Event
 # -1712) until it is relaunched. So check, and relaunch UTM once (only
-# while no VM of ours runs) before giving up. A first boot reads the
+# while no VM runs in it) before giving up. A first boot reads the
 # password on stdin, so each attempt opens $start_stdin afresh.
 start_vm() {
     for attempt in 1 2; do
@@ -238,6 +238,11 @@ start_vm() {
             sleep 2
         done
         [ "$attempt" = 1 ] && [ "$(vm_status)" = stopped ] || break
+        # Quitting UTM would stop every VM in it; only do it when none runs.
+        if utmctl list 2>/dev/null | awk -v vm="$VM" 'NR > 1 && $2 != "stopped" && $3 != vm' | grep -q .; then
+            die "UTM did not start $VM, and another VM is running in UTM, so it was not
+relaunched. Quit and reopen UTM yourself when that VM can stop, then run this again."
+        fi
         say "UTM did not start $VM; relaunching UTM and trying again ..."
         osascript -e 'tell application "UTM" to quit' >/dev/null 2>&1 || true
         for _ in $(seq 1 15); do pgrep -x UTM >/dev/null || break; sleep 1; done
@@ -460,22 +465,24 @@ EOF
 
 # Runs the script on stdin in Terminal in the guest's logged-in session, the
 # only place Terminal's Screen Recording and Accessibility apply (an SSH
-# session has no display), and waits up to $1 seconds for it. Its window
-# closes once it is done.
+# session has no display), and waits up to $1 seconds for it. Each job has
+# files and a window name of its own; its window closes once it is done, and
+# one that runs out of time is stopped.
 guest_terminal() {
-    guest 'cat > /tmp/swe-demo-job.sh'
-    guest 'cat > /tmp/swe-demo-job.command' <<'EOF'
+    job="swe-demo-job-$$-$RANDOM"
+    guest "cat > /tmp/$job.sh"
+    guest "cat > /tmp/$job.command; chmod +x /tmp/$job.command" <<EOF
 #!/bin/bash
-bash /tmp/swe-demo-job.sh > /tmp/swe-demo-job.log 2>&1
-echo $? > /tmp/swe-demo-job.done
-nohup sh -c 'sleep 1; osascript -e "tell application \"Terminal\" to close (every window whose name contains \"swe-demo-job\")"' >/dev/null 2>&1 &
+bash /tmp/$job.sh > /tmp/$job.log 2>&1
+echo \$? > /tmp/$job.done
+nohup sh -c 'sleep 1; osascript -e "tell application \\"Terminal\\" to close (every window whose name contains \\"$job\\")"' >/dev/null 2>&1 &
 EOF
-    guest "chmod +x /tmp/swe-demo-job.command; rm -f /tmp/swe-demo-job.done
-        open -a Terminal /tmp/swe-demo-job.command
+    guest "open -a Terminal /tmp/$job.command
         for _ in \$(seq 1 $1); do
-            test -f /tmp/swe-demo-job.done && exit \"\$(cat /tmp/swe-demo-job.done)\"
+            test -f /tmp/$job.done && exit \"\$(cat /tmp/$job.done)\"
             sleep 1
         done
+        pkill -f '/tmp/$job' 2>/dev/null
         exit 124"
 }
 

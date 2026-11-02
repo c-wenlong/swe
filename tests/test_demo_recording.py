@@ -43,14 +43,31 @@ class DriverTest(unittest.TestCase):
         lines = self.driver.step_lines(self.doc)
         runs = [shlex.split(line[len("run "):])[0] for line in lines if line.startswith("run ")]
         self.assertEqual(runs, expected)
+        plan, end = self.driver.schedule(self.doc)
         segments = [line for line in lines if line.startswith("segment ")]
-        self.assertEqual(segments, [f"segment {n} {self.driver.PLAN[n]}" for n in range(1, 11)])
-        self.assertEqual(lines[-1], f"finish {self.driver.END}")
+        self.assertEqual(segments, [f"segment {n} {plan[n]}" for n in range(1, 11)])
+        self.assertEqual(lines[-1], f"finish {end}")
+
+    def test_the_schedule_is_the_doc_table(self):
+        plan, end = self.driver.schedule(self.doc)
+        self.assertEqual(sorted(plan), list(range(1, 11)))
+        self.assertEqual(plan[1], 0)
+        self.assertEqual(plan, dict(sorted(plan.items(), key=lambda item: item[1])))
+        self.assertGreater(end, plan[10])
+        # Moving a segment in the table moves it in the take.
+        row = next(line for line in self.doc.splitlines() if line.startswith("| 10 | "))
+        cells = row.split(" | ")
+        moved = self.doc.replace(row, " | ".join(cells[:2] + ["4:20"] + cells[3:]))
+        self.assertIn("segment 10 260", self.driver.step_lines(moved))
 
     def test_script_parses_and_sets_up_the_stage_first(self):
         script = self.driver.render(self.doc)
         self.assertIn('eval "$(scripts/demo_home.sh 2>/dev/null --root=/tmp/swe-demo --home="$HOME")"', script)
         self.assertLess(script.index("demo_home.sh"), script.index("segment 1 0"))
+        # Marks count from the recorder's own start, the movie's first frame,
+        # and a recorder that fails ends the take as failed, not done.
+        self.assertIn("T0=\"$(sed -n 's/^recording [0-9]*x[0-9]* //p' \"$OUT/screenrec.log\")\"", script)
+        self.assertIn('wait "$REC" || { echo failed > "$OUT/done"; exit 1; }', script)
         if BASH:
             out = temp_dir(self) / "take.sh"
             out.write_text(script)

@@ -9,7 +9,8 @@ starts the recorder, then for each segment of the doc types every bash block
 after a `$` prompt, runs it, and clicks SWE.app to the page the segment talks
 about. A segment never starts before its time in the doc's table; one that
 runs long pushes the next one back. Every segment start, command and page
-switch goes to marks.tsv, which voiceover.py times the narration from.
+switch goes to marks.tsv, in seconds from the movie's first frame, which
+voiceover.py times the narration from.
 
 The commands are the doc's own, so a change to a block changes the take. The
 page clicks below are not: they are screen positions in SWE.app at the
@@ -22,9 +23,6 @@ import shlex
 import sys
 from pathlib import Path
 
-# Each segment's start in the doc's table, in seconds, and the take's end.
-PLAN = {1: 0, 2: 40, 3: 65, 4: 85, 5: 115, 6: 145, 7: 160, 8: 195, 9: 220, 10: 250}
-END = 300
 
 # SWE.app's sidebar rows (x 80) with its window at {0, 33}, 1280 by 1047.
 SIDEBAR = {"overview": 159, "plugins": 607, "skills": 641, "agents": 675, "mcp": 709,
@@ -63,6 +61,28 @@ STEPS = {
 }
 
 
+def _seconds(clock):
+    minutes, seconds = clock.split(":")
+    return int(minutes) * 60 + int(seconds)
+
+
+def schedule(doc):
+    """({segment: start}, end) in seconds, from the doc's Segments table."""
+    section = doc.split("## Segments", 1)[1]
+    starts, end = {}, None
+    for row in section.splitlines():
+        cells = [cell.strip() for cell in row.strip().strip("|").split("|")]
+        if len(cells) == 4 and cells[0].isdigit() and ":" in cells[2]:
+            starts[int(cells[0])] = _seconds(cells[2])
+        elif len(cells) == 4 and cells[1] == "Total":
+            end = _seconds(cells[3])
+        elif starts and not row.startswith("|"):
+            break
+    if not starts or end is None:
+        raise SystemExit("driver: no Segments table with a Total row in docs/demo.md")
+    return starts, end
+
+
 def setup_block(doc):
     """The first bash block under "Before you record"."""
     section = doc.split("## Before you record", 1)[1].split("\n## ", 1)[0]
@@ -80,7 +100,8 @@ def segment_blocks(doc):
 def step_lines(doc):
     """The take as lines of the script's own small commands."""
     blocks = segment_blocks(doc)
-    if sorted(blocks) != sorted(STEPS):
+    plan, end = schedule(doc)
+    if sorted(blocks) != sorted(STEPS) or sorted(plan) != sorted(STEPS):
         raise SystemExit(f"driver: docs/demo.md has segments {sorted(blocks)}, the driver knows {sorted(STEPS)}")
     lines = []
     for number, steps in STEPS.items():
@@ -88,7 +109,7 @@ def step_lines(doc):
         if used != set(range(len(blocks[number]))):
             raise SystemExit(f"driver: segment {number} has {len(blocks[number])} bash blocks; "
                              f"the driver runs {sorted(used)}. Update STEPS.")
-        lines.append(f"segment {number} {PLAN[number]}")
+        lines.append(f"segment {number} {plan[number]}")
         for kind, arg in steps:
             if kind == "run":
                 lines.append("run " + shlex.quote(blocks[number][arg]))
@@ -98,7 +119,7 @@ def step_lines(doc):
                 lines.append(f"click {arg[0]} {arg[1]}")
             else:
                 lines.append(f"pause {arg}")
-    lines.append(f"finish {END}")
+    lines.append(f"finish {end}")
     return lines
 
 
@@ -154,10 +175,12 @@ segment() {
   sleep "$(python3 -c "print(max(0, $T0 + $2 - $(now)))")"
   mark "segment $1"
 }
+# A movie the recorder did not finish is no take: say so instead of done.
 finish() {
   sleep "$(python3 -c "print(max(3, $T0 + $1 - $(now)))")"
   mark "end"
-  touch "$OUT/stop"; wait "$REC"
+  touch "$OUT/stop"
+  wait "$REC" || { echo failed > "$OUT/done"; exit 1; }
 }
 
 clear
@@ -167,8 +190,10 @@ until grep -q recording "$OUT/screenrec.log" 2>/dev/null; do
   kill -0 "$REC" 2>/dev/null || { echo failed > "$OUT/done"; exit 1; }
   sleep 0.2
 done
+# Marks count from when the recorder started, which it prints: the
+# movie's first frame. The first segment starts a moment later.
+T0="$(sed -n 's/^recording [0-9]*x[0-9]* //p' "$OUT/screenrec.log")"
 sleep 1.5
-T0="$(now)"
 '''
 
 
