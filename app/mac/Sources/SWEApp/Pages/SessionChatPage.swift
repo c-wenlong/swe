@@ -300,7 +300,7 @@ private struct ChatEntry: View {
             HStack {
                 Spacer(minLength: 120)
                 VStack(alignment: .trailing, spacing: 4) {
-                    MarkdownBlocks(blocks: GitHubMarkdown.blocks(text))
+                    MarkdownBlocks(blocks: ChatMarkdown.blocks(text), inline: ChatMarkdown.inline)
                         .font(Theme.bodySmall)
                         .foregroundStyle(Theme.textPrimary)
                         .padding(.horizontal, 14).padding(.vertical, 10)
@@ -316,13 +316,13 @@ private struct ChatEntry: View {
                 }
             }
         case .assistant(let text):
-            MarkdownBlocks(blocks: GitHubMarkdown.blocks(text))
+            MarkdownBlocks(blocks: ChatMarkdown.blocks(text), inline: ChatMarkdown.inline)
                 .font(Theme.bodySmall)
                 .foregroundStyle(Theme.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .thinking(let text, let seconds):
             Fold(title: Label(ThoughtLabel.text(seconds), systemImage: "brain").foregroundStyle(Theme.textSecondary)) {
-                MarkdownBlocks(blocks: GitHubMarkdown.blocks(text))
+                MarkdownBlocks(blocks: ChatMarkdown.blocks(text), inline: ChatMarkdown.inline)
                     .font(Theme.bodySmall)
                     .foregroundStyle(Theme.textSecondary)
             }
@@ -342,7 +342,7 @@ private struct ChatEntry: View {
             VStack(alignment: .leading, spacing: 4) {
                 Label("Error", systemImage: "exclamationmark.triangle")
                     .font(Theme.caption).foregroundStyle(Theme.dangerText)
-                MarkdownBlocks(blocks: GitHubMarkdown.blocks(text))
+                MarkdownBlocks(blocks: ChatMarkdown.blocks(text), inline: ChatMarkdown.inline)
                     .font(Theme.bodySmall).foregroundStyle(Theme.textPrimary)
             }
         }
