@@ -805,11 +805,14 @@ return div.innerHTML;
         fence whose info string has a `|` opens a code block."""
         out = self.run_js(
             "return [T.mdBlocks('| a | b |\\n|---|---|\\n| 1 | 2 |\\n> Warning: a | b'),"
-            " T.mdBlocks('| a |\\n|---|\\n| 1 |\\n```a|b\\nx\\n```')];")
+            " T.mdBlocks('| a |\\n|---|\\n| 1 |\\n```a|b\\nx\\n```'),"
+            " T.mdBlocks('| a |\\n|---|\\n| 1 |\\n- Run a | b')];")
         self.assertEqual(len(out[0]), 2)
         self.assertEqual(out[0][0]["rows"], [["1", "2"]])
         self.assertEqual(out[0][1], {"t": "quote", "text": "Warning: a | b"})
         self.assertEqual(out[1][1], {"t": "code", "lang": "a|b", "code": "x"})
+        # `- Run a | b` after a table is a list item, not a row.
+        self.assertEqual(out[2][1], {"t": "li", "indent": 0, "marker": "•", "text": "Run a | b"})
 
     def test_agent_coded_text_folds_to_notes(self):
         """<json-render> views and lone images become note chips; inline

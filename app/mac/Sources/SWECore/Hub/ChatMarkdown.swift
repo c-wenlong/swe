@@ -250,6 +250,7 @@ public enum ChatMarkdown {
         let t = lines[i].trimmingCharacters(in: .whitespaces)
         if t.hasPrefix("```") || t.hasPrefix("~~~") || t.hasPrefix(">") || heading(t) != nil { return true }
         if t.hasPrefix("<json-render>") || imageLine(t) != nil { return true }
+        if listItem(lines[i]) != nil { return true }
         if orTable, t.contains("|"), i + 1 < lines.count, separatorAlignments(lines[i + 1]) != nil { return true }
         return false
     }

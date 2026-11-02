@@ -156,6 +156,11 @@ import Testing
             .table(MarkdownTable(header: ["a"], align: [.leading], rows: [["1"]])),
             .code("x", "a|b"),
         ])
+        // `- Run a | b` after a table is a list item, not a row.
+        #expect(ChatMarkdown.blocks("| a |\n|---|\n| 1 |\n- Run a | b") == [
+            .table(MarkdownTable(header: ["a"], align: [.leading], rows: [["1"]])),
+            .list([MarkdownListItem(depth: 0, kind: .bullet, text: "Run a | b")]),
+        ])
     }
 
     @Test func setextHeadingsKeepTheirFormat() {

@@ -351,6 +351,7 @@ const SessionChat = (() => {
     const t = lines[i].trim();
     if (t.startsWith("```") || t.startsWith("~~~") || t.startsWith(">") || heading(t)) return true;
     if (t.startsWith("<json-render>") || imageLine(t)) return true;
+    if (listItem(lines[i])) return true;
     return orTable && t.includes("|") && i + 1 < lines.length && !!separatorAlignments(lines[i + 1]);
   }
 

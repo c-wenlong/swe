@@ -297,6 +297,10 @@ final class MarkdownTests: XCTestCase {
         blocks = Markdown.parse("| a |\n|---|\n| 1 |\n```a|b\nx\n```")
         XCTAssertEqual(blocks, [.table(Markdown.Table(header: ["a"], align: [.leading], rows: [["1"]])),
                                 .code(language: "a|b", text: "x")])
+        // `- Run a | b` after a table is a list item, not a row.
+        blocks = Markdown.parse("| a |\n|---|\n| 1 |\n- Run a | b")
+        XCTAssertEqual(blocks, [.table(Markdown.Table(header: ["a"], align: [.leading], rows: [["1"]])),
+                                .listItem(indent: 0, marker: "•", text: "Run a | b")])
     }
 
     func testRaggedRowsPadToTheWidestRow() {
