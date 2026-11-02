@@ -69,6 +69,10 @@ repo="$(cd "$(dirname "$0")/.." && pwd -P)"
 key="$STATE/id_ed25519"
 known_hosts="$STATE/known_hosts"
 password_file="$STATE/demo-password"
+# Written once the guest account answers on SSH. Until then every start
+# from `create` passes the first-boot flags again, so a first boot that
+# failed or was cut short can be retried.
+account_marker="$STATE/$VM.account"
 
 need_host() {
     [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] \
@@ -215,6 +219,17 @@ wait_for_status() {
     die "$VM did not reach $1 (it is $(vm_status))."
 }
 
+# utmctl start exits 0 even when UTM never started the VM (an Apple Event
+# timeout while a UTM dialog is open, say), so check that it did.
+start_vm() {
+    utmctl start "$VM" "$@" || true
+    for _ in $(seq 1 30); do
+        [ "$(vm_status)" = started ] && return 0
+        sleep 2
+    done
+    die "UTM did not start $VM (it is $(vm_status)); check UTM's window for a dialog, then run this again."
+}
+
 # --- Steps ---
 
 cmd_create() {
@@ -223,7 +238,11 @@ cmd_create() {
     chmod 700 "$STATE"
     [ -f "$key" ] || ssh-keygen -q -t ed25519 -N '' -C "$VM" -f "$key"
     if [ ! -f "$password_file" ]; then
-        (umask 077; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20 > "$password_file")
+        # A bounded read: `tr </dev/urandom | head` would end on SIGPIPE,
+        # which pipefail turns into a failed step.
+        password="$(head -c 512 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9')"
+        [ "${#password}" -ge 20 ] || die "couldn't make a password from /dev/urandom."
+        (umask 077; printf '%s' "${password:0:20}" > "$password_file")
     fi
 
     if vm_exists; then
@@ -254,18 +273,27 @@ EOF
             done
             say ""
             set_vm_notes "installed"
-            # The first start after the install creates the account, logs it
-            # in automatically and turns on Remote Login; it applies only to
-            # that one start and is never saved.
-            say "First boot: creating the $GUEST_USER account ..."
-            utmctl start "$VM" --provision-username="$GUEST_USER" --provision-full-name="Demo" \
-                --provision-password-stdin --provision-auto-login --provision-ssh < "$password_file"
             ;;
     esac
 
-    [ "$(vm_status)" = started ] || utmctl start "$VM"
+    if [ "$(vm_status)" != started ]; then
+        case "$(vm_notes)" in
+            *provisioned*) touch "$account_marker" ;;
+        esac
+        if [ -f "$account_marker" ]; then
+            start_vm
+        else
+            # The first start after the install creates the account, logs
+            # it in automatically and turns on Remote Login; it applies
+            # only to that one start and is never saved.
+            say "First boot: creating the $GUEST_USER account ..."
+            start_vm --provision-username="$GUEST_USER" --provision-full-name="Demo" \
+                --provision-password-stdin --provision-auto-login --provision-ssh < "$password_file"
+        fi
+    fi
     ip="$(wait_for_ssh)"
     authorize_key "$ip"
+    touch "$account_marker"
     say "$VM is up at $ip; next: scripts/demo_vm.sh provision"
 }
 
@@ -320,9 +348,12 @@ build_app() {
 
 cmd_provision() {
     need_host
-    [ "$(vm_status)" = started ] || { utmctl start "$VM"; }
+    [ "$(vm_status)" = started ] || start_vm
     ip="$(wait_for_ssh)"
     authorize_key "$ip"
+    # Provisioning ends by deleting ~/.swe, which must only ever be the
+    # app's own data, never a hub a take left behind.
+    refuse_used_base
 
     say "Installing the command line tools, Homebrew, swe and the harness CLIs ..."
     # Written to a file and run with stdin closed: fed to `bash -s`, the
@@ -430,6 +461,13 @@ cmd_shot() {
     say "Saved $1"
 }
 
+# A hub in ~/.swe means a take ran with changes saved: that is someone's
+# work, and not a clean base. Nothing here deletes it.
+refuse_used_base() {
+    guest 'test ! -e ~/.swe/AGENTS.md && test ! -L ~/.swe/AGENTS.md && test ! -e ~/.swe/.git' \
+        || die "$VM has a hub in ~/.swe; set up a fresh base (or remove it by hand) first."
+}
+
 # docs/demo.md's own setup line, run once and undone, to prove the stage
 # builds in this account.
 check_stage() {
@@ -451,10 +489,8 @@ cmd_save() {
             || die "$VM is missing SWE.app or a CLI; run provision first."
         # Launching SWE.app writes ~/.swe/data and caches, and the CLIs write
         # their state (~/.codex's databases) the first time anything runs
-        # them. Those go, so a take starts as a fresh account; a hub in ~/.swe
-        # means a take ran in the base, which is not a clean base at all.
-        guest 'test ! -e ~/.swe/AGENTS.md && test ! -e ~/.swe/.git' \
-            || die "$VM has a hub in ~/.swe; set up a fresh base (or remove it by hand) first."
+        # them. Those go, so a take starts as a fresh account.
+        refuse_used_base
         # Terminal's saved windows and zsh's saved sessions would reopen at
         # every take's login.
         guest 'osascript -e "tell application id \"com.cwenlong.swe\" to quit" >/dev/null 2>&1 || true
@@ -481,7 +517,7 @@ cmd_save() {
 cmd_take() {
     need_host
     [ "$(vm_status)" = stopped ] || die "$VM is $(vm_status); stop it first (scripts/demo_vm.sh reset)."
-    utmctl start "$VM" --disposable
+    start_vm --disposable
     ip="$(wait_for_ssh)"
     say ""
     say "$VM is running without saving changes, at $ip."

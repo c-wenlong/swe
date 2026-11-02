@@ -1,8 +1,9 @@
 """scripts/demo_vm.sh: the UTM virtual machine for recording the primitives demo (#524).
 
 A real run needs UTM and a macOS 27 Mac, so these tests stop short of the
-VM: argument handling, and the refusal on a machine that cannot run it,
-which must leave nothing behind.
+VM: argument handling, the refusal on a machine that cannot run it, which
+must leave nothing behind, and `create`'s first run up to the restore
+image, with a stand-in Mac.
 """
 
 import os
@@ -69,6 +70,38 @@ class DemoVmTest(unittest.TestCase):
                 self.assertRegex(run.stderr, r"^demo_vm: (needs a Mac|needs macOS 27|utmctl is not on PATH)")
                 self.assertFalse(self.state.exists())
                 self.assertFalse(self.cache.exists())
+
+    @unittest.skipUnless(shutil.which("ssh-keygen"), "ssh-keygen not installed")
+    def test_first_create_makes_the_guest_key_and_password(self):
+        # A stand-in macOS 27 Mac on Apple silicon whose UTM has no VMs, so
+        # create gets past the host checks, makes the guest's key pair and
+        # password, then stops at the restore image it was pointed at.
+        shims = {"uname": 'case "$1" in -s) echo Darwin ;; -m) echo arm64 ;; esac',
+                 "sw_vers": "echo 27.2",
+                 "utmctl": "exit 1"}
+        for name, body in shims.items():
+            (self.bin / name).write_text(f"#!/bin/sh\n{body}\n")
+            (self.bin / name).chmod(0o755)
+        tool_dirs = {os.path.dirname(shutil.which(tool))
+                     for tool in ("ssh-keygen", "head", "tr", "mkdir", "chmod", "cut", "basename")
+                     if shutil.which(tool)}
+        self.path = ":".join([str(self.bin), *sorted(tool_dirs), self.path])
+        missing = self.scratch / "no-such.ipsw"
+        run = subprocess.run([BASH, str(SCRIPT), "create"], capture_output=True, text=True,
+                             env={"PATH": self.path, "HOME": str(self.scratch / "home"),
+                                  "SWE_DEMO_VM_STATE": str(self.state),
+                                  "SWE_DEMO_VM_CACHE": str(self.cache),
+                                  "SWE_DEMO_VM_IPSW": str(missing)}, timeout=60)
+        self.assertEqual(run.returncode, 1, run.stderr)
+        self.assertIn(f"SWE_DEMO_VM_IPSW={missing} is not a file", run.stderr)
+        self.assertEqual(self.state.stat().st_mode & 0o777, 0o700)
+        password = (self.state / "demo-password").read_text()
+        self.assertRegex(password, r"^[A-Za-z0-9]{20}$")
+        self.assertEqual((self.state / "demo-password").stat().st_mode & 0o777, 0o600)
+        self.assertTrue((self.state / "id_ed25519").is_file())
+        self.assertTrue((self.state / "id_ed25519.pub").is_file())
+        # No account yet: the first boot has not answered.
+        self.assertFalse((self.state / "swe-demo-base.account").exists())
 
 
 if __name__ == "__main__":
