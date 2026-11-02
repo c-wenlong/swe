@@ -1402,6 +1402,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.system` again through it. A `.system` without the marker, or one
   deeper in the tree, is still treated as your skills.
 
+- **A stray fence line or block-open line no longer corrupts the chat's
+  code blocks and tables — on iOS and the web app too.** The chat
+  Markdown parser closed a fenced code block on any line starting with
+  the fence marker, so a quoted ` ```swift build ` inside a block ended
+  the code early, and it let a table's rows swallow a line that opens
+  another block, so a `> Warning: a | b` quote or a ` ```a|b ` fence
+  after a table became a row. iOS's `Markdown.parse` and the web app's
+  `md()` now match the Mac parser: a fence closes only on a marker-only
+  line (a longer run of the same character still closes), and a table's
+  rows stop when a line opens a block of its own — a quote, a fence or a
+  list item is never a row.
+
 - **`swe sync` no longer commits the app's stores or Codex's own
   skills.** While SWE.app runs it writes `~/.swe/data/catalog/catalog.sqlite`
   (and its WAL), `data/issues.json.lock` and other files under `data/`

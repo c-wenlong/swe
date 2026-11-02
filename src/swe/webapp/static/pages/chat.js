@@ -199,7 +199,7 @@ const SessionChat = (() => {
         const indent = (line.match(/^ */) || [""])[0].length;
         const body = [];
         i += 1;
-        while (i < lines.length && !lines[i].trim().startsWith(fence)) {
+        while (i < lines.length && !fenceClose(lines[i], fence)) {
           const raw = lines[i];
           const lead = Math.min(indent, (raw.match(/^ */) || [""])[0].length);
           body.push(raw.slice(lead));
@@ -255,7 +255,9 @@ const SessionChat = (() => {
           i += 2;
           while (i < lines.length) {
             const row = lines[i].trim();
-            if (!row || !row.includes("|")) break;
+            // A line that opens its own block — `> Warning: a | b` is a
+            // quote, ```a|b``` a fence — is never a row.
+            if (!row || !row.includes("|") || startsBlock(lines, i, false)) break;
             if (rows.length < TABLE_MAX_ROWS) rows.push(cells(row));
             else extraRows += 1;
             i += 1;
@@ -334,12 +336,23 @@ const SessionChat = (() => {
     return [alt, source];
   }
 
-  /* Whether `lines[i]` opens a block that isn't list-item text. */
-  function startsBlock(lines, i) {
+  /* A line that closes the open fence: the marker alone, or a longer
+     run of the same character — "```swift build" is content, not a
+     close. (CommonMark agrees; the Mac chat parser got this first.) */
+  function fenceClose(line, marker) {
+    const t = line.trim();
+    return t.startsWith(marker) && [...t].every((c) => c === marker[0]);
+  }
+
+  /* Whether `lines[i]` opens a block that isn't list-item text.
+     `orTable: false` inside a table's row loop: a data row followed by
+     a separator-looking line is still a row, not a second table. */
+  function startsBlock(lines, i, orTable = true) {
     const t = lines[i].trim();
     if (t.startsWith("```") || t.startsWith("~~~") || t.startsWith(">") || heading(t)) return true;
     if (t.startsWith("<json-render>") || imageLine(t)) return true;
-    return t.includes("|") && i + 1 < lines.length && !!separatorAlignments(lines[i + 1]);
+    if (listItem(lines[i])) return true;
+    return orTable && t.includes("|") && i + 1 < lines.length && !!separatorAlignments(lines[i + 1]);
   }
 
   function heading(line) {

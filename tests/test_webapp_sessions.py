@@ -786,6 +786,34 @@ return div.innerHTML;
         self.assertEqual(out[3]["t"], "table")
         self.assertEqual(out[3]["rows"], [["1", "2"]])
 
+    def test_fence_closes_on_a_marker_only_line(self):
+        """A line that starts with the marker but trails content is code,
+        not a close — CommonMark's rule, the same fix the Mac parser got."""
+        out = self.run_js(
+            "return [T.mdBlocks('```text\\n```swift build\\n```\\ndone'),"
+            " T.mdBlocks('```\\nx\\n````\\ny')];")
+        self.assertEqual(out[0], [
+            {"t": "code", "lang": "text", "code": "```swift build"},
+            {"t": "p", "text": "done"}])
+        # A longer run of the same character still closes.
+        self.assertEqual(out[1], [
+            {"t": "code", "lang": "", "code": "x"},
+            {"t": "p", "text": "y"}])
+
+    def test_table_stops_at_a_line_that_opens_a_block(self):
+        """`> Warning: a | b` after a table is a quote, not a row, and a
+        fence whose info string has a `|` opens a code block."""
+        out = self.run_js(
+            "return [T.mdBlocks('| a | b |\\n|---|---|\\n| 1 | 2 |\\n> Warning: a | b'),"
+            " T.mdBlocks('| a |\\n|---|\\n| 1 |\\n```a|b\\nx\\n```'),"
+            " T.mdBlocks('| a |\\n|---|\\n| 1 |\\n- Run a | b')];")
+        self.assertEqual(len(out[0]), 2)
+        self.assertEqual(out[0][0]["rows"], [["1", "2"]])
+        self.assertEqual(out[0][1], {"t": "quote", "text": "Warning: a | b"})
+        self.assertEqual(out[1][1], {"t": "code", "lang": "a|b", "code": "x"})
+        # `- Run a | b` after a table is a list item, not a row.
+        self.assertEqual(out[2][1], {"t": "li", "indent": 0, "marker": "•", "text": "Run a | b"})
+
     def test_agent_coded_text_folds_to_notes(self):
         """<json-render> views and lone images become note chips; inline
         images read as *Image: alt*; unclosed fences still render."""

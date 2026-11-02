@@ -67,7 +67,7 @@ enum Markdown {
                 let indent = line.prefix { $0 == " " }.count
                 var body: [String] = []
                 i += 1
-                while i < lines.count, !lines[i].trimmingCharacters(in: .whitespaces).hasPrefix(fence) {
+                while i < lines.count, !fenceClose(lines[i], marker: fence) {
                     let raw = lines[i]
                     let lead = min(indent, raw.prefix { $0 == " " }.count)
                     body.append(String(raw.dropFirst(lead)))
@@ -121,7 +121,10 @@ enum Markdown {
                 i += 2
                 while i < lines.count {
                     let row = lines[i].trimmingCharacters(in: .whitespaces)
-                    guard !row.isEmpty, row.contains("|") else { break }
+                    // A line that opens its own block — `> Warning: a | b`
+                    // is a quote, ```a|b``` a fence — is never a row.
+                    guard !row.isEmpty, row.contains("|"),
+                          !startsBlock(lines, at: i, orTable: false) else { break }
                     rows.append(cells(row))
                     i += 1
                 }
@@ -218,12 +221,24 @@ enum Markdown {
     private static let inlineImageRE = try? NSRegularExpression(
         pattern: #"(`+)[\s\S]*?\1|(?<!\\)!\[([^\]]*)\]\([^)\s]+\)"#)
 
+    /// A line that closes the open fence: the marker alone, or a longer
+    /// run of the same character — ``` ` ```swift build` ``` is content,
+    /// not a close. (CommonMark agrees; the Mac chat parser got this
+    /// first.)
+    static func fenceClose(_ line: String, marker: String) -> Bool {
+        let t = line.trimmingCharacters(in: .whitespaces)
+        return t.hasPrefix(marker) && t.allSatisfy { $0 == marker.first }
+    }
+
     /// Whether `lines[i]` opens a block that isn't list-item text.
-    static func startsBlock(_ lines: [String], at i: Int) -> Bool {
+    /// `orTable: false` inside a table's row loop: a data row followed
+    /// by a separator-looking line is still a row, not a second table.
+    static func startsBlock(_ lines: [String], at i: Int, orTable: Bool = true) -> Bool {
         let t = lines[i].trimmingCharacters(in: .whitespaces)
         if t.hasPrefix("```") || t.hasPrefix("~~~") || t.hasPrefix(">") || heading(t) != nil { return true }
         if t.hasPrefix("<json-render>") || imageLine(t) != nil { return true }
-        if t.contains("|"), i + 1 < lines.count, separatorAlignments(lines[i + 1]) != nil { return true }
+        if listItem(lines[i]) != nil { return true }
+        if orTable, t.contains("|"), i + 1 < lines.count, separatorAlignments(lines[i + 1]) != nil { return true }
         return false
     }
 

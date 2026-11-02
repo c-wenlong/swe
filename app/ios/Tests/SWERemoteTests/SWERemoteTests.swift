@@ -276,6 +276,33 @@ final class MarkdownTests: XCTestCase {
         XCTAssertEqual(Markdown.parse("```\nhalf"), [.code(language: nil, text: "half")])
     }
 
+    func testFenceClosesOnAMarkerOnlyLine() {
+        // A fence-open-looking line inside a block — the agent quoting a
+        // command back — is content, not a close: "```swift build" stays in.
+        XCTAssertEqual(Markdown.parse("```text\n```swift build\n```\ndone"),
+                       [.code(language: "text", text: "```swift build"), .paragraph("done")])
+        // A longer run of the same character still closes.
+        XCTAssertEqual(Markdown.parse("```\nx\n````\ny"),
+                       [.code(language: nil, text: "x"), .paragraph("y")])
+    }
+
+    func testTableStopsAtALineThatOpensABlock() {
+        // `> Warning: a | b` right after a table is a quote, not a row.
+        var blocks = Markdown.parse("| a | b |\n|---|---|\n| 1 | 2 |\n> Warning: a | b")
+        XCTAssertEqual(blocks.count, 2)
+        guard case .table(let t) = blocks[0] else { return XCTFail("expected a table") }
+        XCTAssertEqual(t.rows, [["1", "2"]])
+        XCTAssertEqual(blocks[1], .quote("Warning: a | b"))
+        // A fence whose info string contains `|` opens a code block.
+        blocks = Markdown.parse("| a |\n|---|\n| 1 |\n```a|b\nx\n```")
+        XCTAssertEqual(blocks, [.table(Markdown.Table(header: ["a"], align: [.leading], rows: [["1"]])),
+                                .code(language: "a|b", text: "x")])
+        // `- Run a | b` after a table is a list item, not a row.
+        blocks = Markdown.parse("| a |\n|---|\n| 1 |\n- Run a | b")
+        XCTAssertEqual(blocks, [.table(Markdown.Table(header: ["a"], align: [.leading], rows: [["1"]])),
+                                .listItem(indent: 0, marker: "•", text: "Run a | b")])
+    }
+
     func testRaggedRowsPadToTheWidestRow() {
         guard case .table(let t)? = Markdown.parse("| a |\n|---|\n| 1 | 2 | 3 |").first else { return XCTFail() }
         XCTAssertEqual(t.columnCount, 3)
