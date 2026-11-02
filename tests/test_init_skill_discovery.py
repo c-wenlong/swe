@@ -30,6 +30,14 @@ def _skill(root: Path, name: str, body: str = "x") -> None:
     (d / "SKILL.md").write_text(f"---\nname: {name}\n---\n{body}\n")
 
 
+def _codex_system(root: Path, marked: bool = True) -> None:
+    """The .system folder Codex 0.166 writes into its skills root on start."""
+    for name in ("imagegen", "skill-creator"):
+        _skill(root / ".system", name)
+    if marked:
+        (root / ".system" / ".codex-system-skills.marker").write_text("a49d0ab9dc3eb676\n")
+
+
 def _home(tmp: str) -> Path:
     home = Path(tmp)
     shared = home / ".swe" / "skills"
@@ -399,6 +407,67 @@ class ClassifyTest(unittest.TestCase):
             self.assertEqual(state, "keep")
             self.assertIn("no skills", detail)
 
+    def test_codex_system_alone_is_absorbed(self):
+        # Codex ran before swe init: its skills root holds only the .system
+        # folder it rewrites on every start, none of it the user's.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            root = home / ".codex" / "skills"
+            _codex_system(root)
+            state, detail = classify_skill_root(root, home)
+            self.assertEqual(state, "absorb")
+            self.assertEqual(detail, "only .system, which Codex rewrites")
+
+    def test_codex_system_beside_shared_copies_is_absorbed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            root = home / ".codex" / "skills"
+            _codex_system(root)
+            _skill(root, "alpha")
+            state, detail = classify_skill_root(root, home)
+            self.assertEqual(state, "absorb")
+            self.assertEqual(
+                detail, "1 skills, all already shared, plus .system, which Codex rewrites")
+
+    def test_codex_system_does_not_cover_a_unique_skill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            root = home / ".codex" / "skills"
+            _codex_system(root)
+            _skill(root, "only-here")
+            state, detail = classify_skill_root(root, home)
+            self.assertEqual(state, "keep")
+            self.assertEqual(detail, "1 of 1 skills exist nowhere else")
+
+    def test_codex_system_does_not_cover_files_beside_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            root = home / ".codex" / "skills"
+            _codex_system(root)
+            (root / "notes.txt").write_text("mine\n")
+            state, detail = classify_skill_root(root, home)
+            self.assertEqual(state, "keep")
+            self.assertIn("no skills", detail)
+
+    def test_system_without_codex_marker_is_kept(self):
+        # Nothing proves an unmarked .system is Codex's to rewrite, so its
+        # skills are the user's like any other dot folder's.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            root = home / ".codex" / "skills"
+            _codex_system(root, marked=False)
+            state, detail = classify_skill_root(root, home)
+            self.assertEqual(state, "keep")
+            self.assertEqual(detail, "2 of 2 skills exist nowhere else")
+
+    def test_marked_system_below_the_top_level_is_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            root = home / ".codex" / "skills"
+            _codex_system(root / "vendor")
+            state, _detail = classify_skill_root(root, home)
+            self.assertEqual(state, "keep")
+
     def test_regular_file_at_root_is_conflict_not_crash(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = _home(tmp)
@@ -484,6 +553,19 @@ class SafetyTest(unittest.TestCase):
             self.assertEqual(
                 len(list((home / ".swe" / "backups").glob("*copilot_skills*"))), 1
             )
+
+    def test_codex_system_root_is_linked_and_backed_up(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            root = home / ".codex" / "skills"
+            _codex_system(root)
+            code, _out = self._run(home, [])
+            self.assertEqual(code, 0)
+            self.assertTrue(root.is_symlink(), "Codex never sees the hub's skills")
+            saved = list((home / ".swe" / "backups").glob("*codex_skills*"))
+            self.assertEqual(len(saved), 1)
+            self.assertTrue((saved[0] / ".system" / ".codex-system-skills.marker").is_file())
+            self.assertTrue((saved[0] / ".system" / "imagegen" / "SKILL.md").is_file())
 
     def test_check_mode_changes_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:

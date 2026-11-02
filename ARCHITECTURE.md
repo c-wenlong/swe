@@ -199,6 +199,11 @@ Link state is a small vocabulary shared by `swe init`, `swe list` and
 
 `keep` is the safety valve. It is never overwritten on a plain run, because
 absorbing it would hide the only copy of something behind the shared tree.
+A folder a harness writes into its own skills root and rewrites on start is
+not something to hide: Codex's `.system`, at the top of the root and carrying
+its `.codex-system-skills.marker` (`HARNESS_SKILL_MARKERS` in
+`init/layout.py`), is left out when a skills root is classified, so a root
+holding only that is `absorb`. The absorb backs it up with the rest.
 
 `ignored` is the opt-out. `~/.swe/.linkignore` holds home-relative
 patterns (`fnmatch`, `*` crosses `/`, naming a directory covers its
