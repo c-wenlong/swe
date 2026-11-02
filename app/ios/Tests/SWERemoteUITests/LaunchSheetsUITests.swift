@@ -4,8 +4,9 @@ import XCTest
 /// on a machine row that reports `model_at_launch`, starts on the
 /// harness's newest recent model, re-defaults on a harness change while
 /// untouched, keeps a picked Harness default and a typed Other value
-/// across switches, and disables with a note for a harness that can't
-/// take a pick.
+/// across switches, gets a picked recent model back after a round trip
+/// through another harness, and disables with a note for a harness that
+/// can't take a pick.
 ///
 /// Needs a paired hub in the simulator's store (pair once with
 /// `simctl openurl <device> 'quiver://pair?…'` before running); the
@@ -67,6 +68,42 @@ final class LaunchSheetsUITests: XCTestCase {
         item.tap()
     }
 
+    /// Closes an open menu without a pick: a tap on the navigation title.
+    private func closeMenu() {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+    }
+
+    /// The open menu's recent models, newest first: the entries between
+    /// Harness default and Other. One snapshot of the tree rather than an
+    /// element query per button, which took minutes on a busy sheet.
+    private func menuRecents() throws -> [String] {
+        modelMenu.tap()
+        let other = app.buttons.matching(NSPredicate(format: "label == %@", "Other…")).firstMatch
+        XCTAssertTrue(other.waitForExistence(timeout: 5), "Model menu has no Other… entry")
+        var labels: [String] = []
+        func walk(_ node: XCUIElementSnapshot) {
+            if node.elementType == .button { labels.append(node.label) }
+            node.children.forEach(walk)
+        }
+        walk(try app.snapshot())
+        closeMenu()
+        guard let start = labels.lastIndex(of: "Harness default"),
+              let end = labels[start...].firstIndex(of: "Other…") else { return [] }
+        return Array(labels[(start + 1)..<end])
+    }
+
+    /// Waits for the menu to show `label`, then asserts it does.
+    private func expectMenu(_ label: String, _ message: String) {
+        let shown = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", label), object: modelMenu)
+        _ = XCTWaiter.wait(for: [shown], timeout: 5)
+        XCTAssertEqual(menuValue(), label, message)
+    }
+
+    /// The harness chip on screen now, so a round trip can come back to it.
+    private func selectedChip(among names: [String]) -> XCUIElement? {
+        names.map(chip).first { $0.exists && $0.isSelected }
+    }
+
     func testModelMenuDefaultsFollowsAndKeepsAPick() throws {
         try openNewSessionSheet()
 
@@ -83,16 +120,18 @@ final class LaunchSheetsUITests: XCTestCase {
             XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch.waitForExistence(timeout: 5),
                           "Model menu has no \(label) entry")
         }
-        // Close it without a pick: a tap on the navigation title.
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+        closeMenu()
 
         // An untouched menu follows a harness switch to the new
-        // harness's newest model. A hub offering only one of these
-        // harnesses has nothing to switch to: its setup, not a menu bug.
+        // harness's newest model, or Harness default only when it has
+        // none. A hub offering only one of these harnesses has nothing
+        // to switch to: its setup, not a menu bug.
         guard let first = otherChip(than: harnesses) else {
             throw XCTSkip("the hub offers no alternate harness to switch to")
         }
         first.tap()
+        let newest = try menuRecents().first ?? "Harness default"
+        expectMenu(newest, "an untouched menu did not land on the new harness's newest model")
         XCTAssertNotEqual(menuValue(), initial, "Model menu kept another harness's model across a switch")
 
         // An explicit Harness default survives the next switch.
@@ -112,6 +151,39 @@ final class LaunchSheetsUITests: XCTestCase {
         first.tap()
         XCTAssertEqual(menuValue(), "Other…", "Other was re-defaulted by a switch")
         XCTAssertEqual(otherField.value as? String, "my-model", "typed model was lost on a switch")
+    }
+
+    /// A picked recent model survives a round trip through another
+    /// harness: away, the menu shows that harness's own model or its
+    /// default; back, it shows the pick again rather than the newest.
+    func testModelMenuRemembersAPickAcrossARoundTrip() throws {
+        try openNewSessionSheet()
+
+        XCTAssertTrue(modelMenu.waitForExistence(timeout: 10), "Model menu missing on the New session sheet")
+        let harnesses = ["Codex", "Claude Code", "Claude", "Gemini", "Kilo"]
+        guard let home = selectedChip(among: harnesses) else {
+            throw XCTSkip("the sheet opened on a harness this test doesn't know")
+        }
+        // The pick has to be an older model, or an untouched menu would
+        // land on it anyway and the check would prove nothing.
+        let recents = try menuRecents()
+        try XCTSkipUnless(recents.count >= 2, "the harness has fewer than two recent models to pick between")
+        let picked = recents[1]
+        pick(picked)
+        expectMenu(picked, "the picked model did not show")
+
+        guard let away = otherChip(than: harnesses) else {
+            throw XCTSkip("the hub offers no alternate harness to switch to")
+        }
+        away.tap()
+        if modelMenu.isEnabled {
+            let there = try menuRecents()
+            let expected = there.contains(picked) ? picked : (there.first ?? "Harness default")
+            expectMenu(expected, "away from home the menu showed neither the pick nor that harness's default")
+        }
+
+        home.tap()
+        expectMenu(picked, "the picked model was forgotten after a round trip")
     }
 
     func testAnUnsupportedHarnessDisablesTheMenu() throws {
