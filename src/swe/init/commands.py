@@ -12,7 +12,7 @@ from swe.console import c
 from swe.flags import expand_value_flags
 from swe.json_output import emit, take_json_flag
 from swe.multiselect import Choice, _supported, multiselect
-from swe.paths import backup_tree, hub_dirs_for
+from swe.paths import backup_tree, hub_dirs_for, instructions_dir_for, instructions_index_for
 from swe.prompt import read_line
 from swe.init.accounts import (
     AccountRow,
@@ -698,10 +698,14 @@ def cmd_init(args) -> int:
         (s_, r) for s_, r in skill_rows if r in ("protected", "keep", "would-keep")
     ]
     linked = [r for _, r in everything if r in _LINKED_RESULTS]
-    summary = (
-        f"{len(linked)} linked, {len(blocked)} blocked, "
-        f"edit {agents_file(home)} to change them all"
-    )
+    # With chapters, AGENTS.md is generated and the next build replaces
+    # an edit made to it, so point at the chapters instead.
+    if instructions_index_for(home).is_file():
+        change = (f"edit the chapters in {instructions_dir_for(home)}, "
+                  "then swe instructions build, to change them all")
+    else:
+        change = f"edit {agents_file(home)} to change them all"
+    summary = f"{len(linked)} linked, {len(blocked)} blocked, {change}"
     print(f"\n  {c('dim', summary)}\n")
     if protected:
         _print_paths("Left alone, these hold skills that exist nowhere else:", protected, home)

@@ -1477,6 +1477,12 @@ raw editor. <code>swe hooks list --json</code> rows now carry <code>summary</cod
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong><code>swe init</code> points at the chapters when the hub has them.</strong> Its
+summary always said to edit <code>~/.swe/AGENTS.md</code> to change every
+harness's instructions, but with <code>AGENTS_MD/index.txt</code> that file is
+generated and the next <code>swe instructions build</code> replaces the edit. It
+now says to edit the chapters and run <code>swe instructions build</code>.</p>
+</li>
 <li><p><strong>Hub marketplaces skip archived harnesses.</strong> <code>swe setup --hub</code>,
 <code>swe init --hub</code> and <code>swe sync</code> registered the hub's plugin
 marketplaces in every installed harness, including ones the registry

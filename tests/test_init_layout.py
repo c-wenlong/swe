@@ -266,6 +266,18 @@ class CmdInitTest(unittest.TestCase):
             self.assertNotIn("conflict", out)
             self.assertEqual(len(list((swe_dir(home) / "backups").iterdir())), 0)
 
+    def test_summary_points_at_chapters_once_the_hub_has_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _fake_home(tmp)
+            _, out = self._run(home, [])
+            self.assertIn("AGENTS.md to change them all", out)
+            chapters = swe_dir(home) / "AGENTS_MD"
+            chapters.mkdir()
+            (chapters / "index.txt").write_text("01-general.md\n")
+            _, out = self._run(home, [])
+            self.assertIn(f"edit the chapters in {chapters}, then swe instructions build", out)
+            self.assertNotIn("AGENTS.md to change them all", out)
+
     def test_unknown_option_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = _fake_home(tmp)

@@ -1345,6 +1345,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`swe init` points at the chapters when the hub has them.** Its
+  summary always said to edit `~/.swe/AGENTS.md` to change every
+  harness's instructions, but with `AGENTS_MD/index.txt` that file is
+  generated and the next `swe instructions build` replaces the edit. It
+  now says to edit the chapters and run `swe instructions build`.
+
 - **Hub marketplaces skip archived harnesses.** `swe setup --hub`,
   `swe init --hub` and `swe sync` registered the hub's plugin
   marketplaces in every installed harness, including ones the registry
