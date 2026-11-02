@@ -571,6 +571,21 @@ class TestSnapshotChangeGate(unittest.TestCase):
             src.poll(); src.poll(); src.poll()
             self.assertEqual(rt.call_count, 1, "an unchanged Devin token is trusted past the recheck window")
 
+    def test_unreadable_read_is_retried_without_repeats(self):
+        src = tail.SnapshotSource(self._session("devin"))
+        token = ((5, 5), (2,))
+        down = _Transcript([])
+        down.readable = False
+        reads = [_Transcript(["a"]), down, _Transcript(["a", "b"])]
+        with patch.object(tail, "_devin_token", return_value=token), \
+                patch.object(tail._tr, "read_transcript_tail", side_effect=reads) as rt:
+            src.poll()
+            src._token = None  # force the next poll to read; it fails
+            self.assertEqual(src.poll(), [])
+            out = src.poll()
+            self.assertEqual(rt.call_count, 3, "the same token is read again after a failed read")
+            self.assertEqual([m["text"] for m in out], ["b"], "recovery emits only what is new")
+
     def test_devin_token_reads_one_sessions_rows(self):
         import sqlite3
         db = self.tmp / "sessions.db"

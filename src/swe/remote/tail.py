@@ -1333,6 +1333,10 @@ class SnapshotSource:
             tr = _tr.read_transcript_tail(self.session, SNAPSHOT_WINDOW)
         except Exception:
             return []
+        if not getattr(tr, "readable", True):
+            # A locked or missing store: keep the old token and window so
+            # the next poll retries, and recovery doesn't re-emit history.
+            return []
         self._sources = list(getattr(tr, "source_paths", None) or [])
         # The token from before the read is the one kept: a write that
         # lands mid-read changes the next token, so it is picked up then.
