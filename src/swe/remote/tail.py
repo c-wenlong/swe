@@ -151,6 +151,7 @@ LIMIT_REPEAT_S = 3600.0
 # Snapshot stores (no byte cursor) re-read only when something changed;
 # this is how long a "nothing changed" answer is trusted before a full
 # re-read anyway, in case a store writes somewhere the check can't see.
+# Devin's token is exact and never expires: see ``SnapshotSource.poll``.
 SNAPSHOT_RECHECK_S = 60.0
 # A bounded read (Devin) returns this many newest chain nodes, so a poll
 # sees a sliding window; more than a poll interval ever adds.
@@ -1320,12 +1321,21 @@ class SnapshotSource:
     def poll(self) -> list[dict]:
         now = time.monotonic()
         token = self.change_token()
+        # Devin's token reads the rows the transcript read does. Devin
+        # writes a message with INSERT OR REPLACE, which gives even a
+        # rewritten row a new row_id, so an unchanged token means nothing
+        # to read: no timed re-read of up to 1,000 nodes per idle session.
+        exact = self.session.tool_name == "devin"
         if (token is not None and token == self._token
-                and now - self._token_at < SNAPSHOT_RECHECK_S):
+                and (exact or now - self._token_at < SNAPSHOT_RECHECK_S)):
             return []
         try:
             tr = _tr.read_transcript_tail(self.session, SNAPSHOT_WINDOW)
         except Exception:
+            return []
+        if not getattr(tr, "readable", True):
+            # A locked or missing store: keep the old token and window so
+            # the next poll retries, and recovery doesn't re-emit history.
             return []
         self._sources = list(getattr(tr, "source_paths", None) or [])
         # The token from before the read is the one kept: a write that
