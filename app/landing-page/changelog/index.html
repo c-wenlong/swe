@@ -1688,6 +1688,19 @@ now goes through the parse cache, so an unchanged one costs a <code>stat</code>.
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong><code>build_ios.sh</code> reaches a real iPhone and a named signing team.</strong>
+The device picker took the first paired iOS device <code>devicectl</code>
+reported, which could be a simulator (it reports <code>paired</code> like a real
+phone), so a connected iPhone was passed over; the filter now also
+requires <code>reality == &quot;physical&quot;</code>. And <code>DEVELOPMENT_TEAM</code> ships empty
+in <code>project.yml</code> with no override path, so device builds always died
+on &quot;requires a development team&quot; — the script now takes
+<code>SWE_DEVELOPMENT_TEAM</code> and passes it to xcodebuild. The README's
+claim that automatic signing registers the App Group was wrong for
+entitlements-file groups, so the fresh-team portal steps (create the
+group, assign it on each App ID, purge stale profiles) are
+documented.</p>
+</li>
 <li><p><strong>The remote hub no longer drops a browser's parallel asset fetches,
 which left the web app a blank shell behind <code>tailscale serve</code>.</strong> A
 page load fires all of its script requests at once, and serve opens a

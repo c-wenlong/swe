@@ -1543,6 +1543,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`build_ios.sh` reaches a real iPhone and a named signing team.**
+  The device picker took the first paired iOS device `devicectl`
+  reported, which could be a simulator (it reports `paired` like a real
+  phone), so a connected iPhone was passed over; the filter now also
+  requires `reality == "physical"`. And `DEVELOPMENT_TEAM` ships empty
+  in `project.yml` with no override path, so device builds always died
+  on "requires a development team" — the script now takes
+  `SWE_DEVELOPMENT_TEAM` and passes it to xcodebuild. The README's
+  claim that automatic signing registers the App Group was wrong for
+  entitlements-file groups, so the fresh-team portal steps (create the
+  group, assign it on each App ID, purge stale profiles) are
+  documented.
+
 - **The remote hub no longer drops a browser's parallel asset fetches,
   which left the web app a blank shell behind `tailscale serve`.** A
   page load fires all of its script requests at once, and serve opens a
