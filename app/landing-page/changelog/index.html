@@ -1296,11 +1296,33 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 <li><p><strong>Three small rendering costs in the Mac app are gone.</strong> GitHub's
 octicons parsed their SVG path data on every layout; each glyph now
 parses once. An open Calendar hover card polled the pointer every
-50 ms; it polls every 100 ms, still inside the card's 150 ms hide
-grace. A sheet's shadow was worked out from its whole content on each
+50 ms; it polls every 100 ms, so a card closes at most 300 ms after
+the pointer leaves instead of 250. A sheet's shadow was worked out from its whole content on each
 frame of the open animation; it now comes from one rounded shape
 behind the card. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1545">#1545</a>.</p>
+</li>
+<li><p><strong>A long-running hub stops keeping state for sessions and panes that
+are gone.</strong> The rate-limit notice memory kept one entry per session
+that ever hit a limit, and the tmux keystroke locks one per pane ever
+typed into. A session leaving the catalog now drops its limit entry,
+and a pane's lock lives only while a write holds it. Streamed messages
+whose channel died mid-reply were bounded in
+<a href="https://github.com/c-wenlong/swe/issues/1532">#1532</a>. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1533">#1533</a>.</p>
+</li>
+<li><p><strong>Live reply text costs the hub linear work, not quadratic.</strong> Every
+100 ms flush of a streamed reply re-cleaned the whole message so far:
+a 100 KB reply took 3.3 s of cleaning, now 58 ms. Each message keeps
+its cleaned text up to a line break no redaction can reach across and
+re-cleans only what follows; the <code>done</code> flush still cleans the whole
+text. A reply with no line breaks makes each flush wait longer once
+8 KB of it is pending, so its cleaning stays linear too. A message
+whose channel dies mid-reply stops streaming and frees its text after
+15 idle minutes (a late chunk for it never streams), and its empty
+entry goes after a day. A hub event going to several open streams is now cleaned and
+encoded once, not once per stream. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1532">#1532</a>.</p>
 </li>
 <li><p><strong>The web chat parses only the growing end of a streaming reply.</strong>
 Each repaint (at most every 80 ms) used to run the whole reply through
@@ -1343,6 +1365,18 @@ through years no longer grows it without end. The Sessions page lists
 at most 20,000 sessions instead of 100,000, with the existing note
 when older ones are left out. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1544">#1544</a>.</p>
+</li>
+<li><p><strong><code>swe check</code> and <code>swe mcp status</code> probe side by side.</strong> <code>swe check</code>
+asked each installed harness for its version one after another (up to
+three subprocesses each); it now runs them on a small thread pool,
+7.5 s down to 2.4 s for 11 harnesses here. <code>swe mcp status</code> does the
+same for its server health checks, where each HTTP server can take its
+whole five-second timeout. The rows keep their order. <code>swe list</code> asks
+<code>which</code> once per command instead of twice, harness discovery lists
+each PATH directory once instead of probing every absent name in each
+(8.7 to 5.8 ms), and skill discovery enumerates the skill roots once
+instead of once per <code>SKILL.md</code>. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1537">#1537</a>.</p>
 </li>
 <li><p><strong>The hub stops re-parsing its small stores on every request.</strong> The
 credential check, an open stream's revocation check, the session
@@ -1749,6 +1783,17 @@ fewer requests), and the poll pauses
 while the app is inactive (the app switcher, Control Centre, a call),
 not only in the background. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1549">#1549</a>.</p>
+</li>
+<li><p><strong>The iPhone console, uploads and Devices page wake the app less.</strong>
+The console hopped to the main queue once per SSH read, hundreds of
+times a second while a command printed; reads now queue up and reach
+the terminal in one batch per main-queue turn, in order. Upload
+progress redrew the chip for every chunk URLSession sent; it now
+reports at most ten times a second, plus the end. The Devices page
+fetched both pair requests and the device list every 5 s while open;
+it now loads devices once (and again after an approval, a removal or
+a pull to refresh) and asks for pending requests every 10 s. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1553">#1553</a>.</p>
 </li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>

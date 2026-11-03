@@ -3732,6 +3732,53 @@ class TestServeEntry(unittest.TestCase):
             time.sleep(0.05)
 
 
+class TestSharedFrames(unittest.TestCase):
+    """One published event is cleaned and encoded once (#1532)."""
+
+    def _event(self, text="hello"):
+        ev = protocol.event("message.appended", "claude:s1", "mbp",
+                            protocol.message("assistant", text))
+        ev["seq"] = 7
+        return ev
+
+    def test_subscribers_share_one_encoded_frame(self):
+        bus = hub_mod.EventBus()
+        queues = [bus.subscribe("claude:s1") for _ in range(3)]
+        real = hub_mod.injected_mod.clean_event
+        with patch.object(hub_mod.injected_mod, "clean_event",
+                          side_effect=real) as clean:
+            bus.publish("claude:s1", self._event())
+            frames = [hub_mod.sse_frame(q.get_nowait()) for q in queues]
+        self.assertEqual(clean.call_count, 1)
+        self.assertEqual(len(set(frames)), 1)
+        self.assertTrue(frames[0].startswith(
+            b"id: 7\nevent: message.appended\ndata: {"))
+        self.assertTrue(frames[0].endswith(b"}\n\n"))
+
+    def test_frame_matches_an_unshared_event(self):
+        ev = self._event("café — done")
+        shared = hub_mod.SharedEvent(ev)
+        self.assertEqual(shared, ev)
+        self.assertEqual(hub_mod.sse_frame(shared), hub_mod.sse_frame(ev))
+        self.assertIn("café —".encode(), hub_mod.sse_frame(ev))
+
+    def test_a_dropped_event_is_dropped_for_everyone(self):
+        bus = hub_mod.EventBus()
+        queues = [bus.subscribe("claude:s1") for _ in range(2)]
+        with patch.object(hub_mod.injected_mod, "clean_event",
+                          return_value=None) as clean:
+            bus.publish("claude:s1", self._event())
+            frames = [hub_mod.sse_frame(q.get_nowait()) for q in queues]
+        self.assertEqual(frames, [None, None])
+        self.assertEqual(clean.call_count, 1)
+
+    def test_a_transient_event_has_no_id_line(self):
+        ev = protocol.delta_event("claude:s1", "mbp", "m1", "assistant",
+                                  "hi ", 1)
+        self.assertTrue(hub_mod.sse_frame(ev).startswith(
+            b"event: message.delta\n"))
+
+
 class _ShortHeartbeat:
     """A closed SSE stream's handler thread only exits when a heartbeat
     write fails, and the default 15 s heartbeat left one running per test

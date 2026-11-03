@@ -347,6 +347,35 @@ class CmdStatusMatrixMigrationTest(McpMatrixFixtureMixin, unittest.TestCase):
         self.assertIn("2 servers across 3 tools", output)
 
 
+class CmdStatusParallelProbeTest(McpMatrixFixtureMixin, unittest.TestCase):
+    """#1537: health checks ran one server after another, each HTTP one
+    up to its five-second timeout."""
+
+    def _probe(self):
+        import threading
+
+        barrier = threading.Barrier(2, timeout=5)
+
+        def probe(name, cfg):
+            barrier.wait()  # passes only when both servers probe at once
+            return ("ok", None) if name == "server_a" else ("error", f"{name} down")
+        return probe
+
+    def test_table_probes_overlap_and_keep_each_row_its_result(self):
+        with patch.object(cli_mod, "probe_server_health", self._probe()):
+            output = self.run_cmd(cmd_status, [])
+        self.assertIn("✓", self.body_row_for(output, "server_a"))
+        self.assertIn("server_b down", self.body_row_for(output, "server_b"))
+
+    def test_json_probes_overlap_and_keep_each_row_its_result(self):
+        with patch.object(cli_mod, "probe_server_health", self._probe()):
+            output = self.run_cmd(cmd_status, ["--json"])
+        rows = {r["name"]: (r["health"], r["detail"])
+                for r in json.loads(output)["data"]["servers"]}
+        self.assertEqual(rows["server_a"], ("ok", None))
+        self.assertEqual(rows["server_b"], ("error", "server_b down"))
+
+
 class CmdStatusEmptyTest(McpMatrixFixtureMixin, unittest.TestCase):
     """Empty-matrix early-return for cmd_status."""
 
