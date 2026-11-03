@@ -1178,6 +1178,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The queued-send spinner turns with one repeating rotation instead of
   its own per-frame timeline. Closes
   [#1550](https://github.com/c-wenlong/swe/issues/1550).
+- **The iPhone chat stops re-parsing a streaming reply from the top.**
+  Every 80 ms repaint of a reply still being written parsed the whole
+  reply twice (once for the text, once for its link cards), styled every
+  block again with `AttributedString(markdown:)` and rescanned it all for
+  bare links. A 16 KB reply over a minute meant about 750 full passes,
+  13 s of CPU on a Mac simulator. The bubble now keeps the blocks before
+  its last finished blank line and parses only what follows; styled
+  text and link scans are cached by block text, and unchanged blocks
+  skip layout. The same reply now costs 0.9 s, and every prefix parses
+  to exactly the blocks a full parse gives. Closes
+  [#1548](https://github.com/c-wenlong/swe/issues/1548).
+- **A snapshot session whose store can't be found no longer costs a
+  read attempt every poll.** When a Cline, Continue, Gemini, Copilot,
+  Forge or Crush read found no source files or a store it couldn't read,
+  the tailer had no change token to keep and tried a whole read on every
+  poll, every second for an active session. It now waits 1 s, then 2, 4 and so on up
+  to a minute between attempts, and goes back to the stat check once the
+  files exist. Copilot and Crush tail reads also stop at the newest 1,000
+  turns or rows instead of reading the whole session; the other stores
+  keep one JSON document per session, which has to be parsed whole.
+  Closes [#1526](https://github.com/c-wenlong/swe/issues/1526).
+
 - **The usage ledger reads only new Devin and OpenCode rows.** Any
   write to Devin's `sessions.db` or its WAL made the next scan (each
   web Overview load after the 60 s cache, and every satellite usage

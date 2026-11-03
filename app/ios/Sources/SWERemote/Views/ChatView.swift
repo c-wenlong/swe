@@ -519,17 +519,47 @@ private struct UserBubble: View {
 /// a table too wide for it scrolls sideways inside its own box, so the
 /// chat itself never does.
 struct RichText: View {
-    let text: String
+    let blocks: [Markdown.Block]
+
+    init(text: String) { blocks = Markdown.parse(text) }
+
+    /// Blocks parsed already, as a reply still streaming in keeps them.
+    init(blocks: [Markdown.Block]) { self.blocks = blocks }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(Markdown.parse(text).enumerated()), id: \.offset) { _, block in
-                BlockView(block: block)
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                // Equatable: a block that didn't change between repaints
+                // of a streaming reply isn't laid out again.
+                BlockView(block: block).equatable()
             }
         }
     }
 
+    /// `s`'s inline Markdown styled, from `inlineCache` when this text
+    /// was styled before. A streaming reply repaints every 80 ms, and all
+    /// but its last block come back unchanged each time.
     static func inline(_ s: String) -> AttributedString {
+        let key = s as NSString
+        if let hit = inlineCache.object(forKey: key) { return hit.value }
+        let styled = styleInline(s)
+        inlineCache.setObject(Styled(styled), forKey: key, cost: s.utf8.count)
+        return styled
+    }
+
+    private final class Styled {
+        let value: AttributedString
+        init(_ value: AttributedString) { self.value = value }
+    }
+
+    /// Styled text by its source, up to about 4 MB of source text.
+    private static let inlineCache: NSCache<NSString, Styled> = {
+        let cache = NSCache<NSString, Styled>()
+        cache.totalCostLimit = 4 << 20
+        return cache
+    }()
+
+    private static func styleInline(_ s: String) -> AttributedString {
         let source = Markdown.inlineImagesAsText(s)
         var out = (try? AttributedString(markdown: source, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(source)
@@ -548,7 +578,7 @@ struct RichText: View {
     }
 }
 
-private struct BlockView: View {
+private struct BlockView: View, Equatable {
     let block: Markdown.Block
 
     var body: some View {
