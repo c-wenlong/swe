@@ -183,9 +183,17 @@ team, on developer.apple.com:
 2. Identifiers › App IDs: on each of `com.swe.remote`,
    `com.swe.remote.share`, `com.swe.remote.widget`, enable App Groups
    and assign `group.com.swe.remote`.
-3. Delete any `*com.swe.remote*` profiles under
-   `~/Library/Developer/Xcode/UserData/Provisioning Profiles` — Xcode
-   reuses ones it minted without the group — and rebuild.
+3. Delete the profiles Xcode minted without the group — it reuses
+   them otherwise. Profile files are named by UUID, so match on the
+   app identifier inside each one instead of the filename:
+
+   ```sh
+   for p in ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.mobileprovision; do
+     security cms -D -i "$p" | grep -q 'com\.swe\.remote' && rm "$p"
+   done
+   ```
+
+   Then rebuild.
 
 Two other walls a device build can hit, both account-side rather than
 project-side: "PLA Update available" means a pending Program License
