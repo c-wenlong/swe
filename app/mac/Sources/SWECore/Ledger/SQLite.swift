@@ -86,6 +86,9 @@ final class SQLiteDatabase: @unchecked Sendable {
 
     var lastInsertRowID: Int64 { sqlite3_last_insert_rowid(handle) }
 
+    /// Rows the last finished INSERT, UPDATE or DELETE changed.
+    var changes: Int { Int(sqlite3_changes(handle)) }
+
     /// Copies the whole database into `destination` with SQLite's online
     /// backup API: one consistent snapshot, rows still in the WAL included,
     /// while other connections keep reading and writing.

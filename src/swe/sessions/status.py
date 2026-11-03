@@ -95,7 +95,51 @@ def needs_followup(text: str) -> bool:
     )
 
 
-def _tail_records(path: str, tail_bytes: int) -> tuple[list[dict], bool]:
+class _TailRecords:
+    """The JSON objects of a tail window, oldest first, decoded lazily.
+
+    Every walk reads newest-first and usually decides within the last few
+    records, so a line is decoded only once a walk steps back to it, and
+    each line at most once however many times the window is walked. Lines
+    that are blank, not JSON or not an object are skipped.
+    """
+
+    __slots__ = ("_lines", "_left", "_newest_first")
+
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+        self._left = len(lines)  # lines[:_left] are not decoded yet
+        self._newest_first: list[dict] = []
+
+    def _decode_one(self) -> bool:
+        """Decode back to the next object; False once none are left."""
+        while self._left > 0:
+            self._left -= 1
+            line = self._lines[self._left]
+            if not line.strip():
+                continue
+            try:
+                data = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(data, dict):
+                self._newest_first.append(data)
+                return True
+        return False
+
+    def __reversed__(self):
+        i = 0
+        while i < len(self._newest_first) or self._decode_one():
+            yield self._newest_first[i]
+            i += 1
+
+    def __iter__(self):
+        while self._decode_one():
+            pass
+        return reversed(self._newest_first)
+
+
+def _tail_records(path: str, tail_bytes: int) -> tuple[_TailRecords, bool]:
     """(JSON objects from the file's tail in order, window-covers-file)."""
     size = os.path.getsize(path)
     with open(path, "rb") as fh:
@@ -105,17 +149,7 @@ def _tail_records(path: str, tail_bytes: int) -> tuple[list[dict], bool]:
     lines = chunk.split("\n")
     if start > 0 and lines:
         lines = lines[1:]  # first line is a partial record
-    out = []
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            data = json.loads(line)
-        except Exception:
-            continue
-        if isinstance(data, dict):
-            out.append(data)
-    return out, start == 0
+    return _TailRecords(lines), start == 0
 
 
 def _walk_tail(path: str, walk):
@@ -284,9 +318,10 @@ def _cursor_transcript(session: Session, ctx: dict) -> str:
 
 
 def _cursor_walk(records):
-    if not records:
+    newest_first = reversed(records)
+    last = next(newest_first, None)
+    if last is None:
         return None, ""
-    last = records[-1]
     if last.get("type") != "turn_ended":
         # An assistant or user record with no turn_ended after it
         # means the turn never closed.
@@ -301,7 +336,7 @@ def _cursor_walk(records):
     # success: walk back to the nearest assistant record that has
     # text, but no further than this turn's own boundary — a
     # tool_use-only turn does not inherit the previous turn's text.
-    for rec in reversed(records[:-1]):
+    for rec in newest_first:
         if rec.get("type") == "turn_ended" or rec.get("role") == "user":
             break
         if rec.get("role") != "assistant":
@@ -419,43 +454,56 @@ def _devin_lock_alive(session_id: str, host_pids: set[int]) -> bool:
     return pid not in host_pids and _pid_alive(pid)
 
 
+# What ``_probe_devin`` needs from a ``chat_message``, pulled out by
+# SQLite instead of ``json.loads`` of the whole message (a head row
+# carries every tool result and reasoning block of its turn): whether
+# the row is empty, the role, the ``tool_calls`` type and value, and the
+# ``content`` only where it is a string.
+_DEVIN_HEAD_FIELDS = (
+    "chat_message IS NULL, "
+    "json_extract(chat_message, '$.role'), "
+    "json_type(chat_message, '$.tool_calls'), "
+    "json_extract(chat_message, '$.tool_calls'), "
+    "CASE json_type(chat_message, '$.content') "
+    "WHEN 'text' THEN json_extract(chat_message, '$.content') END"
+)
+
+
 def _probe_devin(session: Session, ctx: dict):
     """(phase, text) from the session's main-chain head message."""
     conn = ctx.get("devin_conn")
     if conn is None:
         return None, ""
     sid = session.session_id
-    row = conn.execute(
-        "SELECT main_chain_id FROM sessions WHERE id = ?", (sid,)
+    head = conn.execute(
+        f"SELECT {_DEVIN_HEAD_FIELDS} FROM message_nodes "
+        "WHERE session_id = ? "
+        "AND node_id = (SELECT main_chain_id FROM sessions WHERE id = ?)",
+        (sid, sid),
     ).fetchone()
-    head = row[0] if row else None
-    chat = None
-    if head is not None:
-        r = conn.execute(
-            "SELECT chat_message FROM message_nodes "
-            "WHERE session_id = ? AND node_id = ?",
-            (sid, head),
-        ).fetchone()
-        chat = r[0] if r else None
-    if chat is None:
+    if head is None or head[0]:
         # rowid, not node_id: sibling nodes can share an id (a streamed
         # reply is rewritten under the same parent), and ordering ties
         # then pick an arbitrary branch. The last written row is the
         # freshest state either way.
-        r = conn.execute(
-            "SELECT chat_message FROM message_nodes "
+        head = conn.execute(
+            f"SELECT {_DEVIN_HEAD_FIELDS} FROM message_nodes "
             "WHERE session_id = ? ORDER BY rowid DESC LIMIT 1",
             (sid,),
         ).fetchone()
-        if not r:
+        if head is None or head[0]:
             return None, ""
-        chat = r[0]
-    msg = json.loads(chat)
-    role = msg.get("role")
+    _null, role, calls_type, calls, content = head
     if role == "assistant":
-        if msg.get("tool_calls"):
+        # SQLite hands an array or object back as minified JSON text, so
+        # an empty one is exactly ``[]`` or ``{}``; a scalar comes back
+        # as itself and is tested the way Python tests it.
+        if calls_type in ("array", "object"):
+            has_calls = calls not in ("[]", "{}")
+        else:
+            has_calls = bool(calls)
+        if has_calls:
             return "midturn", ""
-        content = msg.get("content")
         return "finished", content if isinstance(content, str) else ""
     if role in ("tool", "user"):
         return "midturn", ""
@@ -559,7 +607,7 @@ def _probe_opencode(session: Session, ctx: dict):
     """(phase, text) from the session's last message.
 
     OpenCode 2.x rows (``session_message``) go through
-    ``opencode_store.v2_phase``; a session with none reads its last
+    ``opencode_store.newest_phase``; a session with none reads its last
     legacy ``message`` row.
 
     The drizzle schema keeps the payload in a JSON ``data`` column: a
@@ -568,15 +616,25 @@ def _probe_opencode(session: Session, ctx: dict):
     is a failure and any other value closes the turn. The reply text
     lives in the message's ``part`` rows, newest first.
     """
-    conn = ctx.get("opencode_conn")
+    return _opencode_phase(session, ctx, "opencode_conn")
+
+
+def _opencode_phase(session: Session, ctx: dict, key: str):
+    """``_probe_opencode`` against the connection at ``ctx[key]``."""
+    conn = ctx.get(key)
     if conn is None:
         return None, ""
     sid = session.session_id
+    # The store's table shape is read once per connection per pass, not
+    # with two ``PRAGMA table_info`` calls for every session.
+    shapes = ctx.setdefault("opencode_v2_shape", {})
+    if key not in shapes:
+        shapes[key] = opencode_store.v2_shape(conn)
     # OpenCode 2.x keeps new turns only in ``session_message``; when the
     # session has a decisive row there, the newest decides. Bookkeeping
     # alone (a model switch on a migrated session) leaves the legacy rows'
     # verdict standing.
-    phase = opencode_store.v2_phase(opencode_store.v2_rows(conn, sid, newest=_OPENCODE_V2_WINDOW))
+    phase = opencode_store.newest_phase(conn, sid, _OPENCODE_V2_WINDOW, shapes[key])
     if phase[0] is not None:
         return phase
     row = conn.execute(
@@ -617,7 +675,7 @@ def _probe_opencode(session: Session, ctx: dict):
 
 def _probe_kilo(session: Session, ctx: dict):
     """Kilo is an opencode fork: same drizzle schema, different db path."""
-    return _probe_opencode(session, {"opencode_conn": ctx.get("kilo_conn")})
+    return _opencode_phase(session, ctx, "kilo_conn")
 
 
 # Cline 3.x session metadata (``data/sessions/<id>/<id>.json``) carries a
@@ -646,31 +704,60 @@ def _cline_meta_path(session_id: str) -> str:
     )
 
 
-def _cline_pid_alive(session_id: str) -> bool:
+def _cline_pid_alive(session_id: str, ctx: dict | None = None) -> bool:
     """True when the session metadata's ``pid`` still names a process.
 
     ``started_at`` never moves past session start, so the timestamp
     window alone would call every turn older than two minutes dead;
-    the recorded pid is the real liveness signal.
+    the recorded pid is the real liveness signal. A ``ctx`` whose probe
+    already read the metadata this pass supplies that read's pid.
     """
-    try:
-        with open(_cline_meta_path(session_id), encoding="utf-8") as fh:
-            pid = json.load(fh).get("pid")
-    except Exception:
-        return False
+    pids = ctx.get("cline_pids", {}) if ctx is not None else {}
+    if session_id in pids:
+        pid = pids[session_id]
+    else:
+        meta = _cline_meta(session_id)
+        pid = meta.get("pid") if meta is not None else None
     return isinstance(pid, int) and _pid_alive(pid)
 
 
-def _cline_last_assistant_text(session_id: str) -> str:
-    path = os.path.join(
+def _cline_meta(session_id: str) -> dict | None:
+    """The session metadata file's object, or ``None``."""
+    try:
+        with open(_cline_meta_path(session_id), encoding="utf-8") as fh:
+            meta = json.load(fh)
+    except Exception:
+        return None
+    return meta if isinstance(meta, dict) else None
+
+
+def _cline_messages_path(session_id: str) -> str:
+    return os.path.join(
         os.path.expanduser("~/.cline/data/sessions"),
         session_id,
         session_id + ".messages.json",
     )
+
+
+def _cline_last_assistant_text(session_id: str) -> str:
     try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except Exception:
+        return _cline_read_text(_cline_messages_path(session_id))
+    except OSError:
+        return ""
+
+
+def _cline_read_text(path: str) -> str:
+    """The last assistant text of the messages file's final turn.
+
+    ``OSError`` from opening or reading the file propagates, so a cached
+    caller never stores what a failed read returned; bytes that do not
+    decode are the file's own answer, "".
+    """
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    try:
+        data = json.loads(raw)
+    except (ValueError, RecursionError):
         return ""
     messages = data.get("messages") if isinstance(data, dict) else None
     if not isinstance(messages, list):
@@ -701,21 +788,45 @@ def _probe_cline(session: Session, ctx: dict):
     so ``needs_followup`` can tell a question from a sign-off. Legacy
     ``taskHistory.json`` sessions have no metadata file and stay unknown.
     """
-    try:
-        with open(
-            _cline_meta_path(session.session_id), encoding="utf-8"
-        ) as fh:
-            meta = json.load(fh)
-    except Exception:
-        return None, ""
-    if not isinstance(meta, dict):
-        return None, ""
-    phase = _CLINE_PHASES.get(meta.get("status"))
-    if phase is None:
-        return None, ""
+    phase = _cline_phase(session.session_id, ctx)
     if phase == "finished":
         return "finished", _cline_last_assistant_text(session.session_id)
     return phase, ""
+
+
+def _cline_phase(session_id: str, ctx: dict) -> str | None:
+    """The metadata ``status`` as a phase; its ``pid`` is kept in ``ctx``
+    so the liveness check later in the pass does not read the file again."""
+    meta = _cline_meta(session_id)
+    if meta is None:
+        return None
+    ctx.setdefault("cline_pids", {})[session_id] = meta.get("pid")
+    return _CLINE_PHASES.get(meta.get("status"))
+
+
+def _cline_verdict(session: Session, ctx: dict) -> tuple:
+    """``_verdict`` for Cline: ``_probe_cline`` with the follow-up cached.
+
+    The small metadata file is read on every pass, since its status moves
+    without the messages file changing. Whether the final turn asks the
+    user something depends only on ``<id>.messages.json``, which can run
+    to megabytes, so it is cached against that file's signature in the
+    pass's status cache.
+    """
+    sid = session.session_id
+    phase = _cline_phase(sid, ctx)
+    if phase != "finished":
+        return phase, False
+    path = _cline_messages_path(sid)
+    try:
+        followup = parse_cache.lookup_in(
+            ctx.get("tail_cache"), "cline", path,
+            lambda: needs_followup(_cline_read_text(path)),
+            valid=lambda value: isinstance(value, bool),
+        )
+    except OSError:
+        followup = False
+    return "finished", followup
 
 
 def _pi_transcript(session: Session, ctx: dict) -> str:
@@ -789,6 +900,12 @@ _TAIL_PROBES = {
     _probe_pi: (_pi_transcript, _pi_walk),
 }
 
+# Probes with a verdict function of their own, which caches the part of
+# the answer that comes from one file's bytes. Keyed the same way.
+_VERDICT_PROBES = {
+    _probe_cline: _cline_verdict,
+}
+
 
 def transcript_path(session: Session, ctx: dict) -> str:
     """The file ``session``'s tail probe reads, or "" when its harness
@@ -820,6 +937,9 @@ def _verdict(session: Session, probe, ctx: dict) -> tuple:
     transcript is unchanged; the clock, live pids and job states are
     applied by the caller on every run.
     """
+    own = _VERDICT_PROBES.get(probe)
+    if own is not None:
+        return own(session, ctx)
     tail = _TAIL_PROBES.get(probe)
     if tail is None:
         phase, text = probe(session, ctx)
@@ -987,7 +1107,7 @@ def _one_status(session: Session, now: float, ctx: dict) -> str:
                 session.session_id, _ctx_devin_host_pids(ctx)
             )
         elif session.tool_name == "cline":
-            alive = alive or _cline_pid_alive(session.session_id)
+            alive = alive or _cline_pid_alive(session.session_id, ctx)
         return ACTIVE if alive else INTERRUPTED
     if phase == "finished":
         if session.tool_name == "claude":

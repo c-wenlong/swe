@@ -50,7 +50,7 @@ under those names.
 |---|---|---|---|---|
 | `cache/session_cache.json` | swe | JSON `{cached_at, sessions}` | all parsed sessions | 60s; `invalidate_cache()`; bypassed with `use_cache=False` (`swe session` itself always reparses) |
 | `cache/session_parse_cache.json` | swe | JSON `{version, entries: {"<harness>:<what>": {abs path: [[size, mtime_ns, ctime_ns, ino], value]}}}`, mode 600 | what each transcript (and freebuff `run-state.json`) says on its own: cwd, title, title source, cursor tool paths, claude handoff target | per file: a changed stat signature re-reads it; `version` holds format, package version and a hash of the parser modules, so any code change discards it; entries a harness's parser no longer visits are pruned when it ran; sidecars (codex index and thread store, cursor `meta.json`) are read fresh every run |
-| `cache/session_status_cache.json` | swe | JSON `{version, entries: {"<harness>": {abs path: [[size, mtime_ns, ctime_ns, ino], [phase, followup]]}}}`, mode 600 | what each transcript's tail decides for the `swe session` status column (claude, codex, cursor, pi) | per file, like the parse cache; `version` hashes `status.py` and `parse_cache.py`; an entry goes once its file is gone |
+| `cache/session_status_cache.json` | swe | JSON `{version, entries: {"<harness>": {abs path: [[size, mtime_ns, ctime_ns, ino], [phase, followup]]}}}`, mode 600 | what each transcript's tail decides for the `swe session` status column (claude, codex, cursor, pi), plus `"cline"` entries whose value is the bare followup boolean of a `<id>.messages.json` | per file, like the parse cache; `version` hashes `status.py` and `parse_cache.py`; an entry goes once its file is gone |
 | `cache/session_model_cache.json` | swe (hub and satellite catalog) | JSON `{version, entries: {"<harness>:model": {abs path: [[size, mtime_ns, ctime_ns, ino], "<model>"]}}}`, mode 600 | the model of each transcript's newest reply, for the remote session rows' `model` (claude, codex, pi) | per file, like the status cache; `version` hashes `session_model.py`, `recent_models.py`, `protocol.py` and `parse_cache.py`; an entry goes once its file is gone |
 | `cache/task_states.json` | swe (hub) | JSON `{states: {"<task id>": {state, pr}}}`, mode 600 | the last state each stored task's source reported (`pr` is the brief an issue's branch PR or a pull's own PR carries), so `GET /v1/tasks` serves a task the sources can't read this round as `state_source: cached` | written only when a fresh source read changes a stored task's `{state, pr}`, never on a quiet poll; a read that couldn't see the PR (the branch lookup failed, or only the open list saw the issue) keeps the remembered `pr` unless it was an open PR the open list no longer shows; a write drops tasks `tasks.json` no longer holds; corrupt or missing reads as empty |
 | `cache/session_counts.json` | swe | JSON per window (`"7"`, `"30"`, `"100"`, `"all"`) | session counts + broken parser names | 24h, `SWE_SESSION_COUNTS_TTL`; `invalidate_counts_cache()`; rebuilt on `swe list` |
@@ -121,20 +121,24 @@ resolve through today's list; rates come from the catalog's history). `msg`, `he
   per-file scan position; a scan commits events and cursor in one
   transaction so a crash cannot double-count.
 
-Indexes: `events_ts(ts)`, `events_msg(msg) WHERE msg IS NOT NULL`, plus the
-`dims` UNIQUE index and the `path`/`key` primary keys. Every hot query is
-covered: range scans use `events_ts`, the dims join is a rowid lookup, and
-`ORDER BY ts, key` is satisfied by `events_ts` since rowid is the implicit
-last index column. `GROUP BY d.*` uses a temp b-tree, unavoidable without
-denormalizing.
+Indexes: `events_ts_cover(ts, dim, input, output, cache_read, cache_write,
+cache_write_1h, reasoning, session_total, cost)`, `events_dim(dim)`,
+`events_msg(msg) WHERE msg IS NOT NULL`, plus the `dims` UNIQUE index and
+the `path`/`key` primary keys. Rows sit in `key` (hash) order, so a range
+read through a plain `ts` index paid a table lookup per row scattered over
+the file; the covering index answers range reads alone and replaced
+`events_ts` (#1568). `groups()` groups in two passes: events by integer
+`dim` and price inputs first, then only those groups join `dims` and merge
+by the strings asked for, which roughly halves its CPU again.
 
 ```
-groups()          SEARCH e USING INDEX events_ts (ts>? AND ts<?) + PK join + temp b-tree group
-events(in:)       SEARCH e USING INDEX events_ts (ts>? AND ts<?) + PK join
+groups()          SEARCH e USING COVERING INDEX events_ts_cover (ts>? AND ts<?) + temp b-tree group by dim, then PK join + group
+groups(harness:)  SEARCH e USING INDEX events_dim (dim=?) over the harness's dims + temp b-tree group
+events(in:)       SEARCH e USING COVERING INDEX events_ts_cover (ts>? AND ts<?) + PK join + sort of ts ties by key
 selectByMessage   SEARCH events USING COVERING INDEX events_msg (msg=?)
 selectDim         SEARCH dims USING COVERING INDEX sqlite_autoindex_dims_1 (all six cols)
 cursor(for:)      SEARCH cursors USING INDEX sqlite_autoindex_cursors_1 (path=?)
-MAX(ts)           SEARCH events USING COVERING INDEX events_ts
+MAX(ts)           SEARCH events USING COVERING INDEX events_ts_cover
 ```
 
 ### Migration history
