@@ -1176,6 +1176,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it. The activity always ended with each run, so App Nap was only off
   while a child ran, never for the whole app. Closes
   [#1540](https://github.com/c-wenlong/swe/issues/1540).
+- **A snapshot session whose store can't be found no longer costs a
+  read attempt every poll.** When a Cline, Continue, Gemini, Copilot,
+  Forge or Crush read found no source files or a store it couldn't read,
+  the tailer had no change token to keep and tried a whole read on every
+  poll, every second for an active session. It now waits 1 s, then 2, 4 and so on up
+  to a minute between attempts, and goes back to the stat check once the
+  files exist. Copilot and Crush tail reads also stop at the newest 1,000
+  turns or rows instead of reading the whole session; the other stores
+  keep one JSON document per session, which has to be parsed whole.
+  Closes [#1526](https://github.com/c-wenlong/swe/issues/1526).
+
 - **The usage ledger reads only new Devin and OpenCode rows.** Any
   write to Devin's `sessions.db` or its WAL made the next scan (each
   web Overview load after the 60 s cache, and every satellite usage
