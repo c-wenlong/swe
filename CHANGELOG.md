@@ -1167,6 +1167,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The Mac app's background polls no longer keep the Mac awake.**
+  Every `swe` the app ran held a user-initiated activity, which also
+  blocks idle system sleep while the child runs, so the GitHub poll, the
+  3 s pair-request poll on Remote settings and the account, feed and
+  limit refreshes each held it off several times a minute. Polls and
+  timers now run their `swe` with no activity; runs from a button keep
+  it. The activity always ended with each run, so App Nap was only off
+  while a child ran, never for the whole app. Closes
+  [#1540](https://github.com/c-wenlong/swe/issues/1540).
 - **The usage ledger reads only new Devin and OpenCode rows.** Any
   write to Devin's `sessions.db` or its WAL made the next scan (each
   web Overview load after the 60 s cache, and every satellite usage

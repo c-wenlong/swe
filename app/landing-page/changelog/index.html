@@ -1293,6 +1293,16 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The Mac app's background polls no longer keep the Mac awake.</strong>
+Every <code>swe</code> the app ran held a user-initiated activity, which also
+blocks idle system sleep while the child runs, so the GitHub poll, the
+3 s pair-request poll on Remote settings and the account, feed and
+limit refreshes each held it off several times a minute. Polls and
+timers now run their <code>swe</code> with no activity; runs from a button keep
+it. The activity always ended with each run, so App Nap was only off
+while a child ran, never for the whole app. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1540">#1540</a>.</p>
+</li>
 <li><p><strong>The usage ledger reads only new Devin and OpenCode rows.</strong> Any
 write to Devin's <code>sessions.db</code> or its WAL made the next scan (each
 web Overview load after the 60 s cache, and every satellite usage
