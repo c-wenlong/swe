@@ -361,6 +361,9 @@ struct GitHubNotifierTests {
         var seen = runs.makeAsyncIterator()
         let task = Task { await notifier.keepFresh(swe: { swe }) }
         _ = await seen.next()
+        // The first poll done and the loop asleep on the slow pace.
+        for _ in 0..<10_000 where !notifier.isNapping { await Task.yield() }
+        try #require(notifier.isNapping)
         // Two minutes on, hidden with banners off: the 15 minute pace
         // still has the poll asleep. The window showing wakes it, and
         // the minute pace says it is due.

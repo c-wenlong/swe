@@ -47,6 +47,8 @@ final class GitHubNotifier {
     }
 
     @ObservationIgnored private var napping: Task<Void, Never>?
+    /// Whether the loop sits between polls; tests wait on it.
+    var isNapping: Bool { napping != nil }
     /// The wall clock; tests set a fake.
     @ObservationIgnored var now: () -> Date = Date.init
 
