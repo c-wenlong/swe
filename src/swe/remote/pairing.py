@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
-from swe.paths import atomic_write_text, remote_dir_for
+from swe.paths import atomic_write_text, read_json_shared, remote_dir_for
 from swe.remote.protocol import url_host
 
 # A pairing token is worthless within minutes of `swe remote pair`.
@@ -124,6 +124,20 @@ def load_devices(home: Path | str | None = None) -> dict[str, dict]:
     data = _read_json(devices_file(home), {"devices": {}})
     devices = data.get("devices")
     return devices if isinstance(devices, dict) else {}
+
+
+def _devices_of(data: object) -> dict[str, dict]:
+    devices = data.get("devices") if isinstance(data, dict) else None
+    return devices if isinstance(devices, dict) else {}
+
+
+def peek_devices(home: Path | str | None = None) -> dict[str, dict]:
+    """``load_devices`` for readers, parsed again only when devices.json
+    changes. Shared: never mutate it or save it back."""
+    try:
+        return read_json_shared(devices_file(home), _devices_of)
+    except Exception:
+        return {}
 
 
 def _save_devices(home: Path | None, devices: dict[str, dict]) -> None:
@@ -443,7 +457,7 @@ def device_for_credential(
     if not credential:
         return None
     digest = _hash_credential(credential)
-    for device_id, row in load_devices(home).items():
+    for device_id, row in peek_devices(home).items():
         if row.get("revoked_at"):
             continue
         if hmac.compare_digest(
@@ -569,21 +583,34 @@ def revoke_device(home: Path | str | None, device_id: str) -> bool:
 # changes but not removing the node from the tailnet.
 
 
-def _read_signins(home: Path | str | None) -> dict[str, dict] | None:
+def _signins_of(data: object) -> dict[str, dict] | None:
+    rows = data.get("signins") if isinstance(data, dict) else None
+    if not isinstance(rows, dict):
+        return None
+    return {k: v for k, v in rows.items() if isinstance(v, dict)}
+
+
+def _read_signins(home: Path | str | None,
+                  shared: bool = False) -> dict[str, dict] | None:
     """The sign-in rows; ``{}`` when the file doesn't exist yet, None
     when it exists but can't be read or parsed. A damaged file must not
-    read as "nothing revoked"."""
+    read as "nothing revoked". ``shared`` reads through the memo: only
+    for callers that never mutate the rows."""
     path = signins_file(home)
     try:
+        if shared:
+            return read_json_shared(path, _signins_of)
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
     except (OSError, ValueError):
         return None
-    rows = data.get("signins") if isinstance(data, dict) else None
-    if not isinstance(rows, dict):
-        return None
-    return {k: v for k, v in rows.items() if isinstance(v, dict)}
+    return _signins_of(data)
+
+
+def peek_signins(home: Path | str | None = None) -> dict[str, dict]:
+    """``load_signins`` for readers, through the memo. Never mutate it."""
+    return _read_signins(home, shared=True) or {}
 
 
 def load_signins(home: Path | str | None = None) -> dict[str, dict]:
@@ -601,7 +628,7 @@ def signin_revoked(home: Path | str | None, node_id: str) -> bool:
     """True when the owner revoked this tailnet node's sign-in, and for
     every node while the file can't be read: owner devices then pair
     like anyone else rather than a revoked phone getting back in."""
-    rows = _read_signins(home)
+    rows = _read_signins(home, shared=True)
     return rows is None or bool((rows.get(node_id) or {}).get("revoked_at"))
 
 
@@ -641,7 +668,7 @@ def note_signin(
         return bool(row.get("revoked_at")) or (
             seen is not None and now - float(seen) < SIGNIN_TOUCH_S)
 
-    rows = _read_signins(home)
+    rows = _read_signins(home, shared=True)
     if rows is None or fresh(rows.get(node_id) or {}):
         return
     home_path = Path(home) if home is not None else None
@@ -1003,7 +1030,7 @@ def node_revoked(home: Path | str | None, node_id: str) -> bool:
     if signin_revoked(home, node_id):
         return True
     newest = None
-    for row in load_devices(home).values():
+    for row in peek_devices(home).values():
         if row.get("tailscale_node") != node_id:
             continue
         if newest is None or (row.get("created_at") or 0) >= (
