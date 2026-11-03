@@ -223,22 +223,33 @@ def parse_devin():
     or after ``created_at`` belong to the session.
     """
 
+    # Every session's prompts in one query on first use, instead of one
+    # query per session. The ``created_at`` bound is applied in SQL, with
+    # the same rule the per-row read used: a non-numeric value counts as 0.
+    by_session: dict[str, list] = {}
+    loaded: list[bool] = []
+
+    def prompts_of(conn, sid):
+        if not loaded:
+            for session_id, content in conn.execute(
+                "SELECT p.session_id, p.content FROM prompt_history p "
+                "JOIN sessions s ON s.id = p.session_id "
+                "WHERE p.is_shell = 0 AND p.timestamp >= CASE "
+                "WHEN typeof(s.created_at) IN ('integer', 'real') "
+                "THEN s.created_at ELSE 0 END "
+                "ORDER BY p.session_id, p.timestamp, p.id"
+            ):
+                by_session.setdefault(session_id, []).append(content)
+            loaded.append(True)
+        return by_session.get(sid, ())
+
     def enrich(conn, row, fields):
         sid = fields.get("session_id")
         if not sid:
             return
-        created_at = row[4] if len(row) > 4 else None
-        if not isinstance(created_at, (int, float)) or isinstance(created_at, bool):
-            created_at = 0
-        prompts = conn.execute(
-            "SELECT content FROM prompt_history "
-            "WHERE session_id = ? AND is_shell = 0 AND timestamp >= ? "
-            "ORDER BY timestamp, id",
-            (sid, created_at),
-        ).fetchall()
         first_prompt = ""
         renamed_to = ""
-        for (content,) in prompts:
+        for content in prompts_of(conn, sid):
             text = str(content or "")
             match = _DEVIN_RENAME_RE.match(text)
             if match:
@@ -1379,6 +1390,9 @@ def parse_cline():
             ),
             get_ts=lambda e, _f: parse_iso_ts(e.get("started_at")),
             require_path=True,
+            # The glob also matches every <id>.messages.json transcript,
+            # which can run to megabytes: parse each file once per change.
+            cache=True,
         )
     )
     sessions += parse_json_store(

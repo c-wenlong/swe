@@ -1293,6 +1293,117 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The hub's approval watcher reads the supervised registry once per
+pass.</strong> Every 3 s it opened and parsed <code>supervised.json</code> once for each
+tailed session (up to 100), and again for each tmux-attached one to
+name its pane. It now reads the file once per pass and takes the pane
+name from the same row. With nothing attached it spawned no <code>tmux</code>
+before and spawns none now. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1530">#1530</a>.</p>
+</li>
+<li><p><strong>Devin change checks cost microseconds instead of milliseconds.</strong>
+Every poll of a tailed Devin session opened a new connection to
+<code>sessions.db</code> and counted the session's rows: 13 to 22 ms a call for a
+37K to 52K-node session on a 9.8 GB store. The hub now keeps one
+read-only connection and asks SQLite's <code>data_version</code> whether anything
+committed. When nothing did, no query runs (0.02 ms); after a write it
+reads the newest row id and chain head (0.03 to 0.3 ms). The row count,
+which catches a delete below the newest row, is read again at most once
+a minute per session. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1521">#1521</a>.</p>
+</li>
+<li><p><strong>The Mac app keeps fewer things in memory for its whole life.</strong>
+Switching machines kept a live web view and WebContent process for
+every hub ever shown; only the last two shown stay now, and an older
+one reloads when picked. The Calendar's day cache stops at 400 days,
+dropping the days farthest from the ones on show, so scrolling back
+through years no longer grows it without end. The Sessions page lists
+at most 20,000 sessions instead of 100,000, with the existing note
+when older ones are left out. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1544">#1544</a>.</p>
+</li>
+<li><p><strong>The hub stops re-parsing its small stores on every request.</strong> The
+credential check, an open stream's revocation check, the session
+list's unread flags and the machine list read <code>devices.json</code>, the
+sign-ins file, <code>session_reads.json</code> (twice per session list) and
+<code>machines.json</code> from disk each time. They now share one memo that
+parses a file again only when it changes: a session list over 2,000
+read cursors went from 1.8 ms to 0.7 ms, and a credential check from
+37 to 11 us. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1528">#1528</a>.</p>
+</li>
+<li><p><strong>The Mac app's background polls no longer keep the Mac awake.</strong>
+Every <code>swe</code> the app ran held a user-initiated activity, which also
+blocks idle system sleep while the child runs, so the GitHub poll, the
+3 s pair-request poll on Remote settings and the account, feed and
+limit refreshes each held it off several times a minute. Polls and
+timers now run their <code>swe</code> with no activity; runs from a button keep
+it. The activity always ended with each run, so App Nap was only off
+while a child ran, never for the whole app. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1540">#1540</a>.</p>
+</li>
+<li><p><strong>The Mac app's ledger ticks cost about a third of the CPU they did.</strong>
+A background scan now counts as new usage only when it wrote a usage
+event, not when it merely read a file, so a tick that appended prompts
+or tool output rebuilds nothing. Ticks that do write usage read less:
+a covering index answers the time-range reads without a table lookup
+per row, grouped reads group by dimension id before joining names, and
+Codex's account comparison reads only Codex rows. Measured against a
+copy of a 415,000-event ledger, one ingest tick went from about 6.4 to
+2.0 CPU-seconds. Closes <a href="https://github.com/c-wenlong/swe/issues/1568">#1568</a>.</p>
+</li>
+<li><p><strong>The hub slows down while nobody is watching.</strong> With no client
+stream open (the ntfy notifier holds one whenever it can push;
+satellite command streams don't count) and no client request for two
+minutes, <code>swe remote serve</code> polls
+active sessions every 5 s instead of 1 s and idle ones every 60 s
+instead of 8 s, refreshes the catalog every 60 s instead of 10 s, and
+ticks its tail loop once a second instead of four times. Transcripts
+stay on disk, so this only delays the journal's copy. The next client
+request ends it at once: every tailer polls, the catalog refreshes, and
+the first <code>/v1/sessions</code> or <code>/v1/inbox</code> read waits up to 5 s for that
+refresh instead of serving a minute-old list. An unwatched hub on this
+Mac used about 8% of a core, split about evenly between the catalog
+and tail threads. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1520">#1520</a>.</p>
+</li>
+<li><p><strong><code>swe</code> starts faster: each command imports only its own code.</strong>
+<code>cli.py</code> imported every command's module tree before dispatching, so
+<code>import swe.cli</code> took about 330 ms on a loaded machine, nearly all of
+a <code>swe version</code> run, and every <code>swe</code> the Mac app spawns paid it. Each
+command now imports its module when it runs, which brings
+<code>import swe.cli</code> to about 33 ms. A rate limits call also reads its
+cache file once instead of five times, and <code>swe list</code> reads
+config.json's <code>list</code> section once instead of three times. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1536">#1536</a>.</p>
+</li>
+<li><p><strong>The status column reads less per session.</strong> OpenCode's probe
+pulled the full JSON of a session's newest 50 messages and ran two
+<code>PRAGMA table_info</code> reads for every session; it now reads the table
+shape once per pass, picks the deciding row by type, and loads only
+that row's JSON. Devin's probe lets SQLite pull the role, tool calls
+and text out of the head message instead of decoding all of it.
+Cline caches the follow-up check against its <code>messages.json</code>
+signature and reads the metadata file once per pass, and the tail
+probes decode JSONL lines newest-first only until the walk decides.
+CPU per pass here: OpenCode 381 sessions about 66 to 50 ms, Devin
+216 sessions about 10 to 6 ms, a 64 KB transcript tail walk about
+half. Closes <a href="https://github.com/c-wenlong/swe/issues/1535">#1535</a>.</p>
+</li>
+<li><p><strong>The Mac app's Compute sampler runs at full rate only while a
+trend view is on screen.</strong> It used to sweep every process, the GPU
+clients and the SMC at the chosen interval (3 s on one Mac) for as
+long as the app ran, about 80 ms of CPU per sweep with 700 processes.
+The Compute page, the menu bar's Compute tab and the Widgets page's
+Compute preview now ask for the full rate while their window can be
+seen. Otherwise the sampler reads only what auto clean (processes),
+the fan threshold (temperatures) and a placed Compute widget need,
+every 30 s, and nothing at all when none of them is on. The page's
+own three-second refresh also stops while its window is minimised or
+covered, the temperature reads keep one SMC connection, and process
+attribution works each pid's harness out once. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1539">#1539</a>.</p>
+</li>
 <li><p><strong>The iPhone chat stops re-parsing a streaming reply from the top.</strong>
 Every 80 ms repaint of a reply still being written parsed the whole
 reply twice (once for the text, once for its link cards), styled every
@@ -1563,9 +1674,50 @@ its command and settings file, where it's linked, and the script in a
 raw editor. <code>swe hooks list --json</code> rows now carry <code>summary</code> and
 <code>detail</code> for it.</p>
 </li>
+<li><p><strong>An SSE reconnect replays from the journal's end.</strong> <code>read_since</code>
+parsed a session's whole journal front to back on every reconnect,
+even when the client was a few events behind: 31 to 36 ms for a
+4.4 MB, 3,519-event journal here. It now walks back from the end and
+stops at the client's cursor, in 0.2 ms for 5 events and 0.4 ms for
+100. A full replay (<code>last=0</code>) still reads the file once, forward.
+Appends encode each line once for both the write and the byte count.
+Closes <a href="https://github.com/c-wenlong/swe/issues/1529">#1529</a>.</p>
+</li>
+<li><p><strong>The status and model caches stop stat'ing every entry on each
+rewrite.</strong> The hub's status probes rewrite <code>session_status_cache.json</code>
+up to once a second while a session is busy, and every rewrite checked
+each of its 1,000 entries for a deleted file: about 5 of the 6.5 ms
+per rewrite here. That sweep now runs at most every 5 minutes per
+cache file in a process; a deleted file's entry just waits for the
+next one. A process-resident store was not worth it: the cache files
+are 210 to 245 KB here (not 10 to 50 MB) and load in about 1 ms.
+Closes <a href="https://github.com/c-wenlong/swe/issues/1527">#1527</a>.</p>
+</li>
+<li><p><strong>Session listings read Devin prompts once and Cline files once per
+change.</strong> Devin's title provenance ran one <code>prompt_history</code> query per
+session (210 here); it now runs one for all of them. Cline's session
+glob also matches every <code>&lt;id&gt;.messages.json</code> transcript, which a cold
+listing parsed in full every time (about 3 ms per 2 MB file); each file
+now goes through the parse cache, so an unchanged one costs a <code>stat</code>.
+<code>json_engine</code> joins the parse cache's fingerprint. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1534">#1534</a>.</p>
+</li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong><code>build_ios.sh</code> reaches a real iPhone and a named signing team.</strong>
+The device picker took the first paired iOS device <code>devicectl</code>
+reported, which could be a simulator (it reports <code>paired</code> like a real
+phone), so a connected iPhone was passed over; the filter now also
+requires <code>reality == &quot;physical&quot;</code>. And <code>DEVELOPMENT_TEAM</code> ships empty
+in <code>project.yml</code> with no override path, so device builds always died
+on &quot;requires a development team&quot; — the script now takes
+<code>SWE_DEVELOPMENT_TEAM</code> and passes it to xcodebuild. The README's
+claim that automatic signing registers the App Group was wrong for
+entitlements-file groups, so the fresh-team portal steps (create the
+group, assign it on each App ID, purge stale profiles) are
+documented.</p>
+</li>
 <li><p><strong>The remote hub no longer drops a browser's parallel asset fetches,
 which left the web app a blank shell behind <code>tailscale serve</code>.</strong> A
 page load fires all of its script requests at once, and serve opens a
