@@ -258,6 +258,9 @@ public enum ThermalKeys {
 public struct MacTemperatureSampler: TemperatureSampling {
     private let keys: [ThermalComponent: [String]]
     private let hid: any TemperatureSampling
+    /// One AppleSMC connection for every read, rather than an
+    /// IOServiceOpen and close per tick.
+    private let smc = SMCSession()
 
     public init(brand: String = MacTemperatureSampler.brand(), hid: any TemperatureSampling = HIDTemperatureSampler()) {
         keys = ThermalKeys.keys(forBrand: brand)
@@ -277,10 +280,16 @@ public struct MacTemperatureSampler: TemperatureSampling {
     static let hidComponents: Set<ThermalComponent> = [.cpu, .battery, .ssd]
 
     public func read() -> TemperatureReading? {
-        let smc = AppleSMC()
-        let temperatures = smc.flatMap { ThermalKeys.read(keys, from: $0) }
-        guard var reading = Self.combine(temperatures, hid: hid.read) else { return nil }
-        reading.fans = smc.flatMap { FanSummary.from(FanKeys.read($0)) }
+        let keys = keys
+        // Nothing at all from the SMC counts as a failed read, so a
+        // connection gone bad is reopened next tick.
+        let read = smc.with { smc -> (TemperatureReading?, FanSummary?)? in
+            let temperatures = ThermalKeys.read(keys, from: smc)
+            let fans = FanSummary.from(FanKeys.read(smc))
+            return temperatures == nil && fans == nil ? nil : (temperatures, fans)
+        }
+        guard var reading = Self.combine(read?.0 ?? nil, hid: hid.read) else { return nil }
+        reading.fans = read?.1
         return reading
     }
 
@@ -294,5 +303,34 @@ public struct MacTemperatureSampler: TemperatureSampling {
         let fallback = hidComponents.isSubset(of: answered) ? nil : hid()
         guard temperatures != nil || fallback != nil else { return nil }
         return (temperatures ?? TemperatureReading([:])).filling(from: fallback)
+    }
+}
+
+/// A long-lived AppleSMC connection, opened on first use and shared by
+/// every read under a lock. A read that gets nothing back drops the
+/// connection, so the next one opens a fresh one instead of asking a
+/// dead client again.
+final class SMCSession: @unchecked Sendable {
+    private let lock = NSLock()
+    private var smc: (any SMCAccess)?
+    private let open: () -> (any SMCAccess)?
+    /// How many connections it has opened, for tests.
+    private(set) var opened = 0
+
+    init(open: @escaping () -> (any SMCAccess)? = { AppleSMC() }) {
+        self.open = open
+    }
+
+    func with<T>(_ body: (any SMCAccess) -> T?) -> T? {
+        lock.lock()
+        defer { lock.unlock() }
+        if smc == nil {
+            smc = open()
+            if smc != nil { opened += 1 }
+        }
+        guard let smc else { return nil }
+        let result = body(smc)
+        if result == nil { self.smc = nil }
+        return result
     }
 }
