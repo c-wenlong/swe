@@ -411,8 +411,13 @@ public final class SessionsModel {
     ///     `~/.swe/data/search`.
     ///   - searchIndexingEnabled: overrides the stored
     ///     `searchIndexingEnabled` default (tests); nil reads it.
+    /// The most sessions listed (#1544). Every row stays in memory with
+    /// its usage and project for the app's life; at 100,000 that was tens
+    /// of MB. Past this the page says older sessions are missing.
+    public static let defaultLimit = 20_000
+
     public init(source: SessionListing, ledger: SessionUsageQuerying, defaultHomes: Set<String> = [],
-                limit: Int = 100_000, snapshots: (any SnapshotStoring<SessionSnapshot>)? = nil, maxAge: TimeInterval = 60,
+                limit: Int = SessionsModel.defaultLimit, snapshots: (any SnapshotStoring<SessionSnapshot>)? = nil, maxAge: TimeInterval = 60,
                 listTimeout: Duration = .seconds(60),
                 parents: (@Sendable () async -> [String: SessionParent])? = nil,
                 now: @escaping () -> Date = Date.init, calendar: Calendar = .current,

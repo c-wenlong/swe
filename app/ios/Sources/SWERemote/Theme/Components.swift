@@ -314,6 +314,12 @@ enum WorkingVerbs {
 /// A cycling verb with a light band sweeping diagonally across it — the
 /// shared "the agent is working" readout. The widest verb is laid out
 /// invisibly beside it so a word swap never resizes the pill it sits in.
+///
+/// It stays on screen for a whole agent turn, so it costs almost nothing
+/// per frame: the word swaps on a periodic timeline (one body evaluation
+/// per verb, not per display frame), and each verb's band is one linear
+/// offset animation that SwiftUI interpolates without evaluating a body.
+/// Nothing animates while the word rests unlit.
 struct WorkingVerb: View {
     /// Seconds a verb stays up.
     static let verbSeconds: Double = 2.4
@@ -324,14 +330,11 @@ struct WorkingVerb: View {
     static let bandHalf: Double = 0.26
 
     var body: some View {
-        TimelineView(.animation) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            let index = Int(t / Self.verbSeconds) % WorkingVerbs.all.count
-            let f = t.truncatingRemainder(dividingBy: Self.verbSeconds)
-                / Self.verbSeconds
+        TimelineView(Self.schedule(now: .now)) { context in
+            let index = Self.index(at: context.date)
             ZStack(alignment: .leading) {
                 Text("\(Self.widest)…").opacity(0)
-                shimmering(WorkingVerbs.all[index], sweep: min(1, f / Self.sweepShare))
+                SweepingVerb(word: WorkingVerbs.all[index], since: Self.slotStart(at: context.date))
                     .id(index)
                     .transition(.opacity)
             }
@@ -339,40 +342,139 @@ struct WorkingVerb: View {
         }
     }
 
+    /// One tick per verb, on the same wall-clock boundaries `index(at:)`
+    /// counts, so every tick lands on a new word.
+    static func schedule(now: Date) -> PeriodicTimelineSchedule {
+        let t = now.timeIntervalSinceReferenceDate
+        let start = (t / verbSeconds).rounded(.down) * verbSeconds
+        return .periodic(from: Date(timeIntervalSinceReferenceDate: start), by: verbSeconds)
+    }
+
+    /// The verb on screen at `date`. The small nudge keeps a tick that
+    /// lands on a boundary from rounding down to the previous verb.
+    static func index(at date: Date) -> Int {
+        let slot = slot(at: date)
+        let n = WorkingVerbs.all.count
+        return ((slot % n) + n) % n
+    }
+
+    /// When the verb on screen at `date` came up.
+    static func slotStart(at date: Date) -> Date {
+        Date(timeIntervalSinceReferenceDate: Double(slot(at: date)) * verbSeconds)
+    }
+
+    private static func slot(at date: Date) -> Int {
+        Int((date.timeIntervalSinceReferenceDate / verbSeconds + 1e-6).rounded(.down))
+    }
+
+    /// How far the band is across a verb that came up at `since`, at
+    /// `now`: 0 as it comes up, 1 once it has crossed and the word rests.
+    /// The pill can appear partway through a verb; its band then starts
+    /// where it would be, not back at the left.
+    static func sweep(since: Date, now: Date) -> Double {
+        let elapsed = max(0, now.timeIntervalSince(since))
+        return min(1, elapsed / (verbSeconds * sweepShare))
+    }
+
     /// The verb that pins the pill's width.
     private static var widest: String {
         WorkingVerbs.all.max { $0.count < $1.count } ?? "Working"
     }
+}
 
-    /// `word` in the quiet colour, its brighter copy revealed only
-    /// inside the sweeping band, with a faint bloom so the sheen reads
-    /// as light rather than a recolour.
-    private func shimmering(_ word: String, sweep: Double) -> some View {
+/// One verb's turn: the band crosses it once, linearly, and stops. It
+/// starts from where the band is when it appears, so a pill that shows
+/// up late in a verb's turn still finishes the sweep on time.
+private struct SweepingVerb: View {
+    let word: String
+    @State private var sweep: Double
+
+    init(word: String, since: Date) {
+        self.word = word
+        _sweep = State(initialValue: WorkingVerb.sweep(since: since, now: .now))
+    }
+
+    var body: some View {
+        VerbShimmer(word: word, sweep: sweep)
+            .onAppear {
+                guard sweep < 1 else { return }
+                let left = (1 - sweep) * WorkingVerb.verbSeconds * WorkingVerb.sweepShare
+                withAnimation(.linear(duration: left)) { sweep = 1 }
+            }
+    }
+}
+
+/// `word` in the quiet colour, its brighter copy revealed only inside a
+/// diagonal band, with a faint bloom so the sheen reads as light rather
+/// than a recolour. `sweep` puts the band between off-left (0) and
+/// off-right (1).
+///
+/// The band is a fixed gradient on a strip three words wide, slid by an
+/// offset that is linear in `sweep`. Animating `sweep` therefore animates
+/// only the offset, which SwiftUI interpolates frame by frame on its own;
+/// the band's stops are never rebuilt mid-sweep.
+struct VerbShimmer: View {
+    let word: String
+    let sweep: Double
+
+    var body: some View {
         Text("\(word)…")
             .foregroundStyle(Theme.textSecondary)
             .overlay {
                 Text("\(word)…")
                     .foregroundStyle(Theme.textPrimary)
                     .shadow(color: Theme.textPrimary.opacity(0.5), radius: 3)
-                    .mask(band(at: sweep))
+                    .mask {
+                        GeometryReader { geometry in
+                            band(size: geometry.size)
+                        }
+                    }
             }
             .accessibilityHidden(true)
     }
 
-    /// A clear→white→clear gradient aimed diagonally, its centre at
-    /// `sweep` between off-left (0) and off-right (1).
-    private func band(at sweep: Double) -> LinearGradient {
-        let half = Self.bandHalf
-        let centre = -half + (1 + half * 2) * sweep
+    /// How many word widths the band's strip spans. It has to reach the
+    /// word's right edge at the leftmost offset.
+    static let stripWidths: Double = 3
+    /// Where the band's centre sits on the strip's own gradient.
+    static let stripCentre: Double = 0.5
+
+    /// The band's centre on the word's diagonal (0 at the top-left corner,
+    /// 1 at the bottom-right), from just off-left to just off-right.
+    static func centre(sweep: Double) -> Double {
+        let half = WorkingVerb.bandHalf
+        return -half + (1 + half * 2) * sweep
+    }
+
+    /// The strip's offset that puts the band's centre at `centre(sweep:)`
+    /// on a word of `size`. A gradient aimed along the word's diagonal
+    /// (w, h) moves by w / (w² + h²) of its length per point it slides
+    /// right, so the offset is the centre's distance from the strip's own
+    /// centre over that.
+    static func offset(sweep: Double, size: CGSize) -> CGFloat {
+        let w = Double(size.width), h = Double(size.height)
+        guard w > 0 else { return 0 }
+        return CGFloat((centre(sweep: sweep) - stripCentre) * (w * w + h * h) / w)
+    }
+
+    /// A clear→white→clear gradient along the word's diagonal, on a strip
+    /// `stripWidths` words wide: the end point sits one word width and one
+    /// word height from the start, so the angle matches the word's own
+    /// diagonal and every stop stays inside 0...1.
+    private func band(size: CGSize) -> some View {
+        let half = WorkingVerb.bandHalf
+        let c = Self.stripCentre
         return LinearGradient(
             stops: [
-                .init(color: .clear, location: max(0, centre - half)),
-                .init(color: .white, location: min(1, max(0, centre))),
-                .init(color: .clear, location: min(1, centre + half)),
+                .init(color: .clear, location: c - half),
+                .init(color: .white, location: c),
+                .init(color: .clear, location: c + half),
             ],
             startPoint: .topLeading,
-            endPoint: .bottomTrailing
+            endPoint: UnitPoint(x: 1 / Self.stripWidths, y: 1)
         )
+        .frame(width: size.width * Self.stripWidths, height: size.height)
+        .offset(x: Self.offset(sweep: sweep, size: size))
     }
 }
 

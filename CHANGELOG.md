@@ -1167,6 +1167,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The web chat parses only the growing end of a streaming reply.**
+  Each repaint (at most every 80 ms) used to run the whole reply through
+  the Markdown parser and syntax highlighter and replace the bubble's
+  HTML. Blocks that end at a blank line are now settled: their nodes
+  stay, and only the text after them is parsed and drawn again, with
+  the same result as a full render. Over a 60 s, 12 KB reply (600
+  paints) that is 18 ms of Markdown work instead of 824 ms, and 133 KB
+  of HTML handed to the DOM instead of 9.5 MB. A delta no longer
+  rebuilds every bubble's text twice to see whether anything changed,
+  and the chat log is no longer a live region, so screen readers hear a
+  finished reply once from a small status node instead of each repaint.
+  Closes [#1555](https://github.com/c-wenlong/swe/issues/1555).
+
+- **The hub's approval watcher reads the supervised registry once per
+  pass.** Every 3 s it opened and parsed `supervised.json` once for each
+  tailed session (up to 100), and again for each tmux-attached one to
+  name its pane. It now reads the file once per pass and takes the pane
+  name from the same row. With nothing attached it spawned no `tmux`
+  before and spawns none now. Closes
+  [#1530](https://github.com/c-wenlong/swe/issues/1530).
+
+- **Devin change checks cost microseconds instead of milliseconds.**
+  Every poll of a tailed Devin session opened a new connection to
+  `sessions.db` and counted the session's rows: 13 to 22 ms a call for a
+  37K to 52K-node session on a 9.8 GB store. The hub now keeps one
+  read-only connection and asks SQLite's `data_version` whether anything
+  committed. When nothing did, no query runs (0.02 ms); after a write it
+  reads the newest row id and chain head (0.03 to 0.3 ms). The row count,
+  which catches a delete below the newest row, is read again at most once
+  a minute per session. Closes
+  [#1521](https://github.com/c-wenlong/swe/issues/1521).
+
+- **The Mac app keeps fewer things in memory for its whole life.**
+  Switching machines kept a live web view and WebContent process for
+  every hub ever shown; only the last two shown stay now, and an older
+  one reloads when picked. The Calendar's day cache stops at 400 days,
+  dropping the days farthest from the ones on show, so scrolling back
+  through years no longer grows it without end. The Sessions page lists
+  at most 20,000 sessions instead of 100,000, with the existing note
+  when older ones are left out. Closes
+  [#1544](https://github.com/c-wenlong/swe/issues/1544).
 - **`swe check` and `swe mcp status` probe side by side.** `swe check`
   asked each installed harness for its version one after another (up to
   three subprocesses each); it now runs them on a small thread pool,
@@ -1265,7 +1306,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skip layout. The same reply now costs 0.9 s, and every prefix parses
   to exactly the blocks a full parse gives. Closes
   [#1548](https://github.com/c-wenlong/swe/issues/1548).
-
 - **A snapshot session whose store can't be found no longer costs a
   read attempt every poll.** When a Cline, Continue, Gemini, Copilot,
   Forge or Crush read found no source files or a store it couldn't read,
@@ -1287,6 +1327,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after new activity reads only the rows past it, in about 3 ms. A
   recreated or rebuilt database is read again from the start. Closes
   [#1524](https://github.com/c-wenlong/swe/issues/1524).
+
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
   newest 1,000 chain nodes anyway. Devin's change token (the session's
@@ -1513,8 +1554,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its command and settings file, where it's linked, and the script in a
   raw editor. `swe hooks list --json` rows now carry `summary` and
   `detail` for it.
+- **An SSE reconnect replays from the journal's end.** `read_since`
+  parsed a session's whole journal front to back on every reconnect,
+  even when the client was a few events behind: 31 to 36 ms for a
+  4.4 MB, 3,519-event journal here. It now walks back from the end and
+  stops at the client's cursor, in 0.2 ms for 5 events and 0.4 ms for
+  100. A full replay (`last=0`) still reads the file once, forward.
+  Appends encode each line once for both the write and the byte count.
+  Closes [#1529](https://github.com/c-wenlong/swe/issues/1529).
+- **The status and model caches stop stat'ing every entry on each
+  rewrite.** The hub's status probes rewrite `session_status_cache.json`
+  up to once a second while a session is busy, and every rewrite checked
+  each of its 1,000 entries for a deleted file: about 5 of the 6.5 ms
+  per rewrite here. That sweep now runs at most every 5 minutes per
+  cache file in a process; a deleted file's entry just waits for the
+  next one. A process-resident store was not worth it: the cache files
+  are 210 to 245 KB here (not 10 to 50 MB) and load in about 1 ms.
+  Closes [#1527](https://github.com/c-wenlong/swe/issues/1527).
+- **Session listings read Devin prompts once and Cline files once per
+  change.** Devin's title provenance ran one `prompt_history` query per
+  session (210 here); it now runs one for all of them. Cline's session
+  glob also matches every `<id>.messages.json` transcript, which a cold
+  listing parsed in full every time (about 3 ms per 2 MB file); each file
+  now goes through the parse cache, so an unchanged one costs a `stat`.
+  `json_engine` joins the parse cache's fingerprint. Closes
+  [#1534](https://github.com/c-wenlong/swe/issues/1534).
+- **The iPhone chat's working pill stops redrawing every frame.** The
+  cycling verb under a working agent ran on a `.animation` timeline,
+  so for the whole turn it rebuilt its gradient mask and glow on every
+  display frame (60 to 120 times a second), including the rest between
+  sweeps. It now swaps the word on a 2.4 s periodic timeline and slides
+  a fixed band with one linear animation per word: about 1,500 body
+  evaluations an hour instead of 216,000 to 432,000, nothing animating
+  while the word rests, and the same picture (the test renders both).
+  The queued-send spinner turns with one repeating rotation instead of
+  its own per-frame timeline. Closes
+  [#1550](https://github.com/c-wenlong/swe/issues/1550).
 
 ### Fixed
+
+- **`build_ios.sh` reaches a real iPhone and a named signing team.**
+  The device picker took the first paired iOS device `devicectl`
+  reported, which could be a simulator (it reports `paired` like a real
+  phone), so a connected iPhone was passed over; the filter now also
+  requires `reality == "physical"`. And `DEVELOPMENT_TEAM` ships empty
+  in `project.yml` with no override path, so device builds always died
+  on "requires a development team" — the script now takes
+  `SWE_DEVELOPMENT_TEAM` and passes it to xcodebuild. The README's
+  claim that automatic signing registers the App Group was wrong for
+  entitlements-file groups, so the fresh-team portal steps (create the
+  group, assign it on each App ID, purge stale profiles) are
+  documented.
 
 - **The remote hub no longer drops a browser's parallel asset fetches,
   which left the web app a blank shell behind `tailscale serve`.** A

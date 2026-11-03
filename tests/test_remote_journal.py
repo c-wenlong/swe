@@ -274,6 +274,58 @@ class TestReadTail(unittest.TestCase):
         self.assertEqual([e["seq"] for e in events], [4996, 4997, 4998, 4999, 5000])
         self.assertLess(len(calls), 400)
 
+    def test_read_since_near_the_head_reads_only_the_end(self):
+        # An SSE reconnect a few events behind must not parse the ring.
+        self._write([{"seq": i, "type": "t", "pad": "x" * 200}
+                     for i in range(1, 5001)])
+        from unittest.mock import patch
+        real = json.loads
+        calls = []
+
+        def counting(raw, *args, **kwargs):
+            calls.append(raw)
+            return real(raw, *args, **kwargs)
+
+        with patch.object(journal_mod.json, "loads", side_effect=counting):
+            events, truncated = self.journal.read_since(self.key, 4995)
+        self.assertEqual([e["seq"] for e in events], [4996, 4997, 4998, 4999, 5000])
+        self.assertFalse(truncated)
+        self.assertLess(len(calls), 400)
+
+    def test_bounded_replay_from_the_start_stops_at_its_limit(self):
+        self._write([{"seq": i, "type": "t"} for i in range(1, 2001)])
+        from unittest.mock import patch
+        real = journal_mod._parse_line
+        calls = []
+
+        def counting(raw):
+            calls.append(raw)
+            return real(raw)
+
+        with patch.object(journal_mod, "_parse_line", side_effect=counting):
+            events, truncated = self.journal.read_since(self.key, 0, limit=3)
+        self.assertEqual([e["seq"] for e in events], [1, 2, 3])
+        self.assertFalse(truncated)
+        self.assertEqual(len(calls), 3)
+
+    def test_read_since_matches_a_forward_read_at_every_cursor(self):
+        # Large multibyte events across chunk boundaries, corrupt lines,
+        # a cut-short last write and a ring that starts at seq 20.
+        records = [{"seq": i, "type": "t", "text": "é漢" * ((i % 7) * 9000)}
+                   for i in range(20, 60)]
+        self._write(records, prefix='not json\n[1, 2]\n{"type": "t"}\n')
+        with open(self.path, "a", encoding="utf-8") as fh:
+            fh.write('{"seq": 60, "ty')
+        for after in (0, 1, 18, 19, 20, 35, 58, 59, 70):
+            want = [r["seq"] for r in records if r["seq"] > after]
+            events, truncated = self.journal.read_since(self.key, after)
+            self.assertEqual([e["seq"] for e in events], want, after)
+            self.assertEqual(truncated, bool(after and after < 19), after)
+            events, _ = self.journal.read_since(self.key, after, limit=3)
+            self.assertEqual([e["seq"] for e in events], want[:3], after)
+        self.assertEqual(self.journal.read_since(self.key, 30)[0][0]["text"],
+                         records[11]["text"])
+
 
 if __name__ == "__main__":
     unittest.main()

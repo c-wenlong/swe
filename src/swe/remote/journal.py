@@ -118,16 +118,17 @@ class Journal:
             seq = self.last_seq(session_key) + 1
             event = dict(event, seq=seq)
             self._seqs[session_key] = seq
-            line = json.dumps(event, ensure_ascii=False) + "\n"
+            # Encoded once: the same bytes are written and counted.
+            line = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
             try:
-                with open(path, "a", encoding="utf-8") as fh:
+                with open(path, "ab") as fh:
                     fh.write(line)
             except OSError:
                 return event
             if str(path) in self._lines:
                 self._lines[str(path)] += 1
             if str(path) in self._bytes:
-                self._bytes[str(path)] += len(line.encode("utf-8"))
+                self._bytes[str(path)] += len(line)
             self._maybe_trim(path)
             return event
 
@@ -235,31 +236,39 @@ class Journal:
         """
         path = self._file(session_key)
         with _lock_for(path):
-            events: list[dict] = []
+            # Newest first, back to the first event at or before the
+            # cursor: a reconnect near the head reads the last few
+            # events, not the whole ring. Seqs only grow within a file.
+            newest_first: list[dict] = []
             oldest = 0
             try:
-                with open(path, encoding="utf-8", errors="replace") as fh:
-                    for line in fh:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            rec = json.loads(line)
-                        except ValueError:
-                            continue
-                        if not isinstance(rec, dict):
-                            continue
-                        seq = rec.get("seq")
-                        if not isinstance(seq, int):
-                            continue
-                        if not oldest:
-                            oldest = seq
-                        if seq > after_seq:
+                fh = open(path, "rb")
+            except OSError:
+                return [], False
+            with fh:
+                try:
+                    if after_seq <= 0:
+                        # A replay from the start reads forward, and
+                        # stops at ``limit`` when it has one.
+                        events = []
+                        for raw in fh:
+                            rec = _parse_line(raw)
+                            if rec is None:
+                                continue
                             events.append(rec)
                             if limit is not None and len(events) >= limit:
                                 break
-            except OSError:
-                return [], False
+                        return events, False
+                    for rec in _records_backward(fh):
+                        oldest = rec["seq"]
+                        if oldest <= after_seq:
+                            break
+                        newest_first.append(rec)
+                except OSError:
+                    return [], False
+            events = newest_first[::-1]
+            if limit is not None:
+                events = events[:limit]
             truncated = bool(oldest and after_seq and after_seq < oldest - 1)
             return events, truncated
 
@@ -290,44 +299,53 @@ class Journal:
                 return []
             with fh:
                 try:
-                    pos = fh.seek(0, os.SEEK_END)
-                    # The line the walk is inside, as the chunks read so
-                    # far (later bytes first). Joined once its start is
-                    # found, so a large event is copied once, not per
-                    # chunk.
-                    parts: list[bytes] = []
-                    while pos > 0 and len(out) < limit:
-                        step = min(_TAIL_CHUNK, pos)
-                        pos -= step
-                        fh.seek(pos)
-                        chunk = fh.read(step)
-                        if pos > 0 and b"\n" not in chunk:
-                            parts.append(chunk)
+                    for rec in _records_backward(fh):
+                        if before_seq and rec["seq"] >= before_seq:
                             continue
-                        lines = (chunk + b"".join(reversed(parts))).split(b"\n")
-                        # Until the read reaches the file's start, its
-                        # first line may begin in the next chunk back.
-                        parts = [lines.pop(0)] if pos > 0 else []
-                        for raw in reversed(lines):
-                            rec = _parse_line(raw)
-                            if rec is None:
-                                continue
-                            if before_seq and rec["seq"] >= before_seq:
-                                continue
-                            picked = keep(rec) if keep is not None else rec
-                            if picked is None:
-                                continue
-                            out.append(picked)
-                            if len(out) >= limit:
-                                break
+                        picked = keep(rec) if keep is not None else rec
+                        if picked is None:
+                            continue
+                        out.append(picked)
+                        if len(out) >= limit:
+                            break
                 except OSError:
                     return []
         out.reverse()
         return out
 
 
-# Bytes read per step of ``read_tail``'s backward walk.
+# Bytes read per step of the backward walk.
 _TAIL_CHUNK = 64 << 10
+
+
+def _records_backward(fh):
+    """The events of an open journal file, newest first.
+
+    Reads ``_TAIL_CHUNK`` bytes at a time from the end, so a caller that
+    stops early pays for the events it looked at, not the whole ring.
+    Lines that are not an event with an int seq are skipped.
+    """
+    pos = fh.seek(0, os.SEEK_END)
+    # The line the walk is inside, as the chunks read so far (later
+    # bytes first). Joined once its start is found, so a large event is
+    # copied once, not per chunk.
+    parts: list[bytes] = []
+    while pos > 0:
+        step = min(_TAIL_CHUNK, pos)
+        pos -= step
+        fh.seek(pos)
+        chunk = fh.read(step)
+        if pos > 0 and b"\n" not in chunk:
+            parts.append(chunk)
+            continue
+        lines = (chunk + b"".join(reversed(parts))).split(b"\n")
+        # Until the read reaches the file's start, its first line may
+        # begin in the next chunk back.
+        parts = [lines.pop(0)] if pos > 0 else []
+        for raw in reversed(lines):
+            rec = _parse_line(raw)
+            if rec is not None:
+                yield rec
 
 
 def _parse_line(raw: bytes) -> dict | None:
