@@ -1167,6 +1167,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`swe check` and `swe mcp status` probe side by side.** `swe check`
+  asked each installed harness for its version one after another (up to
+  three subprocesses each); it now runs them on a small thread pool,
+  7.5 s down to 2.4 s for 11 harnesses here. `swe mcp status` does the
+  same for its server health checks, where each HTTP server can take its
+  whole five-second timeout. The rows keep their order. `swe list` asks
+  `which` once per command instead of twice, harness discovery lists
+  each PATH directory once instead of probing every absent name in each
+  (8.7 to 5.8 ms), and skill discovery enumerates the skill roots once
+  instead of once per `SKILL.md`. Closes
+  [#1537](https://github.com/c-wenlong/swe/issues/1537).
 - **The hub stops re-parsing its small stores on every request.** The
   credential check, an open stream's revocation check, the session
   list's unread flags and the machine list read `devices.json`, the
