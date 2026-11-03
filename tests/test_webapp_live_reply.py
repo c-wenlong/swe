@@ -223,6 +223,42 @@ class TestLiveReply(unittest.TestCase):
                                         ["streams", [["x", "Hello"]]]])
         self.assertEqual(out["seq"], 6)
 
+    def test_a_stream_dropped_while_hidden_shows_what_it_received_first(self):
+        """Reopening the stream clears what waits; everything received is
+        shown before it, so a trimmed journal can't lose it, and the
+        reopened stream resumes after it."""
+        out = self.run_js("""
+            const opened = [];
+            globalThis.authHeaders = () => ({});
+            globalThis.fetch = (url) => { opened.push(url); return new Promise(() => {}); };
+            T.chat.opened = true; T.chat.stream = {};
+            document.hidden = true; document.visibilityState = 'hidden';
+            appended(5, { kind: 'system', text: 'one' });
+            appended(6, { kind: 'system', text: 'two' });
+            appended(7, { kind: 'system', text: 'three' });
+            T.chat.stream = null;   // dropped while hidden
+            document.hidden = false; document.visibilityState = 'visible';
+            docListeners.visibilitychange();
+            return { shown: shape().map((e) => e[1]), seq: T.chat.seq, opened };""")
+        self.assertEqual(out["shown"], ["5", "6", "7"])
+        self.assertEqual(out["seq"], 7)
+        self.assertEqual(len(out["opened"]), 1)
+        self.assertIn("last=7", out["opened"][0])
+
+    def test_a_backlog_of_finals_draws_the_bubbles_once(self):
+        out = self.run_js("""
+            document.hidden = true; document.visibilityState = 'hidden';
+            for (let i = 1; i <= 30; i++) delta('r' + i, 'reply ' + i, 1, true);
+            for (let i = 1; i <= 30; i++) appended(100 + i, { kind: 'assistant', text: 'reply ' + i });
+            document.hidden = false; document.visibilityState = 'visible';
+            const shown = T.chat.replies.shown;
+            let paints = 0;
+            T.chat.replies.shown = () => { paints++; return shown(); };
+            T.chat.opened = true; T.chat.stream = {};
+            docListeners.visibilitychange();
+            return { paints, entries: shape().length, streams: shape().filter((e) => e[0] === 'streams').length };""")
+        self.assertEqual(out, {"paints": 1, "entries": 30, "streams": 0})
+
 
 if __name__ == "__main__":
     unittest.main()

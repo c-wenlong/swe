@@ -365,20 +365,25 @@ function showPairCode(req) {
 }
 
 /* Every 2 s until approved, denied or expired. A hidden tab asks nothing
- * (#1554): it waits for the tab to show, then asks at once, so an
- * approval made on another device lands as soon as you come back. */
+ * (#1554). One listener, there for the whole poll, asks at once whenever
+ * the tab is shown, so an approval made on another device lands as soon
+ * as you come back, without waiting for the next tick. */
 function pairRequestPoll(requestId, secret, gen, rgen) {
+  let timer = null, asking = false;
+  const done = () => {
+    clearTimeout(timer);
+    document.removeEventListener("visibilitychange", shown);
+  };
+  const shown = () => {
+    if (gen !== pairGen) return done();
+    if (!document.hidden && !asking) { clearTimeout(timer); tick(); }
+  };
   const tick = async () => {
-    if (gen !== pairGen) return;
-    if (document.hidden) {
-      const shown = () => {
-        if (document.hidden) return;
-        document.removeEventListener("visibilitychange", shown);
-        tick();
-      };
-      document.addEventListener("visibilitychange", shown);
-      return;
-    }
+    timer = null;
+    if (gen !== pairGen) return done();
+    // Hidden: no next tick; showing the tab asks (shown).
+    if (document.hidden) return;
+    asking = true;
     let status = 0, data = null;
     try {
       const resp = await fetch(
@@ -386,19 +391,22 @@ function pairRequestPoll(requestId, secret, gen, rgen) {
       status = resp.status;
       try { data = await resp.json(); } catch { /* empty body */ }
     } catch { /* transient — poll again */ }
-    if (gen !== pairGen) return;
+    asking = false;
+    if (gen !== pairGen) return done();
     if (data && data.status === "approved" && data.credential) {
+      done();
       pairStore(data);
       if (rgen !== routeGen) return;
       history.replaceState(null, "", "#/overview");
       route();
       return;
     }
-    if (data && data.status === "denied") return pairRequestFailed("Pairing was denied.");
-    if (status === 404) return pairRequestFailed("Request expired.");
-    setTimeout(tick, 2000);
+    if (data && data.status === "denied") { done(); return pairRequestFailed("Pairing was denied."); }
+    if (status === 404) { done(); return pairRequestFailed("Request expired."); }
+    timer = setTimeout(tick, 2000);
   };
-  setTimeout(tick, 2000);
+  document.addEventListener("visibilitychange", shown);
+  timer = setTimeout(tick, 2000);
 }
 
 function pairRequestFailed(msg) {

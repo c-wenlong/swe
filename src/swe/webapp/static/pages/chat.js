@@ -32,8 +32,9 @@ const SessionChat = (() => {
     // state, the timer of the next repaint, and the box at the log's end
     // that holds them.
     replies: null, streamPaint: null, streamBox: null,
-    // A repaint skipped while the tab was hidden.
-    streamsStale: false,
+    // A repaint skipped while the tab was hidden or a batch landed, and
+    // whether a batch is landing (flushPending).
+    streamsStale: false, paintHeld: false,
     toolCards: new Map(), // call_id -> tool card
     // While set, the stream is replaying events the backfill already
     // showed, looking for one waiting approval (restoreApproval).
@@ -611,7 +612,7 @@ const SessionChat = (() => {
   function paintStreams() {
     clearTimeout(chat.streamPaint);
     chat.streamPaint = null;
-    if (document.hidden) { chat.streamsStale = true; return; }
+    if (document.hidden || chat.paintHeld) { chat.streamsStale = true; return; }
     chat.streamsStale = false;
     const log = $("chat-log");
     const shown = chat.replies.shown();
@@ -2554,12 +2555,20 @@ const SessionChat = (() => {
     if (chat.pending.length) chat.revealTimer = setTimeout(revealNext, added ? delay : 0);
   }
 
+  /* Every waiting event at once. Finals taking their bubbles' places
+   * would each redraw the bubbles left; they are drawn once at the end. */
   function flushPending() {
     clearTimeout(chat.revealTimer);
     chat.revealTimer = null;
     const all = chat.pending;
     chat.pending = [];
-    for (const ev of all) showLive(ev);
+    chat.paintHeld = true;
+    try {
+      for (const ev of all) showLive(ev);
+    } finally {
+      chat.paintHeld = false;
+    }
+    if (chat.streamsStale) paintStreams();
     updateWorking();
   }
 
@@ -4601,8 +4610,13 @@ const SessionChat = (() => {
       // Back on the tab: a model switched elsewhere meanwhile shows now,
       // and so do sends another device queued, edited or removed.
       refreshModel();
-      // What arrived while hidden: the bubbles as they are now, then the
-      // held events, through the reveal (a backlog over 24 lands at once).
+      // What arrived while hidden. A stream that dropped meanwhile is
+      // opened again below, which clears what is waiting: show it all
+      // now, so nothing received is left to a replay the hub may have
+      // trimmed. A backlog over 24 lands at once anyway, its bubbles drawn
+      // once after it. Otherwise the bubbles as they are now, then the
+      // held events through the reveal.
+      if (chat.pending.length && (!chat.stream || revealDelay(chat.pending.length) === null)) flushPending();
       if (chat.streamsStale) paintStreams();
       if (chat.pending.length && chat.revealTimer === null) revealNext();
       unreadHook("activity", chat.key);
