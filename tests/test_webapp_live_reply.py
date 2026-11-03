@@ -349,20 +349,38 @@ class TestStreamingMarkdown(ChatScript):
         self.assertIn('id="chat-announce" role="status" aria-live="polite"', source)
         out = self.run_js("""
             const say = ids['chat-announce'] = el('div');
-            delta('x', 'still writing', 1); T.paintStreams();
+            const settle = () => new Promise((r) => setImmediate(r));
+            delta('x', 'still writing', 1); T.paintStreams(); await settle();
             const streaming = say.textContent;
-            T.appendMessage({ kind: 'assistant', text: 'old reply' }, false);
+            T.appendMessage({ kind: 'assistant', text: 'old reply' }, false); await settle();
             const backfill = say.textContent;
-            T.appendMessage({ kind: 'assistant', text: 'Done **now**' }, true);
+            T.appendMessage({ kind: 'assistant', text: 'Done **now**' }, true); await settle();
             const final = say.textContent;
-            T.appendMessage({ kind: 'error', text: 'x'.repeat(400) }, true);
-            return { streaming, backfill, final, error: say.textContent };""")
+            T.appendMessage({ kind: 'error', text: 'x'.repeat(400) }, true); await settle();
+            const error = say.textContent;
+            // Drawn in one pass: said together, nothing overwritten.
+            T.appendMessage({ kind: 'error', text: 'boom' }, true);
+            T.appendMessage({ kind: 'assistant', text: 'after' }, true);
+            await settle();
+            const pair = say.textContent;
+            // A backlog: a count, every error and prompt, then the newest.
+            T.appendMessage({ kind: 'assistant', text: 'r1' }, true);
+            T.appendMessage({ kind: 'error', text: 'e1' }, true);
+            T.appendMessage({ kind: 'assistant', text: 'r2' }, true);
+            T.appendMessage({ kind: 'assistant', text: 'r3' }, true);
+            await settle();
+            return { streaming, backfill, final, error, pair, backlog: say.textContent };""")
         self.assertEqual(out["streaming"], "", "a streaming bubble is never read out")
         self.assertEqual(out["backfill"], "")
         self.assertEqual(out["final"], "Done now")
         self.assertTrue(out["error"].startswith("Error: "))
         self.assertTrue(out["error"].endswith("…"))
         self.assertLessEqual(len(out["error"]), len("Error: ") + 301)
+        self.assertTrue(out["pair"].startswith("Error: "), out["pair"])
+        self.assertTrue(out["pair"].endswith(" after"), out["pair"])
+        self.assertTrue(out["backlog"].startswith("4 new entries. Error: "), out["backlog"])
+        self.assertTrue(out["backlog"].endswith(" r3"), out["backlog"])
+        self.assertNotIn("r1", out["backlog"])
 
 
 if __name__ == "__main__":

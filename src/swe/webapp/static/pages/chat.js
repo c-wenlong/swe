@@ -2482,15 +2482,32 @@ const SessionChat = (() => {
   /* The log is no live region (#1555): a screen reader would read a
    * streaming bubble out again on every repaint. A finished reply, an
    * error or a prompt that waits for an answer is said once instead, in
-   * the small status node under the log, cut to its start. */
+   * the small status node under the log, cut to its start. Entries drawn
+   * in one pass (a backlog landing at once) are said together, so none
+   * overwrites another: past ANNOUNCE_BATCH of them, a count, then every
+   * error and prompt, then the newest entry. */
   const ANNOUNCED = { assistant: "", error: "Error: ", approval: "Approval needed: ", system: "" };
-  const ANNOUNCE_MAX = 300;
+  const ANNOUNCE_MAX = 300, ANNOUNCE_BATCH = 3;
+  let announcing = [];
 
   function announce(lead, div) {
-    const node = $("chat-announce");
-    if (!node) return;
     const text = String((div.querySelector(".text") || div).textContent || "").replace(/\s+/g, " ").trim();
-    node.textContent = lead + (text.length > ANNOUNCE_MAX ? `${text.slice(0, ANNOUNCE_MAX)}…` : text);
+    if (!announcing.length) queueMicrotask(sayAnnounced);
+    announcing.push({ lead, text: lead + (text.length > ANNOUNCE_MAX ? `${text.slice(0, ANNOUNCE_MAX)}…` : text) });
+  }
+
+  function sayAnnounced() {
+    const all = announcing;
+    announcing = [];
+    const node = $("chat-announce");
+    if (!node || !all.length) return;
+    let said = all;
+    if (all.length > ANNOUNCE_BATCH) {
+      const last = all[all.length - 1];
+      said = [{ text: `${all.length} new entries.` },
+        ...all.slice(0, -1).filter((a) => a.lead), last];
+    }
+    node.textContent = said.map((a) => a.text).join(" ");
   }
 
   /* An answer folds the card like a folded tool callout: the chevron
