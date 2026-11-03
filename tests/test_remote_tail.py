@@ -586,6 +586,71 @@ class TestSnapshotChangeGate(unittest.TestCase):
             self.assertEqual(rt.call_count, 3, "the same token is read again after a failed read")
             self.assertEqual([m["text"] for m in out], ["b"], "recovery emits only what is new")
 
+    def _devin_db(self, name="sessions.db"):
+        import sqlite3
+        db = self.tmp / name
+        conn = sqlite3.connect(db)
+        conn.executescript(
+            "CREATE TABLE sessions(id TEXT PRIMARY KEY, main_chain_id INTEGER);"
+            "CREATE TABLE message_nodes(row_id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT,"
+            " node_id INTEGER, parent_node_id INTEGER, chat_message TEXT, created_at INTEGER,"
+            " UNIQUE(session_id, node_id));"
+            "INSERT INTO sessions VALUES ('s1', 2), ('s2', 1);"
+            "INSERT INTO message_nodes(session_id, node_id, chat_message, created_at)"
+            " VALUES ('s1', 1, '{}', 0), ('s1', 2, '{}', 0), ('s2', 1, '{}', 0);"
+        )
+        conn.commit()
+        self.addCleanup(conn.close)
+        return db, conn
+
+    def test_devin_token_runs_no_query_while_nothing_commits(self):
+        # #1521: one kept connection; PRAGMA data_version gates the rest.
+        db, conn = self._devin_db()
+        tokens = tail._DevinTokens()
+        self.addCleanup(tokens._close)
+        with patch.object(tail, "DEVIN_DB", str(db)):
+            first = tokens.token("s1")
+            kept = tokens._conn
+            ran = []
+            kept.set_trace_callback(ran.append)
+            self.assertEqual(tokens.token("s1"), first)
+            self.assertEqual(ran, ["PRAGMA data_version"], "no row query while nothing committed")
+            conn.execute("INSERT INTO message_nodes(session_id, node_id, chat_message, created_at) VALUES ('s2', 2, '{}', 0)")
+            conn.commit()
+            ran.clear()
+            self.assertEqual(tokens.token("s1"), first)
+            self.assertFalse(any("COUNT" in q for q in ran), "the count waits for its recheck window")
+            self.assertIs(tokens._conn, kept, "the connection is kept, not reopened")
+
+    def test_devin_token_sees_a_delete_below_the_max_within_the_window(self):
+        db, conn = self._devin_db()
+        now = [0.0]
+        tokens = tail._DevinTokens(clock=lambda: now[0])
+        self.addCleanup(tokens._close)
+        with patch.object(tail, "DEVIN_DB", str(db)):
+            before = tokens.token("s1")
+            conn.execute("DELETE FROM message_nodes WHERE session_id = 's1' AND node_id = 1")
+            conn.commit()
+            self.assertEqual(tokens.token("s1"), before, "MAX(row_id) alone can't see it")
+            now[0] += tail.SNAPSHOT_RECHECK_S
+            self.assertNotEqual(tokens.token("s1"), before, "the count recheck does")
+
+    def test_devin_token_follows_a_replaced_db_file(self):
+        import os
+        db, conn = self._devin_db()
+        tokens = tail._DevinTokens()
+        self.addCleanup(tokens._close)
+        with patch.object(tail, "DEVIN_DB", str(db)):
+            before = tokens.token("s1")
+            other, oconn = self._devin_db("other.db")
+            oconn.execute("UPDATE sessions SET main_chain_id = 9 WHERE id = 's1'")
+            oconn.commit()
+            os.replace(other, db)
+            self.assertNotEqual(tokens.token("s1"), before)
+            self.assertEqual(tokens.token("s1")[1], (9,))
+            os.unlink(db)
+            self.assertIsNone(tokens.token("s1"))
+
     def test_devin_token_reads_one_sessions_rows(self):
         import sqlite3
         db = self.tmp / "sessions.db"

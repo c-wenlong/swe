@@ -1385,27 +1385,116 @@ def _new_from(old: list[str], new: list[str]) -> int:
     return max(common, overlap)
 
 
-def _devin_token(session_id: str) -> tuple | None:
-    """Devin's newest message row and chain head for one session."""
-    path = Path(os.path.expanduser(DEVIN_DB))
-    try:
-        conn = sqlite3.connect(path.absolute().as_uri() + "?mode=ro",
-                               uri=True, timeout=1.0)
-    except (sqlite3.Error, ValueError):
-        return None
-    try:
-        rows = conn.execute(
-            "SELECT MAX(row_id), COUNT(*) FROM message_nodes WHERE session_id = ?",
+class _DevinTokens:
+    """Every Devin tailer's change token, from one read-only connection.
+
+    A connection per call cost a connect plus ``MAX(row_id), COUNT(*)``
+    over the session's index entries: 14 ms a call for a 52K-node session
+    on a 9.8 GB ``sessions.db`` (#1521). Now:
+
+    - ``PRAGMA data_version`` on the kept connection changes only when
+      another connection commits (any write, delete or update). While it
+      holds still, every session's last token stands and no query runs.
+    - ``MAX(row_id)`` and the chain head are read on every change. Devin
+      writes a message with ``INSERT OR REPLACE``, which takes a new
+      row_id, so every write moves the max at once.
+    - ``COUNT(*)`` is what sees a delete below the max. It is read again
+      only once SNAPSHOT_RECHECK_S has passed for that session, so a
+      delete shows within a minute instead of costing a scan per poll.
+      A delete takes nothing back from a phone that already has the
+      message, so the delay changes nothing it shows.
+
+    The file's inode is checked on every call: a ``sessions.db`` that
+    was replaced or deleted gets a fresh connection, or None.
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._conn: sqlite3.Connection | None = None
+        self._ident: tuple | None = None
+        # session_id -> (token, data_version it was read at, COUNT(*),
+        # the data_version and clock time the count was read at)
+        self._cache: dict[str, tuple] = {}
+
+    def _close(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except sqlite3.Error:
+                pass
+        self._conn = None
+        self._ident = None
+        self._cache.clear()
+
+    def _connect(self) -> sqlite3.Connection | None:
+        path = Path(os.path.expanduser(DEVIN_DB)).absolute()
+        try:
+            st = os.stat(path)
+        except OSError:
+            self._close()
+            return None
+        ident = (str(path), st.st_dev, st.st_ino)
+        if self._conn is not None and ident == self._ident:
+            return self._conn
+        self._close()
+        try:
+            self._conn = sqlite3.connect(
+                path.as_uri() + "?mode=ro", uri=True, timeout=1.0,
+                check_same_thread=False)
+        except (sqlite3.Error, ValueError):
+            return None
+        self._ident = ident
+        return self._conn
+
+    def token(self, session_id: str) -> tuple | None:
+        with self._lock:
+            conn = self._connect()
+            if conn is None:
+                return None
+            try:
+                return self._token(conn, session_id)
+            except sqlite3.Error:
+                self._close()
+                return None
+
+    def _token(self, conn: sqlite3.Connection, session_id: str) -> tuple:
+        version = conn.execute("PRAGMA data_version").fetchone()[0]
+        now = self._clock()
+        cached = self._cache.get(session_id)
+        if cached is not None:
+            token, token_version, count, count_version, at = cached
+            # The count is current when nothing committed since it was
+            # read, or still inside its window.
+            count_ok = count_version == version \
+                or now - at < SNAPSHOT_RECHECK_S
+            if token_version == version and count_ok:
+                return token
+        newest = conn.execute(
+            "SELECT MAX(row_id) FROM message_nodes WHERE session_id = ?",
             (session_id,),
         ).fetchone()
         head = conn.execute(
             "SELECT main_chain_id FROM sessions WHERE id = ?", (session_id,)
         ).fetchone()
-        return (tuple(rows or ()), tuple(head or ()))
-    except sqlite3.Error:
-        return None
-    finally:
-        conn.close()
+        if cached is None or not count_ok:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM message_nodes WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0]
+            count_version, at = version, now
+        token = ((newest[0] if newest else None, count), tuple(head or ()))
+        self._cache[session_id] = (token, version, count, count_version, at)
+        return token
+
+
+_DEVIN_TOKENS = _DevinTokens()
+
+
+def _devin_token(session_id: str) -> tuple | None:
+    """Devin's newest message row, row count and chain head for one
+    session; see ``_DevinTokens``."""
+    return _DEVIN_TOKENS.token(session_id)
 
 
 def make_source(session: Session) -> "JsonlTailSource | OpencodeSource | SnapshotSource | None":
