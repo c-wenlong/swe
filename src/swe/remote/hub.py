@@ -199,6 +199,52 @@ def _sat_delta(mid: str, local_key: str, data) -> dict | None:
         str(data.get("kind")), text, seq, done=data.get("done") is True)
 
 
+_NO_FRAME = object()
+
+
+class SharedEvent(dict):
+    """One published event, the same object in every subscriber's queue.
+
+    It carries its SSE frame, cleaned and encoded by the first
+    subscriber that writes it, so N open streams pay for one
+    ``clean_event`` + ``json.dumps`` + encode instead of N. Two threads
+    racing on the first write both compute the same bytes; the last
+    assignment wins, harmlessly. Subscribers only read the dict.
+    """
+
+    __slots__ = ("frame",)
+
+    def __init__(self, event: dict) -> None:
+        super().__init__(event)
+        self.frame = _NO_FRAME
+
+
+def sse_frame(ev: dict) -> bytes | None:
+    """``ev`` as the bytes of one SSE frame, or None when it is not served.
+
+    A transient event (``message.delta``) has no seq and no ``id:``
+    line, so an EventSource's Last-Event-ID stays on the last journaled
+    event.
+    """
+    if isinstance(ev, SharedEvent):
+        frame = ev.frame
+        if frame is _NO_FRAME:
+            frame = ev.frame = _encode_frame(ev)
+        return frame
+    return _encode_frame(ev)
+
+
+def _encode_frame(ev: dict) -> bytes | None:
+    ev = injected_mod.clean_event(ev)
+    if ev is None:
+        return None
+    return (
+        (f"id: {ev['seq']}\n" if "seq" in ev else "")
+        + f"event: {ev.get('type', 'message')}\n"
+        + f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
+    ).encode("utf-8")
+
+
 class EventBus:
     """Fan-out to SSE subscriber queues, keyed by session or global."""
 
@@ -220,6 +266,8 @@ class EventBus:
         """``exact`` leaves out the whole-hub (``None``) subscribers."""
         with self._lock:
             subs = list(self._subs)
+        if not isinstance(event, SharedEvent):
+            event = SharedEvent(event)
         for want, q in subs:
             if want == key or (want is None and not exact):
                 try:
@@ -1871,18 +1919,10 @@ class _Handler(BaseHTTPRequestHandler):
             pass
 
     def _sse_write(self, ev: dict) -> None:
-        ev = injected_mod.clean_event(ev)
-        if ev is None:
+        frame = sse_frame(ev)
+        if frame is None:
             return
-        # A transient event (``message.delta``) has no seq and no
-        # ``id:`` line, so an EventSource's Last-Event-ID stays on the
-        # last journaled event.
-        frame = (
-            (f"id: {ev['seq']}\n" if "seq" in ev else "")
-            + f"event: {ev.get('type', 'message')}\n"
-            + f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
-        )
-        self.wfile.write(frame.encode("utf-8"))
+        self.wfile.write(frame)
         self.wfile.flush()
 
     def _sse_after(self, args) -> int:
