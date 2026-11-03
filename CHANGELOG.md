@@ -1176,6 +1176,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at most 20,000 sessions instead of 100,000, with the existing note
   when older ones are left out. Closes
   [#1544](https://github.com/c-wenlong/swe/issues/1544).
+- **The Mac app's background polls no longer keep the Mac awake.**
+  Every `swe` the app ran held a user-initiated activity, which also
+  blocks idle system sleep while the child runs, so the GitHub poll, the
+  3 s pair-request poll on Remote settings and the account, feed and
+  limit refreshes each held it off several times a minute. Polls and
+  timers now run their `swe` with no activity; runs from a button keep
+  it. The activity always ended with each run, so App Nap was only off
+  while a child ran, never for the whole app. Closes
+  [#1540](https://github.com/c-wenlong/swe/issues/1540).
+- **The Mac app's ledger ticks cost about a third of the CPU they did.**
+  A background scan now counts as new usage only when it wrote a usage
+  event, not when it merely read a file, so a tick that appended prompts
+  or tool output rebuilds nothing. Ticks that do write usage read less:
+  a covering index answers the time-range reads without a table lookup
+  per row, grouped reads group by dimension id before joining names, and
+  Codex's account comparison reads only Codex rows. Measured against a
+  copy of a 415,000-event ledger, one ingest tick went from about 6.4 to
+  2.0 CPU-seconds. Closes [#1568](https://github.com/c-wenlong/swe/issues/1568).
+- **The hub slows down while nobody is watching.** With no client
+  stream open (the ntfy notifier holds one whenever it can push;
+  satellite command streams don't count) and no client request for two
+  minutes, `swe remote serve` polls
+  active sessions every 5 s instead of 1 s and idle ones every 60 s
+  instead of 8 s, refreshes the catalog every 60 s instead of 10 s, and
+  ticks its tail loop once a second instead of four times. Transcripts
+  stay on disk, so this only delays the journal's copy. The next client
+  request ends it at once: every tailer polls, the catalog refreshes, and
+  the first `/v1/sessions` or `/v1/inbox` read waits up to 5 s for that
+  refresh instead of serving a minute-old list. An unwatched hub on this
+  Mac used about 8% of a core, split about evenly between the catalog
+  and tail threads. Closes
+  [#1520](https://github.com/c-wenlong/swe/issues/1520).
+- **The status column reads less per session.** OpenCode's probe
+  pulled the full JSON of a session's newest 50 messages and ran two
+  `PRAGMA table_info` reads for every session; it now reads the table
+  shape once per pass, picks the deciding row by type, and loads only
+  that row's JSON. Devin's probe lets SQLite pull the role, tool calls
+  and text out of the head message instead of decoding all of it.
+  Cline caches the follow-up check against its `messages.json`
+  signature and reads the metadata file once per pass, and the tail
+  probes decode JSONL lines newest-first only until the walk decides.
+  CPU per pass here: OpenCode 381 sessions about 66 to 50 ms, Devin
+  216 sessions about 10 to 6 ms, a 64 KB transcript tail walk about
+  half. Closes [#1535](https://github.com/c-wenlong/swe/issues/1535).
 - **The Mac app's Compute sampler runs at full rate only while a
   trend view is on screen.** It used to sweep every process, the GPU
   clients and the SMC at the chosen interval (3 s on one Mac) for as
