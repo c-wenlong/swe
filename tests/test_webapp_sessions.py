@@ -1849,6 +1849,48 @@ class TestSessionModelShown(unittest.TestCase):
         self.assertEqual(out["tabReturn"], 1)
         self.assertEqual(out["path"], "/v1/sessions?key=s%201")
 
+    def test_satellite_rows_and_a_tab_return_keep_the_turns_retries(self):
+        """A satellite's row is pushed on its own clock, so a newer hub
+        rebuild doesn't stop its retries; a tab coming back while a turn's
+        retries run takes them over instead of ending them."""
+        out = self.run_js("""
+          const T = SessionChat._test;
+          const out = {};
+          T.chat.key = "s1"; T.chat.gen = 3;
+          T.chat.row = { harness: "claude", model: "m-old" };
+          let reads = 0, remote = true, model = "m-old", newFrom = Infinity;
+          globalThis.api = async () => {
+            reads++;
+            if (reads >= newFrom) model = "m-new";
+            return { status: 200, data: { sessions: [{ key: "s1", model, remote }], machines: [],
+                                          server_time: 100 + reads, catalog_as_of: 100 + reads } };
+          };
+          globalThis.setTimeout = (f) => { f(); return 0; };
+          await T.refreshModel(true);
+          out.remoteReads = reads;
+          // A turn ends; the tab comes back while its first retry waits.
+          remote = false; reads = 0;
+          const timers = [];
+          globalThis.setTimeout = (f) => { timers.push(f); return 0; };
+          const turn = T.refreshModel(true);
+          await new Promise((r) => setImmediate(r));
+          // The tab's own read (the 2nd) is still stale; the catalog
+          // catches up by the 3rd.
+          newFrom = 3;
+          globalThis.setTimeout = (f) => { f(); return 0; };
+          const back = T.refreshModel();
+          timers.splice(0).forEach((f) => f());
+          await Promise.all([turn, back]);
+          out.shown = T.chat.row.model;
+          // Back with no turn pending: one read.
+          model = "m-new"; reads = 0;
+          await T.refreshModel();
+          out.plainReads = reads;
+          return out;""", with_sessions=False)
+        self.assertEqual(out["remoteReads"], 3, "a satellite row reads through every wait")
+        self.assertEqual(out["shown"], "m-new")
+        self.assertEqual(out["plainReads"], 1)
+
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
 class TestMachineStrip(unittest.TestCase):

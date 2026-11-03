@@ -1397,7 +1397,7 @@ class _Handler(BaseHTTPRequestHandler):
         if device_id.startswith(devices_mod.TAILNET_PREFIX):
             return pairing.signin_revoked(
                 home, device_id[len(devices_mod.TAILNET_PREFIX):])
-        row = pairing.load_devices(home).get(device_id) or {}
+        row = pairing.peek_devices(home).get(device_id) or {}
         return bool(row.get("revoked_at"))
 
     def _approver_node(self, peer: dict | None) -> str | None:
@@ -2081,7 +2081,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "sessions": readstate.annotate(
                     self._state.home, device_id, self._state.catalog.rows()),
                 "machines": list(
-                    catalog_mod.load_machines(self._state.home).values()
+                    catalog_mod.peek_machines(self._state.home).values()
                 ),
                 "server_time": time.time(),
             })
@@ -2103,7 +2103,7 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/v1/machines":
             self._send_json(200, {
                 "machines": list(
-                    catalog_mod.load_machines(self._state.home).values()
+                    catalog_mod.peek_machines(self._state.home).values()
                 )
             })
             return
@@ -3745,17 +3745,22 @@ class _Handler(BaseHTTPRequestHandler):
         for that was most of the cost. ``catalog_as_of`` is when the
         catalog's last rebuild started, so a client waiting for a new
         model can tell a stale read from an unchanged one."""
+        # The same freshness wait as the whole list after low power.
+        self._state.fresh_catalog()
+        # The stamp first, then the row: the row comes from that rebuild
+        # or a newer one, never an older one under a newer stamp.
+        as_of = self._state.catalog.refreshed_at
         row = self._state.catalog.row_for(key)
         if row is None:
             self._send_error(404, "unknown_session", "no such session")
             return
         machine_id = row.get("machine_id")
-        machines = catalog_mod.load_machines(self._state.home)
+        machines = catalog_mod.peek_machines(self._state.home)
         self._send_json(200, {
             "sessions": readstate.annotate(self._state.home, device_id, [row]),
             "machines": [m for mid, m in machines.items() if mid == machine_id],
             "server_time": time.time(),
-            "catalog_as_of": self._state.catalog.refreshed_at,
+            "catalog_as_of": as_of,
         })
 
     def _slash_commands(self, key: str) -> None:

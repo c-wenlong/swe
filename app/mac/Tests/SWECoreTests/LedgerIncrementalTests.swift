@@ -53,6 +53,34 @@ func claudeLine(
         #expect(await s.total() == 11 + 21)
     }
 
+    /// Only written usage counts as ingest (#1568): a prompt line is a
+    /// read with nothing written, and a rescan into the same rows writes
+    /// nothing either.
+    @Test func eventsWrittenCountsOnlyUsageTheScanStored() async throws {
+        let s = try Setup()
+        try s.write(claudeLine(message: "m1"))
+        var report = try await s.ledger.scan(roots: s.roots)
+        #expect(report.eventsWritten == 1)
+
+        try s.append(#"{"type":"user","timestamp":"2026-10-05T12:01:00.000Z","sessionId":"s1","message":{"role":"user","content":"hi"}}"# + "\n")
+        report = try await s.ledger.scan(roots: s.roots)
+        #expect(report.filesRead == 1)
+        #expect(report.eventsWritten == 0)
+
+        try s.append(claudeLine(message: "m2", output: 20) + claudeLine(message: "m3", output: 5))
+        report = try await s.ledger.scan(roots: s.roots)
+        #expect(report.eventsWritten == 2)
+
+        // The same lines in a new file: read from the start, nothing new.
+        let text = try String(contentsOf: s.file, encoding: .utf8)
+        try FileManager.default.removeItem(at: s.file)
+        try s.write(text)
+        report = try await s.ledger.scan(roots: s.roots)
+        #expect(report.filesRead == 1)
+        #expect(report.eventsWritten == 0)
+        #expect(await s.total() == 11 + 21 + 6)
+    }
+
     @Test func aHalfWrittenLineIsReadOnceItIsComplete() async throws {
         let s = try Setup()
         let line = claudeLine(message: "m1")
