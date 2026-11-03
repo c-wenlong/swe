@@ -32,6 +32,8 @@ const SessionChat = (() => {
     // state, the timer of the next repaint, and the box at the log's end
     // that holds them.
     replies: null, streamPaint: null, streamBox: null,
+    // A repaint skipped while the tab was hidden.
+    streamsStale: false,
     toolCards: new Map(), // call_id -> tool card
     // While set, the stream is replaying events the backfill already
     // showed, looking for one waiting approval (restoreApproval).
@@ -603,10 +605,14 @@ const SessionChat = (() => {
    * Markdown as the final message: it only grows, so a half-written block
    * (an unclosed fence, a ** not yet closed) is the only flicker, and
    * switching to Markdown at the end would reflow the whole reply at once.
-   * Only a bubble whose text changed is drawn again. */
+   * Only a bubble whose text changed is drawn again. A hidden tab draws
+   * nothing: the bubbles' state keeps up, and showing the tab draws it
+   * (#1554). */
   function paintStreams() {
     clearTimeout(chat.streamPaint);
     chat.streamPaint = null;
+    if (document.hidden) { chat.streamsStale = true; return; }
+    chat.streamsStale = false;
     const log = $("chat-log");
     const shown = chat.replies.shown();
     let box = chat.streamBox;
@@ -654,6 +660,7 @@ const SessionChat = (() => {
 
   function receiveDelta(d) {
     if (!chat.replies.apply(d) || chat.streamPaint !== null) return;
+    if (document.hidden) { chat.streamsStale = true; return; }
     chat.streamPaint = setTimeout(paintStreams, STREAM_MS.paint);
   }
 
@@ -2515,6 +2522,10 @@ const SessionChat = (() => {
 
   function enqueue(ev) {
     chat.pending.push(ev);
+    // A hidden tab keeps every event, in order, and shows them when it is
+    // shown again (#1554); the cursor moves only as each is shown, so a
+    // stream that drops meanwhile replays them.
+    if (document.hidden) return;
     updateWorking();
     if (chat.revealTimer !== null) return;
     // Frames often arrive in separate reads a few ms apart: the queue
@@ -2526,6 +2537,7 @@ const SessionChat = (() => {
 
   function revealNext() {
     chat.revealTimer = null;
+    if (document.hidden) return;
     if (!chat.pending.length) { updateWorking(); return; }
     const delay = revealDelay(chat.pending.length);
     if (delay === null) { flushPending(); return; }
@@ -4589,6 +4601,10 @@ const SessionChat = (() => {
       // Back on the tab: a model switched elsewhere meanwhile shows now,
       // and so do sends another device queued, edited or removed.
       refreshModel();
+      // What arrived while hidden: the bubbles as they are now, then the
+      // held events, through the reveal (a backlog over 24 lands at once).
+      if (chat.streamsStale) paintStreams();
+      if (chat.pending.length && chat.revealTimer === null) revealNext();
       unreadHook("activity", chat.key);
       if (chat.rowKnown) loadQueue(chat.gen);
       if (!chat.stream) {

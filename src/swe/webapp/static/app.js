@@ -364,9 +364,21 @@ function showPairCode(req) {
   pairCodeEl("pair-retry").hidden = true;
 }
 
+/* Every 2 s until approved, denied or expired. A hidden tab asks nothing
+ * (#1554): it waits for the tab to show, then asks at once, so an
+ * approval made on another device lands as soon as you come back. */
 function pairRequestPoll(requestId, secret, gen, rgen) {
   const tick = async () => {
     if (gen !== pairGen) return;
+    if (document.hidden) {
+      const shown = () => {
+        if (document.hidden) return;
+        document.removeEventListener("visibilitychange", shown);
+        tick();
+      };
+      document.addEventListener("visibilitychange", shown);
+      return;
+    }
     let status = 0, data = null;
     try {
       const resp = await fetch(
