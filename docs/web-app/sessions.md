@@ -48,7 +48,7 @@ the chat, like the Repositories rail's fold.
 ## How it talks to the hub
 
 1. `GET /v1/sessions/{key}/messages?limit=500`, the backfill.
-2. Then, together: `GET /v1/sessions` for the catalog row (`ownership`,
+2. Then, together: `GET /v1/sessions?key=<key>` for the catalog row (`ownership`,
    `attachable` and `status` as the hub has them now, since the list's
    copy can be minutes old, and the machine's name), and `GET /v1/inbox`
    for an approval of this session the hub still waits on (its

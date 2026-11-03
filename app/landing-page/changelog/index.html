@@ -1293,6 +1293,16 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The web chat reads its one session row, not the whole catalog.</strong>
+The chat read <code>GET /v1/sessions</code> (every row, read-state and machines)
+to find its own row on open, on resync, at every turn's end (up to
+three times, 6 s apart) and on every return to the tab. The hub now
+answers <code>GET /v1/sessions?key=&lt;key&gt;</code> with that row and its machine:
+0.4 ms and under 1 KB against 34 ms and 1.6 MB for a 2,000-row
+catalog. A turn's end also stops re-reading once a read comes from a
+catalog rebuilt after it, and a return to the tab reads once.
+Closes <a href="https://github.com/c-wenlong/swe/issues/1556">#1556</a>.</p>
+</li>
 <li><p><strong>The usage ledger reads only new Devin and OpenCode rows.</strong> Any
 write to Devin's <code>sessions.db</code> or its WAL made the next scan (each
 web Overview load after the 60 s cache, and every satellite usage

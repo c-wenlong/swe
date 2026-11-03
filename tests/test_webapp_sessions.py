@@ -429,6 +429,26 @@ class TestChatContract(unittest.TestCase):
         self.assertEqual(resolved[0]["data"], {"request_id": "r1", "decision": "always"})
         fake.control.assert_called_once()
 
+    def test_one_row_by_key(self):
+        """#1556: ``?key=`` answers that row alone, in the list's shape,
+        with only its machine and when the catalog was last rebuilt."""
+        from swe.remote import catalog as catalog_mod
+        whole = json.loads(self.srv.request("GET", "/v1/sessions", headers=self.hdr)[1])
+        row = next(r for r in whole["sessions"] if r["key"] == self.key)
+        catalog_mod.upsert_machine(self.srv.state.home, {"id": "elsewhere", "name": "Other"})
+        if row.get("machine_id"):
+            catalog_mod.upsert_machine(self.srv.state.home, {"id": row["machine_id"], "name": "Here"})
+        status, data = self.srv.request("GET", "/v1/sessions?key=claude%3As1", headers=self.hdr)
+        self.assertEqual(status, 200)
+        one = json.loads(data)
+        self.assertEqual(one["sessions"], [row])
+        self.assertEqual([m["id"] for m in one["machines"]], [row["machine_id"]] if row.get("machine_id") else [])
+        self.assertEqual(one["catalog_as_of"], self.srv.state.catalog.as_of)
+        self.assertIn("server_time", one)
+        status, data = self.srv.request("GET", "/v1/sessions?key=claude%3Anope", headers=self.hdr)
+        self.assertEqual((status, json.loads(data)["error"]["code"]), (404, "unknown_session"))
+        self.assertEqual(self.srv.request("GET", "/v1/sessions?key=claude%3As1")[0], 401)
+
     def test_every_route_wants_the_device_credential(self):
         for method, action, body in (("GET", "messages", None), ("GET", "events?last=0", None),
                                      ("POST", "message", {"text": "x"}), ("POST", "approval", {}),

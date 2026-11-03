@@ -1167,6 +1167,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The web chat reads its one session row, not the whole catalog.**
+  The chat read `GET /v1/sessions` (every row, read-state and machines)
+  to find its own row on open, on resync, at every turn's end (up to
+  three times, 6 s apart) and on every return to the tab. The hub now
+  answers `GET /v1/sessions?key=<key>` with that row and its machine:
+  0.4 ms and under 1 KB against 34 ms and 1.6 MB for a 2,000-row
+  catalog. A turn's end also stops re-reading once a read comes from a
+  catalog rebuilt after it, and a return to the tab reads once.
+  Closes [#1556](https://github.com/c-wenlong/swe/issues/1556).
+
 - **The usage ledger reads only new Devin and OpenCode rows.** Any
   write to Devin's `sessions.db` or its WAL made the next scan (each
   web Overview load after the 60 s cache, and every satellite usage
