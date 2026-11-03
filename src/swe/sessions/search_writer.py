@@ -975,16 +975,53 @@ def _homes(home: Path, vendor: str, default: str) -> list[Path]:
     return [p for p in out if p.is_dir()]
 
 
+def _scan(directory: str) -> list[os.DirEntry]:
+    try:
+        with os.scandir(directory) as it:
+            return sorted(it, key=lambda entry: entry.name)
+    except OSError:
+        return []
+
+
+def _resolved(real_dir: str, entry: os.DirEntry) -> str:
+    """``realpath`` of ``entry``, which sits in the already resolved
+    ``real_dir``: only a symlinked entry needs resolving again, and
+    ``is_symlink`` comes from the directory listing, so the usual case
+    costs no syscall. ``realpath`` per file was an lstat per path
+    component for every transcript, every pass (#1538)."""
+    if entry.is_symlink():
+        return os.path.realpath(entry.path)
+    return os.path.join(real_dir, entry.name)
+
+
 def _walk(root: Path, suffix: str = ".jsonl") -> list[str]:
     """Resolved ``*<suffix>`` paths under ``root``: hidden entries and
-    ``subagents`` directories pruned, as the Swift source table does."""
-    found = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames
-                             if not d.startswith(".") and d != "subagents")
-        for name in sorted(filenames):
-            if name.endswith(suffix) and not name.startswith("."):
-                found.append(os.path.realpath(os.path.join(dirpath, name)))
+    ``subagents`` directories pruned, as the Swift source table does.
+
+    ``os.walk``'s order and rules: a directory's files by name, then its
+    subdirectories by name; a symlinked directory is listed but not
+    entered. The root is resolved once, and below it only symlinked
+    files need resolving (``_resolved``)."""
+    found: list[str] = []
+
+    def visit(directory: str, real_dir: str) -> None:
+        subdirs: list[os.DirEntry] = []
+        for entry in _scan(directory):
+            try:
+                is_dir = entry.is_dir()
+            except OSError:
+                is_dir = False
+            if is_dir:
+                if not entry.name.startswith(".") and entry.name != "subagents":
+                    subdirs.append(entry)
+            elif entry.name.endswith(suffix) and not entry.name.startswith("."):
+                found.append(_resolved(real_dir, entry))
+        for entry in subdirs:
+            if not entry.is_symlink():
+                visit(entry.path, os.path.join(real_dir, entry.name))
+
+    if os.path.isdir(root):
+        visit(str(root), os.path.realpath(root))
     return found
 
 
@@ -1058,12 +1095,16 @@ _KIRO_FILE = re.compile(
 def _files_in(directory: Path) -> list[str]:
     """Resolved regular files directly in ``directory``, hidden ones left
     out."""
-    try:
-        names = sorted(os.listdir(directory))
-    except OSError:
-        return []
-    return [os.path.realpath(directory / name) for name in names
-            if not name.startswith(".") and (directory / name).is_file()]
+    real_dir = os.path.realpath(directory)
+    out = []
+    for entry in _scan(str(directory)):
+        try:
+            regular = entry.is_file()
+        except OSError:
+            regular = False
+        if regular and not entry.name.startswith("."):
+            out.append(_resolved(real_dir, entry))
+    return out
 
 
 DEVIN_DB = ".local/share/devin/cli/sessions.db"
