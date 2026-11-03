@@ -57,6 +57,13 @@ POLL_IDLE_S = 8.0
 # (see SnapshotSource.hot_poll_s).
 POLL_HOT_S = 0.25
 HOT_WINDOW_S = 15.0
+# Low power: no client has asked for anything lately, no SSE stream is
+# open and nothing pushes to ntfy (``TailManager.set_low_power``). The
+# transcripts are durable on disk, so a slower poll only delays the
+# journal's copy; a client's next request ends low power at once and
+# every tailer polls straight away.
+POLL_ACTIVE_LOW_S = 5.0
+POLL_IDLE_LOW_S = 60.0
 # A hot session, or one whose transcript just grew, has its status
 # re-probed (one session through sessions/status.py and its tail cache)
 # at most this often, instead of waiting for the 10 s catalog refresh.
@@ -1529,21 +1536,28 @@ class Tailer:
     def due(self, now: float) -> bool:
         return now >= self.next_poll_at
 
-    def interval(self, active: bool, hot: bool = False) -> float:
-        """Seconds until the next poll: hot beats active beats idle."""
-        base = POLL_ACTIVE_S if active else POLL_IDLE_S
+    def interval(self, active: bool, hot: bool = False,
+                 low_power: bool = False) -> float:
+        """Seconds until the next poll: hot beats active beats idle.
+        Low power stretches active and idle, never hot: a hot window
+        only opens after a write, and a write means someone is there."""
+        if low_power:
+            base = POLL_ACTIVE_LOW_S if active else POLL_IDLE_LOW_S
+        else:
+            base = POLL_ACTIVE_S if active else POLL_IDLE_S
         if hot:
             return min(base, getattr(self.source, "hot_poll_s", POLL_HOT_S))
         return base
 
-    def poll(self, now: float, active: bool, hot: bool = False) -> list[dict]:
+    def poll(self, now: float, active: bool, hot: bool = False,
+             low_power: bool = False) -> list[dict]:
         """Poll the source; the cursor is only marked dirty here.
 
         ``commit_cursor`` runs the save — the manager calls it after the
         events are journaled, so a crash between poll and write replays
         (duplicates, recoverable) instead of skipping messages forever.
         """
-        self.next_poll_at = now + self.interval(active, hot)
+        self.next_poll_at = now + self.interval(active, hot, low_power)
         self._take_handoff()
         # The state the last poll left is this poll's "before", unless
         # the source was replaced since (a resume moved the transcript):
@@ -1642,6 +1656,8 @@ class TailManager:
         # whether it has a journal) against ``sweep_stale`` deleting
         # them; see ``_add_tailer``.
         self._files_lock = threading.Lock()
+        # Set by the hub while nobody watches; see ``set_low_power``.
+        self.low_power = False
 
     def last_append_at(self, key: str) -> float | None:
         return self.last_append.get(key)
@@ -1679,6 +1695,24 @@ class TailManager:
     def waking(self, key: str, injector):
         """``injector`` with a wake before and after each write it makes."""
         return _WakingInjector(injector, lambda: self.wake(key))
+
+    def set_low_power(self, on: bool) -> None:
+        """Poll at the low-power cadence (``POLL_*_LOW_S``) or not.
+
+        Safe from any thread. Leaving low power marks every tailer owed
+        a poll (as ``wake`` does, without the hot window) and wakes the
+        loop: a session idle under low power may not be due for another
+        minute, and the client that just arrived should not wait for it.
+        """
+        if on == self.low_power:
+            return
+        self.low_power = on
+        if on:
+            return
+        keys = [key for key, _t in self._tailer_items()]
+        with self._wake_lock:
+            self._woken.update(keys)
+            self._wake_event.set()
 
     def _take_wakes(self, now: float) -> tuple[set[str], dict[str, float]]:
         with self._wake_lock:
@@ -2095,7 +2129,7 @@ class TailManager:
             try:
                 messages = tailer.poll(
                     now, active=self.statuses.get(key) == "active",
-                    hot=key in hot_until,
+                    hot=key in hot_until, low_power=self.low_power,
                 )
             except Exception:
                 tailer.next_poll_at = now + POLL_IDLE_S

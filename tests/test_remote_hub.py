@@ -108,6 +108,17 @@ class HubBase(unittest.TestCase):
 
 
 class TestAuth(HubBase):
+    def test_client_request_ends_low_power_but_status_does_not(self):
+        self.srv.state._client_seen_at = float("-inf")
+        self.srv.state.tail_manager.set_low_power(True)
+        self.srv.request("GET", "/v1/status")
+        self.assertTrue(self.srv.state.tail_manager.low_power)
+        status, _ = self.srv.request("GET", "/v1/sessions",
+                                     headers=self.auth())
+        self.assertEqual(status, 200)
+        self.assertFalse(self.srv.state.tail_manager.low_power)
+        self.assertTrue(self.srv.state.watched())
+
     def test_status_is_public(self):
         status, data = self.srv.request("GET", "/v1/status")
         self.assertEqual(status, 200)
@@ -3491,7 +3502,8 @@ class TestServeEntry(unittest.TestCase):
         state.tail_manager.tick = lambda: None
         state.tail_manager.wait = lambda _t: None
         with patch.object(state.tail_manager, "sweep_stale", sweep), \
-             patch.object(hub_mod.attachments, "sweep", lambda home: 0):
+             patch.object(hub_mod.attachments, "sweep", lambda home: 0), \
+             patch.object(hub_mod, "SWEEP_S", 0.0):
             state._tail_loop()
         self.assertEqual(len(calls), 1)
         journal, keep = calls[0]
@@ -3500,6 +3512,102 @@ class TestServeEntry(unittest.TestCase):
         self.assertIn(state.sat_journal_key("sat1"), keep)
         self.assertIn("claude:x@sat1", keep)
         self.assertNotIn("claude:local", keep)
+
+    def test_unwatched_hub_runs_the_tail_loop_in_low_power(self):
+        # #1520: no stream, no ntfy, no recent request.
+        state = HubState(temp_dir(self))
+        waits = []
+        state.tail_manager.tick = lambda: None
+
+        def wait(timeout):
+            waits.append((timeout, state.tail_manager.low_power))
+            if len(waits) == 1:
+                state.note_client()
+            else:
+                state._stop.set()
+        state.tail_manager.wait = wait
+        state._tail_loop()
+        self.assertEqual(waits, [(hub_mod.TAIL_TICK_LOW_S, True),
+                                 (hub_mod.TAIL_TICK_S, False)])
+
+    def test_watched_counts_streams_and_recent_requests_not_satellites(self):
+        state = HubState(temp_dir(self))
+        self.assertFalse(state.watched())
+        sat = state.bus.subscribe(state.sat_journal_key("sat1"))
+        self.assertFalse(state.watched())
+        # A session stream, or the global one the ntfy notifier holds.
+        for key in ("claude:a", hub_mod.GLOBAL_KEY, None):
+            q = state.bus.subscribe(key)
+            self.assertTrue(state.watched(), key)
+            state.bus.unsubscribe(q)
+        self.assertFalse(state.watched())
+        state.bus.unsubscribe(sat)
+        state.note_client()
+        self.assertTrue(state.watched())
+        state._client_seen_at -= hub_mod.CLIENT_IDLE_S + 1
+        self.assertFalse(state.watched())
+
+    def test_client_arriving_ends_low_power_and_wakes_the_catalog(self):
+        state = HubState(temp_dir(self))
+        state.tail_manager.set_low_power(True)
+        state.note_client()
+        self.assertFalse(state.tail_manager.low_power)
+        self.assertTrue(state._catalog_wake.is_set())
+        # Already watched: a second request wakes nothing again.
+        state._catalog_wake.clear()
+        state.note_client()
+        self.assertFalse(state._catalog_wake.is_set())
+
+    def test_catalog_refreshes_once_a_minute_while_unwatched(self):
+        state = HubState(temp_dir(self))
+        state.catalog.refresh = lambda: []
+        state._adopt_launches = lambda: None
+        state._refresh_launchable = lambda: None
+        state.tail_manager.sync = lambda rows, **kw: None
+        state.catalog.poll_github = lambda: None
+        waits = []
+
+        def wait(timeout):
+            waits.append(timeout)
+            if len(waits) == 1:
+                state.note_client()
+            else:
+                state._stop.set()
+            return False
+        state._catalog_wake.wait = wait
+        with patch("swe.remote.supervise.reap_kept"):
+            state._catalog_loop()
+        self.assertEqual(waits, [hub_mod.CATALOG_IDLE_S,
+                                 catalog_mod.REFRESH_INTERVAL_S])
+        self.assertFalse(state._catalog_running)
+
+    def test_list_request_after_low_power_waits_for_a_fresh_catalog(self):
+        state = HubState(temp_dir(self))
+        state._catalog_running = True
+        state.catalog._status_as_of = time.time() - 300
+        state._catalog_wake.clear()
+
+        def loop():
+            # The catalog loop: woken by the request, refreshes, notifies.
+            state._catalog_wake.wait(5)
+            state.catalog._status_as_of = time.time()
+            state._catalog_refreshed()
+        t = threading.Thread(target=loop, daemon=True)
+        t.start()
+        started = time.monotonic()
+        state.fresh_catalog(timeout=5)
+        t.join(5)
+        self.assertLess(time.monotonic() - started, 4)
+        self.assertGreater(state.catalog.refreshed_at, time.time() - 5)
+
+    def test_fresh_catalog_never_waits_without_a_loop_or_when_fresh(self):
+        state = HubState(temp_dir(self))
+        state.catalog._status_as_of = 0.0
+        state.fresh_catalog(timeout=30)  # no loop running: returns
+        state._catalog_running = True
+        state.catalog._status_as_of = time.time()
+        state.fresh_catalog(timeout=30)  # fresh already: returns
+        self.assertFalse(state._catalog_wake.is_set())
 
     def test_loop_error_log_throttles_per_step_and_window(self):
         import io
