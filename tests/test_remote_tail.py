@@ -828,6 +828,206 @@ class TestDevinBoundedRead(unittest.TestCase):
         self.assertTrue(any("read" in m.text for m in window), "the result still names its call")
 
 
+class TestDevinChainIncremental(unittest.TestCase):
+    """#1522: DevinChain fetches only what changed, and reads exactly
+    what a whole bounded read would."""
+
+    def setUp(self):
+        import sqlite3
+        from swe.reports import transcripts as tr
+        self.tr = tr
+        self.db = temp_dir(self) / "sessions.db"
+        self.conn = sqlite3.connect(self.db)
+        self.addCleanup(self.conn.close)
+        self.conn.executescript(
+            "CREATE TABLE sessions(id TEXT PRIMARY KEY, main_chain_id INTEGER);"
+            "CREATE TABLE message_nodes(row_id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT,"
+            " node_id INTEGER, parent_node_id INTEGER, chat_message TEXT, created_at INTEGER,"
+            " UNIQUE(session_id, node_id));"
+            "CREATE INDEX idx_message_nodes_session ON message_nodes(session_id);"
+            "INSERT INTO sessions VALUES ('s', NULL), ('other', NULL);"
+        )
+        self.session = Session(timestamp=0, agent="Devin", path="/tmp", session_id="s", tool_name="devin")
+        self.parents = {}
+        self.next_id = 1
+        self.head = None
+        patcher = patch("os.path.expanduser",
+                        side_effect=lambda p: str(self.db) if "devin" in p else p)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _put(self, node, parent, rec, sid="s", replace=False):
+        verb = "INSERT OR REPLACE" if replace else "INSERT"
+        self.conn.execute(
+            f"{verb} INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at)"
+            " VALUES (?, ?, ?, ?, 0)", (sid, node, parent, json.dumps(rec)))
+        if sid == "s":
+            self.parents[node] = parent
+
+    def _new(self, parent, rec):
+        node = self.next_id
+        self.next_id += 1
+        self._put(node, parent, rec)
+        return node
+
+    def _set_head(self, node):
+        self.head = node
+        self.conn.execute("UPDATE sessions SET main_chain_id = ? WHERE id = 's'", (node,))
+
+    def _chain(self):
+        out, cursor = [], self.head
+        while cursor is not None:
+            out.append(cursor)
+            cursor = self.parents.get(cursor)
+        return out
+
+    def _texts(self, transcript):
+        return [(m.role, m.kind, m.text) for m in transcript.messages]
+
+    def _same(self, chain, window):
+        got = self.tr.read_transcript_tail(self.session, window, chain=chain)
+        want = self.tr.read_transcript_tail(self.session, window)
+        self.assertEqual(self._texts(got), self._texts(want))
+        return chain.last_read
+
+    def test_random_writes_read_the_same_as_a_whole_read(self):
+        import random
+        rng = random.Random(1522)
+        call = [0]
+
+        def record():
+            kind = rng.choice(["human", "assistant", "call", "result", "system"])
+            if kind == "call":
+                call[0] += 1
+                return {"role": "assistant", "content": rng.choice(["", "running"]),
+                        "tool_calls": [{"id": f"c{call[0]}", "name": rng.choice(["read", "bash"]),
+                                        "arguments": json.dumps({"command": f"cmd {call[0]}"})}]}
+            if kind == "result":
+                return {"role": "tool", "tool_call_id": f"c{rng.randint(max(1, call[0] - 3), call[0] + 1)}",
+                        "content": f"out {rng.random():.3f}"}
+            return {"role": kind, "content": f"{kind} {rng.random():.3f}"}
+
+        steps = {"full": 0, "step": 0}
+        with patch.object(self.tr, "_DEVIN_NAME_MARGIN", 3):
+            chain = self.tr.DevinChain(full_every_s=float("inf"))
+            for _round in range(300):
+                op = rng.choice(["append", "append", "append", "stream", "replace",
+                                 "reparent", "fork", "back", "other", "none"])
+                chain_now = self._chain()
+                if op == "append" or not chain_now:
+                    self._set_head(self._new(self.head, record()))
+                elif op == "stream":
+                    # A streamed reply: another copy under the same parent.
+                    self._set_head(self._new(self.parents[self.head], record()))
+                elif op == "replace":
+                    node = rng.choice(chain_now[:12])
+                    self._put(node, self.parents[node], record(), replace=True)
+                elif op == "reparent" and len(chain_now) > 3:
+                    # A rewrite that moves a node under an older one
+                    # (never seen from Devin, but the read must hold).
+                    i = rng.randrange(0, min(len(chain_now) - 2, 10))
+                    node = chain_now[i]
+                    self._put(node, chain_now[i + 2], record(), replace=True)
+                elif op == "fork":
+                    at = rng.choice(chain_now[:15])
+                    self._set_head(self._new(at, record()))
+                elif op == "back":
+                    self._set_head(rng.choice(chain_now[:15]))
+                elif op == "other":
+                    self._put(self.next_id, None, record(), sid="other")
+                    self.next_id += 1
+                self.conn.commit()
+                how, _fetched = self._same(chain, 6)
+                steps[how] += 1
+        self.assertGreater(steps["step"], steps["full"] * 3, steps)
+
+    def test_appends_fetch_only_the_new_nodes(self):
+        chain = self.tr.DevinChain()
+        for i in range(30):
+            self._set_head(self._new(self.head, {"role": "human", "content": f"m{i}"}))
+        self.conn.commit()
+        self.assertEqual(self._same(chain, 10), ("full", 10 + self.tr._DEVIN_NAME_MARGIN if 30 >= 10 + self.tr._DEVIN_NAME_MARGIN else 30))
+        # Streamed copies of the newest reply: only the head is new.
+        for i in range(3):
+            self._set_head(self._new(self.parents[self.head], {"role": "assistant", "content": "x" * (i + 1)}))
+            self.conn.commit()
+            self.assertEqual(self._same(chain, 10), ("step", 1))
+        # Nothing changed: nothing fetched.
+        self.assertEqual(self._same(chain, 10), ("step", 0))
+
+    def test_a_rewritten_node_is_read_again(self):
+        chain = self.tr.DevinChain()
+        nodes = []
+        for i in range(5):
+            self._set_head(self._new(self.head, {"role": "human", "content": f"m{i}"}))
+            nodes.append(self.head)
+        self.conn.commit()
+        self._same(chain, 10)
+        self._put(nodes[1], self.parents[nodes[1]], {"role": "human", "content": "edited"}, replace=True)
+        self.conn.commit()
+        self.assertEqual(self._same(chain, 10), ("step", 1))
+        texts = [m.text for m in self.tr.read_transcript_tail(self.session, 10, chain=chain).messages]
+        self.assertIn("edited", texts)
+
+    def test_a_replaced_or_rewound_store_reads_whole_again(self):
+        import os
+        import shutil
+        import sqlite3
+        chain = self.tr.DevinChain()
+        for i in range(4):
+            self._set_head(self._new(self.head, {"role": "human", "content": f"m{i}"}))
+        self.conn.commit()
+        self._same(chain, 10)
+        # A restored copy: same node ids, other text, lower row ids.
+        copy = self.db.with_name("copy.db")
+        shutil.copy(self.db, copy)
+        c2 = sqlite3.connect(copy)
+        c2.execute("DELETE FROM message_nodes")
+        for node, parent in sorted(self.parents.items()):
+            c2.execute("INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at)"
+                       " VALUES ('s', ?, ?, ?, 0)", (node, parent, json.dumps({"role": "human", "content": f"r{node}"})))
+        c2.commit()
+        c2.close()
+        os.replace(copy, self.db)
+        self.assertEqual(self._same(chain, 10)[0], "full")
+        # Rows deleted in place under the watermark: whole read too.
+        import sqlite3 as _s
+        c3 = _s.connect(self.db)
+        c3.execute("DELETE FROM message_nodes WHERE node_id = (SELECT MAX(node_id) FROM message_nodes)")
+        c3.execute("UPDATE sessions SET main_chain_id = 3 WHERE id = 's'")
+        c3.commit()
+        c3.close()
+        self.assertEqual(self._same(chain, 10)[0], "full")
+
+    def test_a_full_read_runs_after_its_interval_and_after_a_reset(self):
+        now = [0.0]
+        chain = self.tr.DevinChain(full_every_s=60, clock=lambda: now[0])
+        self._set_head(self._new(None, {"role": "human", "content": "a"}))
+        self.conn.commit()
+        self.assertEqual(self._same(chain, 10)[0], "full")
+        self.assertEqual(self._same(chain, 10)[0], "step")
+        now[0] = 60
+        self.assertEqual(self._same(chain, 10)[0], "full")
+        chain.reset()
+        self.assertEqual(self._same(chain, 10)[0], "full")
+
+    def test_snapshot_source_reads_devin_through_its_chain(self):
+        src = tail.SnapshotSource(self.session)
+        self.assertIsNotNone(src._chain)
+        self._set_head(self._new(None, {"role": "human", "content": "hi"}))
+        self.conn.commit()
+        with patch.object(tail, "_devin_token", side_effect=[(1,), (2,), (2,)]):
+            self.assertEqual([m["text"] for m in src.poll()], ["hi"])
+            self._set_head(self._new(self.head, {"role": "assistant", "content": "yo"}))
+            self.conn.commit()
+            self.assertEqual([m["text"] for m in src.poll()], ["yo"])
+            self.assertEqual(src._chain.last_read, ("step", 1))
+            # Unchanged for DEVIN_CHAIN_KEEP_S: the kept nodes go.
+            src._token_at -= tail.DEVIN_CHAIN_KEEP_S
+            self.assertEqual(src.poll(), [])
+            self.assertEqual(src._chain._nodes, [])
+
+
 class TestBackfillCap(unittest.TestCase):
     """A session seen for the first time backfills recent history only."""
 
