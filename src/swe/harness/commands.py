@@ -17,6 +17,7 @@ from swe.flags import expand_value_flags
 from swe.harness.columns import (
     COLUMNS,
     DEFAULT_COLUMNS,
+    list_section,
     load_columns,
     load_window,
     next_window,
@@ -83,10 +84,15 @@ def _broken_tools():
     return broken_tools()
 
 
-def _session_counts(days=None):
+_CONFIGURED = object()
+
+
+def _session_counts(days=_CONFIGURED):
+    """Session counts over ``days`` (``None`` is every session ever), or
+    over the configured window when ``days`` is left out."""
     from swe.sessions.usage import session_counts
 
-    return session_counts(load_window() if days is None else days)
+    return session_counts(load_window() if days is _CONFIGURED else days)
 
 
 def _sort_tools(tools: dict, counts: dict[str, int], stars: list[str]):
@@ -740,9 +746,11 @@ def cmd_list(args):
                                     "aliases": [], "tags": []})
 
     tag_filter = args[0] if args else None
-    counts = _session_counts()
-    broken = _broken_tools() if "sess" in set(load_columns()) else set()
-    _sess_label = window_label(load_window())
+    settings = list_section()
+    columns, window = load_columns(settings), load_window(settings)
+    counts = _session_counts(window)
+    broken = _broken_tools() if "sess" in set(columns) else set()
+    _sess_label = window_label(window)
     # USAGE is only ever filled in for an archived harness, so in the
     # default active scope it rendered as a wholly blank column.
     shows_usage = any(n in archived for n in tools)
@@ -783,7 +791,7 @@ def cmd_list(args):
     # exactly when it is needed. Gating on the flags alone was wrong once the
     # set became configurable: a saved AGENTS.MD column rendered every row as
     # "no known convention" because nothing had populated the link state.
-    wanted = set(load_columns())
+    wanted = set(columns)
     if links_view:
         wanted |= {"agents", "skills"}
     if usage_view:
