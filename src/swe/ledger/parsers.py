@@ -393,32 +393,55 @@ def _db_tokens(value) -> int:
     return json_int(value)
 
 
+def _row_int(value) -> int:
+    """A watermark column as SQLite's integer read gives it (NULL and
+    text that is not a number read as 0), for the readers' ``highest``."""
+    if isinstance(value, (int, float)):
+        return int(value)
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def opencode_records(db: Path) -> list[LedgerRecord]:
-    """``opencode.db`` assistant messages, legacy ``message`` rows and
-    2.x ``session_message`` ones, the model recorded as ``provider/model``
-    (see ``opencode_model``). Older rows folded reasoning
-    into output; a recorded cost of 0 means OpenCode did not know the
-    price, so it is no recorded cost."""
+    """Every OpenCode reply in ``db`` (``opencode_scan`` from the start)."""
+    return opencode_scan(db, 0)[0]
+
+
+def opencode_scan(db: Path, since: int = 0) -> tuple[list[LedgerRecord], int]:
+    """``opencode.db`` assistant messages updated at or after ``since``
+    (milliseconds), legacy ``message`` rows and 2.x ``session_message``
+    ones, the model recorded as ``provider/model`` (see
+    ``opencode_model``), with the highest ``time_updated`` read: the next
+    scan's watermark (``scanOpenCode`` in ``DatabaseSources.swift``).
+    Messages are rewritten while they stream, so the watermark is
+    ``time_updated``, compared inclusively, and every row is keyed by its
+    message id, so a re-read replaces in place. Older rows folded
+    reasoning into output; a recorded cost of 0 means OpenCode did not
+    know the price, so it is no recorded cost."""
     conn = _open_ro(db)
     try:
         rows = conn.execute("""
-            SELECT m.id, m.session_id, m.time_created, s.directory,
+            SELECT m.id, m.session_id, m.time_created, m.time_updated, s.directory,
                 json_extract(m.data, '$.modelID'), json_extract(m.data, '$.cost'),
                 json_extract(m.data, '$.tokens.input'), json_extract(m.data, '$.tokens.output'),
                 json_extract(m.data, '$.tokens.reasoning'), json_extract(m.data, '$.tokens.cache.read'),
                 json_extract(m.data, '$.tokens.cache.write'), json_extract(m.data, '$.tokens.total'),
                 json_extract(m.data, '$.providerID')
             FROM message m LEFT JOIN session s ON s.id = m.session_id
-            WHERE json_extract(m.data, '$.role') = 'assistant'
+            WHERE m.time_updated >= ? AND json_extract(m.data, '$.role') = 'assistant'
             ORDER BY m.time_updated
-        """).fetchall()
-        rows += _opencode_v2_rows(conn)
+        """, (since,)).fetchall()
+        rows += _opencode_v2_rows(conn, since)
     finally:
         conn.close()
     account = str(db.parent)
+    highest = since
     out: list[LedgerRecord] = []
-    for (mid, session, created, directory, model, cost,
+    for (mid, session, created, updated, directory, model, cost,
          inp, outp, reas, cread, cwrite, total, provider) in rows:
+        highest = max(highest, _row_int(updated))
         inp, outp, reas = _db_tokens(inp), _db_tokens(outp), _db_tokens(reas)
         cread, cwrite = _db_tokens(cread), _db_tokens(cwrite)
         inside = (reas > 0 and total is not None
@@ -432,7 +455,7 @@ def opencode_records(db: Path) -> list[LedgerRecord]:
         )
         if ev.total > 0:
             out.append(LedgerRecord(key=f"opencode:{mid or ''}", event=ev, relabels_model=True))
-    return out
+    return out, highest
 
 
 def opencode_model(provider: str | None, model_id: str | None) -> str:
@@ -449,8 +472,9 @@ def opencode_model(provider: str | None, model_id: str | None) -> str:
     return f"{provider}/{model_id}"
 
 
-def _opencode_v2_rows(conn: sqlite3.Connection) -> list[tuple]:
-    """OpenCode 2.x replies, in ``opencode_records``' row shape.
+def _opencode_v2_rows(conn: sqlite3.Connection, since: int = 0) -> list[tuple]:
+    """OpenCode 2.x replies updated at or after ``since``, in
+    ``opencode_scan``'s row shape.
 
     2.x writes new replies only to ``session_message`` (and new sessions
     only to ``session_v2``), naming the model ``model.id``. The 2.x
@@ -467,29 +491,46 @@ def _opencode_v2_rows(conn: sqlite3.Connection) -> list[tuple]:
         directory = "COALESCE(v.directory, s.directory)"
         join += " LEFT JOIN session_v2 v ON v.id = sm.session_id"
     return conn.execute(f"""
-        SELECT sm.id, sm.session_id, sm.time_created, {directory},
+        SELECT sm.id, sm.session_id, sm.time_created, sm.time_updated, {directory},
             json_extract(sm.data, '$.model.id'), json_extract(sm.data, '$.cost'),
             json_extract(sm.data, '$.tokens.input'), json_extract(sm.data, '$.tokens.output'),
             json_extract(sm.data, '$.tokens.reasoning'), json_extract(sm.data, '$.tokens.cache.read'),
             json_extract(sm.data, '$.tokens.cache.write'), NULL,
             json_extract(sm.data, '$.model.providerID')
         FROM session_message sm {join}
-        WHERE sm.type = 'assistant'
+        WHERE sm.time_updated >= ? AND sm.type = 'assistant'
           AND NOT EXISTS (SELECT 1 FROM message m WHERE m.id = sm.id)
         ORDER BY sm.time_updated
-    """).fetchall()
+    """, (since,)).fetchall()
 
 
 def devin_records(db: Path) -> list[LedgerRecord]:
-    """Devin CLI ``sessions.db``: usage on assistant ``message_nodes``.
-    Replays copy nodes, so ``request_id`` is the key across the install."""
+    """Every Devin reply in ``db`` (``devin_scan`` from the start)."""
+    return devin_scan(db, 0)[0]
+
+
+def devin_scan(db: Path, since: int = 0) -> tuple[list[LedgerRecord], int]:
+    """Devin CLI ``sessions.db``: usage on assistant ``message_nodes``
+    past the ``row_id`` watermark ``since``, with the next scan's
+    watermark (``scanDevin`` in ``DatabaseSources.swift``). Replays copy
+    nodes, so ``request_id`` is the key across the install.
+
+    Row ids only grow (``AUTOINCREMENT``), so a highest id below
+    ``since`` means the file was rebuilt in place, and it is read from
+    the start. An assistant row still waiting for its metrics holds the
+    watermark back so it is read again once Devin fills them in, unless a
+    later row of the same session has metrics, which means it was
+    abandoned."""
     conn = _open_ro(db)
     try:
+        top = conn.execute("SELECT COALESCE(MAX(row_id), 0) FROM message_nodes").fetchone()
+        if top is not None and _row_int(top[0]) < since:
+            since = 0
         has_sessions = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions'"
         ).fetchone() is not None
         rows = conn.execute(f"""
-            SELECT n.session_id, n.created_at, {"s.working_directory" if has_sessions else "NULL"},
+            SELECT n.row_id, n.session_id, n.created_at, {"s.working_directory" if has_sessions else "NULL"},
                 json_extract(n.chat_message, '$.metadata.request_id'),
                 json_extract(n.chat_message, '$.metadata.generation_model'),
                 json_extract(n.chat_message, '$.metadata.created_at'),
@@ -498,31 +539,39 @@ def devin_records(db: Path) -> list[LedgerRecord]:
                 json_extract(n.chat_message, '$.metadata.metrics.cache_read_tokens'),
                 json_extract(n.chat_message, '$.metadata.metrics.cache_creation_tokens')
             FROM message_nodes n {"LEFT JOIN sessions s ON s.id = n.session_id" if has_sessions else ""}
-            WHERE json_valid(n.chat_message)
+            WHERE n.row_id > ? AND json_valid(n.chat_message)
                 AND json_extract(n.chat_message, '$.role') = 'assistant'
                 AND json_extract(n.chat_message, '$.metadata.request_id') IS NOT NULL
             ORDER BY n.row_id
-        """).fetchall()
+        """, (since,)).fetchall()
     finally:
         conn.close()
     account = str(db.parent)
+    highest = since
+    # Session to its earliest row still waiting for metrics.
+    pending: dict[str, int] = {}
     out: list[LedgerRecord] = []
-    for (session, created, cwd, request_id, model, meta_created,
+    for (row_id, session, created, cwd, request_id, model, meta_created,
          inp, outp, cread, cwrite) in rows:
+        row_id = _row_int(row_id)
+        session = session or "unknown"
+        highest = max(highest, row_id)
         if inp is None or outp is None:
-            continue  # still waiting for metrics
+            pending.setdefault(session, row_id)  # still waiting for metrics
+            continue
+        pending.pop(session, None)
         ts = parse_timestamp(meta_created)
         if ts is None:
             ts = float(created or 0)
         ev = UsageEvent(
-            harness="devin", account=account, session=session or "unknown", cwd=cwd,
+            harness="devin", account=account, session=session, cwd=cwd,
             model=model or "unknown", ts=ts,
             input=_db_tokens(inp), output=_db_tokens(outp),
             cache_read=_db_tokens(cread), cache_write=_db_tokens(cwrite),
         )
         if ev.total > 0 and request_id:
             out.append(LedgerRecord(key=f"devin:{request_id}", event=ev))
-    return out
+    return out, (min(pending.values()) - 1 if pending else highest)
 
 
 # ---------------------------------------------------------------- Pi
