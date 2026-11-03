@@ -1293,6 +1293,17 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The iPhone console, uploads and Devices page wake the app less.</strong>
+The console hopped to the main queue once per SSH read, hundreds of
+times a second while a command printed; reads now queue up and reach
+the terminal in one batch per main-queue turn, in order. Upload
+progress redrew the chip for every chunk URLSession sent; it now
+reports at most ten times a second, plus the end. The Devices page
+fetched both pair requests and the device list every 5 s while open;
+it now loads devices once (and again after an approval, a removal or
+a pull to refresh) and asks for pending requests every 10 s. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1553">#1553</a>.</p>
+</li>
 <li><p><strong>A snapshot session whose store can't be found no longer costs a
 read attempt every poll.</strong> When a Cline, Continue, Gemini, Copilot,
 Forge or Crush read found no source files or a store it couldn't read,
