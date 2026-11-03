@@ -177,12 +177,12 @@ def _pin_columns(test):
     from swe.harness import columns as _columns
 
     patch = mock.patch.object(
-        _columns, "load_columns", lambda: list(_columns.DEFAULT_COLUMNS))
+        _columns, "load_columns", lambda *_: list(_columns.DEFAULT_COLUMNS))
     patch.start()
     test.addCleanup(patch.stop)
     patch2 = mock.patch(
         "swe.harness.commands.load_columns",
-        lambda: list(_columns.DEFAULT_COLUMNS))
+        lambda *_: list(_columns.DEFAULT_COLUMNS))
     patch2.start()
     test.addCleanup(patch2.stop)
 

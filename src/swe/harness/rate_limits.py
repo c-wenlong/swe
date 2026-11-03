@@ -3202,8 +3202,24 @@ _register_devin()
 # Cache
 # ---------------------------------------------------------------------------
 
+# ``data`` default for the cache readers below: read the file themselves.
+_READ = object()
+
+
+def _read_cache() -> object | None:
+    """The rate limits cache file, parsed; ``None`` when it is missing or
+    unreadable. ``get_all_rate_limits`` reads it once and hands the value to
+    each reader below, which used to open it themselves, five times a call
+    (#1536)."""
+    try:
+        with open(RATE_LIMITS_CACHE_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError, RecursionError):
+        return None
+
+
 def _load_cached(
-    ttl: float | None = None,
+    ttl: float | None = None, data: object = _READ,
 ) -> tuple[dict[str, dict], dict[str, float]] | None:
     """Load per-provider readings that are individually fresh.
 
@@ -3216,10 +3232,10 @@ def _load_cached(
     or wholly past the envelope TTL.
     """
     try:
-        if not RATE_LIMITS_CACHE_FILE.exists():
+        if data is _READ:
+            data = _read_cache()
+        if data is None:
             return None
-        with open(RATE_LIMITS_CACHE_FILE) as f:
-            data = json.load(f)
         ttl = _CACHE_TTL if ttl is None else ttl
         try:
             cached_at = float(data.get("cached_at", 0))
@@ -3256,7 +3272,8 @@ def _load_cached_no_data(ttl: float | None = None) -> set[str]:
     return set(_load_cached_no_data_marks(ttl))
 
 
-def _load_cached_no_data_marks(ttl: float | None = None) -> dict[str, float]:
+def _load_cached_no_data_marks(ttl: float | None = None,
+                               data: object = _READ) -> dict[str, float]:
     """Names whose fetcher recently returned nothing, with when it did.
 
     Without this a provider that never reports usage counts as a permanent
@@ -3269,10 +3286,10 @@ def _load_cached_no_data_marks(ttl: float | None = None) -> dict[str, float]:
     dict on the next save.
     """
     try:
-        if not RATE_LIMITS_CACHE_FILE.exists():
+        if data is _READ:
+            data = _read_cache()
+        if data is None:
             return {}
-        with open(RATE_LIMITS_CACHE_FILE) as f:
-            data = json.load(f)
         ttl = _CACHE_TTL if ttl is None else ttl
         cached_at = data.get("cached_at", 0)
         if not isinstance(cached_at, (int, float)) or not math.isfinite(cached_at):
@@ -3294,14 +3311,14 @@ def _load_cached_no_data_marks(ttl: float | None = None) -> dict[str, float]:
         return {}
 
 
-def _load_cached_no_data_status() -> dict[str, str]:
+def _load_cached_no_data_status(data: object = _READ) -> dict[str, str]:
     """Why each ``no_data`` name had nothing, from the cache's
     ``no_data_status`` map: ``SIGNED_OUT`` or ``FETCH_ERROR``. Freshness is
     ``_load_cached_no_data``'s call; a name absent here carries no reason
     (saved by an swe from before the map, or a fetcher that can't tell)."""
     try:
-        with open(RATE_LIMITS_CACHE_FILE) as f:
-            data = json.load(f)
+        if data is _READ:
+            data = _read_cache()
         reasons = data.get("no_data_status") if isinstance(data, dict) else None
         if not isinstance(reasons, dict):
             return {}
@@ -3313,13 +3330,13 @@ def _load_cached_no_data_status() -> dict[str, str]:
         return {}
 
 
-def _load_cached_no_data_issues() -> dict[str, str]:
+def _load_cached_no_data_issues(data: object = _READ) -> dict[str, str]:
     """The saved per-provider no-data statuses in the remedies vocabulary,
     from the cache's ``no_data_issues`` map. Older swe files lack it; a
     caller falls back to deriving one from ``no_data_status``."""
     try:
-        with open(RATE_LIMITS_CACHE_FILE) as f:
-            data = json.load(f)
+        if data is _READ:
+            data = _read_cache()
         issues = data.get("no_data_issues") if isinstance(data, dict) else None
         if not isinstance(issues, dict):
             return {}
@@ -3401,11 +3418,13 @@ _RATE_LIMIT_FETCH_DEADLINE = 2.0
 _RATE_LIMIT_FETCH_DEADLINE_TTY = 25.0
 
 
-def _load_stale_cached() -> tuple[dict[str, dict], dict[str, float]]:
+def _load_stale_cached(
+    data: object = _READ,
+) -> tuple[dict[str, dict], dict[str, float]]:
     """Load the last snapshot for outage fallback, up to 24 hours old."""
     try:
-        with open(RATE_LIMITS_CACHE_FILE) as f:
-            data = json.load(f)
+        if data is _READ:
+            data = _read_cache()
         if not isinstance(data, dict):
             return {}, {}
         cached_at = float(data.get("cached_at", 0))
@@ -3553,12 +3572,14 @@ def get_all_rate_limits(
     # snapshot always contributes: a reading older than this call's TTL is
     # out of the fresh cache but still the best last-known value.
     previous_raw: dict[str, dict] = {}
-    stale_limits, stale_updated_at = _load_stale_cached()
+    # One read of the cache file serves every reader below.
+    on_disk = _read_cache()
+    stale_limits, stale_updated_at = _load_stale_cached(on_disk)
     for name, raw in stale_limits.items():
         previous_raw.setdefault(name, raw)
 
     if use_cache:
-        loaded = _load_cached(cache_ttl)
+        loaded = _load_cached(cache_ttl, on_disk)
         if loaded is not None:
             cached, fresh_at = loaded
             previous_raw.update(cached)
@@ -3614,9 +3635,9 @@ def get_all_rate_limits(
                     pass
             # A provider that answered "nothing to report" last time is
             # covered for this window too, otherwise it is refetched forever.
-            empty_marks = _load_cached_no_data_marks(cache_ttl)
+            empty_marks = _load_cached_no_data_marks(cache_ttl, on_disk)
             known_empty = set(empty_marks) & fetcher_names
-            cached_reasons = _load_cached_no_data_status()
+            cached_reasons = _load_cached_no_data_status(on_disk)
             # Signed out is a local credential verdict, re-derived every
             # call like auth-required, so a fresh sign-in shows at once. A
             # Refresh press retries a failed fetch.
@@ -3632,7 +3653,7 @@ def get_all_rate_limits(
             # Saved issues keep the fine status across reads; caches from
             # before the map fall back to the coarse-to-fine mapping —
             # "error" to "unavailable", "signed_out" to "signed-out".
-            cached_issues = _load_cached_no_data_issues()
+            cached_issues = _load_cached_no_data_issues(on_disk)
             statuses.update({
                 name: cached_issues.get(
                     name,
