@@ -610,6 +610,39 @@ def read_json_dict(path: "Path") -> dict:
     return data if isinstance(data, dict) else {}
 
 
+# path -> ((inode, mtime_ns, size), parsed value), for read_json_shared.
+_SHARED_JSON: dict[tuple, tuple[tuple[int, int, int], object]] = {}
+
+
+def read_json_shared(path: "Path", build=None):
+    """The JSON at ``path``, parsed again only when the file changes.
+
+    For small stores the hub reads on every request. The value is shared
+    between callers: never mutate it, and never build a write from it
+    (a read-change-write reads the file itself). ``build`` turns the
+    parsed JSON into what is kept; its result is shared the same way.
+
+    A change is seen through the file's inode, mtime and size: every
+    writer replaces the file through ``atomic_write_text``, which gives
+    it a new inode. Raises what ``open`` and ``json.loads`` raise; a
+    failed read or parse is never kept.
+    """
+    st = os.stat(path)
+    sig = (st.st_ino, st.st_mtime_ns, st.st_size)
+    key = (os.fspath(path), build)
+    hit = _SHARED_JSON.get(key)
+    if hit is not None and hit[0] == sig:
+        return hit[1]
+    with open(path, encoding="utf-8") as fh:
+        data = json.loads(fh.read())
+    if build is not None:
+        data = build(data)
+    # Keyed on the stat taken before the read: a write landing in
+    # between changes the stat, so the next call reads again.
+    _SHARED_JSON[key] = (sig, data)
+    return data
+
+
 def atomic_write_text(path: "Path", text: str, *, private: bool = False) -> None:
     """Write ``text`` to ``path`` atomically, preserving its permissions.
 

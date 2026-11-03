@@ -1180,6 +1180,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finished reply once from a small status node instead of each repaint.
   Closes [#1555](https://github.com/c-wenlong/swe/issues/1555).
 
+- **Devin change checks cost microseconds instead of milliseconds.**
+  Every poll of a tailed Devin session opened a new connection to
+  `sessions.db` and counted the session's rows: 13 to 22 ms a call for a
+  37K to 52K-node session on a 9.8 GB store. The hub now keeps one
+  read-only connection and asks SQLite's `data_version` whether anything
+  committed. When nothing did, no query runs (0.02 ms); after a write it
+  reads the newest row id and chain head (0.03 to 0.3 ms). The row count,
+  which catches a delete below the newest row, is read again at most once
+  a minute per session. Closes
+  [#1521](https://github.com/c-wenlong/swe/issues/1521).
+
+- **The Mac app keeps fewer things in memory for its whole life.**
+  Switching machines kept a live web view and WebContent process for
+  every hub ever shown; only the last two shown stay now, and an older
+  one reloads when picked. The Calendar's day cache stops at 400 days,
+  dropping the days farthest from the ones on show, so scrolling back
+  through years no longer grows it without end. The Sessions page lists
+  at most 20,000 sessions instead of 100,000, with the existing note
+  when older ones are left out. Closes
+  [#1544](https://github.com/c-wenlong/swe/issues/1544).
+- **The hub stops re-parsing its small stores on every request.** The
+  credential check, an open stream's revocation check, the session
+  list's unread flags and the machine list read `devices.json`, the
+  sign-ins file, `session_reads.json` (twice per session list) and
+  `machines.json` from disk each time. They now share one memo that
+  parses a file again only when it changes: a session list over 2,000
+  read cursors went from 1.8 ms to 0.7 ms, and a credential check from
+  37 to 11 us. Closes
+  [#1528](https://github.com/c-wenlong/swe/issues/1528).
+- **The Mac app's background polls no longer keep the Mac awake.**
+  Every `swe` the app ran held a user-initiated activity, which also
+  blocks idle system sleep while the child runs, so the GitHub poll, the
+  3 s pair-request poll on Remote settings and the account, feed and
+  limit refreshes each held it off several times a minute. Polls and
+  timers now run their `swe` with no activity; runs from a button keep
+  it. The activity always ended with each run, so App Nap was only off
+  while a child ran, never for the whole app. Closes
+  [#1540](https://github.com/c-wenlong/swe/issues/1540).
+- **The Mac app's ledger ticks cost about a third of the CPU they did.**
+  A background scan now counts as new usage only when it wrote a usage
+  event, not when it merely read a file, so a tick that appended prompts
+  or tool output rebuilds nothing. Ticks that do write usage read less:
+  a covering index answers the time-range reads without a table lookup
+  per row, grouped reads group by dimension id before joining names, and
+  Codex's account comparison reads only Codex rows. Measured against a
+  copy of a 415,000-event ledger, one ingest tick went from about 6.4 to
+  2.0 CPU-seconds. Closes [#1568](https://github.com/c-wenlong/swe/issues/1568).
+- **The hub slows down while nobody is watching.** With no client
+  stream open (the ntfy notifier holds one whenever it can push;
+  satellite command streams don't count) and no client request for two
+  minutes, `swe remote serve` polls
+  active sessions every 5 s instead of 1 s and idle ones every 60 s
+  instead of 8 s, refreshes the catalog every 60 s instead of 10 s, and
+  ticks its tail loop once a second instead of four times. Transcripts
+  stay on disk, so this only delays the journal's copy. The next client
+  request ends it at once: every tailer polls, the catalog refreshes, and
+  the first `/v1/sessions` or `/v1/inbox` read waits up to 5 s for that
+  refresh instead of serving a minute-old list. An unwatched hub on this
+  Mac used about 8% of a core, split about evenly between the catalog
+  and tail threads. Closes
+  [#1520](https://github.com/c-wenlong/swe/issues/1520).
+- **`swe` starts faster: each command imports only its own code.**
+  `cli.py` imported every command's module tree before dispatching, so
+  `import swe.cli` took about 330 ms on a loaded machine, nearly all of
+  a `swe version` run, and every `swe` the Mac app spawns paid it. Each
+  command now imports its module when it runs, which brings
+  `import swe.cli` to about 33 ms. A rate limits call also reads its
+  cache file once instead of five times, and `swe list` reads
+  config.json's `list` section once instead of three times. Closes
+  [#1536](https://github.com/c-wenlong/swe/issues/1536).
+- **The status column reads less per session.** OpenCode's probe
+  pulled the full JSON of a session's newest 50 messages and ran two
+  `PRAGMA table_info` reads for every session; it now reads the table
+  shape once per pass, picks the deciding row by type, and loads only
+  that row's JSON. Devin's probe lets SQLite pull the role, tool calls
+  and text out of the head message instead of decoding all of it.
+  Cline caches the follow-up check against its `messages.json`
+  signature and reads the metadata file once per pass, and the tail
+  probes decode JSONL lines newest-first only until the walk decides.
+  CPU per pass here: OpenCode 381 sessions about 66 to 50 ms, Devin
+  216 sessions about 10 to 6 ms, a 64 KB transcript tail walk about
+  half. Closes [#1535](https://github.com/c-wenlong/swe/issues/1535).
+- **The Mac app's Compute sampler runs at full rate only while a
+  trend view is on screen.** It used to sweep every process, the GPU
+  clients and the SMC at the chosen interval (3 s on one Mac) for as
+  long as the app ran, about 80 ms of CPU per sweep with 700 processes.
+  The Compute page, the menu bar's Compute tab and the Widgets page's
+  Compute preview now ask for the full rate while their window can be
+  seen. Otherwise the sampler reads only what auto clean (processes),
+  the fan threshold (temperatures) and a placed Compute widget need,
+  every 30 s, and nothing at all when none of them is on. The page's
+  own three-second refresh also stops while its window is minimised or
+  covered, the temperature reads keep one SMC connection, and process
+  attribution works each pid's harness out once. Closes
+  [#1539](https://github.com/c-wenlong/swe/issues/1539).
+
 - **The iPhone chat stops re-parsing a streaming reply from the top.**
   Every 80 ms repaint of a reply still being written parsed the whole
   reply twice (once for the text, once for its link cards), styled every
@@ -1440,8 +1536,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its command and settings file, where it's linked, and the script in a
   raw editor. `swe hooks list --json` rows now carry `summary` and
   `detail` for it.
+- **The status and model caches stop stat'ing every entry on each
+  rewrite.** The hub's status probes rewrite `session_status_cache.json`
+  up to once a second while a session is busy, and every rewrite checked
+  each of its 1,000 entries for a deleted file: about 5 of the 6.5 ms
+  per rewrite here. That sweep now runs at most every 5 minutes per
+  cache file in a process; a deleted file's entry just waits for the
+  next one. A process-resident store was not worth it: the cache files
+  are 210 to 245 KB here (not 10 to 50 MB) and load in about 1 ms.
+  Closes [#1527](https://github.com/c-wenlong/swe/issues/1527).
+- **Session listings read Devin prompts once and Cline files once per
+  change.** Devin's title provenance ran one `prompt_history` query per
+  session (210 here); it now runs one for all of them. Cline's session
+  glob also matches every `<id>.messages.json` transcript, which a cold
+  listing parsed in full every time (about 3 ms per 2 MB file); each file
+  now goes through the parse cache, so an unchanged one costs a `stat`.
+  `json_engine` joins the parse cache's fingerprint. Closes
+  [#1534](https://github.com/c-wenlong/swe/issues/1534).
 
 ### Fixed
+
+- **`build_ios.sh` reaches a real iPhone and a named signing team.**
+  The device picker took the first paired iOS device `devicectl`
+  reported, which could be a simulator (it reports `paired` like a real
+  phone), so a connected iPhone was passed over; the filter now also
+  requires `reality == "physical"`. And `DEVELOPMENT_TEAM` ships empty
+  in `project.yml` with no override path, so device builds always died
+  on "requires a development team" — the script now takes
+  `SWE_DEVELOPMENT_TEAM` and passes it to xcodebuild. The README's
+  claim that automatic signing registers the App Group was wrong for
+  entitlements-file groups, so the fresh-team portal steps (create the
+  group, assign it on each App ID, purge stale profiles) are
+  documented.
 
 - **The remote hub no longer drops a browser's parallel asset fetches,
   which left the web app a blank shell behind `tailscale serve`.** A
