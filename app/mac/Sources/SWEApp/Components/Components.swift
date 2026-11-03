@@ -797,10 +797,13 @@ struct SkeletonBlock: View {
     var radius: CGFloat = 6
 
     @Environment(\.skeletonSweepShared) private var shared
+    @Environment(\.skeletonMaskPass) private var maskPass
 
     var body: some View {
         RoundedRectangle(cornerRadius: radius)
-            .fill(Theme.border)
+            // In the shared band's mask the bar is solid, so the band
+            // keeps its full strength over the translucent bar.
+            .fill(maskPass ? Color.black : Theme.border)
             .modifier(SkeletonSweep(active: !shared))
             .clipShape(.rect(cornerRadius: radius))
             .frame(width: width, height: height)
@@ -812,6 +815,8 @@ struct SkeletonBlock: View {
 extension EnvironmentValues {
     /// Set by `.skeletonSweep()`: an ancestor sweeps, so bars don't.
     @Entry var skeletonSweepShared = false
+    /// Set on the copy a shared band uses as its mask.
+    @Entry var skeletonMaskPass = false
 }
 
 extension View {
@@ -856,7 +861,11 @@ private struct SkeletonSweep: ViewModifier {
                             .frame(width: 160)
                             .offset(x: swept ? geometry.size.width : -160)
                     }
-                    if masked { band.mask(content) } else { band }
+                    if masked {
+                        band.mask(content.environment(\.skeletonMaskPass, true))
+                    } else {
+                        band
+                    }
                 }
                 .onAppear {
                     withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { swept = true }
