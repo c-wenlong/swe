@@ -1167,6 +1167,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The web chat parses only the growing end of a streaming reply.**
+  Each repaint (at most every 80 ms) used to run the whole reply through
+  the Markdown parser and syntax highlighter and replace the bubble's
+  HTML. Blocks that end at a blank line are now settled: their nodes
+  stay, and only the text after them is parsed and drawn again, with
+  the same result as a full render. Over a 60 s, 12 KB reply (600
+  paints) that is 18 ms of Markdown work instead of 824 ms, and 133 KB
+  of HTML handed to the DOM instead of 9.5 MB. A delta no longer
+  rebuilds every bubble's text twice to see whether anything changed,
+  and the chat log is no longer a live region, so screen readers hear a
+  finished reply once from a small status node instead of each repaint.
+  Closes [#1555](https://github.com/c-wenlong/swe/issues/1555).
+
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
   newest 1,000 chain nodes anyway. Devin's change token (the session's
