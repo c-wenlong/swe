@@ -1293,14 +1293,25 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
-<li><p><strong>Session listings read Devin prompts once and Cline files once per
-change.</strong> Devin's title provenance ran one <code>prompt_history</code> query per
-session (210 here); it now runs one for all of them. Cline's session
-glob also matches every <code>&lt;id&gt;.messages.json</code> transcript, which a cold
-listing parsed in full every time (about 3 ms per 2 MB file); each file
-now goes through the parse cache, so an unchanged one costs a <code>stat</code>.
-<code>json_engine</code> joins the parse cache's fingerprint. Closes
-<a href="https://github.com/c-wenlong/swe/issues/1534">#1534</a>.</p>
+<li><p><strong>The Mac app's background polls no longer keep the Mac awake.</strong>
+Every <code>swe</code> the app ran held a user-initiated activity, which also
+blocks idle system sleep while the child runs, so the GitHub poll, the
+3 s pair-request poll on Remote settings and the account, feed and
+limit refreshes each held it off several times a minute. Polls and
+timers now run their <code>swe</code> with no activity; runs from a button keep
+it. The activity always ended with each run, so App Nap was only off
+while a child ran, never for the whole app. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1540">#1540</a>.</p>
+</li>
+<li><p><strong>The Mac app's ledger ticks cost about a third of the CPU they did.</strong>
+A background scan now counts as new usage only when it wrote a usage
+event, not when it merely read a file, so a tick that appended prompts
+or tool output rebuilds nothing. Ticks that do write usage read less:
+a covering index answers the time-range reads without a table lookup
+per row, grouped reads group by dimension id before joining names, and
+Codex's account comparison reads only Codex rows. Measured against a
+copy of a 415,000-event ledger, one ingest tick went from about 6.4 to
+2.0 CPU-seconds. Closes <a href="https://github.com/c-wenlong/swe/issues/1568">#1568</a>.</p>
 </li>
 <li><p><strong>The hub slows down while nobody is watching.</strong> With no client
 stream open (the ntfy notifier holds one whenever it can push;
@@ -1613,6 +1624,15 @@ Clicking a hook opens it in a panel beside the list: what fires it,
 its command and settings file, where it's linked, and the script in a
 raw editor. <code>swe hooks list --json</code> rows now carry <code>summary</code> and
 <code>detail</code> for it.</p>
+</li>
+<li><p><strong>Session listings read Devin prompts once and Cline files once per
+change.</strong> Devin's title provenance ran one <code>prompt_history</code> query per
+session (210 here); it now runs one for all of them. Cline's session
+glob also matches every <code>&lt;id&gt;.messages.json</code> transcript, which a cold
+listing parsed in full every time (about 3 ms per 2 MB file); each file
+now goes through the parse cache, so an unchanged one costs a <code>stat</code>.
+<code>json_engine</code> joins the parse cache's fingerprint. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1534">#1534</a>.</p>
 </li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>

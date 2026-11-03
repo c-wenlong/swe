@@ -1167,14 +1167,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Session listings read Devin prompts once and Cline files once per
-  change.** Devin's title provenance ran one `prompt_history` query per
-  session (210 here); it now runs one for all of them. Cline's session
-  glob also matches every `<id>.messages.json` transcript, which a cold
-  listing parsed in full every time (about 3 ms per 2 MB file); each file
-  now goes through the parse cache, so an unchanged one costs a `stat`.
-  `json_engine` joins the parse cache's fingerprint. Closes
-  [#1534](https://github.com/c-wenlong/swe/issues/1534).
+- **The Mac app's background polls no longer keep the Mac awake.**
+  Every `swe` the app ran held a user-initiated activity, which also
+  blocks idle system sleep while the child runs, so the GitHub poll, the
+  3 s pair-request poll on Remote settings and the account, feed and
+  limit refreshes each held it off several times a minute. Polls and
+  timers now run their `swe` with no activity; runs from a button keep
+  it. The activity always ended with each run, so App Nap was only off
+  while a child ran, never for the whole app. Closes
+  [#1540](https://github.com/c-wenlong/swe/issues/1540).
+- **The Mac app's ledger ticks cost about a third of the CPU they did.**
+  A background scan now counts as new usage only when it wrote a usage
+  event, not when it merely read a file, so a tick that appended prompts
+  or tool output rebuilds nothing. Ticks that do write usage read less:
+  a covering index answers the time-range reads without a table lookup
+  per row, grouped reads group by dimension id before joining names, and
+  Codex's account comparison reads only Codex rows. Measured against a
+  copy of a 415,000-event ledger, one ingest tick went from about 6.4 to
+  2.0 CPU-seconds. Closes [#1568](https://github.com/c-wenlong/swe/issues/1568).
 - **The hub slows down while nobody is watching.** With no client
   stream open (the ntfy notifier holds one whenever it can push;
   satellite command streams don't count) and no client request for two
@@ -1474,6 +1484,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its command and settings file, where it's linked, and the script in a
   raw editor. `swe hooks list --json` rows now carry `summary` and
   `detail` for it.
+- **Session listings read Devin prompts once and Cline files once per
+  change.** Devin's title provenance ran one `prompt_history` query per
+  session (210 here); it now runs one for all of them. Cline's session
+  glob also matches every `<id>.messages.json` transcript, which a cold
+  listing parsed in full every time (about 3 ms per 2 MB file); each file
+  now goes through the parse cache, so an unchanged one costs a `stat`.
+  `json_engine` joins the parse cache's fingerprint. Closes
+  [#1534](https://github.com/c-wenlong/swe/issues/1534).
 
 ### Fixed
 
