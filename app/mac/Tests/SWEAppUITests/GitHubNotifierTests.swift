@@ -382,3 +382,14 @@ struct GitHubNotifierTests {
         await task.value
     }
 }
+
+/// The Inbox's hub-down retry: each try asks swe where the hub listens,
+/// so the wait doubles from a minute, capped at five.
+@Suite struct NeedsYouRetryTests {
+    @Test @MainActor func theHubDownWaitDoublesUpToFiveMinutes() {
+        var wait = NeedsYouCards.firstRetry
+        var waits: [TimeInterval] = []
+        for _ in 0..<5 { waits.append(wait); wait = NeedsYouCards.nextRetry(after: wait) }
+        #expect(waits == [60, 120, 240, 300, 300])
+    }
+}

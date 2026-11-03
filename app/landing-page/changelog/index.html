@@ -1293,6 +1293,19 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The Mac app's background polls slow down while nobody can see
+them.</strong> The GitHub inbox poll ran <code>swe gh inbox</code> every minute for the
+app's whole life. It now keeps the minute only while the main window
+is on screen, polls every 3 minutes behind it while GitHub banners are
+on, and every 15 minutes with banners off. The window coming back
+wakes it at once. The Repositories and repo pages, the Inbox's hub
+cards, Remote pairing requests and the remote setup sheet skip their
+<code>swe</code> runs while the window is minimised, hidden or covered. A hub
+that doesn't answer is retried after 1, 2, 4 and then 5 minutes,
+where before it was every minute. The accounts timer reads the cached
+login <code>PATH</code> rather than starting <code>zsh -il</code> (the whole rc chain) every
+5 minutes. Closes <a href="https://github.com/c-wenlong/swe/issues/1541">#1541</a>.</p>
+</li>
 <li><p><strong>The Mac app's Compute sampler runs at full rate only while a
 trend view is on screen.</strong> It used to sweep every process, the GPU
 clients and the SMC at the chosen interval (3 s on one Mac) for as
