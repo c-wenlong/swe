@@ -247,6 +247,12 @@ class Journal:
                 return [], False
             with fh:
                 try:
+                    if after_seq <= 0:
+                        # A full replay reads everything anyway, and
+                        # one forward read beats joining chunks.
+                        events = [rec for rec in map(_parse_line, fh.read().split(b"\n"))
+                                  if rec is not None]
+                        return (events[:limit] if limit is not None else events), False
                     for rec in _records_backward(fh):
                         oldest = rec["seq"]
                         if oldest <= after_seq:

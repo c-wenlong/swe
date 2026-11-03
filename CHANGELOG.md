@@ -1167,6 +1167,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **An SSE reconnect replays from the journal's end.** `read_since`
+  parsed a session's whole journal front to back on every reconnect,
+  even when the client was a few events behind: 31 to 36 ms for a
+  4.4 MB, 3,519-event journal here. It now walks back from the end and
+  stops at the client's cursor, in 0.2 ms for 5 events and 0.4 ms for
+  100. A full replay (`last=0`) still reads the file once, forward.
+  Appends encode each line once for both the write and the byte count.
+  Closes [#1529](https://github.com/c-wenlong/swe/issues/1529).
+
 - **The usage ledger reads only new Devin and OpenCode rows.** Any
   write to Devin's `sessions.db` or its WAL made the next scan (each
   web Overview load after the 60 s cache, and every satellite usage

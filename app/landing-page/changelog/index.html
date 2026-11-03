@@ -1293,6 +1293,15 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>An SSE reconnect replays from the journal's end.</strong> <code>read_since</code>
+parsed a session's whole journal front to back on every reconnect,
+even when the client was a few events behind: 31 to 36 ms for a
+4.4 MB, 3,519-event journal here. It now walks back from the end and
+stops at the client's cursor, in 0.2 ms for 5 events and 0.4 ms for
+100. A full replay (<code>last=0</code>) still reads the file once, forward.
+Appends encode each line once for both the write and the byte count.
+Closes <a href="https://github.com/c-wenlong/swe/issues/1529">#1529</a>.</p>
+</li>
 <li><p><strong>The usage ledger reads only new Devin and OpenCode rows.</strong> Any
 write to Devin's <code>sessions.db</code> or its WAL made the next scan (each
 web Overview load after the 60 s cache, and every satellite usage

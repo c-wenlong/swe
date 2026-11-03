@@ -279,14 +279,14 @@ class TestReadTail(unittest.TestCase):
         self._write([{"seq": i, "type": "t", "pad": "x" * 200}
                      for i in range(1, 5001)])
         from unittest.mock import patch
-        real = journal_mod._parse_line
+        real = json.loads
         calls = []
 
-        def counting(raw):
+        def counting(raw, *args, **kwargs):
             calls.append(raw)
-            return real(raw)
+            return real(raw, *args, **kwargs)
 
-        with patch.object(journal_mod, "_parse_line", side_effect=counting):
+        with patch.object(journal_mod.json, "loads", side_effect=counting):
             events, truncated = self.journal.read_since(self.key, 4995)
         self.assertEqual([e["seq"] for e in events], [4996, 4997, 4998, 4999, 5000])
         self.assertFalse(truncated)
