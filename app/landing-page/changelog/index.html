@@ -1293,6 +1293,15 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>Session listings read Devin prompts once and Cline files once per
+change.</strong> Devin's title provenance ran one <code>prompt_history</code> query per
+session (210 here); it now runs one for all of them. Cline's session
+glob also matches every <code>&lt;id&gt;.messages.json</code> transcript, which a cold
+listing parsed in full every time (about 3 ms per 2 MB file); each file
+now goes through the parse cache, so an unchanged one costs a <code>stat</code>.
+<code>json_engine</code> joins the parse cache's fingerprint. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1534">#1534</a>.</p>
+</li>
 <li><p><strong>The hub stops re-reading idle Devin sessions every minute.</strong> A
 snapshot tailer trusted &quot;nothing changed&quot; for 60 s, then re-read the
 newest 1,000 chain nodes anyway. Devin's change token (the session's

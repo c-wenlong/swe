@@ -1167,6 +1167,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Session listings read Devin prompts once and Cline files once per
+  change.** Devin's title provenance ran one `prompt_history` query per
+  session (210 here); it now runs one for all of them. Cline's session
+  glob also matches every `<id>.messages.json` transcript, which a cold
+  listing parsed in full every time (about 3 ms per 2 MB file); each file
+  now goes through the parse cache, so an unchanged one costs a `stat`.
+  `json_engine` joins the parse cache's fingerprint. Closes
+  [#1534](https://github.com/c-wenlong/swe/issues/1534).
+
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
   newest 1,000 chain nodes anyway. Devin's change token (the session's
