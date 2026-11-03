@@ -1094,7 +1094,7 @@ class TailRecordsTest(unittest.TestCase):
             path = fh.name
         records, complete = _tail_records(path, 65536)
         self.assertTrue(complete)
-        self.assertEqual([{"a": 1}, {"b": 2}], records)
+        self.assertEqual([{"a": 1}, {"b": 2}], list(records))
 
     def test_large_file_is_incomplete_and_drops_partial_first_line(self):
         from swe.sessions.status import _tail_records
@@ -1105,7 +1105,7 @@ class TailRecordsTest(unittest.TestCase):
             path = fh.name
         records, complete = _tail_records(path, 64)
         self.assertFalse(complete)
-        self.assertEqual([{"tail": 1}], records)
+        self.assertEqual([{"tail": 1}], list(records))
 
 
 class StatusLegendTest(unittest.TestCase):
