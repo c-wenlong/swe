@@ -384,6 +384,25 @@ private struct TogglingActivity: ActivityProviding {
         #expect(model.blocks.map(\.project) == ["s"])
     }
 
+    /// Scrolling back for years keeps at most `dayCacheLimit` days, and
+    /// the range on show still paints from the cache (#1544).
+    @Test func theDayCacheIsBoundedAndKeepsTheRangeOnShow() async {
+        let model = model(blocks: [block("2026-10-14T09:00:00Z")])
+        model.mode = .month
+        await model.load()
+        for _ in 0..<30 {
+            model.previous()
+            await model.load()
+            await model.backgroundWork()
+        }
+        #expect(model.cachedDayCount <= CalendarModel.dayCacheLimit)
+        model.today()
+        await model.load()
+        await model.backgroundWork()
+        #expect(model.cachedDayCount <= CalendarModel.dayCacheLimit)
+        #expect(model.blocks.map(\.project) == ["s"])
+    }
+
     @Test func theAccountLabelMapsHomesToProfileNames() async {
         var cal = calendar; cal.firstWeekday = 2
         let model = CalendarModel(providers: [FakeActivity(blocks: [

@@ -1,61 +1,71 @@
 #!/usr/bin/env python3
 """swe — Central manager for AI coding CLI tools."""
 
-import platform
 import sys
 
+from importlib import import_module
+
 from swe import __version__
-from swe.bug import cmd_bug
 from swe.json_output import emit, error_stream, take_json_flag
-from swe.config_commands import cmd_config
-from swe.configuration import ConfigurationError
 from swe.console import c
-from swe.harness.commands import (
-    cmd_add,
-    cmd_aliases,
-    cmd_check,
-    cmd_doctor,
-    cmd_edit,
-    cmd_info,
-    cmd_install,
-    cmd_list,
-    cmd_remove,
-    cmd_tags,
-    cmd_use,
-)
-from swe.find import cmd_find
-from swe.help_text import cmd_help
-from swe.hooks import cmd_hooks
-from swe.init import cmd_init
-from swe.instructions.commands import cmd_instructions
-from swe.github import main as github_main
-from swe.mcp import main as mcp_main
-from swe.plugins import cmd_plugins
-from swe.providers import cli as providers_cli
-from swe.reports.commands import cmd_report
-from swe.sessions.commands import cmd_models, cmd_session
-from swe.setup.commands import cmd_harness, cmd_setup
-from swe.skills.commands import cmd_skills
-from swe.sync import cmd_sync
 
 
-def cmd_mcp(args):
-    return mcp_main(args)
+def _configuration_error() -> type[Exception]:
+    """``ConfigurationError``, imported only once something was raised:
+    an ``except`` clause evaluates its class when an exception reaches it,
+    and ``swe.configuration`` pulls ``subprocess`` and ``tempfile`` in,
+    which `swe version` never needs."""
+    from swe.configuration import ConfigurationError
+    return ConfigurationError
 
 
-def cmd_gh(args):
-    return github_main(args)
+def _lazy(module: str, name: str):
+    """A command that imports ``module`` only when it runs.
+
+    Importing every command module up front cost most of a `swe version`
+    run (#1536): one command needs one module, and the app spawns `swe`
+    many times an hour. Tests that introspect ``COMMANDS`` see the same
+    keys; patch the real module's function, not this shim.
+    """
+    def command(args):
+        return getattr(import_module(module), name)(args)
+
+    command.__name__ = command.__qualname__ = name
+    command.__doc__ = f"``{module}.{name}``, imported when run."
+    return command
 
 
-def cmd_providers(args):
-    return providers_cli.main(args)
-
-
-def cmd_remote(args):
-    # Function-local on purpose: swe.remote pulls sessions, reports and
-    # the hub in, and `swe version` shouldn't pay for any of them.
-    from swe.remote import cmd_remote as remote_main
-    return remote_main(args)
+cmd_add = _lazy("swe.harness.commands", "cmd_add")
+cmd_aliases = _lazy("swe.harness.commands", "cmd_aliases")
+cmd_check = _lazy("swe.harness.commands", "cmd_check")
+cmd_doctor = _lazy("swe.harness.commands", "cmd_doctor")
+cmd_edit = _lazy("swe.harness.commands", "cmd_edit")
+cmd_info = _lazy("swe.harness.commands", "cmd_info")
+cmd_install = _lazy("swe.harness.commands", "cmd_install")
+cmd_list = _lazy("swe.harness.commands", "cmd_list")
+cmd_remove = _lazy("swe.harness.commands", "cmd_remove")
+cmd_tags = _lazy("swe.harness.commands", "cmd_tags")
+cmd_use = _lazy("swe.harness.commands", "cmd_use")
+cmd_bug = _lazy("swe.bug", "cmd_bug")
+cmd_config = _lazy("swe.config_commands", "cmd_config")
+cmd_find = _lazy("swe.find", "cmd_find")
+cmd_help = _lazy("swe.help_text", "cmd_help")
+cmd_hooks = _lazy("swe.hooks", "cmd_hooks")
+cmd_init = _lazy("swe.init", "cmd_init")
+cmd_instructions = _lazy("swe.instructions.commands", "cmd_instructions")
+cmd_gh = _lazy("swe.github", "main")
+cmd_mcp = _lazy("swe.mcp", "main")
+cmd_plugins = _lazy("swe.plugins", "cmd_plugins")
+cmd_providers = _lazy("swe.providers.cli", "main")
+cmd_report = _lazy("swe.reports.commands", "cmd_report")
+cmd_models = _lazy("swe.sessions.commands", "cmd_models")
+cmd_session = _lazy("swe.sessions.commands", "cmd_session")
+cmd_harness = _lazy("swe.setup.commands", "cmd_harness")
+cmd_setup = _lazy("swe.setup.commands", "cmd_setup")
+cmd_skills = _lazy("swe.skills.commands", "cmd_skills")
+cmd_sync = _lazy("swe.sync", "cmd_sync")
+# swe.remote pulls sessions, reports and the hub in (#517).
+cmd_remote = _lazy("swe.remote", "cmd_remote")
 
 
 _HELP_NAME = {"-v": "version", "-V": "version", "--version": "version"}
@@ -70,6 +80,8 @@ def cmd_version(args):
               file=error_stream(json_view))
         return 1
     if json_view:
+        import platform
+
         return emit({"name": "swe", "version": __version__,
                      "python": platform.python_version()})
     print(f"swe {__version__}")
@@ -213,7 +225,7 @@ def main():
     if not argv:
         try:
             cmd_help([])
-        except ConfigurationError as exc:
+        except _configuration_error() as exc:
             print(c("red", str(exc)))
             return 1
         return 0
@@ -232,7 +244,7 @@ def main():
                 cmd_help([_HELP_NAME.get(cmd, cmd)])
                 return 0
             result = COMMANDS[cmd](rest)
-        except ConfigurationError as exc:
+        except _configuration_error() as exc:
             # Under --json the app decodes stdout whole, so the message goes
             # to stderr there; everywhere else it stays where it always was.
             print(c("red", str(exc)), file=error_stream("--json" in rest))
@@ -241,7 +253,7 @@ def main():
     print(f"Unknown command: '{cmd}'")
     try:
         cmd_help([])
-    except ConfigurationError as exc:
+    except _configuration_error() as exc:
         print(c("red", str(exc)))
     return 1
 
