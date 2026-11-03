@@ -1175,6 +1175,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now goes through the parse cache, so an unchanged one costs a `stat`.
   `json_engine` joins the parse cache's fingerprint. Closes
   [#1534](https://github.com/c-wenlong/swe/issues/1534).
+- **The hub slows down while nobody is watching.** With no client
+  stream open (the ntfy notifier holds one whenever it can push;
+  satellite command streams don't count) and no client request for two
+  minutes, `swe remote serve` polls
+  active sessions every 5 s instead of 1 s and idle ones every 60 s
+  instead of 8 s, refreshes the catalog every 60 s instead of 10 s, and
+  ticks its tail loop once a second instead of four times. Transcripts
+  stay on disk, so this only delays the journal's copy. The next client
+  request ends it at once: every tailer polls, the catalog refreshes, and
+  the first `/v1/sessions` or `/v1/inbox` read waits up to 5 s for that
+  refresh instead of serving a minute-old list. An unwatched hub on this
+  Mac used about 8% of a core, split about evenly between the catalog
+  and tail threads. Closes
+  [#1520](https://github.com/c-wenlong/swe/issues/1520).
 - **The status column reads less per session.** OpenCode's probe
   pulled the full JSON of a session's newest 50 messages and ran two
   `PRAGMA table_info` reads for every session; it now reads the table
