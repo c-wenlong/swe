@@ -77,13 +77,18 @@ struct HubWebPage: View {
     }
 }
 
-/// Every hub's web view, made on first show and kept for the app's life,
-/// so switching machines keeps each page where it was.
+/// The hubs' web views, made on first show. The last `kept` hubs shown
+/// keep theirs, so switching between two machines keeps each page where
+/// it was; an older one is dropped with its WebContent process (#1544)
+/// and loads again when picked. Its web data (the pairing) stays on disk.
 @MainActor
 final class HubWebViews {
     private var entries: [HubOrigin: HubWebEntry] = [:]
+    /// Most recently shown first.
+    private var shown = RecentKeys<HubOrigin>(capacity: 2)
 
     func entry(for hub: HubOrigin) -> HubWebEntry {
+        for evicted in shown.touch(hub) { entries[evicted] = nil }
         if let entry = entries[hub] { return entry }
         let entry = HubWebEntry(hub: hub)
         entries[hub] = entry
@@ -100,6 +105,7 @@ final class HubWebViews {
     /// tidy-up only, and it may refuse while the old view is still alive.
     func forget(_ hub: HubOrigin) {
         entries[hub] = nil
+        shown.remove(hub)
         let id = hub.dataStoreID
         Task {
             let store = WKWebsiteDataStore(forIdentifier: id)

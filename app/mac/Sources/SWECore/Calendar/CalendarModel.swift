@@ -199,6 +199,13 @@ public final class CalendarModel {
         var fetched = Date.distantPast
     }
     private var dayCache: [Date: DayEntry] = [:]
+    /// The most days `dayCache` keeps (#1544). Scrolling back read and
+    /// kept every day it landed on for the app's life; past this the days
+    /// farthest from the range on show go first. Days on show, a step
+    /// either side (the prefetch) and the snapshot's recent ranges stay.
+    static let dayCacheLimit = 400
+    /// Days the cache holds; tests read it.
+    var cachedDayCount: Int { dayCache.count }
     /// How long a day read stays fresh without a scan marking it stale.
     static let dayLifetime: TimeInterval = 300
     /// Reads still running, by the days they cover, so a load needing a
@@ -494,6 +501,23 @@ public final class CalendarModel {
         prefetchNeighbours()
     }
 
+    /// Drops the days farthest from `range` once the cache passes
+    /// `dayCacheLimit`. A day a read is still filling is left alone, and
+    /// a read that lands for a range already scrolled away is dropped
+    /// here rather than kept.
+    private func pruneDayCache(around range: DateInterval) {
+        guard dayCache.count > Self.dayCacheLimit else { return }
+        let kept = [range, renderRange(for: shiftedAnchor(-1, mode: mode), mode: mode),
+                    renderRange(for: shiftedAnchor(1, mode: mode), mode: mode)] + recent
+        var keep: Set<Date> = []
+        for span in kept { for day in days(in: span) { keep.insert(dayKey(day)) } }
+        let centre = range.start.addingTimeInterval(range.duration / 2)
+        let candidates = dayCache.keys
+            .filter { !keep.contains($0) && inFlight[$0] == nil }
+            .sorted { abs($0.timeIntervalSince(centre)) > abs($1.timeIntervalSince(centre)) }
+        for key in candidates.prefix(dayCache.count - Self.dayCacheLimit) { dayCache[key] = nil }
+    }
+
     private func dayKey(_ day: DateInterval) -> Date { calendar.startOfDay(for: day.start) }
 
     /// Never read, stale, or past `dayLifetime`, and no read running.
@@ -601,6 +625,7 @@ public final class CalendarModel {
             }
             dayCache[key] = entry
         }
+        pruneDayCache(around: renderRange)
     }
 
     /// The range's blocks per provider from the day cache; nil when no

@@ -96,7 +96,9 @@ back. `HubNavigation.decide` pins the web view to the hub's origin (plus
 link elsewhere, http(s) or mailto, goes to the default app, and anything
 else, `file:` included, never loads. Each hub gets its own persistent
 `WKWebsiteDataStore` (`HubOrigin.dataStoreID`), so the web app's pairing
-credential survives a restart. The hub signs the web view in exactly as
+credential survives a restart. `HubWebViews` keeps the views of the last
+two hubs shown (`RecentKeys`); an older hub's view and its WebContent
+process go, and it loads again when picked. The hub signs the web view in exactly as
 it does a browser on this Mac: the owner's tailnet identity (#653), else
 the web app's own pairing card. The bundle sets
 `NSAllowsArbitraryLoadsInWebContent` so a plain-http `--tailnet` hub

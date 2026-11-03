@@ -1167,6 +1167,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The Mac app keeps fewer things in memory for its whole life.**
+  Switching machines kept a live web view and WebContent process for
+  every hub ever shown; only the last two shown stay now, and an older
+  one reloads when picked. The Calendar's day cache stops at 400 days,
+  dropping the days farthest from the ones on show, so scrolling back
+  through years no longer grows it without end. The Sessions page lists
+  at most 20,000 sessions instead of 100,000, with the existing note
+  when older ones are left out. Closes
+  [#1544](https://github.com/c-wenlong/swe/issues/1544).
 - **A snapshot session whose store can't be found no longer costs a
   read attempt every poll.** When a Cline, Continue, Gemini, Copilot,
   Forge or Crush read found no source files or a store it couldn't read,
