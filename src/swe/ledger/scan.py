@@ -7,11 +7,11 @@ gate, the totals it has seen), so a changed rollout is read whole; its
 keys make that idempotent. Pi logs and the Droid and Cline session files
 are read whole when they change, also keyed — the session files hold one
 authoritative total each, so a re-read replaces and a now-empty file
-deletes. OpenCode and Devin databases are read whole when their files
-change. Cursor's usage is not a file: the web app polls it in the
-background on the feed's own cadence (``CursorUsageFeed.keepFresh``), so
-a scan never waits on network replies and a missed round keeps the
-stored rows.
+deletes. OpenCode and Devin databases are skipped while they and their
+WALs are unchanged, and otherwise read only past a watermark. Cursor's
+usage is not a file: the web app polls it in the background on the
+feed's own cadence (``CursorUsageFeed.keepFresh``), so a scan never
+waits on network replies and a missed round keeps the stored rows.
 """
 
 from __future__ import annotations
@@ -110,14 +110,15 @@ def scan(store: LedgerStore, home: Path | None = None) -> ScanResult:
     # read only the legacy tables (no suffix) must not skip the 2.x rows it
     # missed, and one saved before models carried their provider (``#v2``)
     # must not skip rows now named ``provider/model``. Every row is keyed
-    # by message id, so the re-read renames events in place.
+    # by message id, so the re-read renames events in place. ``@w`` names
+    # a cursor whose offset is a watermark: one saved by a whole-file
+    # reader holds the file's size there instead.
     for db, reader, key in (
-        (home / ".local/share/opencode/opencode.db", parsers.opencode_records, "#v3"),
-        (home / ".local/share/devin/cli/sessions.db", parsers.devin_records, ""),
+        (home / ".local/share/opencode/opencode.db", parsers.opencode_scan, "#v3@w"),
+        (home / ".local/share/devin/cli/sessions.db", parsers.devin_scan, "@w"),
     ):
         if db.is_file():
-            _scan_whole(store, db, result, lambda d=db, r=reader: r(d),
-                        companions=[Path(str(db) + "-wal")], key_suffix=key)
+            _scan_database(store, db, result, reader, key_suffix=key)
 
     for droid_home in _homes(home, "droid", ".factory"):
         for path in _files(droid_home / "sessions", ".settings.json"):
@@ -191,19 +192,12 @@ def _fingerprint(path: Path, offset: int) -> str:
     return f"{offset}:{h.hexdigest()}"
 
 
-def _scan_whole(store: LedgerStore, path: Path, result: ScanResult, read,
-                companions: list[Path] | None = None, key_suffix: str = "") -> None:
+def _scan_whole(store: LedgerStore, path: Path, result: ScanResult, read) -> None:
     st = _stat(path)
     if st is None:
         return
     inode, size, mtime = st
-    # A database's WAL grows without touching the main file's mtime.
-    for extra in companions or []:
-        est = _stat(extra)
-        if est is not None:
-            size += est[1]
-            mtime = max(mtime, est[2])
-    key = str(path) + key_suffix
+    key = str(path)
     cursor = store.file_cursor(key)
     if cursor is not None and tuple(cursor[:3]) == (inode, size, mtime):
         return
@@ -216,6 +210,42 @@ def _scan_whole(store: LedgerStore, path: Path, result: ScanResult, read,
         store.upsert(rec)
     result.records += len(records)
     store.set_file_cursor(key, inode, size, mtime, size)
+    result.files_read += 1
+    store.db.commit()
+
+
+def _scan_database(store: LedgerStore, path: Path, result: ScanResult, read,
+                   key_suffix: str) -> None:
+    """One harness database, read past its watermark (the source pass in
+    ``DatabaseSources.swift``).
+
+    Skipped while the file and its WAL are unchanged: the cursor's ``fp``
+    slot keeps the stamp of both (``Fingerprint``), since a WAL grows
+    without touching the main file. Otherwise ``read(path, since)``
+    returns the rows past the watermark the cursor's ``offset`` slot keeps
+    and the next one. A different inode is a recreated or restored file
+    whose row ids and timestamps start over, so it is read from 0; every
+    row is keyed, so reading one again is harmless."""
+    st = _stat(path)
+    if st is None:
+        return
+    inode, size, mtime = st
+    wal = _stat(Path(str(path) + "-wal"))
+    fingerprint = f"{inode}:{size}:{mtime}:{wal[1] if wal else 0}:{wal[2] if wal else 0}"
+    key = str(path) + key_suffix
+    cursor = store.file_cursor(key)
+    if cursor is not None and cursor[4] == fingerprint:
+        return
+    since = (cursor[3] or 0) if cursor is not None and cursor[0] == inode else 0
+    try:
+        records, watermark = read(path, since)
+    except Exception as exc:  # a corrupt or locked source must not stop the scan
+        result.errors.append(f"{path}: {exc}")
+        return
+    for rec in records:
+        store.upsert(rec)
+    result.records += len(records)
+    store.set_file_cursor(key, inode, size, mtime, watermark, fp=fingerprint)
     result.files_read += 1
     store.db.commit()
 
