@@ -1306,6 +1306,27 @@ entry goes after a day. A hub event going to several open streams is now cleaned
 encoded once, not once per stream. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1532">#1532</a>.</p>
 </li>
+<li><p><strong>Devin change checks cost microseconds instead of milliseconds.</strong>
+Every poll of a tailed Devin session opened a new connection to
+<code>sessions.db</code> and counted the session's rows: 13 to 22 ms a call for a
+37K to 52K-node session on a 9.8 GB store. The hub now keeps one
+read-only connection and asks SQLite's <code>data_version</code> whether anything
+committed. When nothing did, no query runs (0.02 ms); after a write it
+reads the newest row id and chain head (0.03 to 0.3 ms). The row count,
+which catches a delete below the newest row, is read again at most once
+a minute per session. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1521">#1521</a>.</p>
+</li>
+<li><p><strong>The Mac app keeps fewer things in memory for its whole life.</strong>
+Switching machines kept a live web view and WebContent process for
+every hub ever shown; only the last two shown stay now, and an older
+one reloads when picked. The Calendar's day cache stops at 400 days,
+dropping the days farthest from the ones on show, so scrolling back
+through years no longer grows it without end. The Sessions page lists
+at most 20,000 sessions instead of 100,000, with the existing note
+when older ones are left out. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1544">#1544</a>.</p>
+</li>
 <li><p><strong>The hub stops re-parsing its small stores on every request.</strong> The
 credential check, an open stream's revocation check, the session
 list's unread flags and the machine list read <code>devices.json</code>, the
@@ -1658,9 +1679,41 @@ its command and settings file, where it's linked, and the script in a
 raw editor. <code>swe hooks list --json</code> rows now carry <code>summary</code> and
 <code>detail</code> for it.</p>
 </li>
+<li><p><strong>The status and model caches stop stat'ing every entry on each
+rewrite.</strong> The hub's status probes rewrite <code>session_status_cache.json</code>
+up to once a second while a session is busy, and every rewrite checked
+each of its 1,000 entries for a deleted file: about 5 of the 6.5 ms
+per rewrite here. That sweep now runs at most every 5 minutes per
+cache file in a process; a deleted file's entry just waits for the
+next one. A process-resident store was not worth it: the cache files
+are 210 to 245 KB here (not 10 to 50 MB) and load in about 1 ms.
+Closes <a href="https://github.com/c-wenlong/swe/issues/1527">#1527</a>.</p>
+</li>
+<li><p><strong>Session listings read Devin prompts once and Cline files once per
+change.</strong> Devin's title provenance ran one <code>prompt_history</code> query per
+session (210 here); it now runs one for all of them. Cline's session
+glob also matches every <code>&lt;id&gt;.messages.json</code> transcript, which a cold
+listing parsed in full every time (about 3 ms per 2 MB file); each file
+now goes through the parse cache, so an unchanged one costs a <code>stat</code>.
+<code>json_engine</code> joins the parse cache's fingerprint. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1534">#1534</a>.</p>
+</li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong><code>build_ios.sh</code> reaches a real iPhone and a named signing team.</strong>
+The device picker took the first paired iOS device <code>devicectl</code>
+reported, which could be a simulator (it reports <code>paired</code> like a real
+phone), so a connected iPhone was passed over; the filter now also
+requires <code>reality == &quot;physical&quot;</code>. And <code>DEVELOPMENT_TEAM</code> ships empty
+in <code>project.yml</code> with no override path, so device builds always died
+on &quot;requires a development team&quot; — the script now takes
+<code>SWE_DEVELOPMENT_TEAM</code> and passes it to xcodebuild. The README's
+claim that automatic signing registers the App Group was wrong for
+entitlements-file groups, so the fresh-team portal steps (create the
+group, assign it on each App ID, purge stale profiles) are
+documented.</p>
+</li>
 <li><p><strong>The remote hub no longer drops a browser's parallel asset fetches,
 which left the web app a blank shell behind <code>tailscale serve</code>.</strong> A
 page load fires all of its script requests at once, and serve opens a

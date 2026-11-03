@@ -1179,6 +1179,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry goes after a day. A hub event going to several open streams is now cleaned and
   encoded once, not once per stream. Closes
   [#1532](https://github.com/c-wenlong/swe/issues/1532).
+- **Devin change checks cost microseconds instead of milliseconds.**
+  Every poll of a tailed Devin session opened a new connection to
+  `sessions.db` and counted the session's rows: 13 to 22 ms a call for a
+  37K to 52K-node session on a 9.8 GB store. The hub now keeps one
+  read-only connection and asks SQLite's `data_version` whether anything
+  committed. When nothing did, no query runs (0.02 ms); after a write it
+  reads the newest row id and chain head (0.03 to 0.3 ms). The row count,
+  which catches a delete below the newest row, is read again at most once
+  a minute per session. Closes
+  [#1521](https://github.com/c-wenlong/swe/issues/1521).
+
+- **The Mac app keeps fewer things in memory for its whole life.**
+  Switching machines kept a live web view and WebContent process for
+  every hub ever shown; only the last two shown stay now, and an older
+  one reloads when picked. The Calendar's day cache stops at 400 days,
+  dropping the days farthest from the ones on show, so scrolling back
+  through years no longer grows it without end. The Sessions page lists
+  at most 20,000 sessions instead of 100,000, with the existing note
+  when older ones are left out. Closes
+  [#1544](https://github.com/c-wenlong/swe/issues/1544).
 - **The hub stops re-parsing its small stores on every request.** The
   credential check, an open stream's revocation check, the session
   list's unread flags and the machine list read `devices.json`, the
@@ -1288,6 +1308,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after new activity reads only the rows past it, in about 3 ms. A
   recreated or rebuilt database is read again from the start. Closes
   [#1524](https://github.com/c-wenlong/swe/issues/1524).
+
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
   newest 1,000 chain nodes anyway. Devin's change token (the session's
@@ -1514,8 +1535,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its command and settings file, where it's linked, and the script in a
   raw editor. `swe hooks list --json` rows now carry `summary` and
   `detail` for it.
+- **The status and model caches stop stat'ing every entry on each
+  rewrite.** The hub's status probes rewrite `session_status_cache.json`
+  up to once a second while a session is busy, and every rewrite checked
+  each of its 1,000 entries for a deleted file: about 5 of the 6.5 ms
+  per rewrite here. That sweep now runs at most every 5 minutes per
+  cache file in a process; a deleted file's entry just waits for the
+  next one. A process-resident store was not worth it: the cache files
+  are 210 to 245 KB here (not 10 to 50 MB) and load in about 1 ms.
+  Closes [#1527](https://github.com/c-wenlong/swe/issues/1527).
+- **Session listings read Devin prompts once and Cline files once per
+  change.** Devin's title provenance ran one `prompt_history` query per
+  session (210 here); it now runs one for all of them. Cline's session
+  glob also matches every `<id>.messages.json` transcript, which a cold
+  listing parsed in full every time (about 3 ms per 2 MB file); each file
+  now goes through the parse cache, so an unchanged one costs a `stat`.
+  `json_engine` joins the parse cache's fingerprint. Closes
+  [#1534](https://github.com/c-wenlong/swe/issues/1534).
 
 ### Fixed
+
+- **`build_ios.sh` reaches a real iPhone and a named signing team.**
+  The device picker took the first paired iOS device `devicectl`
+  reported, which could be a simulator (it reports `paired` like a real
+  phone), so a connected iPhone was passed over; the filter now also
+  requires `reality == "physical"`. And `DEVELOPMENT_TEAM` ships empty
+  in `project.yml` with no override path, so device builds always died
+  on "requires a development team" — the script now takes
+  `SWE_DEVELOPMENT_TEAM` and passes it to xcodebuild. The README's
+  claim that automatic signing registers the App Group was wrong for
+  entitlements-file groups, so the fresh-team portal steps (create the
+  group, assign it on each App ID, purge stale profiles) are
+  documented.
 
 - **The remote hub no longer drops a browser's parallel asset fetches,
   which left the web app a blank shell behind `tailscale serve`.** A
