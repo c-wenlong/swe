@@ -1301,6 +1301,17 @@ name from the same row. With nothing attached it spawned no <code>tmux</code>
 before and spawns none now. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1530">#1530</a>.</p>
 </li>
+<li><p><strong>The usage ledger reads only new Devin and OpenCode rows.</strong> Any
+write to Devin's <code>sessions.db</code> or its WAL made the next scan (each
+web Overview load after the 60 s cache, and every satellite usage
+push) JSON-decode the whole database: 76 s for 2.1 million rows in a
+9.8 GB file. <code>swe</code> now keeps a watermark per database, as the Mac app
+already did: Devin's highest <code>row_id</code> (a row still waiting for its
+metrics holds it back) and OpenCode's newest <code>time_updated</code>, so a scan
+after new activity reads only the rows past it, in about 3 ms. A
+recreated or rebuilt database is read again from the start. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1524">#1524</a>.</p>
+</li>
 <li><p><strong>The hub stops re-reading idle Devin sessions every minute.</strong> A
 snapshot tailer trusted &quot;nothing changed&quot; for 60 s, then re-read the
 newest 1,000 chain nodes anyway. Devin's change token (the session's
