@@ -109,7 +109,9 @@ struct InboxPage: View {
         // marked read meanwhile. The page only catches up when stale.
         .task(id: app.swePath) { await model.loadInbox(swe: app.swe) }
         .task(id: app.swePath) {
-            await NeedsYouCards.poll(needsYou, hub: app.hub) { [app] in app.mainWindowOnScreen }
+            await CommandActivity.background {
+                await NeedsYouCards.poll(needsYou, hub: app.hub) { [app] in app.mainWindowOnScreen }
+            }
         }
     }
 }

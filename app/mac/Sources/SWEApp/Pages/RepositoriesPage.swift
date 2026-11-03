@@ -94,7 +94,8 @@ struct RepositoriesPage: View {
                 // Behind other windows nobody reads the boards; the next
                 // minute after the window shows again catches up.
                 guard app.mainWindowOnScreen else { continue }
-                await withTaskGroup(of: Void.self) { group in
+                // A timer's round: its swe runs don't hold off idle sleep (#1540).
+                await CommandActivity.background { await withTaskGroup(of: Void.self) { group in
                     for repo in visibleRepos {
                         for tab in tabs {
                             group.addTask {
@@ -107,7 +108,7 @@ struct RepositoriesPage: View {
                             }
                         }
                     }
-                }
+                } }
             }
         }
         .quiverSheet(isPresented: $adding) {

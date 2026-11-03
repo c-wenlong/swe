@@ -646,6 +646,86 @@ class TestSnapshotChangeGate(unittest.TestCase):
             self.assertEqual(rt.call_count, 3, "the same token is read again after a failed read")
             self.assertEqual([m["text"] for m in out], ["b"], "recovery emits only what is new")
 
+    def _devin_db(self, name="sessions.db"):
+        import sqlite3
+        db = self.tmp / name
+        conn = sqlite3.connect(db)
+        conn.executescript(
+            "CREATE TABLE sessions(id TEXT PRIMARY KEY, main_chain_id INTEGER);"
+            "CREATE TABLE message_nodes(row_id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT,"
+            " node_id INTEGER, parent_node_id INTEGER, chat_message TEXT, created_at INTEGER,"
+            " UNIQUE(session_id, node_id));"
+            "INSERT INTO sessions VALUES ('s1', 2), ('s2', 1);"
+            "INSERT INTO message_nodes(session_id, node_id, chat_message, created_at)"
+            " VALUES ('s1', 1, '{}', 0), ('s1', 2, '{}', 0), ('s2', 1, '{}', 0);"
+        )
+        conn.commit()
+        self.addCleanup(conn.close)
+        return db, conn
+
+    def test_devin_token_runs_no_query_while_nothing_commits(self):
+        # #1521: one kept connection; PRAGMA data_version gates the rest.
+        db, conn = self._devin_db()
+        tokens = tail._DevinTokens()
+        self.addCleanup(tokens._close)
+        with patch.object(tail, "DEVIN_DB", str(db)):
+            first = tokens.token("s1")
+            kept = tokens._conn
+            ran = []
+            kept.set_trace_callback(ran.append)
+            self.assertEqual(tokens.token("s1"), first)
+            self.assertEqual(ran, ["PRAGMA data_version"], "no row query while nothing committed")
+            conn.execute("INSERT INTO message_nodes(session_id, node_id, chat_message, created_at) VALUES ('s2', 2, '{}', 0)")
+            conn.commit()
+            ran.clear()
+            self.assertEqual(tokens.token("s1"), first)
+            self.assertFalse(any("COUNT" in q for q in ran), "the count waits for its recheck window")
+            self.assertIs(tokens._conn, kept, "the connection is kept, not reopened")
+
+    def test_devin_token_sees_a_delete_below_the_max_within_the_window(self):
+        db, conn = self._devin_db()
+        now = [0.0]
+        tokens = tail._DevinTokens(clock=lambda: now[0])
+        self.addCleanup(tokens._close)
+        with patch.object(tail, "DEVIN_DB", str(db)):
+            before = tokens.token("s1")
+            conn.execute("DELETE FROM message_nodes WHERE session_id = 's1' AND node_id = 1")
+            conn.commit()
+            self.assertEqual(tokens.token("s1"), before, "MAX(row_id) alone can't see it")
+            now[0] += tail.SNAPSHOT_RECHECK_S
+            self.assertNotEqual(tokens.token("s1"), before, "the count recheck does")
+
+    def test_devin_token_cache_forgets_sessions_nobody_asks_about(self):
+        db, _conn = self._devin_db()
+        now = [0.0]
+        tokens = tail._DevinTokens(clock=lambda: now[0])
+        self.addCleanup(tokens._close)
+        with patch.object(tail, "DEVIN_DB", str(db)):
+            tokens.token("s1")
+            tokens.token("s2")
+            now[0] = tail.DEVIN_TOKEN_IDLE_S / 2
+            tokens.token("s1")
+            now[0] = tail.DEVIN_TOKEN_IDLE_S + 1
+            tokens.token("s1")
+            self.assertEqual(set(tokens._cache), {"s1"})
+            self.assertEqual(set(tokens._used), {"s1"})
+
+    def test_devin_token_follows_a_replaced_db_file(self):
+        import os
+        db, conn = self._devin_db()
+        tokens = tail._DevinTokens()
+        self.addCleanup(tokens._close)
+        with patch.object(tail, "DEVIN_DB", str(db)):
+            before = tokens.token("s1")
+            other, oconn = self._devin_db("other.db")
+            oconn.execute("UPDATE sessions SET main_chain_id = 9 WHERE id = 's1'")
+            oconn.commit()
+            os.replace(other, db)
+            self.assertNotEqual(tokens.token("s1"), before)
+            self.assertEqual(tokens.token("s1")[1], (9,))
+            os.unlink(db)
+            self.assertIsNone(tokens.token("s1"))
+
     def test_devin_token_reads_one_sessions_rows(self):
         import sqlite3
         db = self.tmp / "sessions.db"
@@ -2307,6 +2387,45 @@ class TestTailWake(unittest.TestCase):
                          tail.POLL_IDLE_S)
         self.assertEqual(self.tailer.interval(active=True, hot=True),
                          tail.POLL_HOT_S)
+
+    def test_low_power_stretches_active_and_idle_but_not_hot(self):
+        # #1520: nobody watching, so a slower poll only delays the
+        # journal's copy of a transcript that is on disk anyway.
+        self.assertEqual(self.tailer.interval(active=True, low_power=True),
+                         tail.POLL_ACTIVE_LOW_S)
+        self.assertEqual(self.tailer.interval(active=False, low_power=True),
+                         tail.POLL_IDLE_LOW_S)
+        self.assertEqual(
+            self.tailer.interval(active=True, hot=True, low_power=True),
+            tail.POLL_HOT_S)
+        self.mgr.set_low_power(True)
+        self._append("hi")
+        self.mgr.tick(self.t0 + tail.POLL_IDLE_S)
+        self.assertIn("hi", self._texts())
+        self.assertEqual(self.tailer.next_poll_at,
+                         self.t0 + tail.POLL_IDLE_S + tail.POLL_IDLE_LOW_S)
+
+    def test_leaving_low_power_polls_every_tailer_at_once(self):
+        self.mgr.set_low_power(True)
+        self.mgr.tick(self.t0 + tail.POLL_IDLE_S)  # next poll a minute out
+        self._append("while away")
+        self.mgr.tick(self.t0 + tail.POLL_IDLE_S + 1)
+        self.assertNotIn("while away", self._texts())
+        self.mgr._wake_event.clear()
+        self.mgr.set_low_power(False)
+        # The loop parked in wait() returns at once...
+        self.assertTrue(self.mgr.wait(0))
+        # ...and the next tick reads it, with no hot window opened.
+        self.mgr.tick(self.t0 + tail.POLL_IDLE_S + 2)
+        self.assertIn("while away", self._texts())
+        self.assertFalse(self.mgr.is_hot(self.KEY, now=self.t0 + 20))
+        self.assertEqual(self.tailer.next_poll_at,
+                         self.t0 + tail.POLL_IDLE_S + 2 + tail.POLL_IDLE_S)
+
+    def test_set_low_power_to_the_same_value_wakes_nothing(self):
+        self.mgr._wake_event.clear()
+        self.mgr.set_low_power(False)
+        self.assertFalse(self.mgr.wait(0))
 
     def test_waking_injector_wakes_around_writes_only(self):
         from unittest.mock import MagicMock

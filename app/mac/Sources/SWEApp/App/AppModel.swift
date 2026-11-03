@@ -932,7 +932,7 @@ final class AppModel {
     func start() {
         if statusPolling == nil {
             statusPolling = Task { [serviceStatus, serviceNotify] in
-                await serviceNotify.keepFresh(model: serviceStatus)
+                await CommandActivity.background { await serviceNotify.keepFresh(model: serviceStatus) }
             }
         }
         guard watchers.isEmpty else { return }
@@ -947,26 +947,26 @@ final class AppModel {
         // reconcile only when the feature is on.
         search.start()
         watchers = [
-            Task { await accounts.keepFresh() },
+            Task { await CommandActivity.background { await accounts.keepFresh() } },
             // The inbox polls whether or not its page is open: banners
             // and board invalidations come from this stream.
             Task { [githubNotify, weak self] in
-                await githubNotify.keepFresh { self?.swe }
+                await CommandActivity.background { await githubNotify.keepFresh { self?.swe } }
             },
             // The last session list shows at once; swe lists again behind it,
             // so the page is usually ready before it is opened.
             // The other swe pages only read what they showed last; swe runs
             // when one is opened.
-            Task { [skills] in await skills.restore() },
-            Task { [mcp] in await mcp.restore() },
-            Task { [plugins] in await plugins.restore() },
-            Task { [hooks] in await hooks.restore() },
-            Task { [pluginCatalog] in await pluginCatalog.restore() },
+            Task { [skills] in await CommandActivity.background { await skills.restore() } },
+            Task { [mcp] in await CommandActivity.background { await mcp.restore() } },
+            Task { [plugins] in await CommandActivity.background { await plugins.restore() } },
+            Task { [hooks] in await CommandActivity.background { await hooks.restore() } },
+            Task { [pluginCatalog] in await CommandActivity.background { await pluginCatalog.restore() } },
         ]
-        if let cursorFeed { watchers.append(Task { await cursorFeed.keepFresh() }) }
-        if let devinCloud { watchers.append(Task { await devinCloud.keepFresh() }) }
+        if let cursorFeed { watchers.append(Task { await CommandActivity.background { await cursorFeed.keepFresh() } }) }
+        if let devinCloud { watchers.append(Task { await CommandActivity.background { await devinCloud.keepFresh() } }) }
         if let codexUsage {
-            watchers.append(Task { await codexUsage.keepFresh(homes: codexHomes) })
+            watchers.append(Task { await CommandActivity.background { await codexUsage.keepFresh(homes: codexHomes) } })
             // The "This Mac" side follows the ledger: rebuild after every
             // completed scan or out-of-scan write, the same counters the
             // Overview's own figures listen to. No swe fetch.
@@ -1034,7 +1034,7 @@ final class AppModel {
         [
             Task { [weak self] in
                 while !Task.isCancelled {
-                    await self?.others.load()
+                    await CommandActivity.background { await self?.others.load() }
                     try? await Task.sleep(for: .seconds(300))
                 }
             },
