@@ -4009,6 +4009,13 @@ class _BoundedHTTPServer(ThreadingHTTPServer):
 
     daemon_threads = True
 
+    # A browser opening the web app fires its script fetches at once,
+    # and behind ``tailscale serve`` each stream becomes a separate
+    # backend connection in the same instant. The default backlog of 5
+    # lets the kernel reset the overflow before accept() — the proxy
+    # answers 502, and a lost app.js leaves a blank page.
+    request_queue_size = min(socket.SOMAXCONN, 128)
+
     def __init__(self, *args, **kwargs):
         self._slots = threading.BoundedSemaphore(_MAX_WORKERS)
         super().__init__(*args, **kwargs)

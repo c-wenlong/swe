@@ -1396,6 +1396,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The remote hub no longer drops a browser's parallel asset fetches,
+  which left the web app a blank shell behind `tailscale serve`.** A
+  page load fires all of its script requests at once, and serve opens a
+  separate backend connection per stream in the same instant; the
+  stdlib listen backlog of 5 let the kernel reset the overflow before
+  `accept()`, so the proxy answered 502 for `app.js` or `pages.js` and
+  nothing ever rendered. `_BoundedHTTPServer` now listens with a
+  backlog of 128, so every burst connection is accepted.
+
 - **The Mac app's AGENTS.md strip and Hub sync card keep up with the
   terminal.** After `swe instructions build` in a terminal, the AGENTS.md
   page's Generated strip kept saying Stale until the page was opened
