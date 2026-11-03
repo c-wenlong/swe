@@ -354,15 +354,20 @@ def sync_link_records_from_filesystem(home: Path | None = None) -> list[str]:
     return updated
 
 
-def shared_scopes_for_skill(skill_path: Path, home: Path | None = None) -> list[str]:
-    """Return scope labels whose roots contain this skill path (including via symlinks)."""
+def shared_scopes_for_skill(skill_path: Path, home: Path | None = None,
+                            roots: list[SkillRootEntry] | None = None) -> list[str]:
+    """Return scope labels whose roots contain this skill path (including via symlinks).
+
+    ``roots`` is ``enumerate_skill_roots(home=home)`` taken once by a caller
+    asking about many skills; without it every call enumerates and
+    resolves every root again (#1537)."""
     home = home or Path.home()
     try:
         skill_resolved = skill_path.resolve()
     except OSError:
         return []
     scopes: list[str] = []
-    for entry in enumerate_skill_roots(home=home):
+    for entry in (enumerate_skill_roots(home=home) if roots is None else roots):
         if entry.resolved is None:
             continue
         try:
