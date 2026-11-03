@@ -30,7 +30,7 @@ final class StatusItemController: NSObject {
             dismiss: { [weak self] in self?.close() })
         let host = NSHostingController(
             rootView: PanelRoot(presence: presence, content: content)
-                .environment(model).environment(\.panelScreen, panelScreen))
+                .environment(model).environment(presence).environment(\.panelScreen, panelScreen))
         host.sizingOptions = [.preferredContentSize]
         panel = MenuBarPanel(contentViewController: host)
         panel.onEscape = { [weak self] in self?.close() }
@@ -194,6 +194,8 @@ final class StatusItemController: NSObject {
 final class PanelPresence {
     var isOpen = false
     var lastHeight: CGFloat = 300
+    /// The spend donut's period, kept here so a close doesn't reset it.
+    var spendPeriod: SpendSlice.Period = .today
 }
 
 /// The panel's root: the real content while open, a same-width blank of
@@ -535,7 +537,17 @@ private struct PanelLimits: View {
 private struct SpendDonut: View {
     @Environment(AppModel.self) private var app
     var slices: [SpendSlice]
-    @State private var period: SpendSlice.Period = .today
+    /// The panel keeps the pick across a close, since its tabs unmount
+    /// while it is down; the Menu bar page's preview keeps its own.
+    @Environment(PanelPresence.self) private var presence: PanelPresence?
+    @State private var localPeriod: SpendSlice.Period = .today
+
+    private var period: SpendSlice.Period { presence?.spendPeriod ?? localPeriod }
+    private var periodBinding: Binding<SpendSlice.Period> {
+        Binding(get: { period }, set: { pick in
+            if let presence { presence.spendPeriod = pick } else { localPeriod = pick }
+        })
+    }
 
     var slice: SpendSlice? { slices.first { $0.period == period } }
 
@@ -560,7 +572,7 @@ private struct SpendDonut: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Tabs(options: [(SpendSlice.Period.today, "Today"), (.yesterday, "Yesterday"), (.thirtyDays, "30 days")],
-                 selection: $period, style: .period)
+                 selection: periodBinding, style: .period)
             HStack(spacing: 16) {
                 ZStack {
                     // Every priced provider hidden still has money in the

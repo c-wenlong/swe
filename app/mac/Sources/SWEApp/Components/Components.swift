@@ -819,8 +819,19 @@ extension View {
     /// their shapes: a single animation for the whole stand-in rather
     /// than one per bar.
     func skeletonSweep() -> some View {
-        environment(\.skeletonSweepShared, true)
-            .modifier(SkeletonSweep(active: true, masked: true))
+        modifier(SkeletonSweepContainer())
+    }
+}
+
+/// A container's sweep, unless an outer container already sweeps it:
+/// nested stand-ins share the outermost band.
+private struct SkeletonSweepContainer: ViewModifier {
+    @Environment(\.skeletonSweepShared) private var outerSweeps
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.skeletonSweepShared, true)
+            .modifier(SkeletonSweep(active: !outerSweeps, masked: true))
     }
 }
 

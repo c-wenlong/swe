@@ -14,13 +14,20 @@ final class RenderMemo<Value> {
 
     private let cache = NSCache<NSString, Box>()
 
-    init(limit: Int) { cache.countLimit = limit }
+    /// `bytes` bounds the text the entries were made from (a stand-in for
+    /// what they hold), so a streaming reply's many growing versions can
+    /// not pile up: each costs its length, and NSCache evicts past it.
+    init(limit: Int, bytes: Int = 4 << 20) {
+        cache.countLimit = limit
+        cache.totalCostLimit = bytes
+    }
 
     func value(for key: String, make: () -> Value) -> Value {
+        let cost = key.utf8.count
         let key = key as NSString
         if let hit = cache.object(forKey: key) { return hit.value }
         let value = make()
-        cache.setObject(Box(value), forKey: key)
+        cache.setObject(Box(value), forKey: key, cost: cost)
         return value
     }
 }
