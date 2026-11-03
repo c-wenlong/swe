@@ -3535,6 +3535,39 @@ class TestServeEntry(unittest.TestCase):
         self.assertEqual(waits, [(hub_mod.TAIL_TICK_LOW_S, True),
                                  (hub_mod.TAIL_TICK_S, False)])
 
+    def test_hot_session_keeps_the_fast_tick_in_low_power(self):
+        # An attach outside HTTP opens a hot window with no client there.
+        state = HubState(temp_dir(self))
+        state.tail_manager.tick = lambda: None
+        state.tail_manager.wake("claude:a")
+        waits = []
+
+        def wait(timeout):
+            waits.append((timeout, state.tail_manager.low_power))
+            state._stop.set()
+        state.tail_manager.wait = wait
+        state._tail_loop()
+        self.assertEqual(waits, [(hub_mod.TAIL_TICK_S, True)])
+
+    def test_inbox_catch_up_waits_for_the_github_poll(self):
+        state = HubState(temp_dir(self))
+        state._catalog_running = True
+        state.catalog._status_as_of = time.time()  # sessions are fresh
+        state._github_at = time.time() - 300       # GitHub is not
+        state._catalog_wake.clear()
+        state.fresh_catalog(timeout=5)              # session list: no wait
+        self.assertFalse(state._catalog_wake.is_set())
+
+        def loop():
+            state._catalog_wake.wait(5)
+            state._github_at = time.time()
+            state._catalog_refreshed()
+        t = threading.Thread(target=loop, daemon=True)
+        t.start()
+        state.fresh_catalog(timeout=5, github=True)
+        t.join(5)
+        self.assertGreater(state._github_at, time.time() - 5)
+
     def test_watched_counts_streams_and_recent_requests_not_satellites(self):
         state = HubState(temp_dir(self))
         self.assertFalse(state.watched())

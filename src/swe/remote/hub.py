@@ -373,6 +373,9 @@ class HubState:
         self._client_seen_at = float("-inf")
         self._catalog_done = threading.Condition()
         self._catalog_running = False
+        # When the newest GitHub poll that finished had started (epoch s);
+        # an inbox read after low power waits for it too.
+        self._github_at = 0.0
         # Host values this hub answers to — the owner-identity approval
         # path requires one, and the unauthenticated routes answer only
         # these (filled by serve() from the bind host + whois); empty
@@ -972,9 +975,13 @@ class HubState:
             self.tail_manager.set_low_power(False)
             self._catalog_wake.set()
 
-    def fresh_catalog(self, timeout: float = CATALOG_CATCHUP_S) -> None:
+    def fresh_catalog(self, timeout: float = CATALOG_CATCHUP_S,
+                      github: bool = False) -> None:
         """Wait up to ``timeout`` for a catalog refresh that started
         within CATALOG_STALE_S, when the current one is older.
+
+        ``github`` (the inbox) also waits for the GitHub poll that runs
+        after the refresh, within the same timeout.
 
         Only the first list request after low power waits: the live
         cadence keeps the catalog newer than that. A hub whose catalog
@@ -985,8 +992,10 @@ class HubState:
         floor = time.time() - CATALOG_STALE_S
 
         def fresh() -> bool:
-            return (self.catalog.refreshed_at >= floor
-                    or not self._catalog_running)
+            if not self._catalog_running:
+                return True
+            return self.catalog.refreshed_at >= floor and (
+                not github or self._github_at >= floor)
 
         with self._catalog_done:
             if fresh():
@@ -1047,7 +1056,10 @@ class HubState:
                 self._prune_pair_requests()
                 # GitHub last: a slow ``gh`` must never hold up adoption
                 # or tail sync, which don't need it.
+                github_started = time.time()
                 self.catalog.poll_github()
+                self._github_at = github_started
+                self._catalog_refreshed()
             except Exception:
                 self._log_loop_error("catalog refresh")
             self._catalog_wake.wait(
@@ -1127,8 +1139,11 @@ class HubState:
                 except Exception:
                     self._log_loop_error("journal sweep")
             # A write to a session (tail_manager.wake) or a client
-            # arriving (note_client) cuts this short.
-            self.tail_manager.wait(TAIL_TICK_LOW_S if low else TAIL_TICK_S)
+            # arriving (note_client) cuts this short. A hot session
+            # (written to outside HTTP, say an attach from the CLI) keeps
+            # the fast tick even in low power.
+            slow = low and not self.tail_manager.any_hot()
+            self.tail_manager.wait(TAIL_TICK_LOW_S if slow else TAIL_TICK_S)
 
 
 _UNSET = object()
@@ -2181,7 +2196,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         if path == "/v1/inbox":
             done =str((args.get("done") or [""])[0])
-            self._state.fresh_catalog()
+            self._state.fresh_catalog(github=True)
             self._state.expire_pending_approvals()
             self._send_json(200, {
                 "items": self._state.catalog.inbox(

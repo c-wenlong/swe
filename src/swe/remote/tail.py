@@ -1692,6 +1692,12 @@ class TailManager:
         with self._wake_lock:
             return self._hot_until.get(key, 0.0) > now
 
+    def any_hot(self, now: float | None = None) -> bool:
+        """Whether any session's hot window is open."""
+        now = time.time() if now is None else now
+        with self._wake_lock:
+            return any(t > now for t in self._hot_until.values())
+
     def waking(self, key: str, injector):
         """``injector`` with a wake before and after each write it makes."""
         return _WakingInjector(injector, lambda: self.wake(key))
