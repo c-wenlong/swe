@@ -89,6 +89,8 @@ public final class ComputeModel {
         didSet {
             limits.save(to: defaults)
             republish()
+            // Auto clean needs process samples with every window closed.
+            replan()
         }
     }
 
@@ -100,11 +102,20 @@ public final class ComputeModel {
             // Invalidate every tick still in flight, then wake a parked
             // loop rather than let it sleep out the old interval.
             trendGeneration += 1
-            if let task = trendTask {
-                task.cancel()
-                startTrendLoop()
-            }
+            replan(restart: true)
         }
+    }
+
+    /// The fan threshold is on: temperatures are read with every window
+    /// closed. AppModel follows `FanControl.thresholdEnabled`.
+    public var watchesTemperature = false {
+        didSet { if watchesTemperature != oldValue { replan() } }
+    }
+
+    /// A Compute desktop widget is placed: its figures are sampled with
+    /// every window closed. AppModel follows WidgetKit's configurations.
+    public var widgetPlaced = false {
+        didSet { if widgetPlaced != oldValue { replan() } }
     }
 
     public private(set) var matchers: [HarnessMatcher] = []
@@ -150,6 +161,13 @@ public final class ComputeModel {
     /// Tickets refreshes so a slower earlier one can never republish.
     private var request = 0
     private var trendTask: Task<Void, Never>?
+    /// Views on screen drawing the trend data right now, by the id each
+    /// gave `setLiveViewer`.
+    @ObservationIgnored private var liveViewers: Set<UUID> = []
+    /// Whether `startTrends` has run: before it, consumers only register.
+    @ObservationIgnored private var trendsStarted = false
+    /// The plan the running loop was started for; nil while parked.
+    @ObservationIgnored private var runningPlan: TrendPlan?
     /// Bumped each time a trend loop replaces the last; a tick that
     /// outlives its loop must not write the meters or the history.
     private var trendGeneration = 0
@@ -316,32 +334,107 @@ public final class ComputeModel {
 
     // MARK: Trends
 
+    /// What one trend tick reads.
+    public struct TrendParts: OptionSet, Sendable, Hashable {
+        public let rawValue: Int
+        public init(rawValue: Int) { self.rawValue = rawValue }
+        /// The process table: harness points, CPU, auto clean.
+        public static let processes = TrendParts(rawValue: 1 << 0)
+        public static let gpu = TrendParts(rawValue: 1 << 1)
+        public static let temperature = TrendParts(rawValue: 1 << 2)
+        public static let all: TrendParts = [.processes, .gpu, .temperature]
+    }
+
+    /// How the trend loop runs: how long it sleeps between ticks and what
+    /// each tick reads.
+    public struct TrendPlan: Equatable, Sendable {
+        public var interval: TimeInterval
+        public var parts: TrendParts
+        /// A view on screen draws the trends, so they run at full rate.
+        public var live: Bool
+    }
+
+    /// The slow pace with every trend view off screen: what auto clean,
+    /// the fan threshold and a placed widget need, and no faster.
+    public static let backgroundInterval: TimeInterval = 30
+
+    /// What the loop should be doing now. Full rate, everything, while a
+    /// trend view is on screen. Otherwise only what the consumers that
+    /// work with the window closed need, at `backgroundInterval` (or the
+    /// chosen interval, if slower): processes for auto clean, temperatures
+    /// for the fan threshold, all three for a placed Compute widget. Nil
+    /// when nothing needs a sample, and the loop parks.
+    public var trendPlan: TrendPlan? {
+        if !liveViewers.isEmpty {
+            return TrendPlan(interval: trendInterval.seconds, parts: .all, live: true)
+        }
+        var parts: TrendParts = []
+        if limits.autoClean || widgetPlaced { parts.insert(.processes) }
+        if widgetPlaced { parts.insert(.gpu) }
+        if watchesTemperature || widgetPlaced { parts.insert(.temperature) }
+        guard !parts.isEmpty else { return nil }
+        return TrendPlan(interval: max(trendInterval.seconds, Self.backgroundInterval),
+                         parts: parts, live: false)
+    }
+
+    /// A view that draws the trends tells the model when it comes on
+    /// screen and when it leaves, under an id of its own. The first one
+    /// on screen ticks at once and puts the loop on the full rate; the
+    /// last one off drops it back to the background plan.
+    public func setLiveViewer(_ id: UUID, onScreen: Bool) {
+        let changed = onScreen ? liveViewers.insert(id).inserted : liveViewers.remove(id) != nil
+        if changed { replan() }
+    }
+
     /// Starts the trend sampler, which then runs for as long as the app
-    /// does: one tick now and one every `trendInterval`. AppModel calls it
-    /// once at launch; the page's own three-second refresh is untouched.
+    /// does, on `trendPlan`: one tick now, then one every plan interval,
+    /// parked while nothing needs a sample. AppModel calls it once at
+    /// launch; the page's own three-second refresh is untouched.
     public func startTrends() {
-        guard trendTask == nil else { return }
-        startTrendLoop()
+        guard !trendsStarted else { return }
+        trendsStarted = true
+        replan(restart: true)
+    }
+
+    /// Restart the loop when the plan moved (or `restart` asks): a new
+    /// generation, so a tick still in flight is dropped. Coming on screen,
+    /// waking from parked, or a restart ticks at once; dropping back to
+    /// the slow pace waits out its interval first.
+    private func replan(restart: Bool = false) {
+        let plan = trendPlan
+        guard trendsStarted, restart || plan != runningPlan else { return }
+        let was = runningPlan
+        trendGeneration += 1
+        trendTask?.cancel()
+        trendTask = nil
+        runningPlan = plan
+        guard let plan else { return }
+        startTrendLoop(tickFirst: restart || plan.live || was == nil)
     }
 
     /// Spawn the loop for the current generation; ticks from an older
     /// one are dropped even if the cancelled task resumes first.
-    private func startTrendLoop() {
+    private func startTrendLoop(tickFirst: Bool = true) {
         let generation = trendGeneration
         trendTask = Task { [weak self] in
-            await self?.runTrendLoop(generation: generation)
+            await self?.runTrendLoop(generation: generation, tickFirst: tickFirst)
         }
     }
 
-    /// One tick, then sleep the interval, until cancelled or replaced.
-    /// Tests call it with a sleep that throws once enough ticks have run.
-    func runTrendLoop(generation: Int? = nil) async {
+    /// Tick on the current plan, then sleep its interval, until cancelled,
+    /// replaced or left with nothing to do. Tests call it with a sleep
+    /// that throws once enough ticks have run.
+    func runTrendLoop(generation: Int? = nil, tickFirst: Bool = true) async {
         let generation = generation ?? trendGeneration
-        while !Task.isCancelled, generation == trendGeneration {
-            await trendTick(at: clock(), generation: generation)
-            guard !Task.isCancelled, generation == trendGeneration else { return }
+        var tick = tickFirst
+        while !Task.isCancelled, generation == trendGeneration, let plan = trendPlan {
+            if tick {
+                await trendTick(at: clock(), generation: generation, parts: plan.parts)
+                guard !Task.isCancelled, generation == trendGeneration else { return }
+            }
+            tick = true
             do {
-                try await trendSleep(.seconds(trendInterval.seconds))
+                try await trendSleep(.seconds(plan.interval))
             } catch {
                 return
             }
@@ -355,6 +448,7 @@ public final class ComputeModel {
     public func tickTrendsNow() {
         trendGeneration += 1
         trendTask?.cancel()
+        runningPlan = trendPlan
         startTrendLoop()
     }
 
@@ -367,10 +461,14 @@ public final class ComputeModel {
     /// One trend point per running harness, aggregated exactly the way the
     /// cards count. A tick whose last sample is still fresh (newer than
     /// half the interval) reuses it rather than sampling again, so the
-    /// page being open never doubles the sampling cost.
-    func trendTick(at now: Date, generation: Int? = nil) async {
+    /// page being open never doubles the sampling cost. `parts` says what
+    /// the tick reads; the background plan leaves the rest alone, so a
+    /// temperature-only tick never touches the process meters.
+    func trendTick(at now: Date, generation: Int? = nil, parts: TrendParts = .all) async {
+        let readsProcesses = parts.contains(.processes)
         // Load the list once ever; a failed load may retry once a minute.
-        if !matchersLoaded && (matchersFailedAt.map { now.timeIntervalSince($0) >= 60 } ?? true) {
+        if readsProcesses && !matchersLoaded
+            && (matchersFailedAt.map { now.timeIntervalSince($0) >= 60 } ?? true) {
             await loadMatchers()
             if replaced(generation) { return }
         }
@@ -378,14 +476,14 @@ public final class ComputeModel {
         // service started after the last load would read as an orphan,
         // so the managed list keeps the refresh cadence Refresh uses
         // while the page stays closed.
-        if limits.autoClean
+        if readsProcesses && limits.autoClean
             && (managedPIDsLoadedAt.map { now.timeIntervalSince($0) >= 60 } ?? true) {
             managedPIDs = await managedPIDLoader()
             managedPIDsLoadedAt = clock()
             if replaced(generation) { return }
         }
         let freshEnough = sampledAt.map { now.timeIntervalSince($0) <= trendInterval.seconds / 2 } ?? false
-        if !freshEnough {
+        if readsProcesses && !freshEnough {
             let sampled = await takeSample()
             // A stale finish is discarded inside; a tick whose loop was
             // replaced must not touch the meters or the history at all.
@@ -393,26 +491,35 @@ public final class ComputeModel {
             accept(sampled)
         }
         let gpu = gpuSampler, thermometer = temperatureSampler
-        let (times, reading) = await offMain { (gpu.times(), thermometer.read()) }
+        let readsGPU = parts.contains(.gpu), readsTemperature = parts.contains(.temperature)
+        let (times, reading) = await offMain {
+            (readsGPU ? gpu.times() : [:], readsTemperature ? thermometer.read() : nil)
+        }
         if replaced(generation) { return }
-        let gpuAt = clock()
-        if !times.isEmpty { gpuAvailable = true }
-        let gpuPercent = gpuMeter.update(times, at: gpuAt)
-        // Recorded even when nothing runs, so "now" moves past the last
-        // harness that stopped.
-        history.recordTick(sampledAt ?? now)
+        // A tick without the process table speaks for now, not for the
+        // last sample's moment.
+        let at = readsProcesses ? (sampledAt ?? now) : now
         if let reading {
             temperatureAvailable = true
-            history.appendTemperature(TemperaturePoint(at: sampledAt ?? now, values: reading.values,
+            history.appendTemperature(TemperaturePoint(at: at, values: reading.values,
                                                        fans: reading.fans))
             onTemperature?(reading)
         }
+        guard readsProcesses else { return }
+        var gpuPercent: [Int32: Double] = [:]
+        if readsGPU {
+            if !times.isEmpty { gpuAvailable = true }
+            gpuPercent = gpuMeter.update(times, at: clock())
+        }
+        // Recorded even when nothing runs, so "now" moves past the last
+        // harness that stopped.
+        history.recordTick(at)
         for (harness, procs) in attribution.byHarness where !procs.isEmpty {
             history.append(harness, TrendPoint(
-                at: sampledAt ?? now,
+                at: at,
                 memoryBytes: procs.reduce(0) { $0 + $1.memoryBytes },
                 cpuPercent: procs.reduce(0) { $0 + (cpu[$1.pid] ?? 0) },
-                gpuPercent: times.isEmpty ? nil
+                gpuPercent: !readsGPU || times.isEmpty ? nil
                     : procs.reduce(0) { $0 + (gpuPercent[$1.pid] ?? 0) }))
         }
     }

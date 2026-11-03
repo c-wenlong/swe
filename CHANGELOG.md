@@ -1167,6 +1167,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The Mac app's Compute sampler runs at full rate only while a
+  trend view is on screen.** It used to sweep every process, the GPU
+  clients and the SMC at the chosen interval (3 s on one Mac) for as
+  long as the app ran, about 80 ms of CPU per sweep with 700 processes.
+  The Compute page, the menu bar's Compute tab and the Widgets page's
+  Compute preview now ask for the full rate while their window can be
+  seen. Otherwise the sampler reads only what auto clean (processes),
+  the fan threshold (temperatures) and a placed Compute widget need,
+  every 30 s, and nothing at all when none of them is on. The page's
+  own three-second refresh also stops while its window is minimised or
+  covered, the temperature reads keep one SMC connection, and process
+  attribution works each pid's harness out once. Closes
+  [#1539](https://github.com/c-wenlong/swe/issues/1539).
+
 - **The iPhone chat stops re-parsing a streaming reply from the top.**
   Every 80 ms repaint of a reply still being written parsed the whole
   reply twice (once for the text, once for its link cards), styled every
@@ -1178,6 +1192,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skip layout. The same reply now costs 0.9 s, and every prefix parses
   to exactly the blocks a full parse gives. Closes
   [#1548](https://github.com/c-wenlong/swe/issues/1548).
+
 - **A snapshot session whose store can't be found no longer costs a
   read attempt every poll.** When a Cline, Continue, Gemini, Copilot,
   Forge or Crush read found no source files or a store it couldn't read,
