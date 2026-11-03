@@ -17,9 +17,22 @@ from pathlib import Path
 from tests.test_webapp_chat_queue import CHAT_JS, PRELUDE
 
 # The few DOM parts the bubbles need that the tray's stub leaves out.
+# insertAdjacentHTML adds one node holding the markup it was given, so a
+# test reads a box back as its nodes' markup in order.
 DOM_EXTRA = r"""
 function patchEl(e) {
+  if (e._patched) return e;
+  e._patched = true;
   Object.defineProperty(e, "parentNode", { get: () => e.parent });
+  Object.defineProperty(e, "childNodes", { get: () => e.children });
+  Object.defineProperty(e, "lastChild", { get: () => e.children[e.children.length - 1] || null });
+  const query = e.querySelector;
+  e.querySelector = (sel) => {
+    const found = query(sel);
+    // A part drawn through innerHTML reads as its owner's text.
+    if (found && !found.textContent) found.textContent = e._html.replace(/<[^>]*>/g, "");
+    return found && patchEl(found);
+  };
   Object.defineProperty(e, "childElementCount", { get: () => e.children.length });
   Object.defineProperty(e, "previousElementSibling", { get: () => {
     const p = e.parent; if (!p) return null;
@@ -32,7 +45,13 @@ function patchEl(e) {
     return c;
   };
   e.matches = () => false;
-  e.insertAdjacentHTML = (_, html) => { e._html += html; };
+  e.insertAdjacentHTML = (_, html) => {
+    e._html += html;
+    const node = el("#markup");
+    node._html = html;
+    node.parent = e;
+    e.children.push(node);
+  };
   return e;
 }
 const baseCreate = document.createElement;
@@ -56,7 +75,7 @@ const drain = () => {
   clearTimeout(T.chat.revealTimer); T.chat.revealTimer = null;
 };
 const shape = () => log.children.map((c) => c === T.chat.streamBox
-  ? ['streams', c.children.map((b) => [b.dataset.streamId, b.dataset.text])]
+  ? ['streams', c.children.map((b) => [b.dataset.streamId, b.streamText])]
   : [c.className, c.dataset.seq || '']);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 """
