@@ -1176,6 +1176,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read cursors went from 1.8 ms to 0.7 ms, and a credential check from
   37 to 11 us. Closes
   [#1528](https://github.com/c-wenlong/swe/issues/1528).
+- **The status column reads less per session.** OpenCode's probe
+  pulled the full JSON of a session's newest 50 messages and ran two
+  `PRAGMA table_info` reads for every session; it now reads the table
+  shape once per pass, picks the deciding row by type, and loads only
+  that row's JSON. Devin's probe lets SQLite pull the role, tool calls
+  and text out of the head message instead of decoding all of it.
+  Cline caches the follow-up check against its `messages.json`
+  signature and reads the metadata file once per pass, and the tail
+  probes decode JSONL lines newest-first only until the walk decides.
+  CPU per pass here: OpenCode 381 sessions about 66 to 50 ms, Devin
+  216 sessions about 10 to 6 ms, a 64 KB transcript tail walk about
+  half. Closes [#1535](https://github.com/c-wenlong/swe/issues/1535).
 - **The Mac app's Compute sampler runs at full rate only while a
   trend view is on screen.** It used to sweep every process, the GPU
   clients and the SMC at the chosen interval (3 s on one Mac) for as
