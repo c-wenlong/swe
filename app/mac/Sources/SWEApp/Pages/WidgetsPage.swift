@@ -42,8 +42,15 @@ struct WidgetsPage: View {
             VStack(alignment: .leading, spacing: 24) {
                 Tabs(options: WidgetCatalog.all.map { ($0.kind, $0.title) },
                      selection: $widgetTab, style: .underline)
-                WidgetCard(widget: widget, isPlaced: placed.contains(widget.kind),
-                           snapshot: snapshot)
+                if widget.kind == "compute" {
+                    // The preview draws the newest trend tick.
+                    WidgetCard(widget: widget, isPlaced: placed.contains(widget.kind),
+                               snapshot: snapshot)
+                        .computeTrendsLive(app.compute)
+                } else {
+                    WidgetCard(widget: widget, isPlaced: placed.contains(widget.kind),
+                               snapshot: snapshot)
+                }
             }
             .task { await loadPlaced() }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -59,6 +66,7 @@ struct WidgetsPage: View {
             }
         }
         placed = kinds
+        app.compute.widgetPlaced = kinds.contains("compute")
     }
 }
 
