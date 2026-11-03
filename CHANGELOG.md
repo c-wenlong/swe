@@ -1172,9 +1172,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a 100 KB reply took 3.3 s of cleaning, now 58 ms. Each message keeps
   its cleaned text up to a line break no redaction can reach across and
   re-cleans only what follows; the `done` flush still cleans the whole
-  text. A message whose channel dies mid-reply is dropped after 15 idle
-  minutes instead of staying in memory, and a stalled one frees its
-  text. A hub event going to several open streams is now cleaned and
+  text. A reply with no line breaks makes each flush wait longer once
+  8 KB of it is pending, so its cleaning stays linear too. A message
+  whose channel dies mid-reply stops streaming and frees its text after
+  15 idle minutes (a late chunk for it never streams), and its empty
+  entry goes after a day. A hub event going to several open streams is now cleaned and
   encoded once, not once per stream. Closes
   [#1532](https://github.com/c-wenlong/swe/issues/1532).
 - **The hub stops re-reading idle Devin sessions every minute.** A

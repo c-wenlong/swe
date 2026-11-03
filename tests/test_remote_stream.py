@@ -343,13 +343,51 @@ class TestIncrementalClean(unittest.TestCase):
         total = len(line) * 2000
         self.assertLess(sum(cleaned), 4 * total)
 
-    def test_an_idle_message_is_dropped(self):
+    def test_an_idle_message_stalls_then_is_forgotten(self):
         ds, out, clock, timers = _stream()
         with patch.object(stream.threading, "Timer", timers):
             ds.push("k", "m", "dead", "assistant", "half a reply")
             clock.t += stream.IDLE_S + stream.SWEEP_S
             ds.push("k", "m", "live", "assistant", "next ")
+            dead = ds._open[("k", "dead")]
+            self.assertTrue(dead.stalled)
+            self.assertEqual((dead.tail, dead.kept), ([], []))
+            clock.t += stream.FORGET_S + stream.SWEEP_S
+            ds.push("k", "m", "live", "assistant", "more ")
         self.assertEqual(list(ds._open), [("k", "live")])
+
+    def test_a_reply_resumed_after_a_long_pause_never_streams(self):
+        ds, out, clock, timers = _stream()
+        with patch.object(stream.threading, "Timer", timers):
+            ds.push("k", "m", "a", "assistant", "set API_KEY=")
+            clock.t += stream.IDLE_S + stream.SWEEP_S
+            ds.push("k", "m", "a", "assistant", "s3cretvalue more\n")
+            ds.finish("k", "a")
+        self.assertNotIn("s3cretvalue", _texts(out))
+
+    def test_a_reply_without_line_breaks_cleans_in_linear_work(self):
+        cleaned = []
+        real = stream.sanitize_document
+
+        def counting(text):
+            cleaned.append(len(text))
+            return real(text)
+
+        ds, out, clock, timers = _stream()
+        words = "word " * 20  # 100 chars, no line break
+        with patch.object(stream, "sanitize_document", counting), \
+                patch.object(stream.threading, "Timer", timers):
+            for _ in range(2000):  # 200 KB arriving at 10 KB/s
+                clock.t += 0.01
+                ds.push("k", "m", "a", "assistant", words)
+                for t in list(timers.made):
+                    if not hasattr(t, "due"):
+                        t.due = clock.t + t.delay
+                    if not t.cancelled and clock.t >= t.due:
+                        t.fire()
+                        t.cancelled = True
+        total = len(words) * 2000
+        self.assertLess(sum(cleaned), 40 * total)
 
     def test_a_stalled_message_frees_its_text(self):
         ds, out, clock, timers = _stream(interval=0)

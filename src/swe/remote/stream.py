@@ -48,11 +48,20 @@ COALESCE_S = 0.1
 # still arrives. Keeps a runaway stream from holding memory.
 MAX_STREAM_CHARS = 200_000
 
-# A message that gets no chunk for this long is dropped: its channel
-# died mid-turn and will never finish it. Checked at most once a SWEEP_S
-# from push().
+# A message that gets no chunk for this long stops streaming and frees
+# its text: its channel most likely died mid-turn. It stays as an empty
+# stalled entry, so a chunk that does arrive later can never stream
+# without the text before it (a secret's name, a key block's start).
+# The entry itself goes after FORGET_S more of silence. Checked at most
+# once a SWEEP_S from push().
 IDLE_S = 900.0
+FORGET_S = 86_400.0
 SWEEP_S = 60.0
+
+# Past this much text since the last kept line break, each flush waits
+# proportionally longer: a reply with no line breaks is re-cleaned whole
+# on every flush, and stretching the wait keeps the total work linear.
+LONG_TAIL_CHARS = 8192
 
 # A line holding any of these is held back whole until it ends: the
 # redaction patterns that span a quoted value or a header need the full
@@ -178,7 +187,8 @@ class _Open:
     """
 
     __slots__ = ("machine", "kind", "kept", "clean", "words", "tail", "size",
-                 "sent", "seq", "last", "touched", "timer", "stalled")
+                 "tail_size", "sent", "seq", "last", "touched", "timer",
+                 "stalled")
 
     def __init__(self, machine: str, kind: str) -> None:
         self.machine = machine
@@ -188,6 +198,7 @@ class _Open:
         self.words: list[str] = []
         self.tail: list[str] = []
         self.size = 0
+        self.tail_size = 0
         self.sent = ""
         self.seq = 0
         self.last = 0.0
@@ -200,6 +211,7 @@ class _Open:
         self.stalled = True
         self.kept, self.tail, self.words = [], [], []
         self.clean = self.sent = ""
+        self.tail_size = 0
 
 
 class DeltaStream:
@@ -236,15 +248,17 @@ class DeltaStream:
                 return
             st.tail.append(chunk)
             st.size += len(chunk)
+            st.tail_size += len(chunk)
             if st.size > MAX_STREAM_CHARS:
                 self._cancel(st)
                 st.stall()
                 return
-            if now - st.last >= self._interval:
+            wait = self._interval * max(1.0, st.tail_size / LONG_TAIL_CHARS)
+            if now - st.last >= wait:
                 self._flush(key, msg_id, st, final=False)
             elif st.timer is None:
                 st.timer = threading.Timer(
-                    st.last + self._interval - now, self._due,
+                    st.last + wait - now, self._due,
                     args=(key, msg_id))
                 st.timer.daemon = True
                 st.timer.start()
@@ -278,14 +292,18 @@ class DeltaStream:
                 self._flush(key, msg_id, st, final=False)
 
     def _sweep(self, now: float) -> None:
-        """Drop messages idle past ``IDLE_S``; caller holds the lock."""
+        """Stall messages idle past ``IDLE_S`` and forget stalled ones
+        silent past ``IDLE_S + FORGET_S``; caller holds the lock."""
         if now - self._swept < SWEEP_S:
             return
         self._swept = now
         for k, st in list(self._open.items()):
-            if now - st.touched >= IDLE_S:
-                self._cancel(st)
+            idle = now - st.touched
+            if idle >= IDLE_S + FORGET_S and st.stalled:
                 del self._open[k]
+            elif idle >= IDLE_S and not st.stalled:
+                self._cancel(st)
+                st.stall()
 
     @staticmethod
     def _cancel(st: _Open) -> None:
@@ -321,6 +339,7 @@ class DeltaStream:
         else:
             tail = self._keep(st, tail)
             st.tail = [tail] if tail else []
+            st.tail_size = len(tail)
             safe = st.clean + safe_prefix(tail, False)
         if not safe.startswith(st.sent):
             # Redaction rewrote text already on the client: stop here;

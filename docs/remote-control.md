@@ -389,8 +389,12 @@ later redaction would rewrite stops streaming. Each message keeps its
 cleaned text up to a line break that no redaction or escape can reach
 across (no open OSC escape or key block, and no secret's name in the
 last few words before it) and re-cleans only the text after it, so a
-long reply costs linear work; the `done` flush cleans the whole text. A
-message with no new text for 15 minutes is dropped. The hub publishes deltas
+long reply costs linear work; the `done` flush cleans the whole text.
+Past 8 KB of text with no such break, each flush waits proportionally
+longer, which keeps that case linear too. A message with no new text
+for 15 minutes stops streaming and frees its text; its empty entry,
+which keeps a late chunk from streaming without what came before it,
+goes after a day. The hub publishes deltas
 to the session's SSE subscribers only (not `/v1/events`) and never
 journals them; the transcript's `message.appended` stays the record. A
 satellite coalesces its own deltas and posts them best-effort on a
