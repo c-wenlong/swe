@@ -43,6 +43,7 @@ import hashlib
 import json
 import os
 import threading
+import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
@@ -209,18 +210,33 @@ class _Store:
             pass
 
 
+# How often a ``_FileStore`` sweeps for entries whose file is gone, per
+# cache file, in seconds; and when each cache file was last swept.
+_SWEEP_INTERVAL_S = 300.0
+_last_sweep: dict[Path, float] = {}
+
+
 class _FileStore(_Store):
     """A store whose entries last as long as their files do.
 
     For a caller that looks up whatever subset of files it was handed
     (``swe session 10``, one remote row), so "not visited this run" says
     nothing. An entry goes once its file no longer exists, checked only
-    when the cache is being rewritten anyway.
+    when the cache is being rewritten anyway, and at most once per
+    ``_SWEEP_INTERVAL_S`` per cache file in this process: the sweep is one
+    ``stat`` per entry (about 5 ms for 1,000 entries), and the hub's
+    status probes rewrite this file up to once a second while a session
+    is busy. A dead file's entry only costs space until the next sweep.
     """
 
     def prune(self) -> None:
         if not self.dirty:
             return
+        now = time.monotonic()
+        last = _last_sweep.get(self.path)
+        if last is not None and now - last < _SWEEP_INTERVAL_S:
+            return
+        _last_sweep[self.path] = now
         for namespace, files in self.entries.items():
             seen = self.touched.get(namespace, set())
             for p in [p for p in files if p not in seen and not os.path.exists(p)]:
