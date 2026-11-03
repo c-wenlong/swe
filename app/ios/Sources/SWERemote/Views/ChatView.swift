@@ -519,17 +519,47 @@ private struct UserBubble: View {
 /// a table too wide for it scrolls sideways inside its own box, so the
 /// chat itself never does.
 struct RichText: View {
-    let text: String
+    let blocks: [Markdown.Block]
+
+    init(text: String) { blocks = Markdown.parse(text) }
+
+    /// Blocks parsed already, as a reply still streaming in keeps them.
+    init(blocks: [Markdown.Block]) { self.blocks = blocks }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(Markdown.parse(text).enumerated()), id: \.offset) { _, block in
-                BlockView(block: block)
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                // Equatable: a block that didn't change between repaints
+                // of a streaming reply isn't laid out again.
+                BlockView(block: block).equatable()
             }
         }
     }
 
+    /// `s`'s inline Markdown styled, from `inlineCache` when this text
+    /// was styled before. A streaming reply repaints every 80 ms, and all
+    /// but its last block come back unchanged each time.
     static func inline(_ s: String) -> AttributedString {
+        let key = s as NSString
+        if let hit = inlineCache.object(forKey: key) { return hit.value }
+        let styled = styleInline(s)
+        inlineCache.setObject(Styled(styled), forKey: key, cost: s.utf8.count)
+        return styled
+    }
+
+    private final class Styled {
+        let value: AttributedString
+        init(_ value: AttributedString) { self.value = value }
+    }
+
+    /// Styled text by its source, up to about 4 MB of source text.
+    private static let inlineCache: NSCache<NSString, Styled> = {
+        let cache = NSCache<NSString, Styled>()
+        cache.totalCostLimit = 4 << 20
+        return cache
+    }()
+
+    private static func styleInline(_ s: String) -> AttributedString {
         let source = Markdown.inlineImagesAsText(s)
         var out = (try? AttributedString(markdown: source, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(source)
@@ -548,7 +578,7 @@ struct RichText: View {
     }
 }
 
-private struct BlockView: View {
+private struct BlockView: View, Equatable {
     let block: Markdown.Block
 
     var body: some View {
@@ -1358,18 +1388,23 @@ private struct TrayIconButton: View {
 }
 
 /// A thin turning arc the size of the dashed circle it replaces while a
-/// row is being sent now; still under Reduce Motion.
+/// row is being sent now; still under Reduce Motion. One turn every
+/// 0.9 s is a single repeating rotation, so SwiftUI turns it without
+/// evaluating the body each frame.
 private struct SendingSpinner: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var turning = false
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion)) { context in
-            let turns = context.date.timeIntervalSinceReferenceDate / 0.9
-            Circle().trim(from: 0, to: 0.7)
-                .stroke(Theme.textSecondary, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
-                .frame(width: 14, height: 14)
-                .rotationEffect(.degrees(reduceMotion ? 0 : turns.truncatingRemainder(dividingBy: 1) * 360))
-        }
-        .accessibilityLabel("Sending now")
+        Circle().trim(from: 0, to: 0.7)
+            .stroke(Theme.textSecondary, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            .frame(width: 14, height: 14)
+            .rotationEffect(.degrees(turning && !reduceMotion ? 360 : 0))
+            .animation(turning && !reduceMotion
+                       ? .linear(duration: 0.9).repeatForever(autoreverses: false)
+                       : nil,
+                       value: turning && !reduceMotion)
+            .onAppear { turning = true }
+            .accessibilityLabel("Sending now")
     }
 }
