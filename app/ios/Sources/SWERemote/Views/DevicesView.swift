@@ -88,7 +88,7 @@ struct DevicesView: View {
         do {
             let listed = try await client.pairRequests()
             // Most polls bring back the same list: leave the page alone then.
-            if listed != requests { requests = listed }
+            if listed.map(\.drawn) != requests.map(\.drawn) { requests = listed }
             if requestsError != nil { requestsError = nil }
         } catch is CancellationError {
             // The page closed mid-fetch: nothing failed.

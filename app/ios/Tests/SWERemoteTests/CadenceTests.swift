@@ -52,6 +52,16 @@ final class CadenceTests: XCTestCase {
         XCTAssertEqual(queue.blocks.count, 1)
     }
 
+    func testAPairRequestsCountdownIsNotAChange() {
+        func request(expires: Int, name: String = "Kai's iPad") -> PendingPairRequest {
+            PendingPairRequest(requestId: "r1", name: name, nodeName: "ipad", login: "kai",
+                               createdAt: 1_800_000_000, expiresInS: expires)
+        }
+        // The hub counts the expiry down between polls; the page shows none of it.
+        XCTAssertEqual(request(expires: 290).drawn, request(expires: 280).drawn)
+        XCTAssertNotEqual(request(expires: 290).drawn, request(expires: 290, name: "iPad").drawn)
+    }
+
     func testUploadProgressIsTenASecondAndAlwaysTheEnd() {
         var throttle = ProgressThrottle()
         // A fast upload: 1,000 callbacks over 2 s.
