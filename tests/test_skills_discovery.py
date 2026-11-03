@@ -94,6 +94,15 @@ class SkillsDiscoveryTest(unittest.TestCase):
         self.assertIn("shared", alpha["visible_via"])
         self.assertIn("codex", alpha["visible_via"])
 
+    def test_no_skills_enumerates_no_roots(self):
+        # Enumerating can raise on a root whose parent cannot be searched;
+        # a pass that finds no SKILL.md never needed the roots.
+        self.skills.mkdir(parents=True)
+        with patch("swe.skills.discovery.load_skill_catalogs", return_value=[]), \
+                patch("swe.skills.discovery.enumerate_skill_roots",
+                      side_effect=PermissionError("denied")):
+            self.assertEqual(discover_skills(home=self.home, cwd=self.home), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -120,8 +120,11 @@ def discover_skills(home: Path | None = None, cwd: Path | None = None,
     visibility its own way.
     """
     skills: list[dict] = []
-    # Enumerated once, not once per SKILL.md (#1537).
-    roots = enumerate_skill_roots(home=home) if visibility else None
+    # Enumerated once, at the first SKILL.md, not once per SKILL.md
+    # (#1537). Never when there is no skill: enumerating can raise on a
+    # root whose parent cannot be searched, which a pass that finds no
+    # skill never touched.
+    roots = None
     for label, root in skill_roots(home=home, cwd=cwd):
         try:
             root_real = root.resolve()
@@ -135,6 +138,8 @@ def discover_skills(home: Path | None = None, cwd: Path | None = None,
                 continue
             md = Path(dirpath) / "SKILL.md"
             skill_name, desc = parse_skill_md(md)
+            if visibility and roots is None:
+                roots = enumerate_skill_roots(home=home)
             skills.append(
                 {
                     "name": skill_name,

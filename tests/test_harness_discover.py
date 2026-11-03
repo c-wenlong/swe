@@ -187,42 +187,78 @@ class HarnessDiscoverTest(unittest.TestCase):
 class ResolveExecutableListingTest(unittest.TestCase):
     """#1537: every absent candidate cost a stat in every PATH directory."""
 
-    def _dirs(self, tmp):
+    def _dirs(self, tmp, filename="MyTool-cli"):
         empty, tools = Path(tmp) / "empty", Path(tmp) / "tools"
         empty.mkdir()
         tools.mkdir()
-        exe = tools / "MyTool-cli"
+        exe = tools / filename
         exe.write_text("#!/bin/sh\n")
         exe.chmod(0o755)
         return [empty, tools], exe
 
-    def test_only_listed_names_are_probed_and_case_is_ignored(self):
+    def _resolve_counting(self, dirs, listings, *names):
+        """Resolve each name with ``which`` off, recording every file the
+        fallback checks."""
+        from swe.harness import discover
+
+        real_is_file = Path.is_file
+        checked: list[str] = []
+
+        def is_file(path):
+            checked.append(path.name)
+            return real_is_file(path)
+
+        with patch("swe.harness.discover.shutil.which", return_value=None), \
+                patch.object(Path, "is_file", is_file):
+            found = [discover._resolve_executable(n, n, "", dirs, listings) for n in names]
+        return found, checked
+
+    def test_only_listed_names_are_checked(self):
+        from swe.harness import discover
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dirs, exe = self._dirs(tmp, filename="mytool-cli")
+            (found, missing), checked = self._resolve_counting(
+                dirs, discover._dir_listings(dirs), "mytool", "ghost")
+        self.assertEqual(Path(found[0]).name, "mytool-cli")
+        self.assertEqual(missing, (None, None))
+        # Neither the absent ghost names nor mytool's other candidates.
+        self.assertEqual(checked, ["mytool-cli"])
+
+    def test_a_name_in_another_case_is_still_checked(self):
+        # A case-insensitive volume opens `mytool-cli` as `MyTool-cli`.
+        from swe.harness import discover
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dirs, exe = self._dirs(tmp)
+            _found, checked = self._resolve_counting(
+                dirs, discover._dir_listings(dirs), "mytool")
+        self.assertEqual(checked, ["mytool-cli"])
+
+    def test_both_scans_share_one_listing_per_directory(self):
+        # discover_harnesses lists each PATH directory once for the catalog
+        # and PATH scans together.
         import os
 
         from swe.harness import discover
 
         with tempfile.TemporaryDirectory() as tmp:
-            dirs, exe = self._dirs(tmp)
-            listings = discover._dir_listings(dirs)
-            real_access = os.access
-            probed = []
+            dirs, _exe = self._dirs(tmp)
+            real_listdir = os.listdir
+            listed: list[str] = []
 
-            def access(path, mode):
-                probed.append(Path(path).name)
-                return real_access(path, mode)
+            def listdir(path):
+                listed.append(str(path))
+                return real_listdir(path)
 
-            with patch("swe.harness.discover.shutil.which", return_value=None), \
-                    patch("swe.harness.discover.os.access", side_effect=access):
-                found = discover._resolve_executable(
-                    "mytool", "mytool", "", dirs, listings)
-                missing = discover._resolve_executable(
-                    "ghost", "ghost", "", dirs, listings)
-        # The candidate is `mytool-cli`; the file is `MyTool-cli`, which a
-        # case-insensitive volume still opens, so it must stay probed.
-        self.assertEqual(missing, (None, None))
-        self.assertTrue(all(name.casefold() == "mytool-cli" for name in probed), probed)
-        if found[0] is not None:
-            self.assertEqual(Path(found[0]).name.casefold(), "mytool-cli")
+            with patch("swe.harness.discover.EXTRA_BIN_DIRS", ()), \
+                    patch("swe.harness.discover.load_registry", return_value={}), \
+                    patch("swe.harness.discover._home_scan_findings", return_value=[]), \
+                    patch("swe.harness.discover.os.listdir", side_effect=listdir):
+                discover.discover_harnesses(
+                    path_env=os.pathsep.join(map(str, dirs)), home=Path(tmp))
+        resolved = [str(d.resolve()) for d in dirs]
+        self.assertEqual(sorted(listed), sorted(resolved))
 
     def test_an_unlistable_directory_is_probed_as_before(self):
         from swe.harness import discover
