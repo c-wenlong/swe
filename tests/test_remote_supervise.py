@@ -1738,6 +1738,18 @@ class TestAttachModeGates(unittest.TestCase):
             supervise.approval_fingerprint(p3))
 
 
+class TestPaneLocks(unittest.TestCase):
+    def test_a_pane_lock_is_shared_while_held_and_then_dropped(self):
+        # #1533: one entry per tmux pane name ever written to, forever.
+        name = "qv-test-pane-lock"
+        lock = supervise._pane_lock(name)
+        self.assertIs(supervise._pane_lock(name), lock)
+        del lock
+        import gc
+        gc.collect()
+        self.assertNotIn(name, supervise._PANE_LOCKS)
+
+
 class TestResolveMode(unittest.TestCase):
     def test_claude_auto_prefers_tmux(self):
         with patch.object(supervise, "tmux_bin", return_value="/x/tmux"):
