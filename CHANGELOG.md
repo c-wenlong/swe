@@ -1180,6 +1180,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finished reply once from a small status node instead of each repaint.
   Closes [#1555](https://github.com/c-wenlong/swe/issues/1555).
 
+- **The hub's approval watcher reads the supervised registry once per
+  pass.** Every 3 s it opened and parsed `supervised.json` once for each
+  tailed session (up to 100), and again for each tmux-attached one to
+  name its pane. It now reads the file once per pass and takes the pane
+  name from the same row. With nothing attached it spawned no `tmux`
+  before and spawns none now. Closes
+  [#1530](https://github.com/c-wenlong/swe/issues/1530).
+
 - **Devin change checks cost microseconds instead of milliseconds.**
   Every poll of a tailed Devin session opened a new connection to
   `sessions.db` and counted the session's rows: 13 to 22 ms a call for a
@@ -1287,7 +1295,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skip layout. The same reply now costs 0.9 s, and every prefix parses
   to exactly the blocks a full parse gives. Closes
   [#1548](https://github.com/c-wenlong/swe/issues/1548).
-
 - **A snapshot session whose store can't be found no longer costs a
   read attempt every poll.** When a Cline, Continue, Gemini, Copilot,
   Forge or Crush read found no source files or a store it couldn't read,
@@ -1536,6 +1543,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its command and settings file, where it's linked, and the script in a
   raw editor. `swe hooks list --json` rows now carry `summary` and
   `detail` for it.
+- **An SSE reconnect replays from the journal's end.** `read_since`
+  parsed a session's whole journal front to back on every reconnect,
+  even when the client was a few events behind: 31 to 36 ms for a
+  4.4 MB, 3,519-event journal here. It now walks back from the end and
+  stops at the client's cursor, in 0.2 ms for 5 events and 0.4 ms for
+  100. A full replay (`last=0`) still reads the file once, forward.
+  Appends encode each line once for both the write and the byte count.
+  Closes [#1529](https://github.com/c-wenlong/swe/issues/1529).
 - **The status and model caches stop stat'ing every entry on each
   rewrite.** The hub's status probes rewrite `session_status_cache.json`
   up to once a second while a session is busy, and every rewrite checked
