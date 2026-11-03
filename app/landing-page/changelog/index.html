@@ -1293,6 +1293,14 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The hub's approval watcher reads the supervised registry once per
+pass.</strong> Every 3 s it opened and parsed <code>supervised.json</code> once for each
+tailed session (up to 100), and again for each tmux-attached one to
+name its pane. It now reads the file once per pass and takes the pane
+name from the same row. With nothing attached it spawned no <code>tmux</code>
+before and spawns none now. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1530">#1530</a>.</p>
+</li>
 <li><p><strong>Devin change checks cost microseconds instead of milliseconds.</strong>
 Every poll of a tailed Devin session opened a new connection to
 <code>sessions.db</code> and counted the session's rows: 13 to 22 ms a call for a

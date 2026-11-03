@@ -1167,6 +1167,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The hub's approval watcher reads the supervised registry once per
+  pass.** Every 3 s it opened and parsed `supervised.json` once for each
+  tailed session (up to 100), and again for each tmux-attached one to
+  name its pane. It now reads the file once per pass and takes the pane
+  name from the same row. With nothing attached it spawned no `tmux`
+  before and spawns none now. Closes
+  [#1530](https://github.com/c-wenlong/swe/issues/1530).
+
 - **Devin change checks cost microseconds instead of milliseconds.**
   Every poll of a tailed Devin session opened a new connection to
   `sessions.db` and counted the session's rows: 13 to 22 ms a call for a
@@ -1274,7 +1282,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skip layout. The same reply now costs 0.9 s, and every prefix parses
   to exactly the blocks a full parse gives. Closes
   [#1548](https://github.com/c-wenlong/swe/issues/1548).
-
 - **A snapshot session whose store can't be found no longer costs a
   read attempt every poll.** When a Cline, Continue, Gemini, Copilot,
   Forge or Crush read found no source files or a store it couldn't read,
