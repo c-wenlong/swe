@@ -1178,6 +1178,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a minute per session. Closes
   [#1521](https://github.com/c-wenlong/swe/issues/1521).
 
+- **The Mac app keeps fewer things in memory for its whole life.**
+  Switching machines kept a live web view and WebContent process for
+  every hub ever shown; only the last two shown stay now, and an older
+  one reloads when picked. The Calendar's day cache stops at 400 days,
+  dropping the days farthest from the ones on show, so scrolling back
+  through years no longer grows it without end. The Sessions page lists
+  at most 20,000 sessions instead of 100,000, with the existing note
+  when older ones are left out. Closes
+  [#1544](https://github.com/c-wenlong/swe/issues/1544).
 - **The hub stops re-parsing its small stores on every request.** The
   credential check, an open stream's revocation check, the session
   list's unread flags and the machine list read `devices.json`, the
@@ -1514,6 +1523,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its command and settings file, where it's linked, and the script in a
   raw editor. `swe hooks list --json` rows now carry `summary` and
   `detail` for it.
+- **Session listings read Devin prompts once and Cline files once per
+  change.** Devin's title provenance ran one `prompt_history` query per
+  session (210 here); it now runs one for all of them. Cline's session
+  glob also matches every `<id>.messages.json` transcript, which a cold
+  listing parsed in full every time (about 3 ms per 2 MB file); each file
+  now goes through the parse cache, so an unchanged one costs a `stat`.
+  `json_engine` joins the parse cache's fingerprint. Closes
+  [#1534](https://github.com/c-wenlong/swe/issues/1534).
 
 ### Fixed
 

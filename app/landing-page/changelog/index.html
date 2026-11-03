@@ -1304,6 +1304,16 @@ which catches a delete below the newest row, is read again at most once
 a minute per session. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1521">#1521</a>.</p>
 </li>
+<li><p><strong>The Mac app keeps fewer things in memory for its whole life.</strong>
+Switching machines kept a live web view and WebContent process for
+every hub ever shown; only the last two shown stay now, and an older
+one reloads when picked. The Calendar's day cache stops at 400 days,
+dropping the days farthest from the ones on show, so scrolling back
+through years no longer grows it without end. The Sessions page lists
+at most 20,000 sessions instead of 100,000, with the existing note
+when older ones are left out. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1544">#1544</a>.</p>
+</li>
 <li><p><strong>The hub stops re-parsing its small stores on every request.</strong> The
 credential check, an open stream's revocation check, the session
 list's unread flags and the machine list read <code>devices.json</code>, the
@@ -1655,6 +1665,15 @@ Clicking a hook opens it in a panel beside the list: what fires it,
 its command and settings file, where it's linked, and the script in a
 raw editor. <code>swe hooks list --json</code> rows now carry <code>summary</code> and
 <code>detail</code> for it.</p>
+</li>
+<li><p><strong>Session listings read Devin prompts once and Cline files once per
+change.</strong> Devin's title provenance ran one <code>prompt_history</code> query per
+session (210 here); it now runs one for all of them. Cline's session
+glob also matches every <code>&lt;id&gt;.messages.json</code> transcript, which a cold
+listing parsed in full every time (about 3 ms per 2 MB file); each file
+now goes through the parse cache, so an unchanged one costs a <code>stat</code>.
+<code>json_engine</code> joins the parse cache's fingerprint. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1534">#1534</a>.</p>
 </li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
