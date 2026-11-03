@@ -369,7 +369,11 @@ class TestStreamingMarkdown(ChatScript):
             T.appendMessage({ kind: 'assistant', text: 'r2' }, true);
             T.appendMessage({ kind: 'assistant', text: 'r3' }, true);
             await settle();
-            return { streaming, backfill, final, error, pair, backlog: say.textContent };""")
+            const backlog = say.textContent;
+            // A failure written into a bubble already on screen is said too.
+            T.failBubble(document.createElement('div'), 'Send failed: the hub answered 500');
+            await settle();
+            return { streaming, backfill, final, error, pair, backlog, failed: say.textContent };""")
         self.assertEqual(out["streaming"], "", "a streaming bubble is never read out")
         self.assertEqual(out["backfill"], "")
         self.assertEqual(out["final"], "Done now")
@@ -381,6 +385,7 @@ class TestStreamingMarkdown(ChatScript):
         self.assertTrue(out["backlog"].startswith("4 new entries. Error: "), out["backlog"])
         self.assertTrue(out["backlog"].endswith(" r3"), out["backlog"])
         self.assertNotIn("r1", out["backlog"])
+        self.assertEqual(out["failed"], "Send failed: the hub answered 500")
 
 
 if __name__ == "__main__":

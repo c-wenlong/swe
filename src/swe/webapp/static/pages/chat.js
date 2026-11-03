@@ -2306,7 +2306,9 @@ const SessionChat = (() => {
           }
         } else {
           b.classList.add("failed");
-          if (note) note.textContent = d.cancelled ? "Removed before sending" : (d.note || "Send failed");
+          const why = d.cancelled ? "Removed before sending" : (d.note || "Send failed");
+          if (note) note.textContent = why;
+          announceFailure(why);
           chat.awaitingReply = false;
           updateWorking();
         }
@@ -2346,6 +2348,7 @@ const SessionChat = (() => {
             .forEach((b) => b.classList.remove("chosen"));
           card.querySelectorAll(".approval-actions button").forEach((b) => { b.disabled = false; });
           approvalNote(card).textContent = `Approval failed: ${d.note || "the satellite rejected it"}`;
+          announceFailure(approvalNote(card).textContent);
         }
       }
     }
@@ -2492,8 +2495,19 @@ const SessionChat = (() => {
 
   function announce(lead, div) {
     const text = String((div.querySelector(".text") || div).textContent || "").replace(/\s+/g, " ").trim();
+    queueAnnouncement(lead, lead + (text.length > ANNOUNCE_MAX ? `${text.slice(0, ANNOUNCE_MAX)}…` : text));
+  }
+
+  /* A failure written into a card already on screen (a send or an
+   * approval the hub refused): said like an error, since the log that
+   * holds the card is no live region. */
+  function announceFailure(text) {
+    queueAnnouncement("failure", text);
+  }
+
+  function queueAnnouncement(lead, text) {
     if (!announcing.length) queueMicrotask(sayAnnounced);
-    announcing.push({ lead, text: lead + (text.length > ANNOUNCE_MAX ? `${text.slice(0, ANNOUNCE_MAX)}…` : text) });
+    announcing.push({ lead, text });
   }
 
   function sayAnnounced() {
@@ -2597,6 +2611,7 @@ const SessionChat = (() => {
           buttons().forEach((b) => { b.disabled = false; });
           note.textContent = status === 0 ? "Request failed: connection lost"
             : `Approval failed: ${errorText(data) || "the prompt may have closed"}`;
+          announceFailure(note.textContent);
           noteRefusal(data);
         } else {
           note.remove();
@@ -3583,6 +3598,7 @@ const SessionChat = (() => {
     note.className = "send-note";
     note.textContent = text;
     bubble.appendChild(note);
+    announceFailure(text);
   }
 
   async function send() {
@@ -4723,7 +4739,7 @@ const SessionChat = (() => {
       barSub, refreshModel, railDay, railGroups, slashToken, commandInsert, sourceLabel, filterCommands, insertCommand, menuKey,
       cmds, cmdLists, warmCommands, loadCommands, resetMenus, chat,
       ATTACH, fileExt, attachProblem, formatBytes, uploadError, uploads, addFiles, removeUpload,
-      messageBody, send, updateOwnership, restoreUploads,
+      messageBody, send, updateOwnership, restoreUploads, failBubble,
       mentionToken, insertMention, splitPath, filesError, files, FILES, searchFiles, trackMenus, menu,
       echoes, sendsToTray, mergeQueue, queueNote, trayHtml, posted, takeQueued, echoLeavesTray, sendText,
       sendNow, removeQueued, removeAllQueued, beginEdit, cancelEdit, saveEdit, loadQueue, commandResult, appendMessage,
