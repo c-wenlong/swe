@@ -8,10 +8,10 @@ keys make that idempotent. Pi logs and the Droid and Cline session files
 are read whole when they change, also keyed — the session files hold one
 authoritative total each, so a re-read replaces and a now-empty file
 deletes. OpenCode and Devin databases are skipped while they and their
-WALs are unchanged, and otherwise read only past a watermark. Cursor's usage is not a file: the web app polls it in the
-background on the feed's own cadence (``CursorUsageFeed.keepFresh``), so
-a scan never waits on network replies and a missed round keeps the
-stored rows.
+WALs are unchanged, and otherwise read only past a watermark. Cursor's
+usage is not a file: the web app polls it in the background on the
+feed's own cadence (``CursorUsageFeed.keepFresh``), so a scan never
+waits on network replies and a missed round keeps the stored rows.
 """
 
 from __future__ import annotations
