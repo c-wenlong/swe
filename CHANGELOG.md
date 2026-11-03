@@ -1167,6 +1167,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The iPhone app's 15 s poll changes only what changed.** Every poll
+  of `/v1/sessions` and `/v1/inbox` wrote the sessions, inbox and
+  machines back even when the hub sent the same lists, and
+  `@Observable` reports equal writes, so the Sessions page regrouped
+  every row and an open search asked `/v1/search` again every 15 s.
+  The lists are now written only when they differ, the search reruns
+  only when the query or the sessions change, and the poll pauses
+  while the app is inactive (the app switcher, Control Centre, a call),
+  not only in the background. Closes
+  [#1549](https://github.com/c-wenlong/swe/issues/1549).
 - **The usage ledger reads only new Devin and OpenCode rows.** Any
   write to Devin's `sessions.db` or its WAL made the next scan (each
   web Overview load after the 60 s cache, and every satellite usage
