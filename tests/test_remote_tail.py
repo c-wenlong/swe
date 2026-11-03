@@ -646,6 +646,86 @@ class TestSnapshotChangeGate(unittest.TestCase):
             self.assertEqual(rt.call_count, 3, "the same token is read again after a failed read")
             self.assertEqual([m["text"] for m in out], ["b"], "recovery emits only what is new")
 
+    def _devin_db(self, name="sessions.db"):
+        import sqlite3
+        db = self.tmp / name
+        conn = sqlite3.connect(db)
+        conn.executescript(
+            "CREATE TABLE sessions(id TEXT PRIMARY KEY, main_chain_id INTEGER);"
+            "CREATE TABLE message_nodes(row_id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT,"
+            " node_id INTEGER, parent_node_id INTEGER, chat_message TEXT, created_at INTEGER,"
+            " UNIQUE(session_id, node_id));"
+            "INSERT INTO sessions VALUES ('s1', 2), ('s2', 1);"
+            "INSERT INTO message_nodes(session_id, node_id, chat_message, created_at)"
+            " VALUES ('s1', 1, '{}', 0), ('s1', 2, '{}', 0), ('s2', 1, '{}', 0);"
+        )
+        conn.commit()
+        self.addCleanup(conn.close)
+        return db, conn
+
+    def test_devin_token_runs_no_query_while_nothing_commits(self):
+        # #1521: one kept connection; PRAGMA data_version gates the rest.
+        db, conn = self._devin_db()
+        tokens = tail._DevinTokens()
+        self.addCleanup(tokens._close)
+        with patch.object(tail, "DEVIN_DB", str(db)):
+            first = tokens.token("s1")
+            kept = tokens._conn
+            ran = []
+            kept.set_trace_callback(ran.append)
+            self.assertEqual(tokens.token("s1"), first)
+            self.assertEqual(ran, ["PRAGMA data_version"], "no row query while nothing committed")
+            conn.execute("INSERT INTO message_nodes(session_id, node_id, chat_message, created_at) VALUES ('s2', 2, '{}', 0)")
+            conn.commit()
+            ran.clear()
+            self.assertEqual(tokens.token("s1"), first)
+            self.assertFalse(any("COUNT" in q for q in ran), "the count waits for its recheck window")
+            self.assertIs(tokens._conn, kept, "the connection is kept, not reopened")
+
+    def test_devin_token_sees_a_delete_below_the_max_within_the_window(self):
+        db, conn = self._devin_db()
+        now = [0.0]
+        tokens = tail._DevinTokens(clock=lambda: now[0])
+        self.addCleanup(tokens._close)
+        with patch.object(tail, "DEVIN_DB", str(db)):
+            before = tokens.token("s1")
+            conn.execute("DELETE FROM message_nodes WHERE session_id = 's1' AND node_id = 1")
+            conn.commit()
+            self.assertEqual(tokens.token("s1"), before, "MAX(row_id) alone can't see it")
+            now[0] += tail.SNAPSHOT_RECHECK_S
+            self.assertNotEqual(tokens.token("s1"), before, "the count recheck does")
+
+    def test_devin_token_cache_forgets_sessions_nobody_asks_about(self):
+        db, _conn = self._devin_db()
+        now = [0.0]
+        tokens = tail._DevinTokens(clock=lambda: now[0])
+        self.addCleanup(tokens._close)
+        with patch.object(tail, "DEVIN_DB", str(db)):
+            tokens.token("s1")
+            tokens.token("s2")
+            now[0] = tail.DEVIN_TOKEN_IDLE_S / 2
+            tokens.token("s1")
+            now[0] = tail.DEVIN_TOKEN_IDLE_S + 1
+            tokens.token("s1")
+            self.assertEqual(set(tokens._cache), {"s1"})
+            self.assertEqual(set(tokens._used), {"s1"})
+
+    def test_devin_token_follows_a_replaced_db_file(self):
+        import os
+        db, conn = self._devin_db()
+        tokens = tail._DevinTokens()
+        self.addCleanup(tokens._close)
+        with patch.object(tail, "DEVIN_DB", str(db)):
+            before = tokens.token("s1")
+            other, oconn = self._devin_db("other.db")
+            oconn.execute("UPDATE sessions SET main_chain_id = 9 WHERE id = 's1'")
+            oconn.commit()
+            os.replace(other, db)
+            self.assertNotEqual(tokens.token("s1"), before)
+            self.assertEqual(tokens.token("s1")[1], (9,))
+            os.unlink(db)
+            self.assertIsNone(tokens.token("s1"))
+
     def test_devin_token_reads_one_sessions_rows(self):
         import sqlite3
         db = self.tmp / "sessions.db"
@@ -1243,15 +1323,13 @@ class TestTailManager(unittest.TestCase):
         with patch.object(tail, "make_source", return_value=src):
             mgr.sync([("claude:x", sess, "active")])
         mgr._approval_outstanding["claude:x"] = ("req-1", "fp")
-        mgr._approval_checked_at["claude:x"] = 1.0
         mgr.last_append["claude:x"] = 1.0
         with patch.object(tail.supervise, "set_pending_approval") as pending:
             mgr.sync([])
         pending.assert_called_once_with("claude:x", None)
         resolved = [e for _k, e in self.events if e["type"] == "approval.resolved"]
         self.assertEqual(resolved[-1]["data"]["request_id"], "req-1")
-        for kept in (mgr._approval_outstanding, mgr._approval_checked_at,
-                     mgr.last_append):
+        for kept in (mgr._approval_outstanding, mgr.last_append):
             self.assertNotIn("claude:x", kept)
 
     def test_a_session_dropped_mid_pane_read_raises_no_card(self):
@@ -1267,8 +1345,8 @@ class TestTailManager(unittest.TestCase):
             mgr.sync([])  # the catalog drops it while the pane is read
             return "pane"
 
-        with patch.object(tail.supervise, "meta_for", return_value={"mode": "tmux"}), \
-                patch.object(tail.supervise, "channel_name", return_value="qv-1"), \
+        with patch.object(tail.supervise, "registry",
+                          return_value={"claude:x": {"mode": "tmux", "tmux": "qv-1"}}), \
                 patch.object(tail.supervise, "capture_pane", side_effect=capture), \
                 patch.object(tail.supervise, "pane_shows_approval", return_value=True), \
                 patch.object(tail.supervise, "set_pending_approval"):
@@ -1903,7 +1981,8 @@ class TestApprovalWatcher(unittest.TestCase):
         # Each call lands past the PANE_APPROVAL_S throttle window.
         self._t += 10
         with patch.object(
-            tail.supervise, "meta_for", return_value=meta
+            tail.supervise, "registry",
+            return_value={"k1": meta} if meta is not None else {},
         ), patch.object(
             tail.supervise, "capture_pane", return_value=pane
         ):
@@ -1977,8 +2056,8 @@ class TestApprovalWatcher(unittest.TestCase):
 
     def test_headless_meta_skips_pane_check(self):
         # mode != tmux → never captures a pane, never emits.
-        with patch.object(tail.supervise, "meta_for",
-                          return_value={"mode": "headless"}), \
+        with patch.object(tail.supervise, "registry",
+                          return_value={"k1": {"mode": "headless"}}), \
              patch.object(tail.supervise, "capture_pane") as cap:
             self.mgr._poll_approvals(time.time() + 10)
         cap.assert_not_called()
@@ -1989,9 +2068,9 @@ class TestApprovalWatcher(unittest.TestCase):
         # watcher must still consult the default remote dir, not skip.
         mgr = tail.TailManager(lambda k, ev: None, "mbp", home=None)
         mgr.tailers["k1"] = object()
-        with patch.object(tail.supervise, "meta_for") as mf:
+        with patch.object(tail.supervise, "registry", return_value={}) as reg:
             mgr._poll_approvals(time.time() + 10)
-        mf.assert_called_once_with(None, "k1")
+        reg.assert_called_once_with(None)
 
     def test_prompt_swap_rotates_request_id(self):
         # A menu answered locally then replaced by another one must not
@@ -2015,10 +2094,33 @@ class TestApprovalWatcher(unittest.TestCase):
     def test_poll_throttled(self):
         meta = {"mode": "tmux"}
         self._poll("", meta=meta)
-        with patch.object(tail.supervise, "meta_for") as mf:
+        with patch.object(tail.supervise, "registry") as reg:
             # A second call inside the 3s window doesn't even look.
             self.mgr._poll_approvals(self._t + 1)
-        mf.assert_not_called()
+        reg.assert_not_called()
+
+    def test_one_registry_read_per_pass_whatever_the_tailer_count(self):
+        # #1530: the registry was read once per tailer, every pass.
+        for i in range(50):
+            self.mgr.tailers[f"k{i + 2}"] = object()
+        meta = {"mode": "tmux", "tmux": "qv-k1"}
+        with patch.object(tail.supervise, "registry",
+                          return_value={"k1": meta}) as reg, \
+                patch.object(tail.supervise, "_load_registry") as load, \
+                patch.object(tail.supervise, "capture_pane",
+                             return_value="") as cap:
+            self.mgr._poll_approvals(self._t + 10)
+        reg.assert_called_once_with(self.tmp)
+        load.assert_not_called()
+        cap.assert_called_once_with("qv-k1")
+
+    def test_pane_name_falls_back_to_the_derived_one(self):
+        with patch.object(tail.supervise, "registry",
+                          return_value={"k1": {"mode": "tmux"}}), \
+                patch.object(tail.supervise, "capture_pane",
+                             return_value="") as cap:
+            self.mgr._poll_approvals(self._t + 10)
+        cap.assert_called_once_with(tail.supervise.tmux_name("k1"))
 
     def test_request_carries_the_menu_options(self):
         # The card shows the pane's real rows, so the event lists them —
@@ -2307,6 +2409,45 @@ class TestTailWake(unittest.TestCase):
                          tail.POLL_IDLE_S)
         self.assertEqual(self.tailer.interval(active=True, hot=True),
                          tail.POLL_HOT_S)
+
+    def test_low_power_stretches_active_and_idle_but_not_hot(self):
+        # #1520: nobody watching, so a slower poll only delays the
+        # journal's copy of a transcript that is on disk anyway.
+        self.assertEqual(self.tailer.interval(active=True, low_power=True),
+                         tail.POLL_ACTIVE_LOW_S)
+        self.assertEqual(self.tailer.interval(active=False, low_power=True),
+                         tail.POLL_IDLE_LOW_S)
+        self.assertEqual(
+            self.tailer.interval(active=True, hot=True, low_power=True),
+            tail.POLL_HOT_S)
+        self.mgr.set_low_power(True)
+        self._append("hi")
+        self.mgr.tick(self.t0 + tail.POLL_IDLE_S)
+        self.assertIn("hi", self._texts())
+        self.assertEqual(self.tailer.next_poll_at,
+                         self.t0 + tail.POLL_IDLE_S + tail.POLL_IDLE_LOW_S)
+
+    def test_leaving_low_power_polls_every_tailer_at_once(self):
+        self.mgr.set_low_power(True)
+        self.mgr.tick(self.t0 + tail.POLL_IDLE_S)  # next poll a minute out
+        self._append("while away")
+        self.mgr.tick(self.t0 + tail.POLL_IDLE_S + 1)
+        self.assertNotIn("while away", self._texts())
+        self.mgr._wake_event.clear()
+        self.mgr.set_low_power(False)
+        # The loop parked in wait() returns at once...
+        self.assertTrue(self.mgr.wait(0))
+        # ...and the next tick reads it, with no hot window opened.
+        self.mgr.tick(self.t0 + tail.POLL_IDLE_S + 2)
+        self.assertIn("while away", self._texts())
+        self.assertFalse(self.mgr.is_hot(self.KEY, now=self.t0 + 20))
+        self.assertEqual(self.tailer.next_poll_at,
+                         self.t0 + tail.POLL_IDLE_S + 2 + tail.POLL_IDLE_S)
+
+    def test_set_low_power_to_the_same_value_wakes_nothing(self):
+        self.mgr._wake_event.clear()
+        self.mgr.set_low_power(False)
+        self.assertFalse(self.mgr.wait(0))
 
     def test_waking_injector_wakes_around_writes_only(self):
         from unittest.mock import MagicMock

@@ -320,6 +320,43 @@ class RateLimitCacheTest(unittest.TestCase):
         self.assertNotIn("ghost", result)
         self.assertNotIn("codex", result)
 
+    def test_a_cached_call_reads_the_cache_file_once(self):
+        """#1536: every cache reader opened the file itself, five reads a call."""
+        import builtins
+
+        saved = _FETCHERS.copy()
+        codex, empty = MagicMock(return_value=None), MagicMock(return_value=None)
+        _FETCHERS.clear()
+        register("codex", codex)
+        register("empty", empty)
+        info = {"tool_name": "codex", "used_percent": 5, "limit_reached": False,
+                "reset_at": 0.0, "plan_type": "plus", "window_seconds": 0}
+        real_open = builtins.open
+        opens: list[str] = []
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                cache_file = Path(tmp) / "rate_limits_cache.json"
+
+                def counting_open(file, *args, **kwargs):
+                    if str(file) == str(cache_file):
+                        opens.append(args[0] if args else kwargs.get("mode", "r"))
+                    return real_open(file, *args, **kwargs)
+
+                with patch("swe.harness.rate_limits.RATE_LIMITS_CACHE_FILE", cache_file), \
+                        patch("swe.harness.rate_limits._CACHE_TTL", 300.0):
+                    from swe.harness.rate_limits import _save_cached
+                    _save_cached({"codex": info}, no_data=["empty"],
+                                 no_data_status={"empty": "error"})
+                    with patch("builtins.open", counting_open):
+                        result = get_all_rate_limits(use_cache=True)
+        finally:
+            _FETCHERS.clear()
+            _FETCHERS.update(saved)
+        codex.assert_not_called()
+        empty.assert_not_called()
+        self.assertEqual(result["codex"].used_percent, 5)
+        self.assertEqual(len([m for m in opens if "w" not in m]), 1)
+
     def test_invalidate_cache(self):
         with tempfile.TemporaryDirectory() as tmp:
             cache_file = Path(tmp) / "rate_limits_cache.json"
