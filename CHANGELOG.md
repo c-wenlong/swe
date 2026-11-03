@@ -1179,6 +1179,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CPU per pass here: OpenCode 381 sessions about 66 to 50 ms, Devin
   216 sessions about 10 to 6 ms, a 64 KB transcript tail walk about
   half. Closes [#1535](https://github.com/c-wenlong/swe/issues/1535).
+- **The usage ledger reads only new Devin and OpenCode rows.** Any
+  write to Devin's `sessions.db` or its WAL made the next scan (each
+  web Overview load after the 60 s cache, and every satellite usage
+  push) JSON-decode the whole database: 76 s for 2.1 million rows in a
+  9.8 GB file. `swe` now keeps a watermark per database, as the Mac app
+  already did: Devin's highest `row_id` (a row still waiting for its
+  metrics holds it back) and OpenCode's newest `time_updated`, so a scan
+  after new activity reads only the rows past it, in about 3 ms. A
+  recreated or rebuilt database is read again from the start. Closes
+  [#1524](https://github.com/c-wenlong/swe/issues/1524).
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
   newest 1,000 chain nodes anyway. Devin's change token (the session's

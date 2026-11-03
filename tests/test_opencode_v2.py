@@ -393,7 +393,7 @@ class LedgerTest(OpencodeV2Case):
         store.db.commit()
         result = scan(store, self.home)
         self.assertEqual(result.records, 2)  # msg_a and the 2.x reply m3
-        self.assertIsNotNone(store.file_cursor(str(self.db) + "#v3"))
+        self.assertIsNotNone(store.file_cursor(str(self.db) + "#v3@w"))
 
 
 class TailTest(OpencodeV2Case):
