@@ -84,6 +84,39 @@ def _broken_tools():
     return broken_tools()
 
 
+def _path_memo():
+    """``is_installed`` remembered for one pass: ``swe list`` asks about
+    each command for its row and again for the installed count (#1537).
+    Scoped to the pass, never the process, so the long-running hub still
+    sees a harness installed after it started."""
+    seen: dict[str, bool] = {}
+
+    def on_path(command: str) -> bool:
+        if command not in seen:
+            seen[command] = is_installed(command)
+        return seen[command]
+
+    return on_path
+
+
+# Version probes run side by side: each is up to three subprocesses with
+# a timeout, and `swe check` waited on them one harness at a time.
+_VERSION_PROBE_WORKERS = 8
+
+
+def _live_versions(commands, on_path) -> dict[str, str | None]:
+    """``live_version`` for every installed command in ``commands``,
+    probed on a small thread pool (#1537)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    installed = sorted(cmd for cmd in commands if on_path(cmd))
+    if not installed:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(_VERSION_PROBE_WORKERS,
+                                            len(installed))) as pool:
+        return dict(zip(installed, pool.map(live_version, installed)))
+
+
 _CONFIGURED = object()
 
 
@@ -890,11 +923,12 @@ def cmd_list(args):
                          fit="shrink")
 
     shown_starred = False
+    on_path = _path_memo()
     for name, info in _sort_tools(tools, counts, stars):
         if tag_filter and tag_filter not in info.get("tags", []):
             continue
 
-        installed = is_installed(info.get("command") or name)
+        installed = on_path(info.get("command") or name)
         status = c("green", "✓") if installed else c("red", "✗")
         ver = truncate(info.get("version") or "—", 12)
         aliases = [a for a in info.get("aliases", []) if a != name]
@@ -980,7 +1014,7 @@ def cmd_list(args):
 
     print()
     n_inst = sum(1 for i in tools.values()
-                 if i.get("command") and is_installed(i["command"]))
+                 if i.get("command") and on_path(i["command"]))
     n_star = sum(1 for n in tools if n in starred_set)
     # How many rows --scope left out has nothing to do with whether anything
     # is starred. Nesting this under the star legend meant a registry with no
@@ -1602,11 +1636,14 @@ def cmd_check(args):
     table.add_column("info", "INFO", width=INFO_COL_WIDTH,
                      kind="preformatted", trust_cell_width=True)
 
+    on_path = _path_memo()
+    versions = _live_versions(
+        {info.get("command") or "" for info in tools.values()} - {""}, on_path)
     for name, info in sorted(tools.items()):
         aliases = [a for a in info.get("aliases", []) if a != name]
         command = info.get("command") or ""
         shelved = name in archived_set
-        installed = bool(command) and is_installed(command)
+        installed = bool(command) and on_path(command)
         if not shelved:
             n_active += 1
             n_installed += installed
@@ -1615,7 +1652,7 @@ def cmd_check(args):
             # the row (this is the check-and-heal flow's side-effect,
             # not just a display step). An archived harness heals the
             # same way; only its rendered cells differ.
-            ver = live_version(command)
+            ver = versions.get(command)
             if not ver:
                 # Fall back to sanitizing whatever is already stored
                 ver = extract_version_number(str(info.get("version") or ""))

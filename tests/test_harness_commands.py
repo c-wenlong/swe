@@ -479,6 +479,14 @@ class CmdListInstColumnTest(unittest.TestCase):
         plain = strip_ansi(output)
         self.assertIn("\u2713", plain)
 
+    def test_each_command_is_looked_up_on_path_once(self):
+        # #1537: the row and the installed count each asked `which`.
+        with patch("swe.harness.commands.is_installed", return_value=True) as which:
+            _run_cmd_list()
+        asked = [call.args[0] for call in which.call_args_list]
+        self.assertTrue(asked)
+        self.assertEqual(len(asked), len(set(asked)), asked)
+
 
 class CmdListSessColumnTest(unittest.TestCase):
     """SESS column shows the three documented visual states."""
@@ -911,6 +919,38 @@ class CmdCheckStatusColumnTest(unittest.TestCase):
         plain = strip_ansi(output)
         self.assertIn("augment", plain)
         self.assertIn("version unknown", plain)
+
+
+class CmdCheckParallelProbeTest(unittest.TestCase):
+    """#1537: version probes ran one harness after another."""
+
+    def test_version_probes_overlap_and_rows_keep_their_order(self):
+        import threading
+
+        registry = {n: {"command": n, "aliases": [], "tags": [], "version": "1.0"}
+                    for n in ("alpha", "bravo", "charlie")}
+        barrier = threading.Barrier(3, timeout=5)
+
+        def probe(cmd):
+            barrier.wait()  # passes only when all three run at once
+            return {"alpha": "1.1", "bravo": "2.2", "charlie": "3.3"}[cmd]
+
+        patches = [
+            patch("swe.harness.commands.load_registry", return_value=copy.deepcopy(registry)),
+            patch("swe.harness.commands.is_installed", return_value=True),
+            patch("swe.harness.commands.live_version", side_effect=probe),
+            patch("swe.harness.commands.save_registry"),
+            patch("swe.harness.path_health.find_off_path_tools", return_value=[]),
+        ]
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+        plain = strip_ansi(_run_cmd_check())
+        rows = [ln for ln in plain.splitlines() if any(n in ln for n in registry)]
+        self.assertEqual([next(n for n in registry if n in ln) for ln in rows],
+                         ["alpha", "bravo", "charlie"])
+        for version in ("1.1", "2.2", "3.3"):
+            self.assertIn(version, plain)
 
 
 class CmdCheckHealSideEffectTest(unittest.TestCase):

@@ -450,6 +450,19 @@ struct PendingPairRequest: Decodable, Identifiable, Hashable {
     let createdAt: Double?
     let expiresInS: Int?
     var id: String { requestId }
+
+    /// What the Devices page draws for it. The hub counts `expiresInS`
+    /// down on every answer, so comparing whole requests would call an
+    /// unchanged list new on every poll.
+    var drawn: Drawn { Drawn(requestId: requestId, name: name, nodeName: nodeName, login: login, createdAt: createdAt) }
+
+    struct Drawn: Equatable {
+        let requestId: String
+        let name: String?
+        let nodeName: String?
+        let login: String?
+        let createdAt: Double?
+    }
 }
 
 struct PairRequestsResponse: Decodable { let requests: [PendingPairRequest] }
