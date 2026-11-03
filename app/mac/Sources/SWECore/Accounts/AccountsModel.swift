@@ -178,7 +178,9 @@ public final class AccountsModel {
         let path: String
         if freshPath {
             path = await loginPath()
-            lastLoginPath = path
+            // Only the newest load may keep its read: an older shell
+            // finishing late must not replace what a newer one found.
+            if mine == generation { lastLoginPath = path }
         } else if let lastLoginPath {
             path = lastLoginPath
         } else {
