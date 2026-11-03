@@ -1179,6 +1179,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redraw behind it for the app's whole life. Closes
   [#1543](https://github.com/c-wenlong/swe/issues/1543).
 
+- **A long-running hub stops keeping state for sessions and panes that
+  are gone.** The rate-limit notice memory kept one entry per session
+  that ever hit a limit, and the tmux keystroke locks one per pane ever
+  typed into. A session leaving the catalog now drops its limit entry,
+  and a pane's lock lives only while a write holds it. Streamed messages
+  whose channel died mid-reply were bounded in
+  [#1532](https://github.com/c-wenlong/swe/issues/1532). Closes
+  [#1533](https://github.com/c-wenlong/swe/issues/1533).
 - **Live reply text costs the hub linear work, not quadratic.** Every
   100 ms flush of a streamed reply re-cleaned the whole message so far:
   a 100 KB reply took 3.3 s of cleaning, now 58 ms. Each message keeps
