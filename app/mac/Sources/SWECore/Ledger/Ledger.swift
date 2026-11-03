@@ -182,6 +182,11 @@ public struct ScanReport: Sendable, Equatable {
     /// Lines over the size limit that were skipped.
     public var skippedLines = 0
     public var databasesRead = 0
+    /// Usage events the scan inserted, changed or deleted. Reading a file
+    /// is not enough to move a figure: most appended transcript lines
+    /// (prompts, tool output) carry no usage, and a rewrite can repeat
+    /// rows already stored. Only this says the ledger's figures moved.
+    public var eventsWritten = 0
     /// Sources or files that failed this round and were skipped, one note
     /// each. A source in a transient state (mid-rebuild, locked for
     /// recovery, an unexpected schema) or an unreadable transcript must
@@ -343,6 +348,9 @@ public actor Ledger {
         let roots = roots ?? .standard()
         var report = ScanReport()
         var seen = Set<String>()
+        // A Cursor feed ingest interleaving at a yield counts here too:
+        // at worst one needless rebuild, and that ingest reloads anyway.
+        let writesBefore = store.eventWrites
 
         let claudeFiles = roots.claudeHomes.map { home in
             (home, Self.capped(Self.jsonlFiles(under: home.appendingPathComponent("projects")),
@@ -569,6 +577,7 @@ public actor Ledger {
                 report.notes.append("Index drain failed: \(error.localizedDescription)")
             }
         }
+        report.eventsWritten = store.eventWrites - writesBefore
         return report
     }
 

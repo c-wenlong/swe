@@ -61,6 +61,12 @@ final class LedgerStore {
     /// Dimension rows a relabel moved their last event out of, until
     /// `dropVacatedDims` removes the ones left with no events.
     private var vacatedDims: Set<Int64> = []
+    /// Usage events inserted, changed or deleted since the store opened:
+    /// every `upsert` that wrote and every `delete(key:)` that removed a
+    /// row. A scan reports its own share so the Overview rebuilds only
+    /// when the figures can have moved. Writes later rolled back still
+    /// count, which costs at most one needless rebuild.
+    private(set) var eventWrites = 0
 
     struct DimKey: Hashable {
         var harness, account, session, cwd, model, tier: String
@@ -188,6 +194,12 @@ final class LedgerStore {
     ///   the same event under the same key is a no-op and returns false.
     @discardableResult
     func upsert(_ record: LedgerRecord) throws -> Bool {
+        let wrote = try upsertRow(record)
+        if wrote { eventWrites += 1 }
+        return wrote
+    }
+
+    private func upsertRow(_ record: LedgerRecord) throws -> Bool {
         let key = StableHash.of(record.key)
         let total = Int64(record.event.totalTokens)
         selectByKey.bind([.int(key)])
@@ -351,6 +363,7 @@ final class LedgerStore {
     /// sources whose file now reports nothing, so stale spend clears.
     func delete(key: String) throws {
         try deleteEvent.bind([.int(StableHash.of(key))]).run()
+        if db.changes > 0 { eventWrites += 1 }
     }
 
     /// Abandons the open transaction. Dimension ids inserted in it are gone
