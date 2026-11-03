@@ -1666,6 +1666,15 @@ its command and settings file, where it's linked, and the script in a
 raw editor. <code>swe hooks list --json</code> rows now carry <code>summary</code> and
 <code>detail</code> for it.</p>
 </li>
+<li><p><strong>An SSE reconnect replays from the journal's end.</strong> <code>read_since</code>
+parsed a session's whole journal front to back on every reconnect,
+even when the client was a few events behind: 31 to 36 ms for a
+4.4 MB, 3,519-event journal here. It now walks back from the end and
+stops at the client's cursor, in 0.2 ms for 5 events and 0.4 ms for
+100. A full replay (<code>last=0</code>) still reads the file once, forward.
+Appends encode each line once for both the write and the byte count.
+Closes <a href="https://github.com/c-wenlong/swe/issues/1529">#1529</a>.</p>
+</li>
 <li><p><strong>The status and model caches stop stat'ing every entry on each
 rewrite.</strong> The hub's status probes rewrite <code>session_status_cache.json</code>
 up to once a second while a session is busy, and every rewrite checked
