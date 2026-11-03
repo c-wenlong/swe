@@ -84,6 +84,12 @@ body.chat-open .panel { display: flex; min-height: 0; overflow: hidden; }
 /* Replies still being written (message.delta): the newest entries, spaced
    like the log, until each final message takes its bubble's place. */
 .chat-streams { display: flex; flex-direction: column; gap: 12px; }
+/* The status a screen reader says a finished reply in (the log itself is
+   no live region): present for assistive tech, invisible on screen. */
+.chat-announce {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
 .msg { min-width: 0; font-size: 14px; line-height: 1.5; }
 .msg .text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg .role { font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px; }

@@ -1180,6 +1180,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   login `PATH` rather than starting `zsh -il` (the whole rc chain) every
   5 minutes. Closes [#1541](https://github.com/c-wenlong/swe/issues/1541).
 
+- **The web chat parses only the growing end of a streaming reply.**
+  Each repaint (at most every 80 ms) used to run the whole reply through
+  the Markdown parser and syntax highlighter and replace the bubble's
+  HTML. Blocks that end at a blank line are now settled: their nodes
+  stay, and only the text after them is parsed and drawn again, with
+  the same result as a full render. Over a 60 s, 12 KB reply (600
+  paints) that is 18 ms of Markdown work instead of 824 ms, and 133 KB
+  of HTML handed to the DOM instead of 9.5 MB. A delta no longer
+  rebuilds every bubble's text twice to see whether anything changed,
+  and the chat log is no longer a live region, so screen readers hear a
+  finished reply once from a small status node instead of each repaint.
+  Closes [#1555](https://github.com/c-wenlong/swe/issues/1555).
+
 - **The hub's approval watcher reads the supervised registry once per
   pass.** Every 3 s it opened and parsed `supervised.json` once for each
   tailed session (up to 100), and again for each tmux-attached one to
@@ -1568,6 +1581,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now goes through the parse cache, so an unchanged one costs a `stat`.
   `json_engine` joins the parse cache's fingerprint. Closes
   [#1534](https://github.com/c-wenlong/swe/issues/1534).
+- **The iPhone chat's working pill stops redrawing every frame.** The
+  cycling verb under a working agent ran on a `.animation` timeline,
+  so for the whole turn it rebuilt its gradient mask and glow on every
+  display frame (60 to 120 times a second), including the rest between
+  sweeps. It now swaps the word on a 2.4 s periodic timeline and slides
+  a fixed band with one linear animation per word: about 1,500 body
+  evaluations an hour instead of 216,000 to 432,000, nothing animating
+  while the word rests, and the same picture (the test renders both).
+  The queued-send spinner turns with one repeating rotation instead of
+  its own per-frame timeline. Closes
+  [#1550](https://github.com/c-wenlong/swe/issues/1550).
 
 ### Fixed
 

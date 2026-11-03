@@ -1743,9 +1743,9 @@ class TailManager:
         # idle check reads this server-side.
         self.last_append: dict[str, float] = {}
         # key -> (request_id, prompt fingerprint) of the approval the
-        # pane watcher last issued; key -> last pane check time.
+        # pane watcher last issued; when its last pass ran.
         self._approval_outstanding: dict[str, tuple[str, str]] = {}
-        self._approval_checked_at: dict[str, float] = {}
+        self._approvals_at = float("-inf")
         # Wake state, written by request threads (``wake``) and read by
         # the tail thread (``tick``); nothing else here is shared that
         # way, so this lock guards only these three. ``_woken`` holds
@@ -2070,7 +2070,6 @@ class TailManager:
         retired with ``approval.resolved``, so a phone's card for it
         doesn't wait forever on a session that's gone."""
         self.last_append.pop(key, None)
-        self._approval_checked_at.pop(key, None)
         outstanding = self._approval_outstanding.pop(key, None)
         if outstanding is not None:
             supervise.set_pending_approval(key, None)
@@ -2295,17 +2294,17 @@ class TailManager:
         The transcript never shows a tmux-mode approval menu, so a
         phone notification has to come from the pane itself. A prompt
         appearing emits ``approval.requested`` with a fresh request_id;
-        it disappearing emits ``approval.resolved``. Cheap: one
-        capture-pane per attached session every few seconds.
+        it disappearing emits ``approval.resolved``. Cheap: one read of
+        the supervised registry per pass, every PANE_APPROVAL_S, and one
+        capture-pane per tmux-attached session. It read the registry once
+        per tailer, up to a hundred reads a pass (#1530).
         """
+        if now - self._approvals_at < PANE_APPROVAL_S:
+            return
+        self._approvals_at = now
+        entries = supervise.registry(self.home)
         for key, _tailer in self._tailer_items():
-            if (
-                now - self._approval_checked_at.get(key, 0)
-                < PANE_APPROVAL_S
-            ):
-                continue
-            self._approval_checked_at[key] = now
-            meta = supervise.meta_for(self.home, key)
+            meta = entries.get(key)
             if not meta or meta.get("mode") != "tmux":
                 if key in self._approval_outstanding:
                     rid, _fp = self._approval_outstanding.pop(key)
@@ -2315,8 +2314,10 @@ class TailManager:
                         {"request_id": rid, "source": "detached"},
                     )
                 continue
+            # The pane writes go to: the registry's, else the derived name
+            # (``supervise.channel_name`` without reading the file again).
             pane = supervise.capture_pane(
-                supervise.channel_name(self.home, key)
+                str(meta.get("tmux") or "") or supervise.tmux_name(key)
             )
             if key not in self.tailers:
                 # sync dropped the session while its pane was read:
