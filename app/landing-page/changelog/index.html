@@ -1328,6 +1328,16 @@ Mac used about 8% of a core, split about evenly between the catalog
 and tail threads. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1520">#1520</a>.</p>
 </li>
+<li><p><strong><code>swe</code> starts faster: each command imports only its own code.</strong>
+<code>cli.py</code> imported every command's module tree before dispatching, so
+<code>import swe.cli</code> took about 330 ms on a loaded machine, nearly all of
+a <code>swe version</code> run, and every <code>swe</code> the Mac app spawns paid it. Each
+command now imports its module when it runs, which brings
+<code>import swe.cli</code> to about 33 ms. A rate limits call also reads its
+cache file once instead of five times, and <code>swe list</code> reads
+config.json's <code>list</code> section once instead of three times. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1536">#1536</a>.</p>
+</li>
 <li><p><strong>The status column reads less per session.</strong> OpenCode's probe
 pulled the full JSON of a session's newest 50 messages and ran two
 <code>PRAGMA table_info</code> reads for every session; it now reads the table

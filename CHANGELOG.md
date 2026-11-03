@@ -1199,6 +1199,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Mac used about 8% of a core, split about evenly between the catalog
   and tail threads. Closes
   [#1520](https://github.com/c-wenlong/swe/issues/1520).
+- **`swe` starts faster: each command imports only its own code.**
+  `cli.py` imported every command's module tree before dispatching, so
+  `import swe.cli` took about 330 ms on a loaded machine, nearly all of
+  a `swe version` run, and every `swe` the Mac app spawns paid it. Each
+  command now imports its module when it runs, which brings
+  `import swe.cli` to about 33 ms. A rate limits call also reads its
+  cache file once instead of five times, and `swe list` reads
+  config.json's `list` section once instead of three times. Closes
+  [#1536](https://github.com/c-wenlong/swe/issues/1536).
 - **The status column reads less per session.** OpenCode's probe
   pulled the full JSON of a session's newest 50 messages and ran two
   `PRAGMA table_info` reads for every session; it now reads the table
