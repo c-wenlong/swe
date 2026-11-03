@@ -1167,6 +1167,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Web Compute, Sessions search and Overview do less DOM work.**
+  Compute rebuilt its totals, trend card, harness cards and chart with
+  `innerHTML` on every 3 s sample. It now patches them in place: only the
+  figures, attributes and line paths that changed are written, and a
+  part whose markup is unchanged is skipped, so the nodes, the chart and
+  its hover bubble stay put. The Sessions search built every row's
+  lower-cased details again on each keystroke and redrew the list on
+  each one. Each row's text is now built once, and the list redraws 80
+  ms after typing pauses. Overview redraws its charts at most once per
+  frame while the window is resized.
+  Closes [#1557](https://github.com/c-wenlong/swe/issues/1557).
+
 - **The hub's approval watcher reads the supervised registry once per
   pass.** Every 3 s it opened and parsed `supervised.json` once for each
   tailed session (up to 100), and again for each tmux-attached one to
