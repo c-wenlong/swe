@@ -19,6 +19,8 @@ final class StatusItemController: NSObject {
     private let model: AppModel
     /// The screen the panel opened on, read by the Usage tab's height cap.
     private let panelScreen = PanelScreen()
+    /// Whether the panel is up; its content is only mounted then.
+    private let presence = PanelPresence()
 
     init(model: AppModel) {
         self.model = model
@@ -27,7 +29,8 @@ final class StatusItemController: NSObject {
             openMain: { [weak self] in self?.openMainWindow() },
             dismiss: { [weak self] in self?.close() })
         let host = NSHostingController(
-            rootView: content.environment(model).environment(\.panelScreen, panelScreen))
+            rootView: PanelRoot(presence: presence, content: content)
+                .environment(model).environment(\.panelScreen, panelScreen))
         host.sizingOptions = [.preferredContentSize]
         panel = MenuBarPanel(contentViewController: host)
         panel.onEscape = { [weak self] in self?.close() }
@@ -91,6 +94,10 @@ final class StatusItemController: NSObject {
     private func open() {
         guard let button = item.button, let window = button.window else { return }
         let anchor = window.convertToScreen(button.frame)
+        // Mount the tabs and lay them out before measuring, so the panel
+        // opens at the content's real size.
+        presence.isOpen = true
+        panel.contentViewController?.view.layoutSubtreeIfNeeded()
         let size = panel.contentViewController?.preferredContentSize ?? CGSize(width: 340, height: 300)
         panel.setContentSize(size)
         let anchorScreen = NSScreen.screens.first { $0.frame.intersects(anchor) }
@@ -151,7 +158,13 @@ final class StatusItemController: NSObject {
     }
 
     private func close() {
+        // The placeholder keeps the last height, so the next open starts
+        // from it even before the tabs have laid out again.
+        if presence.isOpen, let size = panel.contentViewController?.preferredContentSize, size.height > 1 {
+            presence.lastHeight = size.height
+        }
         panel.orderOut(nil)
+        presence.isOpen = false
         removeClickMonitors()
     }
 
@@ -170,6 +183,30 @@ final class StatusItemController: NSObject {
             open()
         } else if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
             window.makeKeyAndOrderFront(nil)
+        }
+    }
+}
+
+/// Whether the menu bar panel is up. `orderOut` only hides the window, so
+/// the tabs stayed mounted and redrew on every model change for the
+/// app's life; they now unmount while it is down.
+@MainActor @Observable
+final class PanelPresence {
+    var isOpen = false
+    var lastHeight: CGFloat = 300
+}
+
+/// The panel's root: the real content while open, a same-width blank of
+/// the last height while closed.
+private struct PanelRoot: View {
+    let presence: PanelPresence
+    let content: MenuBarContent
+
+    var body: some View {
+        if presence.isOpen {
+            content
+        } else {
+            Color.clear.frame(width: 340, height: presence.lastHeight)
         }
     }
 }

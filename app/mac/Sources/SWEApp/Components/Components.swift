@@ -788,35 +788,75 @@ struct LoadingCard: View {
 
 /// A placeholder bar with a light band sweeping across it, for skeleton
 /// loading states laid out like what they stand in for. The band is an
-/// offset, so the sweep never lays the page out again.
+/// offset, so the sweep never lays the page out again. Inside a
+/// `.skeletonSweep()` container the bar draws flat and the container's
+/// one band sweeps every bar at once.
 struct SkeletonBlock: View {
     var width: CGFloat?
     var height: CGFloat
     var radius: CGFloat = 6
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var swept = false
+    @Environment(\.skeletonSweepShared) private var shared
 
     var body: some View {
         RoundedRectangle(cornerRadius: radius)
             .fill(Theme.border)
-            .overlay {
-                if !reduceMotion {
-                    GeometryReader { geometry in
+            .modifier(SkeletonSweep(active: !shared))
+            .clipShape(.rect(cornerRadius: radius))
+            .frame(width: width, height: height)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+            .accessibilityHidden(true)
+    }
+}
+
+extension EnvironmentValues {
+    /// Set by `.skeletonSweep()`: an ancestor sweeps, so bars don't.
+    @Entry var skeletonSweepShared = false
+}
+
+extension View {
+    /// One sweeping band over every `SkeletonBlock` inside, masked to
+    /// their shapes: a single animation for the whole stand-in rather
+    /// than one per bar.
+    func skeletonSweep() -> some View {
+        environment(\.skeletonSweepShared, true)
+            .modifier(SkeletonSweep(active: true, masked: true))
+    }
+}
+
+/// The light band. It stops after `limit`, so a fetch that hangs does not
+/// animate the page forever.
+private struct SkeletonSweep: ViewModifier {
+    var active: Bool
+    var masked = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var swept = false
+    @State private var expired = false
+
+    static let limit: Duration = .seconds(60)
+
+    func body(content: Content) -> some View {
+        if active && !reduceMotion && !expired {
+            content
+                .overlay {
+                    let band = GeometryReader { geometry in
                         LinearGradient(colors: [.clear, Theme.borderStrong.opacity(0.7), .clear],
                                        startPoint: .leading, endPoint: .trailing)
                             .frame(width: 160)
                             .offset(x: swept ? geometry.size.width : -160)
                     }
+                    if masked { band.mask(content) } else { band }
                 }
-            }
-            .clipShape(.rect(cornerRadius: radius))
-            .frame(width: width, height: height)
-            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
-            .onAppear {
-                withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { swept = true }
-            }
-            .accessibilityHidden(true)
+                .onAppear {
+                    withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { swept = true }
+                }
+                .task {
+                    try? await Task.sleep(for: Self.limit)
+                    expired = true
+                }
+        } else {
+            content
+        }
     }
 }
 
@@ -877,7 +917,7 @@ struct SkeletonRows: View {
 
     var body: some View {
         Group {
-            if framed { Card { content } } else { content }
+            if framed { Card { content.skeletonSweep() } } else { content.skeletonSweep() }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(label))
@@ -1271,7 +1311,7 @@ struct SkeletonLines: View {
 
     var body: some View {
         Group {
-            if framed { Card { content } } else { content }
+            if framed { Card { content.skeletonSweep() } } else { content.skeletonSweep() }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(label))
@@ -1299,7 +1339,7 @@ struct SkeletonDetail: View {
 
     var body: some View {
         Group {
-            if framed { Card { content } } else { content }
+            if framed { Card { content.skeletonSweep() } } else { content.skeletonSweep() }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(label))
