@@ -1293,6 +1293,15 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong><code>swe</code>'s search indexer stops resolving every transcript's path.</strong>
+Listing the transcripts called <code>realpath</code> on each one, a stat per
+folder in its path, every pass. The walk now resolves its root once
+and only resolves files that are symlinks, with the same paths and
+order as before: 87 to 66 ms to list 1,238 transcripts here. A Devin
+session still decodes its whole chain when it grows, as the Mac app's
+indexer does; FEATURES.md notes that both writers owe that change.
+Closes <a href="https://github.com/c-wenlong/swe/issues/1538">#1538</a>.</p>
+</li>
 <li><p><strong>Live reply text costs the hub linear work, not quadratic.</strong> Every
 100 ms flush of a streamed reply re-cleaned the whole message so far:
 a 100 KB reply took 3.3 s of cleaning, now 58 ms. Each message keeps
