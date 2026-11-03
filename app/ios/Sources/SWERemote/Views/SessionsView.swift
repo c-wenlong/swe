@@ -81,9 +81,11 @@ struct SessionsView: View {
         .searchable(text: $search.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search sessions")
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
-        // Reruns on a new query and on each list refresh (pull to refresh,
-        // the 15 s poll), so results track sessions that just arrived.
-        .task(id: SearchTrigger(query: search.query, refreshedAt: app.refreshedAt)) { await search.run(app: app) }
+        // Reruns on a new query and when a refresh (pull to refresh, the
+        // 15 s poll) changed the sessions, so results track sessions that
+        // just arrived or moved, without asking the hub again every 15 s
+        // for the same answer.
+        .task(id: SearchTrigger(query: search.query, sessions: app.sessions)) { await search.run(app: app) }
         .navigationTitle("Sessions")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -470,9 +472,9 @@ struct SearchResultRow: View {
     }
 }
 
-private struct SearchTrigger: Equatable {
+struct SearchTrigger: Equatable {
     var query: String
-    var refreshedAt: Date?
+    var sessions: [SessionRow]
 }
 
 /// A scroll of the list closes a swiped-open row, as `List` does.
