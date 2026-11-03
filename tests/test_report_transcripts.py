@@ -788,6 +788,17 @@ class SecondaryReaderTest(_HomeCase):
              ("human", "q two"), ("assistant", "a two")],
         )
 
+    def test_copilot_tail_reads_only_the_newest_turns(self):
+        from swe.reports.transcripts import read_transcript_tail
+        self._sqlite(
+            ".copilot/session-store.db",
+            ["CREATE TABLE turns (session_id TEXT, turn_index INTEGER, user_message TEXT, assistant_response TEXT)"]
+            + [f"INSERT INTO turns VALUES ('cp-1', {i}, 'q{i}', 'a{i}')" for i in (2, 0, 1)],
+        )
+        transcript = read_transcript_tail(_session("copilot", "cp-1"), 2)
+        self.assertTrue(transcript.readable)
+        self.assertEqual([m.text for m in transcript.messages], ["q1", "a1", "q2", "a2"])
+
     def test_copilot_schema_mismatch_is_unreadable(self):
         self._sqlite(".copilot/session-store.db",
                      ["CREATE TABLE other (id INTEGER)"])
@@ -811,6 +822,21 @@ class SecondaryReaderTest(_HomeCase):
         transcript = read_transcript(_session("crush", "cr-1", path="/work/project"))
         self.assertTrue(transcript.readable)
         self.assertEqual([m.text for m in transcript.messages], ["crush hi", "crush ack"])
+
+    def test_crush_tail_reads_only_the_newest_messages(self):
+        from swe.reports.transcripts import read_transcript_tail
+        self._json(
+            ".local/share/crush/projects.json",
+            {"projects": [{"path": "/work/project", "data_dir": str(self.home / "crushdata")}]},
+        )
+        self._sqlite(
+            "crushdata/crush.db",
+            ["CREATE TABLE messages (role TEXT, content TEXT, session_id TEXT)"]
+            + [f"INSERT INTO messages VALUES ('user', 'm{i}', 'cr-1')" for i in range(5)]
+            + ["INSERT INTO messages VALUES ('user', 'other', 'cr-2')"],
+        )
+        transcript = read_transcript_tail(_session("crush", "cr-1", path="/work/project"), 2)
+        self.assertEqual([m.text for m in transcript.messages], ["m3", "m4"])
 
     def test_crush_without_matching_project_is_unreadable(self):
         self._json(".local/share/crush/projects.json", {"projects": []})
