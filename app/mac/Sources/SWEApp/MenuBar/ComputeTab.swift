@@ -65,6 +65,9 @@ struct ComputeTabContent: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The panel ordered out, or the preview's window covered, puts
+        // the sampler back on its slow pace.
+        .computeTrendsLive(model)
     }
 
     /// The header's current figure: the sum over the shown harnesses for

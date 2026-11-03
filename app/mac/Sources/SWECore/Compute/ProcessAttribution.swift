@@ -69,8 +69,11 @@ public enum ProcessAttribution {
         let byPid = Dictionary(samples.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
         var byHarness: [String: [ProcessSample]] = [:]
         var rest: [ProcessSample] = []
+        // Siblings share most of their ancestors: each pid's answer is
+        // worked out once and the walks below it stop there.
+        var known: [Int32: String?] = [:]
         for p in samples {
-            if let harness = harness(of: p, byPid: byPid, matchers: matchers) {
+            if let harness = harness(of: p, byPid: byPid, matchers: matchers, known: &known) {
                 byHarness[harness, default: []].append(p)
             } else {
                 rest.append(p)
@@ -107,15 +110,34 @@ public enum ProcessAttribution {
     /// The harness of `p`'s nearest self-or-ancestor root: itself first,
     /// then its parent, and so on to pid 1 (or a process the sample does
     /// not know, e.g. one owned by another user).
+    ///
+    /// `known` holds the answers already found, by pid. Every process the
+    /// walk passes gets the walk's answer, unless it ran out of hops.
     private static func harness(of p: ProcessSample, byPid: [Int32: ProcessSample],
-                                matchers: [HarnessMatcher]) -> String? {
+                                matchers: [HarnessMatcher],
+                                known: inout [Int32: String?]) -> String? {
         var node = p
+        var walked: [Int32] = []
+        var answer: String??
         for _ in 0..<64 {
-            if let match = matchers.first(where: { isRoot(node, of: $0) }) { return match.harness }
-            guard node.pid > 1, let parent = byPid[node.ppid], parent.pid != node.pid else { return nil }
+            if let found = known[node.pid] {
+                answer = found
+                break
+            }
+            walked.append(node.pid)
+            if let match = matchers.first(where: { isRoot(node, of: $0) }) {
+                answer = .some(match.harness)
+                break
+            }
+            guard node.pid > 1, let parent = byPid[node.ppid], parent.pid != node.pid else {
+                answer = .some(nil)
+                break
+            }
             node = parent
         }
-        return nil
+        guard let answer else { return nil }
+        for pid in walked { known[pid] = answer }
+        return answer
     }
 }
 
