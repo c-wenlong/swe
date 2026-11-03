@@ -1974,6 +1974,14 @@ class TestLimitNotify(unittest.TestCase):
         return [ev["data"] for _k, ev in self.events
                 if ev["type"] == "notify" and ev["data"]["kind"] == "limit"]
 
+    def test_a_session_leaving_the_catalog_forgets_its_limit(self):
+        # #1533: _limit_seen grew one entry per rate-limited session.
+        mgr = self._manager()
+        mgr._note_limit("claude:s", {"text": "limit"}, {}, time.time())
+        self.assertIn("claude:s", mgr._limit_seen)
+        mgr.sync([])
+        self.assertNotIn("claude:s", mgr._limit_seen)
+
     def test_claude_decode_marks_rate_limit_only(self):
         out = tail.decode_record("claude", _claude_limit(
             "You've hit your session limit · resets 9:30am"))

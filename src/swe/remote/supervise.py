@@ -120,7 +120,10 @@ _REGISTRY_LOCK = threading.RLock()
 
 # Keystrokes into a tmux pane are multi-call (text, then Enter): per-pane
 # locks keep two concurrent writes from interleaving into one prompt.
-_PANE_LOCKS: dict[str, threading.Lock] = {}
+# Held weakly, like _ATTACH_LOCKS: a pane's lock lives while a writer
+# holds it, so panes long gone don't keep an entry each.
+_PANE_LOCKS: "weakref.WeakValueDictionary[str, threading.Lock]" = \
+    weakref.WeakValueDictionary()
 _PANE_LOCKS_LOCK = threading.Lock()
 
 
@@ -158,7 +161,10 @@ def _attach_lock(session_key: str) -> threading.RLock:
 
 def _pane_lock(name: str) -> threading.Lock:
     with _PANE_LOCKS_LOCK:
-        return _PANE_LOCKS.setdefault(name, threading.Lock())
+        lock = _PANE_LOCKS.get(name)
+        if lock is None:
+            lock = _PANE_LOCKS[name] = threading.Lock()
+        return lock
 
 
 def tmux_bin() -> str | None:

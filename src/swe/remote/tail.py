@@ -2084,6 +2084,7 @@ class TailManager:
         retired with ``approval.resolved``, so a phone's card for it
         doesn't wait forever on a session that's gone."""
         self.last_append.pop(key, None)
+        self._limit_seen.pop(key, None)
         outstanding = self._approval_outstanding.pop(key, None)
         if outstanding is not None:
             supervise.set_pending_approval(key, None)
