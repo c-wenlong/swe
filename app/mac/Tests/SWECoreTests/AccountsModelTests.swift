@@ -153,6 +153,22 @@ final class FakeRunningInstances: RunningInstances {
         #expect(await fresh.count == 1)
     }
 
+    @Test func aCLIRefreshFoundStaysFoundOnTheTimer() async throws {
+        // The launch-time PATH lacks the bin folder; a fresh read (Refresh)
+        // has it. The timer's next pass must keep what Refresh found.
+        let model = AccountsModel(store: store, usage: usage, launcher: launcher,
+                                  terminal: { .terminal },
+                                  loginPath: { [bin] in bin!.path },
+                                  cachedLoginPath: { "/nowhere" },
+                                  running: running)
+        await model.load(force: false, freshPath: false)
+        #expect(model.cliOnPath[.claude] == false)
+        await model.load(force: false)
+        #expect(model.cliOnPath[.claude] == true)
+        await model.load(force: false, freshPath: false)
+        #expect(model.cliOnPath[.claude] == true)
+    }
+
     @Test func defaultsComeFirstThenAddedAccountsEachWithTheirUsage() async throws {
         let work = try store.add(vendor: .codex, name: "Work")
         usage.byHome[root.appending(path: ".claude").path] = reading

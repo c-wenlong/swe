@@ -124,6 +124,8 @@ public final class AccountsModel {
     /// The PATH the login shell gave once, cached for the app's life: the
     /// timer's pass reads this, not a fresh `zsh -il` start.
     private let cachedLoginPath: @Sendable () async -> String
+    /// The PATH the newest fresh read gave.
+    private var lastLoginPath: String?
     private let renewer: ClaudeSignInRenewing
     /// Where a vendor's desktop app is installed (the same AppLocator the
     /// Open-app buttons use); nil means the default /Applications path.
@@ -170,8 +172,18 @@ public final class AccountsModel {
             isLoading = false
             return
         }
-        // One shell start for every vendor's check, or none on the timer.
-        let path = freshPath ? await loginPath() : await cachedLoginPath()
+        // One shell start for every vendor's check, or none on the timer,
+        // which reuses the newest fresh read (a CLI that Refresh found
+        // stays found) and the launch-time PATH before there is one.
+        let path: String
+        if freshPath {
+            path = await loginPath()
+            lastLoginPath = path
+        } else if let lastLoginPath {
+            path = lastLoginPath
+        } else {
+            path = await cachedLoginPath()
+        }
         var found: [Vendor: Bool] = [:]
         for vendor in Vendor.allCases { found[vendor] = CLIPath.contains(LaunchPlanner.cliName(for: vendor), path: path) }
         guard mine == generation else { return }
