@@ -184,6 +184,59 @@ class HarnessDiscoverTest(unittest.TestCase):
                 self.assertEqual(claude[0].status, "registered")
 
 
+class ResolveExecutableListingTest(unittest.TestCase):
+    """#1537: every absent candidate cost a stat in every PATH directory."""
+
+    def _dirs(self, tmp):
+        empty, tools = Path(tmp) / "empty", Path(tmp) / "tools"
+        empty.mkdir()
+        tools.mkdir()
+        exe = tools / "MyTool-cli"
+        exe.write_text("#!/bin/sh\n")
+        exe.chmod(0o755)
+        return [empty, tools], exe
+
+    def test_only_listed_names_are_probed_and_case_is_ignored(self):
+        import os
+
+        from swe.harness import discover
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dirs, exe = self._dirs(tmp)
+            listings = discover._dir_listings(dirs)
+            real_access = os.access
+            probed = []
+
+            def access(path, mode):
+                probed.append(Path(path).name)
+                return real_access(path, mode)
+
+            with patch("swe.harness.discover.shutil.which", return_value=None), \
+                    patch("swe.harness.discover.os.access", side_effect=access):
+                found = discover._resolve_executable(
+                    "mytool", "mytool", "", dirs, listings)
+                missing = discover._resolve_executable(
+                    "ghost", "ghost", "", dirs, listings)
+        # The candidate is `mytool-cli`; the file is `MyTool-cli`, which a
+        # case-insensitive volume still opens, so it must stay probed.
+        self.assertEqual(missing, (None, None))
+        self.assertTrue(all(name.casefold() == "mytool-cli" for name in probed), probed)
+        if found[0] is not None:
+            self.assertEqual(Path(found[0]).name.casefold(), "mytool-cli")
+
+    def test_an_unlistable_directory_is_probed_as_before(self):
+        from swe.harness import discover
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dirs, exe = self._dirs(tmp)
+            exact = exe.with_name("mytool")
+            exe.rename(exact)
+            listings = {d: None for d in dirs}
+            with patch("swe.harness.discover.shutil.which", return_value=None):
+                found = discover._resolve_executable("mytool", "mytool", "", dirs, listings)
+        self.assertEqual(Path(found[0]).name, "mytool")
+
+
 if __name__ == "__main__":
     unittest.main()
 
