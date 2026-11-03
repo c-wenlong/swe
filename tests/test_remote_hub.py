@@ -993,13 +993,18 @@ class TestHubWriteRoutes(unittest.TestCase):
     def test_successful_launch_wakes_the_catalog_loop(self):
         # launch_new's prime can end while the catalog loop sleeps out
         # its 10 s tick; the wake makes adoption look for the transcript
-        # at once instead.
+        # at once instead. A client already active, so the request's own
+        # low-power wake (note_client) can't stand in for it.
+        self.srv.state._client_seen_at = time.monotonic()
         with patch("swe.remote.supervise.launch_new",
                    return_value=(True, "launched", "qv-t")):
             self._launch({"harness": "claude", "cwd": "/tmp", "prompt": "hi"})
         self.assertTrue(self.srv.state._catalog_wake.is_set())
 
     def test_failed_launch_leaves_the_catalog_loop_asleep(self):
+        # A client already active: its request alone wakes nothing
+        # (the first request after low power would, see note_client).
+        self.srv.state._client_seen_at = time.monotonic()
         with patch("swe.remote.supervise.launch_new",
                    return_value=(False, "nope", None)):
             self._launch({"harness": "claude", "cwd": "/tmp", "prompt": "hi"})
