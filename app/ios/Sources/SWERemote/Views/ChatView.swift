@@ -1388,18 +1388,23 @@ private struct TrayIconButton: View {
 }
 
 /// A thin turning arc the size of the dashed circle it replaces while a
-/// row is being sent now; still under Reduce Motion.
+/// row is being sent now; still under Reduce Motion. One turn every
+/// 0.9 s is a single repeating rotation, so SwiftUI turns it without
+/// evaluating the body each frame.
 private struct SendingSpinner: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var turning = false
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion)) { context in
-            let turns = context.date.timeIntervalSinceReferenceDate / 0.9
-            Circle().trim(from: 0, to: 0.7)
-                .stroke(Theme.textSecondary, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
-                .frame(width: 14, height: 14)
-                .rotationEffect(.degrees(reduceMotion ? 0 : turns.truncatingRemainder(dividingBy: 1) * 360))
-        }
-        .accessibilityLabel("Sending now")
+        Circle().trim(from: 0, to: 0.7)
+            .stroke(Theme.textSecondary, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            .frame(width: 14, height: 14)
+            .rotationEffect(.degrees(turning && !reduceMotion ? 360 : 0))
+            .animation(turning && !reduceMotion
+                       ? .linear(duration: 0.9).repeatForever(autoreverses: false)
+                       : nil,
+                       value: turning && !reduceMotion)
+            .onAppear { turning = true }
+            .accessibilityLabel("Sending now")
     }
 }
