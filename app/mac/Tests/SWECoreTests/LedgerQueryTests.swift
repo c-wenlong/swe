@@ -37,6 +37,38 @@ import Testing
         #expect(read[other] == [:])
     }
 
+    /// Range reads come off the covering index without a table lookup per
+    /// row, and the plain `ts` index it replaces is dropped (#1568).
+    @Test func rangeReadsUseTheCoveringIndex() throws {
+        let temp = try TempDir()
+        let store = try LedgerStore(url: temp.path("ledger.sqlite"))
+        let names = try store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
+        var indexes: Set<String> = []
+        while try names.step() { indexes.insert(names.text(0) ?? "") }
+        #expect(indexes.contains("events_ts_cover"))
+        #expect(!indexes.contains("events_ts"))
+        let plan = try store.db.prepare(
+            "EXPLAIN QUERY PLAN SELECT dim, SUM(input), TOTAL(cost) FROM events e WHERE ts >= 0 AND ts < 1 GROUP BY dim")
+        var detail = ""
+        while try plan.step() { detail += (plan.text(3) ?? "") + "\n" }
+        #expect(detail.contains("COVERING INDEX events_ts_cover"))
+    }
+
+    /// One harness's keys read only that harness, with the same days as
+    /// a read across every harness.
+    @Test func oneHarnessDailyTokensMatchTheWholeRead() async throws {
+        let (temp, ledger) = try await scannedFixture()
+        defer { withExtendedLifetime(temp) {} }
+        let range = DateInterval(start: Date(timeIntervalSince1970: 0), end: Date(timeIntervalSince1970: 4_000_000_000))
+        let calendar = Calendar(identifier: .gregorian)
+        let claude = AccountHistory.Key(harness: "claude", homes: nil)
+        let codex = AccountHistory.Key(harness: "codex", homes: nil)
+        let both = await ledger.dailyTokens(for: [claude, codex], in: range, calendar: calendar)
+        #expect(both[codex]?.isEmpty == false)
+        #expect(await ledger.dailyTokens(for: [codex], in: range, calendar: calendar)[codex] == both[codex])
+        #expect(await ledger.dailyTokens(for: [claude], in: range, calendar: calendar)[claude] == both[claude])
+    }
+
     @Test func dailyBucketsUseTheCallersCalendar() async throws {
         let (temp, ledger) = try await scannedFixture()
         defer { withExtendedLifetime(temp) {} }

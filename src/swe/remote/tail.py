@@ -57,6 +57,13 @@ POLL_IDLE_S = 8.0
 # (see SnapshotSource.hot_poll_s).
 POLL_HOT_S = 0.25
 HOT_WINDOW_S = 15.0
+# Low power: no client has asked for anything lately, no SSE stream is
+# open and nothing pushes to ntfy (``TailManager.set_low_power``). The
+# transcripts are durable on disk, so a slower poll only delays the
+# journal's copy; a client's next request ends low power at once and
+# every tailer polls straight away.
+POLL_ACTIVE_LOW_S = 5.0
+POLL_IDLE_LOW_S = 60.0
 # A hot session, or one whose transcript just grew, has its status
 # re-probed (one session through sessions/status.py and its tail cache)
 # at most this often, instead of waiting for the 10 s catalog refresh.
@@ -1406,27 +1413,133 @@ def _new_from(old: list[str], new: list[str]) -> int:
     return max(common, overlap)
 
 
-def _devin_token(session_id: str) -> tuple | None:
-    """Devin's newest message row and chain head for one session."""
-    path = Path(os.path.expanduser(DEVIN_DB))
-    try:
-        conn = sqlite3.connect(path.absolute().as_uri() + "?mode=ro",
-                               uri=True, timeout=1.0)
-    except (sqlite3.Error, ValueError):
-        return None
-    try:
-        rows = conn.execute(
-            "SELECT MAX(row_id), COUNT(*) FROM message_nodes WHERE session_id = ?",
+# A session's cached Devin token goes once nothing asked for it this
+# long (its tailer was dropped); the next ask reads it afresh.
+DEVIN_TOKEN_IDLE_S = 600.0
+
+
+class _DevinTokens:
+    """Every Devin tailer's change token, from one read-only connection.
+
+    A connection per call cost a connect plus ``MAX(row_id), COUNT(*)``
+    over the session's index entries: 14 ms a call for a 52K-node session
+    on a 9.8 GB ``sessions.db`` (#1521). Now:
+
+    - ``PRAGMA data_version`` on the kept connection changes only when
+      another connection commits (any write, delete or update). While it
+      holds still, every session's last token stands and no query runs.
+    - ``MAX(row_id)`` and the chain head are read on every change. Devin
+      writes a message with ``INSERT OR REPLACE``, which takes a new
+      row_id, so every write moves the max at once.
+    - ``COUNT(*)`` is what sees a delete below the max. It is read again
+      only once SNAPSHOT_RECHECK_S has passed for that session, so a
+      delete shows within a minute instead of costing a scan per poll.
+      A delete takes nothing back from a phone that already has the
+      message, so the delay changes nothing it shows.
+
+    The file's inode is checked on every call: a ``sessions.db`` that
+    was replaced or deleted gets a fresh connection, or None.
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._conn: sqlite3.Connection | None = None
+        self._ident: tuple | None = None
+        # session_id -> (token, data_version it was read at, COUNT(*),
+        # the data_version and clock time the count was read at)
+        self._cache: dict[str, tuple] = {}
+        # session_id -> when it was last asked for; a session no tailer
+        # asked about for DEVIN_TOKEN_IDLE_S leaves the cache.
+        self._used: dict[str, float] = {}
+        self._pruned_at = float("-inf")
+
+    def _close(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except sqlite3.Error:
+                pass
+        self._conn = None
+        self._ident = None
+        self._cache.clear()
+        self._used.clear()
+
+    def _connect(self) -> sqlite3.Connection | None:
+        path = Path(os.path.expanduser(DEVIN_DB)).absolute()
+        try:
+            st = os.stat(path)
+        except OSError:
+            self._close()
+            return None
+        ident = (str(path), st.st_dev, st.st_ino)
+        if self._conn is not None and ident == self._ident:
+            return self._conn
+        self._close()
+        try:
+            self._conn = sqlite3.connect(
+                path.as_uri() + "?mode=ro", uri=True, timeout=1.0,
+                check_same_thread=False)
+        except (sqlite3.Error, ValueError):
+            return None
+        self._ident = ident
+        return self._conn
+
+    def token(self, session_id: str) -> tuple | None:
+        with self._lock:
+            conn = self._connect()
+            if conn is None:
+                return None
+            try:
+                return self._token(conn, session_id)
+            except sqlite3.Error:
+                self._close()
+                return None
+
+    def _token(self, conn: sqlite3.Connection, session_id: str) -> tuple:
+        version = conn.execute("PRAGMA data_version").fetchone()[0]
+        now = self._clock()
+        self._used[session_id] = now
+        if now - self._pruned_at >= DEVIN_TOKEN_IDLE_S:
+            self._pruned_at = now
+            for sid in [k for k, at in self._used.items()
+                        if now - at >= DEVIN_TOKEN_IDLE_S]:
+                self._used.pop(sid, None)
+                self._cache.pop(sid, None)
+        cached = self._cache.get(session_id)
+        if cached is not None:
+            token, token_version, count, count_version, at = cached
+            # The count is current when nothing committed since it was
+            # read, or still inside its window.
+            count_ok = count_version == version \
+                or now - at < SNAPSHOT_RECHECK_S
+            if token_version == version and count_ok:
+                return token
+        newest = conn.execute(
+            "SELECT MAX(row_id) FROM message_nodes WHERE session_id = ?",
             (session_id,),
         ).fetchone()
         head = conn.execute(
             "SELECT main_chain_id FROM sessions WHERE id = ?", (session_id,)
         ).fetchone()
-        return (tuple(rows or ()), tuple(head or ()))
-    except sqlite3.Error:
-        return None
-    finally:
-        conn.close()
+        if cached is None or not count_ok:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM message_nodes WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0]
+            count_version, at = version, now
+        token = ((newest[0] if newest else None, count), tuple(head or ()))
+        self._cache[session_id] = (token, version, count, count_version, at)
+        return token
+
+
+_DEVIN_TOKENS = _DevinTokens()
+
+
+def _devin_token(session_id: str) -> tuple | None:
+    """Devin's newest message row, row count and chain head for one
+    session; see ``_DevinTokens``."""
+    return _DEVIN_TOKENS.token(session_id)
 
 
 def make_source(session: Session) -> "JsonlTailSource | OpencodeSource | SnapshotSource | None":
@@ -1550,21 +1663,28 @@ class Tailer:
     def due(self, now: float) -> bool:
         return now >= self.next_poll_at
 
-    def interval(self, active: bool, hot: bool = False) -> float:
-        """Seconds until the next poll: hot beats active beats idle."""
-        base = POLL_ACTIVE_S if active else POLL_IDLE_S
+    def interval(self, active: bool, hot: bool = False,
+                 low_power: bool = False) -> float:
+        """Seconds until the next poll: hot beats active beats idle.
+        Low power stretches active and idle, never hot: a hot window
+        only opens after a write, and a write means someone is there."""
+        if low_power:
+            base = POLL_ACTIVE_LOW_S if active else POLL_IDLE_LOW_S
+        else:
+            base = POLL_ACTIVE_S if active else POLL_IDLE_S
         if hot:
             return min(base, getattr(self.source, "hot_poll_s", POLL_HOT_S))
         return base
 
-    def poll(self, now: float, active: bool, hot: bool = False) -> list[dict]:
+    def poll(self, now: float, active: bool, hot: bool = False,
+             low_power: bool = False) -> list[dict]:
         """Poll the source; the cursor is only marked dirty here.
 
         ``commit_cursor`` runs the save — the manager calls it after the
         events are journaled, so a crash between poll and write replays
         (duplicates, recoverable) instead of skipping messages forever.
         """
-        self.next_poll_at = now + self.interval(active, hot)
+        self.next_poll_at = now + self.interval(active, hot, low_power)
         self._take_handoff()
         # The state the last poll left is this poll's "before", unless
         # the source was replaced since (a resume moved the transcript):
@@ -1663,6 +1783,8 @@ class TailManager:
         # whether it has a journal) against ``sweep_stale`` deleting
         # them; see ``_add_tailer``.
         self._files_lock = threading.Lock()
+        # Set by the hub while nobody watches; see ``set_low_power``.
+        self.low_power = False
 
     def last_append_at(self, key: str) -> float | None:
         return self.last_append.get(key)
@@ -1697,9 +1819,33 @@ class TailManager:
         with self._wake_lock:
             return self._hot_until.get(key, 0.0) > now
 
+    def any_hot(self, now: float | None = None) -> bool:
+        """Whether any session's hot window is open."""
+        now = time.time() if now is None else now
+        with self._wake_lock:
+            return any(t > now for t in self._hot_until.values())
+
     def waking(self, key: str, injector):
         """``injector`` with a wake before and after each write it makes."""
         return _WakingInjector(injector, lambda: self.wake(key))
+
+    def set_low_power(self, on: bool) -> None:
+        """Poll at the low-power cadence (``POLL_*_LOW_S``) or not.
+
+        Safe from any thread. Leaving low power marks every tailer owed
+        a poll (as ``wake`` does, without the hot window) and wakes the
+        loop: a session idle under low power may not be due for another
+        minute, and the client that just arrived should not wait for it.
+        """
+        if on == self.low_power:
+            return
+        self.low_power = on
+        if on:
+            return
+        keys = [key for key, _t in self._tailer_items()]
+        with self._wake_lock:
+            self._woken.update(keys)
+            self._wake_event.set()
 
     def _take_wakes(self, now: float) -> tuple[set[str], dict[str, float]]:
         with self._wake_lock:
@@ -2116,7 +2262,7 @@ class TailManager:
             try:
                 messages = tailer.poll(
                     now, active=self.statuses.get(key) == "active",
-                    hot=key in hot_until,
+                    hot=key in hot_until, low_power=self.low_power,
                 )
             except Exception:
                 tailer.next_poll_at = now + POLL_IDLE_S

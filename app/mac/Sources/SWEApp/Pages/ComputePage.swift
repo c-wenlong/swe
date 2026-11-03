@@ -11,6 +11,11 @@ struct ComputePage: View {
     /// The list as it was when the sheet opened: the page refreshes
     /// every three seconds, and the list must not move under the user.
     @State private var cleanupSnapshot: [CleanupItem] = []
+    /// Whether the page can be seen; the three-second refresh and the
+    /// full-rate trends run only then.
+    @State private var onScreen = false
+    @State private var viewerID = UUID()
+    @State private var matchersLoaded = false
 
     private var model: ComputeModel { app.compute }
 
@@ -81,10 +86,21 @@ struct ComputePage: View {
                 IdleHarnessCard(harness: harness)
             }
         }
-        // Sampling is this page's only: it ticks while the page is open and
-        // stops when the view goes away.
-        .task {
-            await model.loadMatchers()
+        // Sampling is this page's only: it ticks while the page is on
+        // screen and stops when the view goes away or its window is
+        // closed, minimised or covered.
+        .onScreenChange { visible in
+            onScreen = visible
+            model.setLiveViewer(viewerID, onScreen: visible)
+        }
+        .task(id: onScreen) {
+            guard onScreen else { return }
+            // Once per visit: uncovering the window resumes the refresh
+            // without running swe again.
+            if !matchersLoaded {
+                matchersLoaded = true
+                await model.loadMatchers()
+            }
             while !Task.isCancelled {
                 await model.refresh()
                 await app.fans.refresh()
@@ -106,7 +122,8 @@ struct ComputePage: View {
 /// RAM, CPU, GPU and the whole Mac's temperatures over time behind tabs:
 /// one line per harness that has gone above the page's flag threshold,
 /// or one per sensor component on the Temperature tab. Points come from
-/// ComputeModel's trend sampler, which ticks whether the page is open or not.
+/// ComputeModel's trend sampler: full rate while a trend view is on
+/// screen, a slow background pace (or none) otherwise.
 private struct TrendCard: View {
     @Environment(AppModel.self) private var app
     /// A TrendMetric's raw value.
@@ -828,5 +845,22 @@ private struct CleanupRow: View {
             }
         }
         .padding(.vertical, 10)
+    }
+}
+
+extension View {
+    /// Marks a view that draws the compute trends: while it is on screen
+    /// the trend sampler runs at the chosen interval.
+    func computeTrendsLive(_ model: ComputeModel) -> some View {
+        modifier(ComputeTrendsLive(model: model))
+    }
+}
+
+private struct ComputeTrendsLive: ViewModifier {
+    let model: ComputeModel
+    @State private var id = UUID()
+
+    func body(content: Content) -> some View {
+        content.onScreenChange { model.setLiveViewer(id, onScreen: $0) }
     }
 }

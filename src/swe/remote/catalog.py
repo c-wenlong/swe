@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
-from swe.paths import atomic_write_text, remote_dir_for
+from swe.paths import atomic_write_text, read_json_shared, remote_dir_for
 from swe.remote import fork as fork_mod, protocol, sessionmeta
 from swe.sessions.models import Session, SessionRow
 from swe.sessions.resume import resume_json
@@ -402,6 +402,21 @@ def load_machines(home: Path | str | None = None) -> dict[str, dict]:
     return {}
 
 
+def _machines_of(data: object) -> dict[str, dict]:
+    machines = data.get("machines") if isinstance(data, dict) else None
+    return machines if isinstance(machines, dict) else {}
+
+
+def peek_machines(home: Path | str | None = None) -> dict[str, dict]:
+    """``load_machines`` for readers, parsed again only when machines.json
+    changes. Shared: never mutate it or save it back."""
+    path = _machines_file(Path(home) if home is not None else None)
+    try:
+        return read_json_shared(path, _machines_of)
+    except Exception:
+        return {}
+
+
 _machines_lock = threading.Lock()
 
 
@@ -774,6 +789,11 @@ class Catalog:
 
     def rows(self) -> list[dict]:
         return [row for _key, _s, row, _st in self._rows]
+
+    @property
+    def refreshed_at(self) -> float:
+        """When the newest refresh started (epoch s); 0 before the first."""
+        return self._status_as_of
 
     def reapply_meta(self, key: str) -> dict | None:
         """Re-overlay one row's pin and title after a write; returns the row."""

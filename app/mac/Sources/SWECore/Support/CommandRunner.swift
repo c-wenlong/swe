@@ -38,6 +38,31 @@ public extension CommandRunning {
     }
 }
 
+/// Whether the `swe` runs of the current task were asked for by the user.
+///
+/// A run holds `.userInitiated` (no App Nap, no idle system sleep) for its
+/// length unless it runs inside `background`, which timers and pollers use:
+/// the 60 s GitHub poll, the 3 s pair poll and the like spawned a child
+/// every few seconds, and each one kept the Mac from idle sleep while it
+/// ran. Task-local, so a poll loop started inside `background` (and every
+/// `Task` it starts) stays background, while a button's own task keeps
+/// the default.
+public enum CommandActivity {
+    @TaskLocal static var isBackground = false
+
+    /// The activity a run in the current task holds; nil for none.
+    static var options: ProcessInfo.ActivityOptions? {
+        isBackground ? nil : .userInitiated
+    }
+
+    /// Runs `work` as background work: its `swe` runs hold no activity.
+    public static func background<T>(
+        _ work: () async throws -> T, isolation: isolated (any Actor)? = #isolation
+    ) async rethrows -> T {
+        try await $isBackground.withValue(true, operation: work, isolation: isolation)
+    }
+}
+
 /// Runs a real executable, with the PATH a login shell would have.
 ///
 /// A GUI app launched from Finder or the Dock inherits launchd's minimal
@@ -83,11 +108,12 @@ public struct ProcessRunner: CommandRunning {
         }
 
         // App Nap may throttle an app that is not frontmost, as when a page
-        // refreshes behind another window. The user asked for this work, so
-        // hold it off for the length of the run.
-        let activity = ProcessInfo.processInfo.beginActivity(
-            options: [.userInitiated], reason: "Running swe")
-        defer { ProcessInfo.processInfo.endActivity(activity) }
+        // refreshes behind another window. A run the user asked for holds
+        // it off for its length; a timer's run holds nothing (#1540).
+        let activity = CommandActivity.options.map {
+            ProcessInfo.processInfo.beginActivity(options: $0, reason: "Running swe")
+        }
+        defer { if let activity { ProcessInfo.processInfo.endActivity(activity) } }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")

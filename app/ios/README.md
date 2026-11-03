@@ -123,15 +123,20 @@ down: it dials the machine's own sshd over the tailnet, not the hub.
 ## Building
 
 Xcode projects aren't checked in (they churn); `project.yml` generates
-one. `build_ios.sh` builds and installs on the first paired iPhone
-(needs `xcodegen` and `jq`, both on Homebrew). By hand:
+one. `SWE_DEVELOPMENT_TEAM=<team> build_ios.sh` builds and installs on
+the first paired physical iPhone (needs `xcodegen` and `jq`, both on
+Homebrew). `SWE_DEVELOPMENT_TEAM` is required for device builds —
+`project.yml` ships it empty — and it is the `(TEAMID)` in
+`security find-identity -v -p codesigning`, or on developer.apple.com
+under Membership. By hand:
 
 ```sh
 cd app/ios
 xcodegen generate
 xcodebuild -project SWERemote.xcodeproj -scheme SWERemote \
   -destination 'platform=iOS,name=<your phone>' \
-  -allowProvisioningUpdates -derivedDataPath build build
+  -allowProvisioningUpdates -derivedDataPath build \
+  DEVELOPMENT_TEAM=<team> build
 xcrun devicectl device install app --device <device-id> \
   build/Build/Products/Debug-iphoneos/SWERemote.app
 ```
@@ -158,14 +163,42 @@ the scoped ATS exceptions for a plain-HTTP hub on the tailnet
 what covers Tailscale CGNAT addresses — plus an `NSExceptionDomains`
 entry for `*.ts.net` MagicDNS names; arbitrary domains still get full
 ATS),
-the camera prompt for the QR scanner, iOS 17+, `DEVELOPMENT_TEAM`, and
-the entitlements for the App Group and the shared Keychain group (on
-the app, `SWEShare` and `SWEWidget`). The
+the camera prompt for the QR scanner, iOS 17+, and the entitlements for
+the App Group and the shared Keychain group (on the app, `SWEShare` and
+`SWEWidget`). The
 Keychain group is written as `$(AppIdentifierPrefix)com.swe.remote.shared`
 (in the entitlements and in Info.plist's `SWEKeychainGroup`), so the
-signing team fills it in. Automatic signing registers both groups on
-each target's App ID (`com.swe.remote`, `.share`, `.widget`) the first time a device build runs with
-`-allowProvisioningUpdates`.
+signing team fills it in.
+
+On a team that has never signed the app, automatic signing only gets
+half way: it registers the App IDs (`com.swe.remote`, `.share`,
+`.widget`) but not the App Group, because the entitlements files
+declare `com.apple.security.application-groups` directly and Xcode only
+auto-registers groups added through the capabilities editor. Profiles
+then come back with an empty groups list and the build fails on
+`com.apple.security.application-groups`. The manual part, once per
+team, on developer.apple.com:
+
+1. Identifiers › App Groups: create `group.com.swe.remote`.
+2. Identifiers › App IDs: on each of `com.swe.remote`,
+   `com.swe.remote.share`, `com.swe.remote.widget`, enable App Groups
+   and assign `group.com.swe.remote`.
+3. Delete the profiles Xcode minted without the group — it reuses
+   them otherwise. Profile files are named by UUID, so match on the
+   app identifier inside each one instead of the filename:
+
+   ```sh
+   for p in ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.mobileprovision; do
+     security cms -D -i "$p" | grep -q 'com\.swe\.remote' && rm "$p"
+   done
+   ```
+
+   Then rebuild.
+
+Two other walls a device build can hit, both account-side rather than
+project-side: "PLA Update available" means a pending Program License
+Agreement on developer.apple.com, and "missing Xcode-Token" means the
+Apple ID in Xcode › Settings › Accounts has to be removed and re-added.
 The icon is `assets/logo-square.png` at 1024, saved without an alpha
 channel because App Store icons must be opaque; `AppMark` is the same
 art at 256.

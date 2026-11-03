@@ -132,6 +132,28 @@ class ParseDevinTest(unittest.TestCase):
         self.assertEqual(found["s1"].title, "fix the login bug")
         self.assertEqual(found["s1"].title_source, "")
 
+    def test_prompts_are_read_in_one_query_for_every_session(self):
+        import sqlite3 as real_sqlite3
+
+        statements = []
+        real_connect = real_sqlite3.connect
+
+        def traced(*args, **kwargs):
+            conn = real_connect(*args, **kwargs)
+            conn.set_trace_callback(statements.append)
+            return conn
+
+        with mock.patch("sqlite3.connect", side_effect=traced):
+            found = self._parse(
+                [("s1", "/tmp/a", 1000, 1010, "", 0), ("s2", "/tmp/b", 2000, 2010, "", 0),
+                 ("s3", "/tmp/c", "bad", 3010, "", 0)],
+                [("early", 990, "s1", 0), ("first one", 1000, "s1", 0),
+                 ("second one", 2001, "s2", 0), ("third one", 5, "s3", 0)],
+            )
+        self.assertEqual({sid: s.title for sid, s in found.items()},
+                         {"s1": "first one", "s2": "second one", "s3": "third one"})
+        self.assertEqual(sum(s.startswith("SELECT") and "prompt_history" in s for s in statements), 1)
+
     def test_title_equal_to_first_prompt_has_no_provenance(self):
         found = self._parse(
             [("s1", "/tmp/proj", 1000, 1010, "/exi", 0)],
@@ -390,6 +412,57 @@ class ParseClineTest(unittest.TestCase):
             self.assertEqual(sessions[0].path, "/work/project")
             self.assertEqual(sessions[0].title, "hello!")
             self.assertGreater(sessions[0].timestamp, 0)
+
+    def test_warm_listing_reads_no_session_file(self):
+        # The glob also matches every <id>.messages.json transcript; inside
+        # the parse cache an unchanged file is never opened again, and a
+        # changed one is.
+        from swe.sessions import parse_cache
+        from swe.sessions.parsers import parse_cline
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            sess_dir = base / "data" / "sessions" / "s1"
+            sess_dir.mkdir(parents=True)
+            meta = sess_dir / "s1.json"
+            meta.write_text(json.dumps({
+                "session_id": "s1", "started_at": "2026-09-15T11:17:11.371Z",
+                "cwd": "/work/project", "metadata": {"title": "first"}}))
+            (sess_dir / "s1.messages.json").write_text(json.dumps(
+                {"sessionId": "s1", "messages": [{"role": "user", "content": "x" * 5000}]}))
+
+            def expand(p: str) -> str:
+                if p.endswith("data/sessions"):
+                    return str(base / "data" / "sessions")
+                if p.endswith("taskHistory.json"):
+                    return str(base / "data" / "state" / "taskHistory.json")
+                return p
+
+            opened = []
+            real_open = open
+
+            def counting_open(path, *args, **kwargs):
+                if str(path).startswith(str(sess_dir)):
+                    opened.append(str(path))
+                return real_open(path, *args, **kwargs)
+
+            def listing():
+                with parse_cache.activate(base):
+                    sessions = parse_cline()
+                    parse_cache.mark_ran("cline")
+                return [(s.session_id, s.title, s.path) for s in sessions]
+
+            with mock.patch("swe.sessions.parsers.os.path.expanduser", side_effect=expand), \
+                    mock.patch("builtins.open", side_effect=counting_open):
+                self.assertEqual(listing(), [("s1", "first", "/work/project")])
+                self.assertEqual(len(opened), 2)
+                self.assertEqual(listing(), [("s1", "first", "/work/project")])
+                self.assertEqual(len(opened), 2)
+                meta.write_text(json.dumps({
+                    "session_id": "s1", "started_at": "2026-09-15T11:17:11.371Z",
+                    "cwd": "/work/project", "metadata": {"title": "renamed"}}))
+                self.assertEqual(listing(), [("s1", "renamed", "/work/project")])
+                self.assertEqual(len(opened), 3)
 
 
 class ParseOpenCodeTest(unittest.TestCase):

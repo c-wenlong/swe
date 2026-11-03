@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 from typing import Iterable
 
-from swe.paths import atomic_write_text, remote_dir_for
+from swe.paths import atomic_write_text, read_json_shared, remote_dir_for
 from swe.remote import pairing
 from swe.remote.devices import TAILNET_PREFIX
 
@@ -53,19 +53,26 @@ def num(value: object) -> float:
     return out if math.isfinite(out) else 0.0
 
 
-def _load(home: Path | str | None) -> dict:
+def _load(home: Path | str | None, shared: bool = False) -> dict:
     """``{"since": float | None, "devices": {did: {key: at}}}``.
 
     ``ok`` is False when a file that is there could not be read or
     parsed: the store is then treated as empty but never written over,
-    so a temporary failure cannot erase saved cursors.
+    so a temporary failure cannot erase saved cursors. ``shared`` reads
+    through the memo, for readers that never change the result.
     """
     try:
+        if shared:
+            return read_json_shared(reads_file(home), _parse)
         data = json.loads(reads_file(home).read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {"since": None, "devices": {}, "ok": True}
     except Exception:
         return {"since": None, "devices": {}, "ok": False}
+    return _parse(data)
+
+
+def _parse(data: object) -> dict:
     if not isinstance(data, dict):
         return {"since": None, "devices": {}, "ok": False}
     devices = data.get("devices")
@@ -105,9 +112,11 @@ def valid_at(value: object) -> bool:
         return False
 
 
-def _since(home: Path | str | None, now: float) -> float:
-    """When this store began; written once, on first use."""
-    state = _load(home)
+def _since(home: Path | str | None, now: float,
+           state: dict | None = None) -> float:
+    """When this store began; written once, on first use. ``state`` is
+    a load the caller already has."""
+    state = _load(home, shared=True) if state is None else state
     if state["since"] is not None:
         return state["since"]
     with _lock:
@@ -123,23 +132,23 @@ def _since(home: Path | str | None, now: float) -> float:
 
 def _paired_at(home: Path | str | None, device_id: str) -> float:
     if device_id.startswith(TAILNET_PREFIX):
-        row = pairing.load_signins(home).get(
+        row = pairing.peek_signins(home).get(
             device_id[len(TAILNET_PREFIX):]) or {}
         return num(row.get("first_seen_at"))
-    return num((pairing.load_devices(home).get(device_id) or {})
+    return num((pairing.peek_devices(home).get(device_id) or {})
                 .get("created_at"))
 
 
 def baseline(home: Path | str | None, device_id: str,
-             now: float | None = None) -> float:
+             now: float | None = None, state: dict | None = None) -> float:
     """The cursor a never-opened session is judged against."""
     now = time.time() if now is None else now
-    return max(_since(home, now), _paired_at(home, device_id))
+    return max(_since(home, now, state), _paired_at(home, device_id))
 
 
 def cursors(home: Path | str | None, device_id: str) -> dict[str, float]:
     """``key → at`` this device has read."""
-    return dict(_load(home)["devices"].get(device_id, {}))
+    return dict(_load(home, shared=True)["devices"].get(device_id, {}))
 
 
 def annotate(home: Path | str | None, device_id: str | None,
@@ -151,8 +160,10 @@ def annotate(home: Path | str | None, device_id: str | None,
     rows = list(rows)
     if not device_id:
         return [{**r, "unread": False} for r in rows]
-    floor = baseline(home, device_id, now)
-    seen = cursors(home, device_id)
+    # One read of the store for both, kept until it changes; read-only.
+    state = _load(home, shared=True)
+    floor = baseline(home, device_id, now, state)
+    seen = state["devices"].get(device_id, {})
     out = []
     for row in rows:
         cursor = seen.get(str(row.get("key") or ""), floor)
@@ -166,7 +177,7 @@ def annotate(home: Path | str | None, device_id: str | None,
 def _live_devices(home: Path | str | None) -> set[str] | None:
     """Device ids still allowed in; None when nothing reads as paired
     (an empty or damaged devices.json), so pruning leaves devices be."""
-    devices = pairing.load_devices(home)
+    devices = pairing.peek_devices(home)
     if not devices:
         return None
     return {did for did, row in devices.items()
@@ -174,7 +185,7 @@ def _live_devices(home: Path | str | None) -> set[str] | None:
 
 
 def _revoked_nodes(home: Path | str | None) -> set[str]:
-    return {node for node, row in pairing.load_signins(home).items()
+    return {node for node, row in pairing.peek_signins(home).items()
             if row.get("revoked_at")}
 
 
