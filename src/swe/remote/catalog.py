@@ -775,6 +775,12 @@ class Catalog:
     def rows(self) -> list[dict]:
         return [row for _key, _s, row, _st in self._rows]
 
+    @property
+    def as_of(self) -> float:
+        """When the rows' last rebuild started (epoch seconds; 0 before
+        the first)."""
+        return self._status_as_of
+
     def reapply_meta(self, key: str) -> dict | None:
         """Re-overlay one row's pin and title after a write; returns the row."""
         with self._meta_lock:

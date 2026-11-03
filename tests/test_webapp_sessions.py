@@ -540,7 +540,7 @@ return { fetches, hiddenFetches, delays: timers.map((t) => t.ms) };
 let answer; const asked = [];
 globalThis.api = (path) => {
   asked.push(path);
-  if (path === "/v1/sessions") return Promise.resolve({ status: 200, data: { sessions: [] } });
+  if (path.startsWith("/v1/sessions?")) return Promise.resolve({ status: 200, data: { sessions: [] } });
   return new Promise((r) => { answer = r; });
 };
 const card = { kind: "open approval card" }, appended = [];
@@ -578,7 +578,7 @@ return { during, heldWhileReading, held: T.chat.held, seq: T.chat.seq, log: log.
         self.assertEqual(out["seq"], 3)
         self.assertEqual((out["log"], out["kept"]), ("", 1))
         self.assertEqual(out["queued"], ["session.status:1", "approval.requested:1", "message.appended:4"])
-        self.assertEqual(out["asked"][-1], "/v1/sessions")
+        self.assertEqual(out["asked"][-1], "/v1/sessions?key=k")
 
     def test_a_failed_refetch_keeps_the_history(self):
         out = self.run_js(self.RESYNC.replace("ANSWER", "{ status: 0, data: null }"))
@@ -1766,20 +1766,20 @@ class TestSessionModelShown(unittest.TestCase):
             const model = reads < 3 ? "claude-sonnet-4-5" : "claude-opus-4-5";
             return { status: 200, data: { sessions: [{ key: "s1", model }] } };
           };
-          out.shown = await T.refreshModel();
+          out.shown = await T.refreshModel(true);
           out.reads = reads; out.waits = waits.slice();
           // A model that really didn't change reads once per wait, then stops.
           reads = 0; waits.length = 0;
           globalThis.api = async () => { reads++; return { status: 200, data: { sessions: [{ key: "s1", model: "claude-opus-4-5" }] } }; };
-          out.same = await T.refreshModel();
+          out.same = await T.refreshModel(true);
           out.sameReads = reads; out.sameWaits = waits.slice();
           // A newer turn end takes over from a read still waiting.
           reads = 0;
           const timers = [];
           globalThis.setTimeout = (f) => { timers.push(f); return 0; };
-          const first = T.refreshModel();
+          const first = T.refreshModel(true);
           await new Promise((r) => setImmediate(r));
-          const second = T.refreshModel();
+          const second = T.refreshModel(true);
           await new Promise((r) => setImmediate(r));
           out.readsBeforeWake = reads;
           globalThis.setTimeout = (f) => { f(); return 0; };
@@ -1795,6 +1795,39 @@ class TestSessionModelShown(unittest.TestCase):
         # stops (superseded) and the second goes on through its two retries.
         self.assertEqual(out["readsBeforeWake"], 2)
         self.assertEqual(out["readsAfterWake"], 4)
+
+    def test_an_unchanged_model_stops_once_the_catalog_is_newer(self):
+        """#1556: a read from a catalog rebuilt after the first read holds
+        the finished turn, so an unchanged model stops there instead of
+        reading on through every wait; a tab coming back reads once. Each
+        read asks for this one row, never the whole catalog."""
+        out = self.run_js("""
+          const T = SessionChat._test;
+          const out = {};
+          globalThis.setTimeout = (f) => { f(); return 0; };
+          T.chat.key = "s 1"; T.chat.gen = 3;
+          T.chat.row = { harness: "claude", model: "claude-opus-4-5" };
+          const asked = [];
+          // Read 1 at t=100 from a catalog built at 95; read 2's catalog
+          // was rebuilt at 104, after it.
+          const answers = [[100, 95], [106, 104], [112, 104]];
+          globalThis.api = async (path) => {
+            const [now, asOf] = answers[asked.length] || [200, 200];
+            asked.push(path);
+            return { status: 200, data: { sessions: [{ key: "s 1", model: "claude-opus-4-5" }], machines: [],
+                                          server_time: now, catalog_as_of: asOf } };
+          };
+          out.same = await T.refreshModel(true);
+          out.afterTurn = asked.length;
+          asked.length = 0;
+          await T.refreshModel();
+          out.tabReturn = asked.length;
+          out.path = asked[0];
+          return out;""", with_sessions=False)
+        self.assertEqual(out["same"], "claude-opus-4-5")
+        self.assertEqual(out["afterTurn"], 2)
+        self.assertEqual(out["tabReturn"], 1)
+        self.assertEqual(out["path"], "/v1/sessions?key=s%201")
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
