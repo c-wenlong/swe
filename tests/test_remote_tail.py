@@ -635,6 +635,21 @@ class TestSnapshotChangeGate(unittest.TestCase):
             now[0] += tail.SNAPSHOT_RECHECK_S
             self.assertNotEqual(tokens.token("s1"), before, "the count recheck does")
 
+    def test_devin_token_cache_forgets_sessions_nobody_asks_about(self):
+        db, _conn = self._devin_db()
+        now = [0.0]
+        tokens = tail._DevinTokens(clock=lambda: now[0])
+        self.addCleanup(tokens._close)
+        with patch.object(tail, "DEVIN_DB", str(db)):
+            tokens.token("s1")
+            tokens.token("s2")
+            now[0] = tail.DEVIN_TOKEN_IDLE_S / 2
+            tokens.token("s1")
+            now[0] = tail.DEVIN_TOKEN_IDLE_S + 1
+            tokens.token("s1")
+            self.assertEqual(set(tokens._cache), {"s1"})
+            self.assertEqual(set(tokens._used), {"s1"})
+
     def test_devin_token_follows_a_replaced_db_file(self):
         import os
         db, conn = self._devin_db()

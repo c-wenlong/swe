@@ -1385,6 +1385,11 @@ def _new_from(old: list[str], new: list[str]) -> int:
     return max(common, overlap)
 
 
+# A session's cached Devin token goes once nothing asked for it this
+# long (its tailer was dropped); the next ask reads it afresh.
+DEVIN_TOKEN_IDLE_S = 600.0
+
+
 class _DevinTokens:
     """Every Devin tailer's change token, from one read-only connection.
 
@@ -1416,6 +1421,10 @@ class _DevinTokens:
         # session_id -> (token, data_version it was read at, COUNT(*),
         # the data_version and clock time the count was read at)
         self._cache: dict[str, tuple] = {}
+        # session_id -> when it was last asked for; a session no tailer
+        # asked about for DEVIN_TOKEN_IDLE_S leaves the cache.
+        self._used: dict[str, float] = {}
+        self._pruned_at = float("-inf")
 
     def _close(self) -> None:
         if self._conn is not None:
@@ -1426,6 +1435,7 @@ class _DevinTokens:
         self._conn = None
         self._ident = None
         self._cache.clear()
+        self._used.clear()
 
     def _connect(self) -> sqlite3.Connection | None:
         path = Path(os.path.expanduser(DEVIN_DB)).absolute()
@@ -1461,6 +1471,13 @@ class _DevinTokens:
     def _token(self, conn: sqlite3.Connection, session_id: str) -> tuple:
         version = conn.execute("PRAGMA data_version").fetchone()[0]
         now = self._clock()
+        self._used[session_id] = now
+        if now - self._pruned_at >= DEVIN_TOKEN_IDLE_S:
+            self._pruned_at = now
+            for sid in [k for k, at in self._used.items()
+                        if now - at >= DEVIN_TOKEN_IDLE_S]:
+                self._used.pop(sid, None)
+                self._cache.pop(sid, None)
         cached = self._cache.get(session_id)
         if cached is not None:
             token, token_version, count, count_version, at = cached
