@@ -216,7 +216,7 @@ def _sat_delta(mid: str, local_key: str, data) -> dict | None:
         str(data.get("kind")), text, seq, done=data.get("done") is True)
 
 
-<<<<<<< HEAD
+_SAT_PREFIX = "_sat_"
 _NO_FRAME = object()
 
 
@@ -261,9 +261,6 @@ def _encode_frame(ev: dict) -> bytes | None:
         + f"event: {ev.get('type', 'message')}\n"
         + f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
     ).encode("utf-8")
-=======
-_SAT_PREFIX = "_sat_"
->>>>>>> origin/main
 
 
 class EventBus:
