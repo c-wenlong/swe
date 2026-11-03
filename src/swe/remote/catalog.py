@@ -776,9 +776,8 @@ class Catalog:
         return [row for _key, _s, row, _st in self._rows]
 
     @property
-    def as_of(self) -> float:
-        """When the rows' last rebuild started (epoch seconds; 0 before
-        the first)."""
+    def refreshed_at(self) -> float:
+        """When the newest refresh started (epoch s); 0 before the first."""
         return self._status_as_of
 
     def reapply_meta(self, key: str) -> dict | None:

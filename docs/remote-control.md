@@ -232,6 +232,21 @@ Cadence per session, fastest rule first:
 | Active per `sessions/status.py` | 1 s | `POLL_ACTIVE_S` |
 | Anything else | 8 s | `POLL_IDLE_S` |
 
+Low power stretches the active and idle rows to 5 s and 60 s
+(`POLL_ACTIVE_LOW_S`, `POLL_IDLE_LOW_S`), the catalog refresh from 10 s
+to 60 s (`CATALOG_IDLE_S`) and the tail loop's tick from 0.25 s to 1 s.
+The hub is in low power while nobody could see what it reads: no SSE
+stream is open (the ntfy notifier holds one whenever it can push;
+satellite command streams don't count) and no client made an
+authenticated request in the last two minutes (`CLIENT_IDLE_S`). The
+transcripts stay on disk, so a slower poll only delays the journal's
+copy. The next client request (`HubState.note_client`) ends it at once:
+every tailer is owed a poll, the catalog loop wakes, and a list request
+(`/v1/sessions`, `/v1/inbox`, `/v1/app/sessions`) that finds the catalog
+over 20 s old waits up to 5 s for the fresh refresh, so a client that
+polls without a stream never reads a minute-old list
+([#1520](https://github.com/c-wenlong/swe/issues/1520)).
+
 A write is any message that actually goes out (queue mode once the wait
 is over, steer at once), an approval answer, a control op, or an attach.
 Every injector the hub or a satellite builds comes wrapped by

@@ -443,7 +443,7 @@ class TestChatContract(unittest.TestCase):
         one = json.loads(data)
         self.assertEqual(one["sessions"], [row])
         self.assertEqual([m["id"] for m in one["machines"]], [row["machine_id"]] if row.get("machine_id") else [])
-        self.assertEqual(one["catalog_as_of"], self.srv.state.catalog.as_of)
+        self.assertEqual(one["catalog_as_of"], self.srv.state.catalog.refreshed_at)
         self.assertIn("server_time", one)
         status, data = self.srv.request("GET", "/v1/sessions?key=claude%3Anope", headers=self.hdr)
         self.assertEqual((status, json.loads(data)["error"]["code"]), (404, "unknown_session"))
