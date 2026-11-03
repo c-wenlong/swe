@@ -1167,6 +1167,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Devin change checks cost microseconds instead of milliseconds.**
+  Every poll of a tailed Devin session opened a new connection to
+  `sessions.db` and counted the session's rows: 13 to 22 ms a call for a
+  37K to 52K-node session on a 9.8 GB store. The hub now keeps one
+  read-only connection and asks SQLite's `data_version` whether anything
+  committed. When nothing did, no query runs (0.02 ms); after a write it
+  reads the newest row id and chain head (0.03 to 0.3 ms). The row count,
+  which catches a delete below the newest row, is read again at most once
+  a minute per session. Closes
+  [#1521](https://github.com/c-wenlong/swe/issues/1521).
+
 - **The Mac app keeps fewer things in memory for its whole life.**
   Switching machines kept a live web view and WebContent process for
   every hub ever shown; only the last two shown stay now, and an older
@@ -1285,6 +1296,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after new activity reads only the rows past it, in about 3 ms. A
   recreated or rebuilt database is read again from the start. Closes
   [#1524](https://github.com/c-wenlong/swe/issues/1524).
+
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
   newest 1,000 chain nodes anyway. Devin's change token (the session's
@@ -1511,6 +1523,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its command and settings file, where it's linked, and the script in a
   raw editor. `swe hooks list --json` rows now carry `summary` and
   `detail` for it.
+- **The status and model caches stop stat'ing every entry on each
+  rewrite.** The hub's status probes rewrite `session_status_cache.json`
+  up to once a second while a session is busy, and every rewrite checked
+  each of its 1,000 entries for a deleted file: about 5 of the 6.5 ms
+  per rewrite here. That sweep now runs at most every 5 minutes per
+  cache file in a process; a deleted file's entry just waits for the
+  next one. A process-resident store was not worth it: the cache files
+  are 210 to 245 KB here (not 10 to 50 MB) and load in about 1 ms.
+  Closes [#1527](https://github.com/c-wenlong/swe/issues/1527).
 - **Session listings read Devin prompts once and Cline files once per
   change.** Devin's title provenance ran one `prompt_history` query per
   session (210 here); it now runs one for all of them. Cline's session
