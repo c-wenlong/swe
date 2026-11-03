@@ -1167,6 +1167,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The hub stops re-parsing its small stores on every request.** The
+  credential check, an open stream's revocation check, the session
+  list's unread flags and the machine list read `devices.json`, the
+  sign-ins file, `session_reads.json` (twice per session list) and
+  `machines.json` from disk each time. They now share one memo that
+  parses a file again only when it changes: a session list over 2,000
+  read cursors went from 1.8 ms to 0.7 ms, and a credential check from
+  37 to 11 us. Closes
+  [#1528](https://github.com/c-wenlong/swe/issues/1528).
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
   newest 1,000 chain nodes anyway. Devin's change token (the session's

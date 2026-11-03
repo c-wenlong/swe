@@ -215,7 +215,12 @@ of them function-local, and two other packages borrow from it:
 uses `remote.agent._urlopen`. State under
 `~/.swe/data/remote/` (`devices.json` 0600, `inbox_dismissals.json`
 0600, `session_reads.json` 0600, `session_meta.json` 0600, `tasks.json` 0600, `cursors/`, `journal/`) —
-gitignored like the rest of `data/`. New commands run the usual
+gitignored like the rest of `data/`. The hub's per-request readers of
+`devices.json`, the sign-ins file, `session_reads.json` and
+`machines.json` go through `paths.read_json_shared`, which parses a
+file again only when its inode, mtime or size changes; its value is
+shared, so a read-change-write still reads the file itself (`load_*`,
+never `peek_*`). New commands run the usual
 checklist: `completion.py`, `help_text.py`, `docs/json-contracts.md`.
 
 ## Read path — `tail.py`
