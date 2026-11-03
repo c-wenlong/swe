@@ -1167,6 +1167,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The iPhone chat stops re-parsing a streaming reply from the top.**
+  Every 80 ms repaint of a reply still being written parsed the whole
+  reply twice (once for the text, once for its link cards), styled every
+  block again with `AttributedString(markdown:)` and rescanned it all for
+  bare links. A 16 KB reply over a minute meant about 750 full passes,
+  13 s of CPU on a Mac simulator. The bubble now keeps the blocks before
+  its last finished blank line and parses only what follows; styled
+  text and link scans are cached by block text, and unchanged blocks
+  skip layout. The same reply now costs 0.9 s, and every prefix parses
+  to exactly the blocks a full parse gives. Closes
+  [#1548](https://github.com/c-wenlong/swe/issues/1548).
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
   newest 1,000 chain nodes anyway. Devin's change token (the session's
