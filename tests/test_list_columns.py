@@ -641,6 +641,26 @@ class ListReadsConfigOnceTest(unittest.TestCase):
         self.assertEqual(load_config.call_count, 1)
         counts.assert_called_once_with(30)
 
+    def test_the_all_window_is_read_once_too(self):
+        # A null window is "All"; it must reach session_counts as None
+        # rather than read as "use the configured window" again.
+        from swe.harness import commands
+
+        registry = {"claude": {"command": "claude", "description": "",
+                               "aliases": [], "tags": []}}
+        config = {"list": {"columns": ["name", "sess"], "session_window": None}}
+        with mock.patch.object(commands, "load_registry", return_value=registry), \
+             mock.patch("swe.sessions.usage.session_counts",
+                        return_value={"claude": 3}) as counts, \
+             mock.patch.object(commands, "_broken_tools", return_value=set()), \
+             mock.patch("swe.harness.archive.load_archive", return_value={}), \
+             mock.patch("swe.harness.columns.load_config",
+                        return_value=config) as load_config:
+            with redirect_stdout(io.StringIO()):
+                commands.cmd_list([])
+        self.assertEqual(load_config.call_count, 1)
+        counts.assert_called_once_with(None)
+
 
 class BrokenCountsAreNotCachedAsZeroTest(unittest.TestCase):
     """A failed parser's zero must not be remembered as a legitimate zero

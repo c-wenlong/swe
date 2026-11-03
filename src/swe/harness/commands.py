@@ -84,10 +84,15 @@ def _broken_tools():
     return broken_tools()
 
 
-def _session_counts(days=None):
+_CONFIGURED = object()
+
+
+def _session_counts(days=_CONFIGURED):
+    """Session counts over ``days`` (``None`` is every session ever), or
+    over the configured window when ``days`` is left out."""
     from swe.sessions.usage import session_counts
 
-    return session_counts(load_window() if days is None else days)
+    return session_counts(load_window() if days is _CONFIGURED else days)
 
 
 def _sort_tools(tools: dict, counts: dict[str, int], stars: list[str]):
