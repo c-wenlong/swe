@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Observation
 import SWECore
+import WidgetKit
 
 /// App-wide state shared by the window and the menu bar panel.
 @MainActor
@@ -868,6 +869,9 @@ final class AppModel {
         compute.onTemperature = { [fans] reading in
             Task { await fans.checkTemperature(reading[.cpu]) }
         }
+        // With every trend view off screen the sampler reads only what
+        // auto clean, the fan threshold and a placed widget need.
+        compute.watchesTemperature = fans.thresholdEnabled
         compute.startTrends()
         // A page hidden in Settings › Sidebar never comes back as the
         // open one on launch.
@@ -921,7 +925,7 @@ final class AppModel {
     func start() {
         if statusPolling == nil {
             statusPolling = Task { [serviceStatus, serviceNotify] in
-                await serviceNotify.keepFresh(model: serviceStatus)
+                await CommandActivity.background { await serviceNotify.keepFresh(model: serviceStatus) }
             }
         }
         guard watchers.isEmpty else { return }
@@ -936,26 +940,26 @@ final class AppModel {
         // reconcile only when the feature is on.
         search.start()
         watchers = [
-            Task { await accounts.keepFresh() },
+            Task { await CommandActivity.background { await accounts.keepFresh() } },
             // The inbox polls whether or not its page is open: banners
             // and board invalidations come from this stream.
             Task { [githubNotify, weak self] in
-                await githubNotify.keepFresh { self?.swe }
+                await CommandActivity.background { await githubNotify.keepFresh { self?.swe } }
             },
             // The last session list shows at once; swe lists again behind it,
             // so the page is usually ready before it is opened.
             // The other swe pages only read what they showed last; swe runs
             // when one is opened.
-            Task { [skills] in await skills.restore() },
-            Task { [mcp] in await mcp.restore() },
-            Task { [plugins] in await plugins.restore() },
-            Task { [hooks] in await hooks.restore() },
-            Task { [pluginCatalog] in await pluginCatalog.restore() },
+            Task { [skills] in await CommandActivity.background { await skills.restore() } },
+            Task { [mcp] in await CommandActivity.background { await mcp.restore() } },
+            Task { [plugins] in await CommandActivity.background { await plugins.restore() } },
+            Task { [hooks] in await CommandActivity.background { await hooks.restore() } },
+            Task { [pluginCatalog] in await CommandActivity.background { await pluginCatalog.restore() } },
         ]
-        if let cursorFeed { watchers.append(Task { await cursorFeed.keepFresh() }) }
-        if let devinCloud { watchers.append(Task { await devinCloud.keepFresh() }) }
+        if let cursorFeed { watchers.append(Task { await CommandActivity.background { await cursorFeed.keepFresh() } }) }
+        if let devinCloud { watchers.append(Task { await CommandActivity.background { await devinCloud.keepFresh() } }) }
         if let codexUsage {
-            watchers.append(Task { await codexUsage.keepFresh(homes: codexHomes) })
+            watchers.append(Task { await CommandActivity.background { await codexUsage.keepFresh(homes: codexHomes) } })
             // The "This Mac" side follows the ledger: rebuild after every
             // completed scan or out-of-scan write, the same counters the
             // Overview's own figures listen to. No swe fetch.
@@ -1023,7 +1027,7 @@ final class AppModel {
         [
             Task { [weak self] in
                 while !Task.isCancelled {
-                    await self?.others.load()
+                    await CommandActivity.background { await self?.others.load() }
                     try? await Task.sleep(for: .seconds(300))
                 }
             },
@@ -1070,10 +1074,22 @@ final class AppModel {
                 }
             },
             Task { [weak self] in
+                // The fan threshold's switch decides whether the trend
+                // sampler reads temperatures with the windows closed.
+                let changes = Observations { [weak self] in self?.fans.thresholdEnabled ?? false }
+                for await enabled in changes { self?.compute.watchesTemperature = enabled }
+            },
+            Task { [weak self] in
                 // The compute figures move every trend tick, far faster
                 // than the stream above fires; the file picks them up on
-                // a minute cadence while the pushes stay floored.
+                // a minute cadence while the pushes stay floored. Every
+                // fifth minute (and at launch) it also asks WidgetKit
+                // whether a Compute widget is placed, since only then
+                // does the sampler keep reading with the windows closed.
+                var minute = 0
                 while !Task.isCancelled {
+                    if minute % 5 == 0 { await self?.checkComputeWidget() }
+                    minute += 1
                     try? await Task.sleep(for: .seconds(60))
                     guard let self else { return }
                     let style = widgetHarnessStyle
@@ -1083,6 +1099,17 @@ final class AppModel {
                 }
             },
         ]
+    }
+
+    /// Whether a Compute widget sits on the desktop or in Notification
+    /// Center; a failed read leaves the last answer.
+    func checkComputeWidget() async {
+        let kinds: Set<String>? = await withCheckedContinuation { continuation in
+            WidgetCenter.shared.getCurrentConfigurations { result in
+                continuation.resume(returning: (try? result.get()).map { Set($0.map(\.kind)) })
+            }
+        }
+        if let kinds { compute.widgetPlaced = kinds.contains("compute") }
     }
 
     /// Notifications may be switched on or off in System Settings while

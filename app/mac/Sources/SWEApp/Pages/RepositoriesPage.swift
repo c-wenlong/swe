@@ -91,7 +91,8 @@ struct RepositoriesPage: View {
                 // try? swallows the cancel: without this every filter
                 // keystroke ran one more round of fetches.
                 guard !Task.isCancelled else { return }
-                await withTaskGroup(of: Void.self) { group in
+                // A timer's round: its swe runs don't hold off idle sleep (#1540).
+                await CommandActivity.background { await withTaskGroup(of: Void.self) { group in
                     for repo in visibleRepos {
                         for tab in tabs {
                             group.addTask {
@@ -104,7 +105,7 @@ struct RepositoriesPage: View {
                             }
                         }
                     }
-                }
+                } }
             }
         }
         .quiverSheet(isPresented: $adding) {

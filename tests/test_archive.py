@@ -800,10 +800,13 @@ class HarnessListRoutingTest(unittest.TestCase):
 
     def test_the_top_level_shortcut_is_the_same_callable(self):
         from swe.cli import COMMANDS
-        from swe.harness.commands import cmd_list
 
-        self.assertIs(COMMANDS["list"], cmd_list)
-        self.assertIs(COMMANDS["ls"], cmd_list)
+        # cli.py imports the command module only when it runs (#1536), so
+        # the shortcut is a shim that hands over to cmd_list.
+        self.assertIs(COMMANDS["ls"], COMMANDS["list"])
+        with mock.patch("swe.harness.commands.cmd_list", return_value=0) as m:
+            self.assertEqual(COMMANDS["list"](["--json"]), 0)
+        m.assert_called_once_with(["--json"])
 
     def test_the_container_help_lists_it_first(self):
         from swe.setup.commands import cmd_harness

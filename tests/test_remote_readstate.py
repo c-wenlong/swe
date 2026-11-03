@@ -218,5 +218,70 @@ class TestPruning(unittest.TestCase):
                                  "unread": False}])
 
 
+class TestSharedReads(unittest.TestCase):
+    """Small stores are parsed once until they change (#1528)."""
+
+    def setUp(self):
+        from tests._tempdir import temp_dir
+        self.home = temp_dir(self)
+        self.d1 = pairing.exchange(
+            self.home, pairing.mint_pair_token(self.home), "one")["device_id"]
+        readstate.mark_read(self.home, self.d1, "k1", 5.0, ["k1"])
+
+    def _counting_loads(self):
+        from unittest.mock import patch
+        from swe import paths
+        real = paths.json.loads
+        calls = []
+
+        def loads(text, *a, **kw):
+            calls.append(text)
+            return real(text, *a, **kw)
+
+        return calls, patch.object(paths.json, "loads", loads)
+
+    def test_annotate_reads_each_store_once_until_it_changes(self):
+        rows = [{"key": "k1", "last_active_at": time.time() + 100}]
+        readstate.annotate(self.home, self.d1, rows)  # warm
+        calls, patched = self._counting_loads()
+        with patched:
+            for _ in range(5):
+                out = readstate.annotate(self.home, self.d1, rows)
+                self.assertTrue(out[0]["unread"])
+                pairing.device_for_credential(self.home, "nope")
+        self.assertEqual(calls, [])
+        readstate.mark_read(self.home, self.d1, "k1", time.time() + 200,
+                            ["k1"])
+        with patched:
+            out = readstate.annotate(self.home, self.d1, rows)
+        self.assertFalse(out[0]["unread"])
+        self.assertEqual(len(calls), 1)  # the rewritten reads file only
+
+    def test_shared_read_sees_every_write(self):
+        from swe import paths
+        path = readstate.reads_file(self.home).with_name("memo.json")
+        for n in range(20):
+            paths.atomic_write_text(path, json.dumps({"n": n}))
+            self.assertEqual(paths.read_json_shared(path), {"n": n})
+
+    def test_a_bad_file_is_not_kept(self):
+        from swe import paths
+        path = readstate.reads_file(self.home).with_name("memo.json")
+        path.write_text("{")
+        with self.assertRaises(ValueError):
+            paths.read_json_shared(path)
+        paths.atomic_write_text(path, "{}")
+        self.assertEqual(paths.read_json_shared(path), {})
+
+    def test_revocation_is_seen_at_once(self):
+        cred = pairing.exchange(
+            self.home, pairing.mint_pair_token(self.home), "two")
+        self.assertIsNotNone(
+            pairing.device_for_credential(self.home, cred["credential"]))
+        pairing.revoke_device(self.home, cred["device_id"])
+        self.assertIsNone(
+            pairing.device_for_credential(self.home, cred["credential"]))
+
+
 if __name__ == "__main__":
     unittest.main()
