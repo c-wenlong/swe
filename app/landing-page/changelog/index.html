@@ -1293,6 +1293,16 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong><code>swe</code> starts faster: each command imports only its own code.</strong>
+<code>cli.py</code> imported every command's module tree before dispatching, so
+<code>import swe.cli</code> took about 330 ms on a loaded machine, nearly all of
+a <code>swe version</code> run, and every <code>swe</code> the Mac app spawns paid it. Each
+command now imports its module when it runs, which brings
+<code>import swe.cli</code> to about 33 ms. A rate limits call also reads its
+cache file once instead of five times, and <code>swe list</code> reads
+config.json's <code>list</code> section once instead of three times. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1536">#1536</a>.</p>
+</li>
 <li><p><strong>The hub stops re-reading idle Devin sessions every minute.</strong> A
 snapshot tailer trusted &quot;nothing changed&quot; for 60 s, then re-read the
 newest 1,000 chain nodes anyway. Devin's change token (the session's

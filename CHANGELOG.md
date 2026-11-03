@@ -1167,6 +1167,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`swe` starts faster: each command imports only its own code.**
+  `cli.py` imported every command's module tree before dispatching, so
+  `import swe.cli` took about 330 ms on a loaded machine, nearly all of
+  a `swe version` run, and every `swe` the Mac app spawns paid it. Each
+  command now imports its module when it runs, which brings
+  `import swe.cli` to about 33 ms. A rate limits call also reads its
+  cache file once instead of five times, and `swe list` reads
+  config.json's `list` section once instead of three times. Closes
+  [#1536](https://github.com/c-wenlong/swe/issues/1536).
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
   newest 1,000 chain nodes anyway. Devin's change token (the session's
