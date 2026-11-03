@@ -355,6 +355,99 @@ class TestDatabaseSources(unittest.TestCase):
         result = scan(self.store, self.home)
         self.assertEqual(len(result.errors), 1)
 
+    # -- watermarks (#1524): a changed database is read only past the
+    # last row the previous scan saw, like DatabaseSources.swift.
+
+    @staticmethod
+    def _node(rid, inp=7, metrics=True):
+        meta = {"request_id": rid, "generation_model": "swe-2",
+                "created_at": "2026-10-03T10:00:00Z"}
+        if metrics:
+            meta["metrics"] = {"input_tokens": inp, "output_tokens": 2}
+        return json.dumps({"role": "assistant", "metadata": meta})
+
+    @staticmethod
+    def _write(path, sql, *args):
+        import sqlite3
+        conn = sqlite3.connect(path)
+        conn.execute(sql, args)
+        conn.commit()
+        conn.close()
+
+    def _devin(self, *rows):
+        path = self._db(".local/share/devin/cli/sessions.db", """
+            CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
+                created_at REAL, chat_message TEXT);""")
+        for row_id, session, node in rows:
+            self._write(path, "INSERT INTO message_nodes VALUES (?, ?, 0, ?)", row_id, session, node)
+        return path
+
+    def test_devin_reads_only_rows_past_its_watermark(self):
+        path = self._devin((1, "d1", self._node("r1")), (2, "d1", self._node("r2")))
+        self.assertEqual(scan(self.store, self.home).records, 2)
+        self._write(path, "INSERT INTO message_nodes VALUES (3, 'd1', 0, ?)", self._node("r3"))
+        self.assertEqual(scan(self.store, self.home).records, 1)
+        self.assertEqual(set(self._rows()), {"devin:r1", "devin:r2", "devin:r3"})
+
+    def test_a_devin_row_waiting_for_metrics_is_read_again_once_filled(self):
+        path = self._devin((1, "d1", self._node("r1")), (2, "d1", self._node("r2", metrics=False)))
+        scan(self.store, self.home)
+        self.assertEqual(set(self._rows()), {"devin:r1"})
+        # Devin fills the metrics in on the same row; another session moves on.
+        self._write(path, "UPDATE message_nodes SET chat_message = ? WHERE row_id = 2",
+                    self._node("r2", inp=11))
+        self._write(path, "INSERT INTO message_nodes VALUES (3, 'd2', 0, ?)", self._node("r3"))
+        self.assertEqual(scan(self.store, self.home).records, 2)  # rows 2 and 3, not 1
+        self.assertEqual(self._rows()["devin:r2"][2], 11)
+
+    def test_an_abandoned_devin_row_stops_holding_the_watermark(self):
+        # A later row of the same session has metrics, so row 1 never will.
+        path = self._devin((1, "d1", self._node("r1", metrics=False)), (2, "d1", self._node("r2")))
+        scan(self.store, self.home)
+        self._write(path, "INSERT INTO message_nodes VALUES (3, 'd1', 0, ?)", self._node("r3"))
+        self.assertEqual(scan(self.store, self.home).records, 1)
+
+    def test_a_devin_database_rebuilt_in_place_is_read_from_the_start(self):
+        path = self._devin(*[(i, "d1", self._node(f"r{i}")) for i in (1, 2, 3)])
+        scan(self.store, self.home)
+        inode = path.stat().st_ino
+        self._write(path, "DELETE FROM message_nodes")
+        self._write(path, "INSERT INTO message_nodes VALUES (1, 'd9', 0, ?)", self._node("r9"))
+        self.assertEqual(path.stat().st_ino, inode)
+        self.assertEqual(scan(self.store, self.home).records, 1)
+        self.assertIn("devin:r9", self._rows())
+
+    def test_a_replaced_devin_database_is_read_from_the_start(self):
+        path = self._devin(*[(i, "d1", self._node(f"r{i}")) for i in (1, 2, 3)])
+        scan(self.store, self.home)
+        # A restored copy: a new file whose top row id is past the watermark.
+        fresh = path.with_name("fresh.db")
+        self._write(fresh, "CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY,"
+                           " session_id TEXT, created_at REAL, chat_message TEXT)")
+        for i in (1, 2, 3, 4):
+            self._write(fresh, "INSERT INTO message_nodes VALUES (?, 'd5', 0, ?)", i, self._node(f"n{i}"))
+        os.replace(fresh, path)
+        self.assertEqual(scan(self.store, self.home).records, 4)
+        self.assertTrue({"devin:n1", "devin:n2", "devin:n3", "devin:n4"} <= set(self._rows()))
+
+    def test_opencode_reads_only_rows_updated_since_its_watermark(self):
+        def msg(i):
+            return json.dumps({"role": "assistant", "modelID": "m", "tokens": {
+                "input": i, "output": 1, "cache": {"read": 0, "write": 0}}})
+        path = self._db(".local/share/opencode/opencode.db", f"""
+            CREATE TABLE session (id TEXT, directory TEXT);
+            CREATE TABLE message (id TEXT, session_id TEXT, time_created INT, time_updated INT, data TEXT);
+            INSERT INTO message VALUES ('m1', 's', 1790000000000, 1, '{msg(1)}');
+            INSERT INTO message VALUES ('m2', 's', 1790000000000, 2, '{msg(2)}');
+        """)
+        self.assertEqual(scan(self.store, self.home).records, 2)
+        # m2 streams on (rewritten with a later time_updated); m3 is new.
+        self._write(path, "UPDATE message SET time_updated = 5, data = ? WHERE id = 'm2'", msg(20))
+        self._write(path, "INSERT INTO message VALUES ('m3', 's', 1790000000000, 6, ?)", msg(3))
+        self.assertEqual(scan(self.store, self.home).records, 2)  # m2 and m3, not m1
+        self.assertEqual(self._rows()["opencode:m2"][2], 20)
+        self.assertIn("opencode:m3", self._rows())
+
 
 class TestReadsLeaveNoTransaction(unittest.TestCase):
     """The pricing reads fill a temp table; that write must not leave
