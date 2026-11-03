@@ -60,13 +60,15 @@ struct WidgetsPage: View {
     }
 
     private func loadPlaced() async {
-        let kinds: Set<String> = await withCheckedContinuation { continuation in
+        let kinds: Set<String>? = await withCheckedContinuation { continuation in
             WidgetCenter.shared.getCurrentConfigurations { result in
-                continuation.resume(returning: Set((try? result.get())?.map(\.kind) ?? []))
+                continuation.resume(returning: (try? result.get()).map { Set($0.map(\.kind)) })
             }
         }
-        placed = kinds
-        app.compute.widgetPlaced = kinds.contains("compute")
+        placed = kinds ?? []
+        // A failed read says nothing about the Compute widget: the
+        // sampler keeps the last answer, as AppModel's own check does.
+        if let kinds { app.compute.widgetPlaced = kinds.contains("compute") }
     }
 }
 
