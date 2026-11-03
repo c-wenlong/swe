@@ -620,6 +620,28 @@ class SessionColumnStatesTest(unittest.TestCase):
         self.assertEqual(len(set(cells.values())), 4, cells)
 
 
+class ListReadsConfigOnceTest(unittest.TestCase):
+    """#1536: each column and window lookup re-read config.json."""
+
+    def test_swe_list_reads_the_list_section_once(self):
+        from swe.harness import commands
+
+        registry = {"claude": {"command": "claude", "description": "",
+                               "aliases": [], "tags": []}}
+        config = {"list": {"columns": ["name", "sess"], "session_window": 30}}
+        counts = mock.MagicMock(return_value={"claude": 3})
+        with mock.patch.object(commands, "load_registry", return_value=registry), \
+             mock.patch.object(commands, "_session_counts", counts), \
+             mock.patch.object(commands, "_broken_tools", return_value=set()), \
+             mock.patch("swe.harness.archive.load_archive", return_value={}), \
+             mock.patch("swe.harness.columns.load_config",
+                        return_value=config) as load_config:
+            with redirect_stdout(io.StringIO()):
+                commands.cmd_list([])
+        self.assertEqual(load_config.call_count, 1)
+        counts.assert_called_once_with(30)
+
+
 class BrokenCountsAreNotCachedAsZeroTest(unittest.TestCase):
     """A failed parser's zero must not be remembered as a legitimate zero
     for the full day the cache entry lives."""
