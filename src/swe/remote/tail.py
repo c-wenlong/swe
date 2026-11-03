@@ -156,19 +156,16 @@ SNAPSHOT_RECHECK_S = 60.0
 # A bounded read (Devin) returns this many newest chain nodes, so a poll
 # sees a sliding window; more than a poll interval ever adds.
 SNAPSHOT_WINDOW = 1000
-<<<<<<< HEAD
 # A Devin source keeps its window's decoded nodes between reads
 # (``reports.transcripts.DevinChain``), about 1 MB for a long session;
 # one whose session has not changed for this long lets them go.
 DEVIN_CHAIN_KEEP_S = 300.0
-=======
 # A snapshot read that found no source files (a store not written yet,
 # or gone) leaves nothing to stat for a change token, and an unreadable
 # read leaves no token to keep. Either way the next attempt
 # waits this long, doubling per miss up to SNAPSHOT_RECHECK_S, instead of
 # a full read attempt every poll (#1526).
 SNAPSHOT_MISS_S = 1.0
->>>>>>> origin/main
 
 
 def _rec_ts(rec: dict) -> float | None:

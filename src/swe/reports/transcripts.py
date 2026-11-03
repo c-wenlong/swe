@@ -933,7 +933,6 @@ def _devin_walk(
     return nodes, None
 
 
-<<<<<<< HEAD
 def _devin_chain_tail(
     conn: sqlite3.Connection, session_id: str, head: int | None, max_nodes: int
 ) -> list[str]:
@@ -1090,19 +1089,6 @@ class DevinChain:
         return True
 
 
-def read_transcript_tail(
-    session: Session, max_messages: int, chain: "DevinChain | None" = None,
-) -> NormalizedTranscript:
-    """``read_transcript`` bounded to roughly the newest ``max_messages``
-    where the store allows it (Devin); a full read elsewhere. ``chain``
-    (Devin only) keeps the window between calls, so a repeat read
-    fetches only what changed; see ``DevinChain``."""
-    if session.tool_name == "devin":
-        try:
-            if chain is not None:
-                return chain.read(session, max_messages)
-            transcript = _read_devin(session, max_nodes=max_messages)
-=======
 # Readers that can stop at the newest rows, keyed by tool. The rest keep
 # a whole JSON document per session (Cline, Continue, Gemini, Forge's
 # context blob), which has to be parsed whole to find its end anyway.
@@ -1113,15 +1099,19 @@ _TAIL_READERS: dict[str, Callable[[Session, int], NormalizedTranscript]] = {
 }
 
 
-def read_transcript_tail(session: Session, max_messages: int) -> NormalizedTranscript:
+def read_transcript_tail(
+    session: Session, max_messages: int, chain: "DevinChain | None" = None,
+) -> NormalizedTranscript:
     """``read_transcript`` bounded to roughly the newest ``max_messages``
     where the store allows it (Devin, Copilot, Crush); a full read
-    elsewhere."""
+    elsewhere. ``chain`` (Devin only) keeps the window between calls, so
+    a repeat read fetches only what changed; see ``DevinChain``."""
     reader = _TAIL_READERS.get(session.tool_name)
     if reader is not None:
         try:
+            if chain is not None and session.tool_name == "devin":
+                return chain.read(session, max_messages)
             transcript = reader(session, max_messages)
->>>>>>> origin/main
             transcript.messages = _deduplicate(transcript.messages)
             return transcript
         except Exception as exc:
