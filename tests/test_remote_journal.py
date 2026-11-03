@@ -292,6 +292,22 @@ class TestReadTail(unittest.TestCase):
         self.assertFalse(truncated)
         self.assertLess(len(calls), 400)
 
+    def test_bounded_replay_from_the_start_stops_at_its_limit(self):
+        self._write([{"seq": i, "type": "t"} for i in range(1, 2001)])
+        from unittest.mock import patch
+        real = journal_mod._parse_line
+        calls = []
+
+        def counting(raw):
+            calls.append(raw)
+            return real(raw)
+
+        with patch.object(journal_mod, "_parse_line", side_effect=counting):
+            events, truncated = self.journal.read_since(self.key, 0, limit=3)
+        self.assertEqual([e["seq"] for e in events], [1, 2, 3])
+        self.assertFalse(truncated)
+        self.assertEqual(len(calls), 3)
+
     def test_read_since_matches_a_forward_read_at_every_cursor(self):
         # Large multibyte events across chunk boundaries, corrupt lines,
         # a cut-short last write and a ring that starts at seq 20.
