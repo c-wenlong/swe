@@ -1180,6 +1180,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   login `PATH` rather than starting `zsh -il` (the whole rc chain) every
   5 minutes. Closes [#1541](https://github.com/c-wenlong/swe/issues/1541).
 
+- **A streaming Devin session costs the hub its new rows, not its
+  whole window.** Each time a tailed Devin session changed, the hub
+  re-read up to 1,064 chain nodes with one query and one JSON parse each:
+  160 to 410 ms per read for long sessions on a 9.8 GB `sessions.db`,
+  about once a second while the session streams. The tailer now keeps the
+  window's decoded nodes and fetches only the rows written since its last
+  read, splicing a switched chain head at its fork: about 2 ms a read on
+  the same sessions, for 0.4 to 2 MB kept per session. A whole read still
+  runs at least once a minute while the session changes, and the kept
+  nodes go after five quiet minutes. Closes
+  [#1522](https://github.com/c-wenlong/swe/issues/1522).
+
 - **A long-running hub stops keeping state for sessions and panes that
   are gone.** The rate-limit notice memory kept one entry per session
   that ever hit a limit, and the tmux keystroke locks one per pane ever
