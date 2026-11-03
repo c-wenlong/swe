@@ -1167,6 +1167,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The status and model caches stop stat'ing every entry on each
+  rewrite.** The hub's status probes rewrite `session_status_cache.json`
+  up to once a second while a session is busy, and every rewrite checked
+  each of its 1,000 entries for a deleted file: about 5 of the 6.5 ms
+  per rewrite here. That sweep now runs at most every 5 minutes per
+  cache file in a process; a deleted file's entry just waits for the
+  next one. A process-resident store was not worth it: the cache files
+  are 210 to 245 KB here (not 10 to 50 MB) and load in about 1 ms.
+  Closes [#1527](https://github.com/c-wenlong/swe/issues/1527).
+
 - **The usage ledger reads only new Devin and OpenCode rows.** Any
   write to Devin's `sessions.db` or its WAL made the next scan (each
   web Overview load after the 60 s cache, and every satellite usage

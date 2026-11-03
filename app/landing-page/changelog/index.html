@@ -1293,6 +1293,16 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The status and model caches stop stat'ing every entry on each
+rewrite.</strong> The hub's status probes rewrite <code>session_status_cache.json</code>
+up to once a second while a session is busy, and every rewrite checked
+each of its 1,000 entries for a deleted file: about 5 of the 6.5 ms
+per rewrite here. That sweep now runs at most every 5 minutes per
+cache file in a process; a deleted file's entry just waits for the
+next one. A process-resident store was not worth it: the cache files
+are 210 to 245 KB here (not 10 to 50 MB) and load in about 1 ms.
+Closes <a href="https://github.com/c-wenlong/swe/issues/1527">#1527</a>.</p>
+</li>
 <li><p><strong>The usage ledger reads only new Devin and OpenCode rows.</strong> Any
 write to Devin's <code>sessions.db</code> or its WAL made the next scan (each
 web Overview load after the 60 s cache, and every satellite usage
