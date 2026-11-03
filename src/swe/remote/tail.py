@@ -156,6 +156,12 @@ SNAPSHOT_RECHECK_S = 60.0
 # A bounded read (Devin) returns this many newest chain nodes, so a poll
 # sees a sliding window; more than a poll interval ever adds.
 SNAPSHOT_WINDOW = 1000
+# A snapshot read that found no source files (a store not written yet,
+# or gone) leaves nothing to stat for a change token, and an unreadable
+# read leaves no token to keep. Either way the next attempt
+# waits this long, doubling per miss up to SNAPSHOT_RECHECK_S, instead of
+# a full read attempt every poll (#1526).
+SNAPSHOT_MISS_S = 1.0
 
 
 def _rec_ts(rec: dict) -> float | None:
@@ -1262,6 +1268,10 @@ class SnapshotSource:
         self._sources: list[str] = []
         self._token: tuple | None = None
         self._token_at = 0.0
+        # A read that left no source files to stat: when the next may
+        # run, and how long the wait after it is (see SNAPSHOT_MISS_S).
+        self._miss_until = float("-inf")
+        self._miss_wait = 0.0
         # Set by start_near_end: the first poll emits only the newest
         # BACKFILL_MESSAGES instead of the whole history.
         self._backfill_cap: int | None = None
@@ -1329,15 +1339,26 @@ class SnapshotSource:
         if (token is not None and token == self._token
                 and (exact or now - self._token_at < SNAPSHOT_RECHECK_S)):
             return []
+        if not exact and now < self._miss_until:
+            # The last read found no files, or a store that couldn't be
+            # read (a SQLite store that isn't there still lists its path).
+            return []
         try:
             tr = _tr.read_transcript_tail(self.session, SNAPSHOT_WINDOW)
         except Exception:
-            return []
-        if not getattr(tr, "readable", True):
+            tr = None
+        self._sources = list(getattr(tr, "source_paths", None) or [])
+        if self._sources and tr is not None and getattr(tr, "readable", True):
+            self._miss_wait = 0.0
+            self._miss_until = float("-inf")
+        else:
+            self._miss_wait = min(SNAPSHOT_RECHECK_S,
+                                  max(SNAPSHOT_MISS_S, self._miss_wait * 2))
+            self._miss_until = now + self._miss_wait
+        if tr is None or not getattr(tr, "readable", True):
             # A locked or missing store: keep the old token and window so
             # the next poll retries, and recovery doesn't re-emit history.
             return []
-        self._sources = list(getattr(tr, "source_paths", None) or [])
         # The token from before the read is the one kept: a write that
         # lands mid-read changes the next token, so it is picked up then.
         self._token = token if token is not None else self.change_token()
