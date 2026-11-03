@@ -630,15 +630,39 @@ struct HubClient: Sendable {
     }
 }
 
-/// Reports an upload's progress as a fraction of the bytes to send.
+/// Reports an upload's progress as a fraction of the bytes to send, at
+/// most `ProgressThrottle.interval` apart (and always the end).
 private final class UploadProgress: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     let report: @Sendable (Double) -> Void
+    private let lock = NSLock()
+    private var throttle = ProgressThrottle()
 
     init(report: @escaping @Sendable (Double) -> Void) { self.report = report }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64,
                     totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
         guard totalBytesExpectedToSend > 0 else { return }
-        report(Double(totalBytesSent) / Double(totalBytesExpectedToSend))
+        let fraction = Double(totalBytesSent) / Double(totalBytesExpectedToSend)
+        let due = lock.withLock { throttle.admit(fraction, at: ProcessInfo.processInfo.systemUptime) }
+        if due { report(fraction) }
+    }
+}
+
+/// Which upload progress reports go through. URLSession calls back for
+/// every chunk it sends, dozens of times a second on a fast link, and
+/// each report hops to the main actor and redraws the chip's ring: ten a
+/// second looks as smooth. The first report and the last (all bytes
+/// sent) always go; one that doesn't move forward never does.
+struct ProgressThrottle {
+    static let interval: TimeInterval = 0.1
+    private var lastAt: TimeInterval?
+    private var lastFraction = -1.0
+
+    mutating func admit(_ fraction: Double, at now: TimeInterval) -> Bool {
+        guard fraction > lastFraction else { return false }
+        if fraction < 1, let lastAt, now - lastAt < Self.interval { return false }
+        lastAt = now
+        lastFraction = fraction
+        return true
     }
 }

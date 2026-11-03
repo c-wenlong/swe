@@ -1179,6 +1179,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redraw behind it for the app's whole life. Closes
   [#1543](https://github.com/c-wenlong/swe/issues/1543).
 
+- **Live reply text costs the hub linear work, not quadratic.** Every
+  100 ms flush of a streamed reply re-cleaned the whole message so far:
+  a 100 KB reply took 3.3 s of cleaning, now 58 ms. Each message keeps
+  its cleaned text up to a line break no redaction can reach across and
+  re-cleans only what follows; the `done` flush still cleans the whole
+  text. A reply with no line breaks makes each flush wait longer once
+  8 KB of it is pending, so its cleaning stays linear too. A message
+  whose channel dies mid-reply stops streaming and frees its text after
+  15 idle minutes (a late chunk for it never streams), and its empty
+  entry goes after a day. A hub event going to several open streams is now cleaned and
+  encoded once, not once per stream. Closes
+  [#1532](https://github.com/c-wenlong/swe/issues/1532).
+- **The web chat parses only the growing end of a streaming reply.**
+  Each repaint (at most every 80 ms) used to run the whole reply through
+  the Markdown parser and syntax highlighter and replace the bubble's
+  HTML. Blocks that end at a blank line are now settled: their nodes
+  stay, and only the text after them is parsed and drawn again, with
+  the same result as a full render. Over a 60 s, 12 KB reply (600
+  paints) that is 18 ms of Markdown work instead of 824 ms, and 133 KB
+  of HTML handed to the DOM instead of 9.5 MB. A delta no longer
+  rebuilds every bubble's text twice to see whether anything changed,
+  and the chat log is no longer a live region, so screen readers hear a
+  finished reply once from a small status node instead of each repaint.
+  Closes [#1555](https://github.com/c-wenlong/swe/issues/1555).
+
 - **The hub's approval watcher reads the supervised registry once per
   pass.** Every 3 s it opened and parsed `supervised.json` once for each
   tailed session (up to 100), and again for each tmux-attached one to
@@ -1207,6 +1232,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at most 20,000 sessions instead of 100,000, with the existing note
   when older ones are left out. Closes
   [#1544](https://github.com/c-wenlong/swe/issues/1544).
+- **`swe check` and `swe mcp status` probe side by side.** `swe check`
+  asked each installed harness for its version one after another (up to
+  three subprocesses each); it now runs them on a small thread pool,
+  7.5 s down to 2.4 s for 11 harnesses here. `swe mcp status` does the
+  same for its server health checks, where each HTTP server can take its
+  whole five-second timeout. The rows keep their order. `swe list` asks
+  `which` once per command instead of twice, harness discovery lists
+  each PATH directory once instead of probing every absent name in each
+  (8.7 to 5.8 ms), and skill discovery enumerates the skill roots once
+  instead of once per `SKILL.md`. Closes
+  [#1537](https://github.com/c-wenlong/swe/issues/1537).
 - **The hub stops re-parsing its small stores on every request.** The
   credential check, an open stream's revocation check, the session
   list's unread flags and the machine list read `devices.json`, the
@@ -1567,6 +1603,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now goes through the parse cache, so an unchanged one costs a `stat`.
   `json_engine` joins the parse cache's fingerprint. Closes
   [#1534](https://github.com/c-wenlong/swe/issues/1534).
+- **The iPhone chat's working pill stops redrawing every frame.** The
+  cycling verb under a working agent ran on a `.animation` timeline,
+  so for the whole turn it rebuilt its gradient mask and glow on every
+  display frame (60 to 120 times a second), including the rest between
+  sweeps. It now swaps the word on a 2.4 s periodic timeline and slides
+  a fixed band with one linear animation per word: about 1,500 body
+  evaluations an hour instead of 216,000 to 432,000, nothing animating
+  while the word rests, and the same picture (the test renders both).
+  The queued-send spinner turns with one repeating rotation instead of
+  its own per-frame timeline. Closes
+  [#1550](https://github.com/c-wenlong/swe/issues/1550).
+- **The iPhone app's 15 s poll changes only what changed.** Every poll
+  of `/v1/sessions` and `/v1/inbox` wrote the sessions, inbox and
+  machines back even when the hub sent the same lists, and
+  `@Observable` reports equal writes, so the Sessions page regrouped
+  every row and an open search asked `/v1/search` again every 15 s.
+  The lists are now written only when they differ, the page's relative
+  times and Earlier cutoff follow a one-minute clock of their own, an
+  open search reruns when the query or the sessions change, on pull to
+  refresh, after a failed try, and otherwise once a minute (four times
+  fewer requests), and the poll pauses
+  while the app is inactive (the app switcher, Control Centre, a call),
+  not only in the background. Closes
+  [#1549](https://github.com/c-wenlong/swe/issues/1549).
+- **The iPhone console, uploads and Devices page wake the app less.**
+  The console hopped to the main queue once per SSH read, hundreds of
+  times a second while a command printed; reads now queue up and reach
+  the terminal in one batch per main-queue turn, in order. Upload
+  progress redrew the chip for every chunk URLSession sent; it now
+  reports at most ten times a second, plus the end. The Devices page
+  fetched both pair requests and the device list every 5 s while open;
+  it now loads devices once (and again after an approval, a removal or
+  a pull to refresh) and asks for pending requests every 10 s. Closes
+  [#1553](https://github.com/c-wenlong/swe/issues/1553).
 
 ### Fixed
 

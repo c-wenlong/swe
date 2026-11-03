@@ -31,7 +31,8 @@ struct DevicesView: View {
             } else if !requests.isEmpty {
                 GroupLabel(text: "Pending requests")
                 ForEach(requests) { r in
-                    PairRequestCard(request: r) { await loadRequests() }
+                    // An approval adds a device: both lists change.
+                    PairRequestCard(request: r) { await load() }
                 }
             }
             GroupLabel(text: "Devices")
@@ -63,12 +64,19 @@ struct DevicesView: View {
                  : "It will need to pair again before it can see this hub.")
         }
         .task {
+            // The device list changes only when someone pairs or removes
+            // one, and this page reloads it then; pending requests come
+            // from other devices, so only they are polled.
+            await loadDevices()
             while !Task.isCancelled {
-                await load()
-                try? await Task.sleep(for: .seconds(5))
+                await loadRequests()
+                try? await Task.sleep(for: Self.requestPoll)
             }
         }
     }
+
+    /// How often an open page asks for new pair requests.
+    static let requestPoll: Duration = .seconds(10)
 
     private func load() async {
         await loadRequests()
@@ -78,15 +86,17 @@ struct DevicesView: View {
     private func loadRequests() async {
         guard let client = app.client else { return }
         do {
-            requests = try await client.pairRequests()
-            requestsError = nil
+            let listed = try await client.pairRequests()
+            // Most polls bring back the same list: leave the page alone then.
+            if listed.map(\.drawn) != requests.map(\.drawn) { requests = listed }
+            if requestsError != nil { requestsError = nil }
         } catch is CancellationError {
             // The page closed mid-fetch: nothing failed.
             return
         } catch {
             requestsError = error.localizedDescription
         }
-        requestsLoaded = true
+        if !requestsLoaded { requestsLoaded = true }
     }
 
     private func loadDevices() async {
@@ -171,7 +181,7 @@ struct DevicesView: View {
         defer { busyId = nil }
         do {
             try await client.revokeDevice(id: device.id, confirmThisDevice: device.thisDevice ?? false)
-            // Mark it at once; the next poll's sort drops it to the foot.
+            // Mark it at once; the reload below sorts it to the foot.
             if let i = devices.firstIndex(where: { $0.id == device.id }) {
                 devices[i].revoked = true
             }
