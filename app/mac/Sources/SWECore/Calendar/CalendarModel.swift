@@ -600,6 +600,9 @@ public final class CalendarModel {
         for day in covered where inFlight[dayKey(day)] == task {
             inFlight[dayKey(day)] = nil
         }
+        // `store` pruned while these days were still in flight, so a read
+        // for a range already left could not drop them then.
+        pruneDayCache(around: renderRange)
         return failed
     }
 
