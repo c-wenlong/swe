@@ -347,6 +347,7 @@ import Testing
         let log = SleepLog(limit: 3, clock: clock)
         let model = model(sampler: sampler, clock: clock) { try log.call($0) }
         await model.loadMatchers()
+        model.setLiveViewer(UUID(), onScreen: true)
         await model.runTrendLoop()
         #expect(log.durations == [.seconds(10), .seconds(10), .seconds(10)])
         #expect(model.history.points(for: "claude").count == 3)
@@ -657,6 +658,7 @@ import Testing
                                  defaults: TestDefaults("trend"),
                                  selfPID: 99)
         await model.loadMatchers()
+        model.setLiveViewer(UUID(), onScreen: true)
         model.startTrends()
         #expect(await parked.calls.reach(1))
         // Parked on the default 10 s: switching to 3 s ticks at once and
@@ -669,6 +671,139 @@ import Testing
         #expect(model.history.points(for: "claude").count == 1)
         // The parked sleep throws, which ends the loop.
         parked.ended.open()
+    }
+
+    // MARK: The trend plan
+
+    final class CountingGPU: GPUSampling, @unchecked Sendable {
+        private let lock = NSLock()
+        private var calls = 0
+        func times() -> [Int32: UInt64] {
+            lock.lock()
+            defer { lock.unlock() }
+            calls += 1
+            return [10: 1]
+        }
+        var callCount: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return calls
+        }
+    }
+
+    /// A sleep that records each duration, then parks until its task is
+    /// cancelled, so a loop sits still between the test's moves.
+    actor ParkedSleep {
+        var durations: [Duration] = []
+        nonisolated let calls = CountGate()
+        nonisolated let ended = HoldGate()
+        func call(_ duration: Duration) async throws {
+            durations.append(duration)
+            await calls.bump()
+            try await ended.pass()
+            throw CancellationError()
+        }
+    }
+
+    @MainActor @Test func thePlanFollowsItsConsumers() {
+        let model = model(sampler: CountingSampler([]), clock: Clock(Self.now))
+        // Nothing needs a sample with every window closed.
+        #expect(model.trendPlan == nil)
+        model.limits.autoClean = true
+        #expect(model.trendPlan == .init(interval: 30, parts: [.processes], live: false))
+        model.limits.autoClean = false
+        model.watchesTemperature = true
+        #expect(model.trendPlan == .init(interval: 30, parts: [.temperature], live: false))
+        model.widgetPlaced = true
+        #expect(model.trendPlan == .init(interval: 30, parts: .all, live: false))
+        // A slower chosen interval is kept in the background too.
+        model.trendInterval = .fiveMinutes
+        #expect(model.trendPlan?.interval == 300)
+        model.trendInterval = .threeSeconds
+        // A trend view on screen: everything at the chosen interval.
+        let page = UUID(), popup = UUID()
+        model.setLiveViewer(page, onScreen: true)
+        model.setLiveViewer(popup, onScreen: true)
+        #expect(model.trendPlan == .init(interval: 3, parts: .all, live: true))
+        model.setLiveViewer(page, onScreen: false)
+        #expect(model.trendPlan?.live == true)
+        model.setLiveViewer(popup, onScreen: false)
+        #expect(model.trendPlan == .init(interval: 30, parts: .all, live: false))
+    }
+
+    @MainActor @Test func aTemperatureOnlyTickLeavesTheProcessesAlone() async {
+        let clock = Clock(Self.now)
+        let sampler = CountingSampler([Self.proc(10, 1, path: "/opt/homebrew/bin/claude")])
+        let gpu = CountingGPU()
+        let model = model(sampler: sampler, gpu: gpu,
+                          temperature: FakeThermometer(TemperatureReading([.cpu: 70])), clock: clock)
+        var heard: [Double?] = []
+        model.onTemperature = { heard.append($0[.cpu]) }
+        await model.trendTick(at: Self.now, parts: [.temperature])
+        #expect(sampler.callCount == 0)
+        #expect(gpu.callCount == 0)
+        #expect(!model.matchersLoaded)
+        #expect(model.history.isEmpty)
+        #expect(model.history.temperatures.map(\.at) == [Self.now])
+        #expect(heard == [70])
+    }
+
+    @MainActor @Test func anAutoCleanTickSkipsTheGPUAndTheSensors() async {
+        let clock = Clock(Self.now)
+        let sampler = CountingSampler([Self.proc(10, 1, path: "/opt/homebrew/bin/claude")])
+        let gpu = CountingGPU()
+        let model = model(sampler: sampler, gpu: gpu,
+                          temperature: FakeThermometer(TemperatureReading([.cpu: 70])), clock: clock)
+        await model.trendTick(at: Self.now, parts: [.processes])
+        #expect(sampler.callCount == 1)
+        #expect(gpu.callCount == 0)
+        #expect(model.history.temperatures.isEmpty)
+        #expect(model.history.points(for: "claude").last?.gpuPercent == nil)
+    }
+
+    @MainActor @Test(.timeLimit(.minutes(1))) func theLoopParksUntilAViewComesOnScreen() async {
+        let clock = Clock(Self.now)
+        let sampler = CountingSampler([Self.proc(10, 1, path: "/opt/homebrew/bin/claude")])
+        let parked = ParkedSleep()
+        let model = model(sampler: sampler, clock: clock) { try await parked.call($0) }
+        await model.loadMatchers()
+        // Nothing needs a sample: starting takes none and sleeps on nothing.
+        model.startTrends()
+        await Task.yield()
+        #expect(sampler.callCount == 0)
+        #expect(await parked.calls.count == 0)
+        // The page comes on screen: one tick at once, then the 10 s sleep.
+        let page = UUID()
+        model.setLiveViewer(page, onScreen: true)
+        #expect(await parked.calls.reach(1))
+        #expect(sampler.callCount == 1)
+        #expect(model.history.points(for: "claude").count == 1)
+        // Auto clean on, page off screen: back to the slow pace, waiting
+        // it out before the next sample.
+        model.limits.autoClean = true
+        model.setLiveViewer(page, onScreen: false)
+        #expect(await parked.calls.reach(2))
+        #expect(await parked.durations == [.seconds(10), .seconds(30)])
+        #expect(sampler.callCount == 1)
+        parked.ended.open()
+    }
+
+    @Test func theSMCConnectionIsKeptAndReopenedAfterAFailure() {
+        final class FakeSMC: SMCAccess, @unchecked Sendable {
+            var answers = true
+            func read(_ key: String) -> SMCValue? { answers ? SMCValue(type: "flt ", bytes: [0, 0, 0, 0]) : nil }
+            func write(_ key: String, _ bytes: [UInt8]) -> Bool { false }
+        }
+        let fake = FakeSMC()
+        let session = SMCSession(open: { fake })
+        for _ in 0..<3 { _ = session.with { $0.read("TC0P") } }
+        #expect(session.opened == 1)
+        // A read that gets nothing drops the connection; the next opens anew.
+        fake.answers = false
+        #expect(session.with { $0.read("TC0P") } == nil)
+        fake.answers = true
+        #expect(session.with { $0.read("TC0P") } != nil)
+        #expect(session.opened == 2)
     }
 
     // MARK: Harness decoding
@@ -748,6 +883,7 @@ import Testing
         #expect(await gpu.waitForPark())
 
         // Refresh: a new loop ticks at once and finishes.
+        model.setLiveViewer(UUID(), onScreen: true)
         model.tickTrendsNow()
         #expect(await ticked.reach(1))
         #expect(model.history.points(for: "claude").last?.gpuPercent == 0)

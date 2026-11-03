@@ -215,7 +215,12 @@ of them function-local, and two other packages borrow from it:
 uses `remote.agent._urlopen`. State under
 `~/.swe/data/remote/` (`devices.json` 0600, `inbox_dismissals.json`
 0600, `session_reads.json` 0600, `session_meta.json` 0600, `tasks.json` 0600, `cursors/`, `journal/`) —
-gitignored like the rest of `data/`. New commands run the usual
+gitignored like the rest of `data/`. The hub's per-request readers of
+`devices.json`, the sign-ins file, `session_reads.json` and
+`machines.json` go through `paths.read_json_shared`, which parses a
+file again only when its inode, mtime or size changes; its value is
+shared, so a read-change-write still reads the file itself (`load_*`,
+never `peek_*`). New commands run the usual
 checklist: `completion.py`, `help_text.py`, `docs/json-contracts.md`.
 
 ## Read path — `tail.py`
@@ -231,6 +236,21 @@ Cadence per session, fastest rule first:
 | Hot: the hub or satellite wrote to it in the last 15 s | 0.25 s (snapshot stores 1 s) | `POLL_HOT_S`, `HOT_WINDOW_S` |
 | Active per `sessions/status.py` | 1 s | `POLL_ACTIVE_S` |
 | Anything else | 8 s | `POLL_IDLE_S` |
+
+Low power stretches the active and idle rows to 5 s and 60 s
+(`POLL_ACTIVE_LOW_S`, `POLL_IDLE_LOW_S`), the catalog refresh from 10 s
+to 60 s (`CATALOG_IDLE_S`) and the tail loop's tick from 0.25 s to 1 s.
+The hub is in low power while nobody could see what it reads: no SSE
+stream is open (the ntfy notifier holds one whenever it can push;
+satellite command streams don't count) and no client made an
+authenticated request in the last two minutes (`CLIENT_IDLE_S`). The
+transcripts stay on disk, so a slower poll only delays the journal's
+copy. The next client request (`HubState.note_client`) ends it at once:
+every tailer is owed a poll, the catalog loop wakes, and a list request
+(`/v1/sessions`, `/v1/inbox`, `/v1/app/sessions`) that finds the catalog
+over 20 s old waits up to 5 s for the fresh refresh, so a client that
+polls without a stream never reads a minute-old list
+([#1520](https://github.com/c-wenlong/swe/issues/1520)).
 
 A write is any message that actually goes out (queue mode once the wait
 is over, steer at once), an approval answer, a control op, or an attach.
@@ -385,7 +405,16 @@ transcript to replace the bubble.
 Text is redacted over the whole message so far, not per chunk; the
 unfinished word, a line that looks like a credential, and an open
 private-key block wait for more text, and a message whose sent text a
-later redaction would rewrite stops streaming. The hub publishes deltas
+later redaction would rewrite stops streaming. Each message keeps its
+cleaned text up to a line break that no redaction or escape can reach
+across (no open OSC escape or key block, and no secret's name in the
+last few words before it) and re-cleans only the text after it, so a
+long reply costs linear work; the `done` flush cleans the whole text.
+Past 8 KB of text with no such break, each flush waits proportionally
+longer, which keeps that case linear too. A message with no new text
+for 15 minutes stops streaming and frees its text; its empty entry,
+which keeps a late chunk from streaming without what came before it,
+goes after a day. The hub publishes deltas
 to the session's SSE subscribers only (not `/v1/events`) and never
 journals them; the transcript's `message.appended` stays the record. A
 satellite coalesces its own deltas and posts them best-effort on a

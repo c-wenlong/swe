@@ -153,6 +153,23 @@ _LOOP_ERROR_LOG_S = 300.0
 # credential on them) at most this often.
 _PAIR_PRUNE_S = 60.0
 
+# Low power (#1520): with no SSE stream open (the ntfy notifier holds
+# one while it can push) and no client request for CLIENT_IDLE_S, the
+# tailers poll at tail.POLL_*_LOW_S, the catalog refreshes every
+# CATALOG_IDLE_S and the tail loop ticks every TAIL_TICK_LOW_S. A
+# client request ends it at once (``HubState.note_client``).
+CLIENT_IDLE_S = 120.0
+CATALOG_IDLE_S = 60.0
+TAIL_TICK_S = 0.25
+TAIL_TICK_LOW_S = 1.0
+# A list request that finds the catalog older than this (the first one
+# after low power) waits up to CATALOG_CATCHUP_S for a fresh refresh,
+# so a client that polls without a stream never reads minute-old rows.
+CATALOG_STALE_S = 2 * catalog_mod.REFRESH_INTERVAL_S
+CATALOG_CATCHUP_S = 5.0
+# The tail loop sweeps stale journals, cursors and attachments this often.
+SWEEP_S = 300.0
+
 # A launch the phone started stays answerable at /v1/launches/<id> this
 # long; past it the tmux pane has long since been adopted or abandoned.
 LAUNCH_TTL_S = 86400
@@ -199,6 +216,53 @@ def _sat_delta(mid: str, local_key: str, data) -> dict | None:
         str(data.get("kind")), text, seq, done=data.get("done") is True)
 
 
+_SAT_PREFIX = "_sat_"
+_NO_FRAME = object()
+
+
+class SharedEvent(dict):
+    """One published event, the same object in every subscriber's queue.
+
+    It carries its SSE frame, cleaned and encoded by the first
+    subscriber that writes it, so N open streams pay for one
+    ``clean_event`` + ``json.dumps`` + encode instead of N. Two threads
+    racing on the first write both compute the same bytes; the last
+    assignment wins, harmlessly. Subscribers only read the dict.
+    """
+
+    __slots__ = ("frame",)
+
+    def __init__(self, event: dict) -> None:
+        super().__init__(event)
+        self.frame = _NO_FRAME
+
+
+def sse_frame(ev: dict) -> bytes | None:
+    """``ev`` as the bytes of one SSE frame, or None when it is not served.
+
+    A transient event (``message.delta``) has no seq and no ``id:``
+    line, so an EventSource's Last-Event-ID stays on the last journaled
+    event.
+    """
+    if isinstance(ev, SharedEvent):
+        frame = ev.frame
+        if frame is _NO_FRAME:
+            frame = ev.frame = _encode_frame(ev)
+        return frame
+    return _encode_frame(ev)
+
+
+def _encode_frame(ev: dict) -> bytes | None:
+    ev = injected_mod.clean_event(ev)
+    if ev is None:
+        return None
+    return (
+        (f"id: {ev['seq']}\n" if "seq" in ev else "")
+        + f"event: {ev.get('type', 'message')}\n"
+        + f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
+    ).encode("utf-8")
+
+
 class EventBus:
     """Fan-out to SSE subscriber queues, keyed by session or global."""
 
@@ -216,10 +280,21 @@ class EventBus:
         with self._lock:
             self._subs = [(k, s) for k, s in self._subs if s is not q]
 
+    def watched(self) -> bool:
+        """Whether any stream is open besides satellite command queues
+        (those carry the hub's commands out, not its sessions to anyone)."""
+        with self._lock:
+            return any(
+                key is None or not key.startswith(_SAT_PREFIX)
+                for key, _q in self._subs
+            )
+
     def publish(self, key: str, event: dict, *, exact: bool = False) -> None:
         """``exact`` leaves out the whole-hub (``None``) subscribers."""
         with self._lock:
             subs = list(self._subs)
+        if not isinstance(event, SharedEvent):
+            event = SharedEvent(event)
         for want, q in subs:
             if want == key or (want is None and not exact):
                 try:
@@ -336,6 +411,17 @@ class HubState:
         self._pair_req_lock = threading.Lock()
         self._loop_error_at: dict[str, float] = {}
         self._pair_pruned_at = 0.0
+        # Low power (#1520): when a client last made a request
+        # (monotonic), and a condition the catalog loop notifies after
+        # each refresh, which a list request may wait on
+        # (``fresh_catalog``). ``_catalog_running`` says a loop is there
+        # to wait for.
+        self._client_seen_at = float("-inf")
+        self._catalog_done = threading.Condition()
+        self._catalog_running = False
+        # When the newest GitHub poll that finished had started (epoch s);
+        # an inbox read after low power waits for it too.
+        self._github_at = 0.0
         # Host values this hub answers to — the owner-identity approval
         # path requires one, and the unauthenticated routes answer only
         # these (filled by serve() from the bind host + whois); empty
@@ -723,7 +809,7 @@ class HubState:
 
     @staticmethod
     def sat_journal_key(machine_id: str) -> str:
-        return f"_sat_{machine_id}"
+        return f"{_SAT_PREFIX}{machine_id}"
 
     def _own_journal_keys(self) -> list[str]:
         """Journals the sweep must leave: the global stream, each paired
@@ -915,7 +1001,67 @@ class HubState:
         except Exception:
             self._log_loop_error("pair request prune")
 
+    # -- low power (#1520) --------------------------------------------------
+
+    def watched(self) -> bool:
+        """Whether anyone could see what the hub reads: an open stream
+        (a client's, or the ntfy notifier's) or a client request within
+        the last CLIENT_IDLE_S. Satellite traffic doesn't count: it
+        watches the satellite's sessions, not this machine's."""
+        if self.bus.watched():
+            return True
+        return time.monotonic() - self._client_seen_at < CLIENT_IDLE_S
+
+    def note_client(self) -> None:
+        """A client request arrived: leave low power now, so the tailers
+        poll and the catalog refreshes at once instead of in a minute."""
+        idle = not self.watched()
+        self._client_seen_at = time.monotonic()
+        if idle:
+            self.tail_manager.set_low_power(False)
+            self._catalog_wake.set()
+
+    def fresh_catalog(self, timeout: float = CATALOG_CATCHUP_S,
+                      github: bool = False) -> None:
+        """Wait up to ``timeout`` for a catalog refresh that started
+        within CATALOG_STALE_S, when the current one is older.
+
+        ``github`` (the inbox) also waits for the GitHub poll that runs
+        after the refresh, within the same timeout.
+
+        Only the first list request after low power waits: the live
+        cadence keeps the catalog newer than that. A hub whose catalog
+        loop isn't running (tests, a stopped hub) never waits.
+        """
+        if not self._catalog_running:
+            return
+        floor = time.time() - CATALOG_STALE_S
+
+        def fresh() -> bool:
+            if not self._catalog_running:
+                return True
+            return self.catalog.refreshed_at >= floor and (
+                not github or self._github_at >= floor)
+
+        with self._catalog_done:
+            if fresh():
+                return
+            self._catalog_wake.set()
+            self._catalog_done.wait_for(fresh, timeout)
+
+    def _catalog_refreshed(self) -> None:
+        with self._catalog_done:
+            self._catalog_done.notify_all()
+
     def _catalog_loop(self) -> None:
+        self._catalog_running = True
+        try:
+            self._catalog_cycle()
+        finally:
+            self._catalog_running = False
+            self._catalog_refreshed()
+
+    def _catalog_cycle(self) -> None:
         while not self._stop.is_set():
             try:
                 prev_own = {
@@ -923,6 +1069,7 @@ class HubState:
                     for row in self.catalog.rows()
                 }
                 self.catalog.refresh()
+                self._catalog_refreshed()
                 self._adopt_launches()
                 self._refresh_launchable()
                 # Ownership can change outside HTTP — `swe remote
@@ -955,10 +1102,15 @@ class HubState:
                 self._prune_pair_requests()
                 # GitHub last: a slow ``gh`` must never hold up adoption
                 # or tail sync, which don't need it.
+                github_started = time.time()
                 self.catalog.poll_github()
+                self._github_at = github_started
+                self._catalog_refreshed()
             except Exception:
                 self._log_loop_error("catalog refresh")
-            self._catalog_wake.wait(catalog_mod.REFRESH_INTERVAL_S)
+            self._catalog_wake.wait(
+                catalog_mod.REFRESH_INTERVAL_S if self.watched()
+                else CATALOG_IDLE_S)
             self._catalog_wake.clear()
 
     def _search_index_loop(self) -> None:
@@ -1013,15 +1165,16 @@ class HubState:
                 ))
 
     def _tail_loop(self) -> None:
-        sweeps = 0
+        swept_at = time.monotonic()
         while not self._stop.is_set():
+            low = not self.watched()
+            self.tail_manager.set_low_power(low)
             try:
                 self.tail_manager.tick()
             except Exception:
                 self._log_loop_error("tail tick")
-            sweeps += 1
-            if sweeps >= 1200:  # ~5 min at a 250 ms tick
-                sweeps = 0
+            if time.monotonic() - swept_at >= SWEEP_S:
+                swept_at = time.monotonic()
                 try:
                     attachments.sweep(self.home)
                 except Exception:
@@ -1031,8 +1184,12 @@ class HubState:
                         self.journal, keep=self._own_journal_keys())
                 except Exception:
                     self._log_loop_error("journal sweep")
-            # A write to a session (tail_manager.wake) cuts this short.
-            self.tail_manager.wait(0.25)
+            # A write to a session (tail_manager.wake) or a client
+            # arriving (note_client) cuts this short. A hot session
+            # (written to outside HTTP, say an attach from the CLI) keeps
+            # the fast tick even in low power.
+            slow = low and not self.tail_manager.any_hot()
+            self.tail_manager.wait(TAIL_TICK_LOW_S if slow else TAIL_TICK_S)
 
 
 _UNSET = object()
@@ -1286,7 +1443,7 @@ class _Handler(BaseHTTPRequestHandler):
         if device_id.startswith(devices_mod.TAILNET_PREFIX):
             return pairing.signin_revoked(
                 home, device_id[len(devices_mod.TAILNET_PREFIX):])
-        row = pairing.load_devices(home).get(device_id) or {}
+        row = pairing.peek_devices(home).get(device_id) or {}
         return bool(row.get("revoked_at"))
 
     def _approver_node(self, peer: dict | None) -> str | None:
@@ -1347,10 +1504,16 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _caller(self, path: str) -> str | None:
         """The paired device, else the owner's own device. Satellite
-        routes stay bearer-only: a satellite is a paired machine."""
+        routes stay bearer-only: a satellite is a paired machine.
+
+        A client's authenticated request ends low power
+        (``HubState.note_client``); a satellite's does not."""
         if path.startswith("/v1/agent/"):
             return self._device()
-        return self._client_device() or self._owner_device()
+        device_id = self._client_device() or self._owner_device()
+        if device_id is not None:
+            self._state.note_client()
+        return device_id
 
     def _scoped_approval_device(self, path: str) -> str | None:
         """A minted ntfy action token as caller identity.
@@ -1871,18 +2034,10 @@ class _Handler(BaseHTTPRequestHandler):
             pass
 
     def _sse_write(self, ev: dict) -> None:
-        ev = injected_mod.clean_event(ev)
-        if ev is None:
+        frame = sse_frame(ev)
+        if frame is None:
             return
-        # A transient event (``message.delta``) has no seq and no
-        # ``id:`` line, so an EventSource's Last-Event-ID stays on the
-        # last journaled event.
-        frame = (
-            (f"id: {ev['seq']}\n" if "seq" in ev else "")
-            + f"event: {ev.get('type', 'message')}\n"
-            + f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
-        )
-        self.wfile.write(frame.encode("utf-8"))
+        self.wfile.write(frame)
         self.wfile.flush()
 
     def _sse_after(self, args) -> int:
@@ -1955,11 +2110,12 @@ class _Handler(BaseHTTPRequestHandler):
                 return
 
         if path == "/v1/sessions":
+            self._state.fresh_catalog()
             self._send_json(200, {
                 "sessions": readstate.annotate(
                     self._state.home, device_id, self._state.catalog.rows()),
                 "machines": list(
-                    catalog_mod.load_machines(self._state.home).values()
+                    catalog_mod.peek_machines(self._state.home).values()
                 ),
                 "server_time": time.time(),
             })
@@ -1981,7 +2137,7 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/v1/machines":
             self._send_json(200, {
                 "machines": list(
-                    catalog_mod.load_machines(self._state.home).values()
+                    catalog_mod.peek_machines(self._state.home).values()
                 )
             })
             return
@@ -2053,6 +2209,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/v1/app/sessions":
+            self._state.fresh_catalog()
             try:
                 self._state.expire_pending_approvals()
                 body = self._state.webapp.sessions(
@@ -2077,6 +2234,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         if path == "/v1/inbox":
             done =str((args.get("done") or [""])[0])
+            self._state.fresh_catalog(github=True)
             self._state.expire_pending_approvals()
             self._send_json(200, {
                 "items": self._state.catalog.inbox(
