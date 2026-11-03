@@ -1293,6 +1293,17 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>Devin change checks cost microseconds instead of milliseconds.</strong>
+Every poll of a tailed Devin session opened a new connection to
+<code>sessions.db</code> and counted the session's rows: 13 to 22 ms a call for a
+37K to 52K-node session on a 9.8 GB store. The hub now keeps one
+read-only connection and asks SQLite's <code>data_version</code> whether anything
+committed. When nothing did, no query runs (0.02 ms); after a write it
+reads the newest row id and chain head (0.03 to 0.3 ms). The row count,
+which catches a delete below the newest row, is read again at most once
+a minute per session. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1521">#1521</a>.</p>
+</li>
 <li><p><strong>The Mac app keeps fewer things in memory for its whole life.</strong>
 Switching machines kept a live web view and WebContent process for
 every hub ever shown; only the last two shown stay now, and an older
