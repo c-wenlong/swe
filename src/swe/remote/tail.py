@@ -157,7 +157,8 @@ SNAPSHOT_RECHECK_S = 60.0
 # sees a sliding window; more than a poll interval ever adds.
 SNAPSHOT_WINDOW = 1000
 # A snapshot read that found no source files (a store not written yet,
-# or gone) leaves nothing to stat for a change token. The next attempt
+# or gone) leaves nothing to stat for a change token, and an unreadable
+# read leaves no token to keep. Either way the next attempt
 # waits this long, doubling per miss up to SNAPSHOT_RECHECK_S, instead of
 # a full read attempt every poll (#1526).
 SNAPSHOT_MISS_S = 1.0
@@ -1338,16 +1339,18 @@ class SnapshotSource:
         if (token is not None and token == self._token
                 and (exact or now - self._token_at < SNAPSHOT_RECHECK_S)):
             return []
-        if token is None and not exact and now < self._miss_until:
-            # Nothing to stat since the last read found no files.
+        if not exact and now < self._miss_until:
+            # The last read found no files, or a store that couldn't be
+            # read (a SQLite store that isn't there still lists its path).
             return []
         try:
             tr = _tr.read_transcript_tail(self.session, SNAPSHOT_WINDOW)
         except Exception:
             tr = None
         self._sources = list(getattr(tr, "source_paths", None) or [])
-        if self._sources:
+        if self._sources and tr is not None and getattr(tr, "readable", True):
             self._miss_wait = 0.0
+            self._miss_until = float("-inf")
         else:
             self._miss_wait = min(SNAPSHOT_RECHECK_S,
                                   max(SNAPSHOT_MISS_S, self._miss_wait * 2))

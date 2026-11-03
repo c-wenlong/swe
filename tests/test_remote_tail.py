@@ -576,6 +576,19 @@ class TestSnapshotChangeGate(unittest.TestCase):
         self.assertEqual(gaps[:6], [1.0, 2.0, 4.0, 8.0, 16.0, 32.0])
         self.assertEqual(set(gaps[6:]), {tail.SNAPSHOT_RECHECK_S})
 
+    def test_a_missing_store_that_lists_its_path_backs_off_too(self):
+        # Copilot and Forge name their database even when it isn't there.
+        src = tail.SnapshotSource(self._session())
+        missing = _Transcript([], [str(self.tmp / "absent.db")])
+        missing.readable = False
+        clock = [100.0]
+        with patch.object(tail._tr, "read_transcript", return_value=missing) as rt, \
+                patch.object(tail.time, "monotonic", side_effect=lambda: clock[0]):
+            for _ in range(20):
+                src.poll()
+                clock[0] += 0.5
+        self.assertEqual(rt.call_count, 4)  # at 0, 1, 3 and 7 s
+
     def test_sources_appearing_end_the_backoff(self):
         src = tail.SnapshotSource(self._session())
         missing = _Transcript([])

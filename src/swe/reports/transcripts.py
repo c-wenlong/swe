@@ -704,7 +704,7 @@ def _read_copilot(session: Session, max_turns: int | None = None) -> NormalizedT
     transcript = _new(session, [path])
     try:
         if max_turns is None:
-            rows = conn.execute("SELECT user_message, assistant_response FROM turns WHERE session_id = ? ORDER BY turn_index", (session.session_id,)).fetchall()
+            rows = conn.execute("SELECT user_message, assistant_response FROM turns WHERE session_id = ? ORDER BY turn_index", (session.session_id,))
         else:
             rows = conn.execute(
                 "SELECT user_message, assistant_response FROM turns WHERE session_id = ? "
@@ -930,7 +930,7 @@ def _read_crush(session: Session, max_messages: int | None = None) -> Normalized
                 text_col = "content" if "content" in columns else "message"
                 query = f"SELECT {role_col}, {text_col} FROM messages WHERE session_id = ?"
                 if max_messages is None:
-                    rows = conn.execute(query + " ORDER BY rowid", (session.session_id,)).fetchall()
+                    rows = conn.execute(query + " ORDER BY rowid", (session.session_id,))
                 else:
                     rows = conn.execute(query + " ORDER BY rowid DESC LIMIT ?",
                                         (session.session_id, max_messages)).fetchall()
