@@ -42,8 +42,15 @@ struct WidgetsPage: View {
             VStack(alignment: .leading, spacing: 24) {
                 Tabs(options: WidgetCatalog.all.map { ($0.kind, $0.title) },
                      selection: $widgetTab, style: .underline)
-                WidgetCard(widget: widget, isPlaced: placed.contains(widget.kind),
-                           snapshot: snapshot)
+                if widget.kind == "compute" {
+                    // The preview draws the newest trend tick.
+                    WidgetCard(widget: widget, isPlaced: placed.contains(widget.kind),
+                               snapshot: snapshot)
+                        .computeTrendsLive(app.compute)
+                } else {
+                    WidgetCard(widget: widget, isPlaced: placed.contains(widget.kind),
+                               snapshot: snapshot)
+                }
             }
             .task { await loadPlaced() }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -53,12 +60,15 @@ struct WidgetsPage: View {
     }
 
     private func loadPlaced() async {
-        let kinds: Set<String> = await withCheckedContinuation { continuation in
+        let kinds: Set<String>? = await withCheckedContinuation { continuation in
             WidgetCenter.shared.getCurrentConfigurations { result in
-                continuation.resume(returning: Set((try? result.get())?.map(\.kind) ?? []))
+                continuation.resume(returning: (try? result.get()).map { Set($0.map(\.kind)) })
             }
         }
-        placed = kinds
+        placed = kinds ?? []
+        // A failed read says nothing about the Compute widget: the
+        // sampler keeps the last answer, as AppModel's own check does.
+        if let kinds { app.compute.widgetPlaced = kinds.contains("compute") }
     }
 }
 

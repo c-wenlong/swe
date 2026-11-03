@@ -1303,6 +1303,20 @@ cache file once instead of five times, and <code>swe list</code> reads
 config.json's <code>list</code> section once instead of three times. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1536">#1536</a>.</p>
 </li>
+<li><p><strong>The Mac app's Compute sampler runs at full rate only while a
+trend view is on screen.</strong> It used to sweep every process, the GPU
+clients and the SMC at the chosen interval (3 s on one Mac) for as
+long as the app ran, about 80 ms of CPU per sweep with 700 processes.
+The Compute page, the menu bar's Compute tab and the Widgets page's
+Compute preview now ask for the full rate while their window can be
+seen. Otherwise the sampler reads only what auto clean (processes),
+the fan threshold (temperatures) and a placed Compute widget need,
+every 30 s, and nothing at all when none of them is on. The page's
+own three-second refresh also stops while its window is minimised or
+covered, the temperature reads keep one SMC connection, and process
+attribution works each pid's harness out once. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1539">#1539</a>.</p>
+</li>
 <li><p><strong>The iPhone chat stops re-parsing a streaming reply from the top.</strong>
 Every 80 ms repaint of a reply still being written parsed the whole
 reply twice (once for the text, once for its link cards), styled every
