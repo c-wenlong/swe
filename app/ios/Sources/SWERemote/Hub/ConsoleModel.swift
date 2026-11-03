@@ -133,10 +133,12 @@ final class ConsoleModel {
         guard let target, gen == generation else { return }
         phase = .connecting
         do {
+            let batches = ConsoleEventBatcher { [weak self] events in
+                for event in events { self?.handle(event, generation: gen) }
+            }
             let opened = try await SSHShell.open(target: target, key: identity.privateKey,
-                                                 cols: size.cols, rows: size.rows) { [weak self] event in
-                // The main queue keeps output in order; separate Tasks don't promise to.
-                DispatchQueue.main.async { MainActor.assumeIsolated { self?.handle(event, generation: gen) } }
+                                                 cols: size.cols, rows: size.rows) { event in
+                batches.push(event)
             }
             guard gen == generation else {
                 opened.close()
@@ -191,5 +193,51 @@ final class ConsoleModel {
         guard cols > 0, rows > 0, (cols, rows) != size else { return }
         size = (cols, rows)
         shell?.resize(cols: cols, rows: rows)
+    }
+}
+
+/// Hands the shell's events to the main queue in batches. SSH reads come
+/// in small chunks on NIO's thread, often hundreds a second while a
+/// command prints; one main-queue hop per chunk woke the main thread for
+/// each. Events wait here until the main queue runs the one drain the
+/// first of them scheduled, and back-to-back output joins into one feed.
+/// Order is kept: a close is delivered after the output before it.
+final class ConsoleEventBatcher: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: [SSHShell.Event] = []
+    private let schedule: (@escaping @Sendable () -> Void) -> Void
+    private let deliver: @MainActor ([SSHShell.Event]) -> Void
+
+    init(schedule: @escaping (@escaping @Sendable () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) },
+         deliver: @escaping @MainActor ([SSHShell.Event]) -> Void) {
+        self.schedule = schedule
+        self.deliver = deliver
+    }
+
+    /// From any thread.
+    func push(_ event: SSHShell.Event) {
+        let first: Bool = lock.withLock {
+            let wasEmpty = pending.isEmpty
+            if case .output(let more) = event, case .output(var bytes)? = pending.last {
+                // Off the array first, so the append grows it in place.
+                pending.removeLast()
+                bytes += more
+                pending.append(.output(bytes))
+            } else {
+                pending.append(event)
+            }
+            return wasEmpty
+        }
+        if first { schedule { [self] in drain() } }
+    }
+
+    /// On the main queue: everything that arrived since the last drain.
+    private func drain() {
+        let events: [SSHShell.Event] = lock.withLock {
+            defer { pending = [] }
+            return pending
+        }
+        guard !events.isEmpty else { return }
+        MainActor.assumeIsolated { deliver(events) }
     }
 }

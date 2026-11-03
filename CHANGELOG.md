@@ -1604,6 +1604,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while the app is inactive (the app switcher, Control Centre, a call),
   not only in the background. Closes
   [#1549](https://github.com/c-wenlong/swe/issues/1549).
+- **The iPhone console, uploads and Devices page wake the app less.**
+  The console hopped to the main queue once per SSH read, hundreds of
+  times a second while a command printed; reads now queue up and reach
+  the terminal in one batch per main-queue turn, in order. Upload
+  progress redrew the chip for every chunk URLSession sent; it now
+  reports at most ten times a second, plus the end. The Devices page
+  fetched both pair requests and the device list every 5 s while open;
+  it now loads devices once (and again after an approval, a removal or
+  a pull to refresh) and asks for pending requests every 10 s. Closes
+  [#1553](https://github.com/c-wenlong/swe/issues/1553).
 
 ### Fixed
 
