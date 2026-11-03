@@ -1298,8 +1298,11 @@ of <code>/v1/sessions</code> and <code>/v1/inbox</code> wrote the sessions, inbo
 machines back even when the hub sent the same lists, and
 <code>@Observable</code> reports equal writes, so the Sessions page regrouped
 every row and an open search asked <code>/v1/search</code> again every 15 s.
-The lists are now written only when they differ, the search reruns
-only when the query or the sessions change, and the poll pauses
+The lists are now written only when they differ, the page's relative
+times and Earlier cutoff follow a one-minute clock of their own, an
+open search reruns when the query or the sessions change, on pull to
+refresh, after a failed try, and otherwise once a minute (four times
+fewer requests), and the poll pauses
 while the app is inactive (the app switcher, Control Centre, a call),
 not only in the background. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1549">#1549</a>.</p>
