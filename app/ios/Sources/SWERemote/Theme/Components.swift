@@ -334,7 +334,7 @@ struct WorkingVerb: View {
             let index = Self.index(at: context.date)
             ZStack(alignment: .leading) {
                 Text("\(Self.widest)…").opacity(0)
-                SweepingVerb(word: WorkingVerbs.all[index])
+                SweepingVerb(word: WorkingVerbs.all[index], since: Self.slotStart(at: context.date))
                     .id(index)
                     .transition(.opacity)
             }
@@ -353,9 +353,27 @@ struct WorkingVerb: View {
     /// The verb on screen at `date`. The small nudge keeps a tick that
     /// lands on a boundary from rounding down to the previous verb.
     static func index(at date: Date) -> Int {
-        let slot = (date.timeIntervalSinceReferenceDate / verbSeconds + 1e-6).rounded(.down)
+        let slot = slot(at: date)
         let n = WorkingVerbs.all.count
-        return ((Int(slot) % n) + n) % n
+        return ((slot % n) + n) % n
+    }
+
+    /// When the verb on screen at `date` came up.
+    static func slotStart(at date: Date) -> Date {
+        Date(timeIntervalSinceReferenceDate: Double(slot(at: date)) * verbSeconds)
+    }
+
+    private static func slot(at date: Date) -> Int {
+        Int((date.timeIntervalSinceReferenceDate / verbSeconds + 1e-6).rounded(.down))
+    }
+
+    /// How far the band is across a verb that came up at `since`, at
+    /// `now`: 0 as it comes up, 1 once it has crossed and the word rests.
+    /// The pill can appear partway through a verb; its band then starts
+    /// where it would be, not back at the left.
+    static func sweep(since: Date, now: Date) -> Double {
+        let elapsed = max(0, now.timeIntervalSince(since))
+        return min(1, elapsed / (verbSeconds * sweepShare))
     }
 
     /// The verb that pins the pill's width.
@@ -364,17 +382,24 @@ struct WorkingVerb: View {
     }
 }
 
-/// One verb's turn: the band crosses it once, linearly, and stops.
+/// One verb's turn: the band crosses it once, linearly, and stops. It
+/// starts from where the band is when it appears, so a pill that shows
+/// up late in a verb's turn still finishes the sweep on time.
 private struct SweepingVerb: View {
     let word: String
-    @State private var sweep: Double = 0
+    @State private var sweep: Double
+
+    init(word: String, since: Date) {
+        self.word = word
+        _sweep = State(initialValue: WorkingVerb.sweep(since: since, now: .now))
+    }
 
     var body: some View {
         VerbShimmer(word: word, sweep: sweep)
             .onAppear {
-                withAnimation(.linear(duration: WorkingVerb.verbSeconds * WorkingVerb.sweepShare)) {
-                    sweep = 1
-                }
+                guard sweep < 1 else { return }
+                let left = (1 - sweep) * WorkingVerb.verbSeconds * WorkingVerb.sweepShare
+                withAnimation(.linear(duration: left)) { sweep = 1 }
             }
     }
 }

@@ -35,6 +35,21 @@ final class WorkingVerbTests: XCTestCase {
         XCTAssertEqual(WorkingVerb.index(at: Date(timeIntervalSinceReferenceDate: s * Double(n) + 0.1)), 0)
     }
 
+    func testAPillAppearingMidVerbStartsItsBandPartway() {
+        let s = WorkingVerb.verbSeconds
+        let boundary = Date(timeIntervalSinceReferenceDate: s * 1000)
+        // The slot a mid-verb date belongs to starts at its boundary.
+        XCTAssertEqual(WorkingVerb.slotStart(at: boundary.addingTimeInterval(1.0)), boundary)
+        XCTAssertEqual(WorkingVerb.slotStart(at: boundary), boundary)
+        let sweepTime = s * WorkingVerb.sweepShare
+        XCTAssertEqual(WorkingVerb.sweep(since: boundary, now: boundary), 0)
+        XCTAssertEqual(WorkingVerb.sweep(since: boundary, now: boundary.addingTimeInterval(sweepTime / 2)), 0.5, accuracy: 1e-9)
+        // Into the rest: already across, nothing left to animate.
+        XCTAssertEqual(WorkingVerb.sweep(since: boundary, now: boundary.addingTimeInterval(2.0)), 1)
+        // A clock a hair behind the tick never runs the band backwards.
+        XCTAssertEqual(WorkingVerb.sweep(since: boundary, now: boundary.addingTimeInterval(-0.001)), 0)
+    }
+
     func testBandOffsetPutsTheCentreWhereTheOldGradientHadIt() {
         // Sliding the strip right by `offset` moves its gradient along the
         // word's diagonal by offset·w/(w²+h²); the centre must land on the
