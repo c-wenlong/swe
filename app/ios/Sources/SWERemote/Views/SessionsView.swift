@@ -21,13 +21,20 @@ struct SessionsView: View {
     @State private var forkedKey: String?
     @State private var detachAsk: SessionRow?
     @State private var toast: ListToast?
+    /// The page's clock: relative times, the Earlier cutoff and the
+    /// machine strip's "last seen" read it. It ticks once a minute; the
+    /// 15 s poll no longer redraws the page when the lists didn't change.
+    @State private var clock = Date()
+    /// Bumped by pull to refresh, which reruns an open search.
+    @State private var searchPulls = 0
 
     var body: some View {
-        let chips = MachineStrip.chips(machines: app.machines, rows: app.displaySessions)
+        let now = clock.timeIntervalSince1970
+        let chips = MachineStrip.chips(machines: app.machines, rows: app.displaySessions, now: now)
         let machine = MachineStrip.effective(machineFilter, chips: chips)
         let onMachine = MachineStrip.filter(app.displaySessions, machine: machine)
         let rows = onMachine.filter(filter.includes)
-        let groups = SessionGrouping.groupsWithPins(rows, machines: app.machines)
+        let groups = SessionGrouping.groupsWithPins(rows, machines: app.machines, now: now)
         PageScroll {
             if search.isActive {
                 searchResults
@@ -55,7 +62,7 @@ struct SessionsView: View {
                                                place: group.id == "pinned"
                                                    ? SessionGrouping.pinnedPlace(row, rows: app.sessions, machines: app.machines) : nil,
                                                detachPending: app.isDetachPending(row.key),
-                                               unread: app.isUnread(row))
+                                               unread: app.isUnread(row), now: now)
                             }
                             .buttonStyle(RowButtonStyle())
                             .contentShape(.contextMenuPreview, .rect(cornerRadius: Theme.blockRadius))
@@ -77,15 +84,21 @@ struct SessionsView: View {
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.9), value: toast)
-        .refreshable { await app.refresh() }
+        .refreshable {
+            await app.refresh()
+            clock = Date()
+            searchPulls += 1
+        }
         .searchable(text: $search.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search sessions")
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
-        // Reruns on a new query and when a refresh (pull to refresh, the
-        // 15 s poll) changed the sessions, so results track sessions that
-        // just arrived or moved, without asking the hub again every 15 s
-        // for the same answer.
-        .task(id: SearchTrigger(query: search.query, sessions: app.sessions)) { await search.run(app: app) }
+        .background { SearchRunner(search: search, pulls: searchPulls) }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                clock = Date()
+            }
+        }
         .navigationTitle("Sessions")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -314,6 +327,9 @@ struct SessionRowView: View {
     var detachPending = false
     /// New activity since this phone last read it (`AppModel.isUnread`).
     var unread = false
+    /// The clock "2m" is measured against; the Sessions page passes its
+    /// minute tick so the times move while the list doesn't.
+    var now = Date().timeIntervalSince1970
     @Environment(\.dynamicTypeSize) private var size
 
     var body: some View {
@@ -335,7 +351,7 @@ struct SessionRowView: View {
                     if markInline { attachMark }
                     HarnessIcon(harness: row.harness, name: row.harnessName, size: 13)
                     Text(status.label).foregroundStyle(waiting ? Theme.warningText : Theme.textSecondary)
-                    let when = RelativeTime.short(row.lastActiveAt)
+                    let when = RelativeTime.short(row.lastActiveAt, now: now)
                     if !when.isEmpty { Text("· \(when)") }
                     if let model = row.modelLabel {
                         Text("· \(model)").accessibilityLabel("model \(model)")
@@ -472,9 +488,42 @@ struct SearchResultRow: View {
     }
 }
 
+/// Runs an open search again when its answer could have moved: a new
+/// query, sessions that changed, a pull to refresh, every poll while the
+/// last try failed, and otherwise at most once a minute (the hub indexes
+/// transcripts on its own time, so an unchanged list can still gain
+/// matches). It is its own view so the poll's `refreshedAt`, which it
+/// reads, redraws only it and not the list.
+private struct SearchRunner: View {
+    @Environment(AppModel.self) private var app
+    let search: SessionSearch
+    let pulls: Int
+
+    var body: some View {
+        Color.clear
+            .task(id: SearchTrigger(query: search.query, sessions: app.sessions, pulls: pulls,
+                                    tick: SearchTrigger.tick(refreshedAt: app.refreshedAt, failed: search.error != nil))) {
+                await search.run(app: app)
+            }
+    }
+}
+
 struct SearchTrigger: Equatable {
     var query: String
     var sessions: [SessionRow]
+    var pulls = 0
+    var tick = 0
+
+    /// How often an unchanged list reruns a search.
+    static let every: TimeInterval = 60
+
+    /// Every refresh while the last search failed; else the minute the
+    /// lists last refreshed in.
+    static func tick(refreshedAt: Date?, failed: Bool) -> Int {
+        guard let refreshedAt else { return 0 }
+        let t = refreshedAt.timeIntervalSinceReferenceDate
+        return failed ? Int(t * 1000) : Int(t / every)
+    }
 }
 
 /// A scroll of the list closes a swiped-open row, as `List` does.

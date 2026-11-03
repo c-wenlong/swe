@@ -84,5 +84,18 @@ final class ListWriteTests: XCTestCase {
         XCTAssertNotEqual(a, SearchTrigger(query: "fix", sessions: [row("a"), row("b")]))
         XCTAssertNotEqual(a, SearchTrigger(query: "fix", sessions: [row("a", at: now + 1)]))
         XCTAssertNotEqual(a, SearchTrigger(query: "fixes", sessions: [row("a")]))
+        XCTAssertNotEqual(a, SearchTrigger(query: "fix", sessions: [row("a")], pulls: 1), "pull to refresh reruns it")
+    }
+
+    func testAnUnchangedListStillSearchesAgainEachMinuteAndRetriesFailures() {
+        // 15 s polls: four in a minute share a tick, so the hub's
+        // transcript index still gets asked once a minute.
+        let start = Date(timeIntervalSinceReferenceDate: 60 * 1000)
+        let ticks = (0..<8).map { SearchTrigger.tick(refreshedAt: start.addingTimeInterval(Double($0) * 15), failed: false) }
+        XCTAssertEqual(Set(ticks).count, 2)
+        // After a failed search, every poll tries again.
+        let failing = (0..<4).map { SearchTrigger.tick(refreshedAt: start.addingTimeInterval(Double($0) * 15), failed: true) }
+        XCTAssertEqual(Set(failing).count, 4)
+        XCTAssertEqual(SearchTrigger.tick(refreshedAt: nil, failed: true), 0)
     }
 }
