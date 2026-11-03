@@ -1702,6 +1702,18 @@ now goes through the parse cache, so an unchanged one costs a <code>stat</code>.
 <code>json_engine</code> joins the parse cache's fingerprint. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1534">#1534</a>.</p>
 </li>
+<li><p><strong>The iPhone chat's working pill stops redrawing every frame.</strong> The
+cycling verb under a working agent ran on a <code>.animation</code> timeline,
+so for the whole turn it rebuilt its gradient mask and glow on every
+display frame (60 to 120 times a second), including the rest between
+sweeps. It now swaps the word on a 2.4 s periodic timeline and slides
+a fixed band with one linear animation per word: about 1,500 body
+evaluations an hour instead of 216,000 to 432,000, nothing animating
+while the word rests, and the same picture (the test renders both).
+The queued-send spinner turns with one repeating rotation instead of
+its own per-frame timeline. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1550">#1550</a>.</p>
+</li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>

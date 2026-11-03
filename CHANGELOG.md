@@ -1555,6 +1555,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now goes through the parse cache, so an unchanged one costs a `stat`.
   `json_engine` joins the parse cache's fingerprint. Closes
   [#1534](https://github.com/c-wenlong/swe/issues/1534).
+- **The iPhone chat's working pill stops redrawing every frame.** The
+  cycling verb under a working agent ran on a `.animation` timeline,
+  so for the whole turn it rebuilt its gradient mask and glow on every
+  display frame (60 to 120 times a second), including the rest between
+  sweeps. It now swaps the word on a 2.4 s periodic timeline and slides
+  a fixed band with one linear animation per word: about 1,500 body
+  evaluations an hour instead of 216,000 to 432,000, nothing animating
+  while the word rests, and the same picture (the test renders both).
+  The queued-send spinner turns with one repeating rotation instead of
+  its own per-frame timeline. Closes
+  [#1550](https://github.com/c-wenlong/swe/issues/1550).
 
 ### Fixed
 
