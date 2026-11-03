@@ -19,8 +19,36 @@ final class GitHubNotifier {
     /// Inbox page is hidden. Off means banners stop; polling still runs so
     /// the inbox, badge and board invalidations stay live.
     var bannersEnabled: Bool {
-        didSet { defaults.set(bannersEnabled, forKey: "githubNotifications") }
+        didSet {
+            defaults.set(bannersEnabled, forKey: "githubNotifications")
+            if bannersEnabled != oldValue { napping?.cancel() }
+        }
     }
+
+    /// Whether the main window can be seen; AppModel follows it. Coming
+    /// back on screen wakes the poll, which looks at once when its last
+    /// look is older than `interval`.
+    @ObservationIgnored var windowVisible = false {
+        didSet { if windowVisible != oldValue { napping?.cancel() } }
+    }
+
+    /// The cadence with the window off screen: banners are the only thing
+    /// left to serve, a few minutes late at most.
+    static let hiddenInterval: TimeInterval = 180
+    /// Off screen with banners off: the inbox only has to be roughly
+    /// current for the next time the window opens.
+    static let idleInterval: TimeInterval = 900
+
+    /// How long the poll waits now: `interval` on screen, then the two
+    /// slower paces.
+    static func cadence(base: TimeInterval, windowVisible: Bool, banners: Bool) -> TimeInterval {
+        if windowVisible { return base }
+        return max(base, banners ? hiddenInterval : idleInterval)
+    }
+
+    @ObservationIgnored private var napping: Task<Void, Never>?
+    /// The wall clock; tests set a fake.
+    @ObservationIgnored var now: () -> Date = Date.init
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let model: GitHubModel
@@ -64,12 +92,37 @@ final class GitHubNotifier {
 
     /// The AppModel watcher loop: poll, sleep, repeat until the app
     /// tears it down. `swe` is read per poll so a path change in
-    /// Settings needs no restart.
+    /// Settings needs no restart. The wait follows `cadence`: once a
+    /// minute while the window shows, slower behind it. A change of
+    /// window or banners cuts the nap short and the wait is worked out
+    /// again from the last look.
     func keepFresh(swe: @escaping () -> SweClient?) async {
+        var last: Date?
         while !Task.isCancelled {
+            if let last {
+                let wait = Self.cadence(base: interval, windowVisible: windowVisible,
+                                        banners: bannersEnabled)
+                let left = last.addingTimeInterval(wait).timeIntervalSince(now())
+                if left > 0 {
+                    await nap(left)
+                    continue
+                }
+            }
             await poll(swe: swe())
-            try? await Task.sleep(for: .seconds(interval))
+            last = now()
         }
+    }
+
+    /// Sleeps `seconds`, or less when `napping` is cancelled by a wake.
+    private func nap(_ seconds: TimeInterval) async {
+        let sleeper = Task<Void, Never> { try? await Task.sleep(for: .seconds(seconds)) }
+        napping = sleeper
+        await withTaskCancellationHandler {
+            await sleeper.value
+        } onCancel: {
+            sleeper.cancel()
+        }
+        if napping == sleeper { napping = nil }
     }
 
     /// One tick: refetch the inbox, banner ids not seen before, and mark

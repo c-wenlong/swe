@@ -108,7 +108,9 @@ struct InboxPage: View {
         // landing out of step with the notifier's, could put back a row
         // marked read meanwhile. The page only catches up when stale.
         .task(id: app.swePath) { await model.loadInbox(swe: app.swe) }
-        .task(id: app.swePath) { await NeedsYouCards.poll(needsYou, hub: app.hub) }
+        .task(id: app.swePath) {
+            await NeedsYouCards.poll(needsYou, hub: app.hub) { [app] in app.mainWindowOnScreen }
+        }
     }
 }
 

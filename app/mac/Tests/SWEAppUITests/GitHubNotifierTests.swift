@@ -329,6 +329,48 @@ struct GitHubNotifierTests {
         #expect(relaunched.bannersEnabled)
     }
 
+    @Test func thePollSlowsDownBehindTheWindow() {
+        #expect(GitHubNotifier.cadence(base: 60, windowVisible: true, banners: false) == 60)
+        #expect(GitHubNotifier.cadence(base: 60, windowVisible: false, banners: true) == 180)
+        #expect(GitHubNotifier.cadence(base: 60, windowVisible: false, banners: false) == 900)
+    }
+
+    /// Hidden, the poll waits its slow pace; the window coming back wakes
+    /// it, and it looks at once since the last look is over a minute old.
+    @Test func theWindowComingBackWakesThePoll() async throws {
+        final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 1_800_000_000) }
+        /// Yields once per `swe` run, so the test waits on runs, not time.
+        final class Counted: CommandRunning, @unchecked Sendable {
+            let inner: Router
+            let runs: AsyncStream<Void>.Continuation
+            init(_ inner: Router, _ runs: AsyncStream<Void>.Continuation) { self.inner = inner; self.runs = runs }
+            func run(_ arguments: [String]) async throws -> CommandResult {
+                defer { runs.yield() }
+                return try await inner.run(arguments)
+            }
+            func run(_ arguments: [String], input: Data?) async throws -> CommandResult {
+                try await run(arguments)
+            }
+        }
+        let clock = Clock()
+        let notifier = GitHubNotifier(swe: quiverDir(), model: GitHubModel(), interval: 60,
+                                      defaults: TestDefaults()) { _ in }
+        notifier.now = { clock.now }
+        let (runs, continuation) = AsyncStream<Void>.makeStream()
+        let swe = SweClient(runner: Counted(Router([inboxKey: inbox([note("a")])]), continuation))
+        var seen = runs.makeAsyncIterator()
+        let task = Task { await notifier.keepFresh(swe: { swe }) }
+        _ = await seen.next()
+        // Two minutes on, hidden with banners off: the 15 minute pace
+        // still has the poll asleep. The window showing wakes it, and
+        // the minute pace says it is due.
+        clock.now = clock.now.addingTimeInterval(120)
+        notifier.windowVisible = true
+        _ = await seen.next()
+        task.cancel()
+        await task.value
+    }
+
     /// The watcher loop returns when its task is cancelled rather than
     /// holding the AppModel watcher slot forever.
     @Test func keepFreshStopsOnCancel() async throws {

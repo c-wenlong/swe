@@ -151,6 +151,8 @@ struct RepoDetailPage: View {
                 // try? swallows the cancel: without this a tab switch ran
                 // one more round of fetches for the tab just left.
                 guard !Task.isCancelled else { return }
+                // Behind other windows the minute passes without a fetch.
+                guard app.mainWindowOnScreen else { continue }
                 await model.loadFocusTab(model.focusTab, repo: repo, swe: app.swe)
                 if model.focusTab == .pulls {
                     await model.loadReviewRequests(repo: repo, swe: app.swe)
