@@ -136,20 +136,73 @@ def last_text(data: dict) -> str:
     return ""
 
 
-def v2_phase(rows: list[tuple[str, str, int, int, dict]]) -> tuple[str | None, str]:
-    """(phase, text) from v2 rows, oldest first, read from the newest back.
+def v2_shape(conn: sqlite3.Connection) -> str | None:
+    """The ``session_message`` filter ``newest_phase`` needs, or ``None``.
+
+    ``None`` when the store has no v2 messages table; otherwise the SQL
+    that skips rows already in the legacy ``message`` table. A caller
+    probing many sessions on one connection computes it once, instead of
+    two ``PRAGMA table_info`` reads per session.
+    """
+    return _not_legacy(conn) if has_v2_messages(conn) else None
+
+
+def _decisive_newest_first(
+    conn: sqlite3.Connection, session_id: str, window: int, not_legacy: str
+):
+    """``(type, data)`` of the decisive v2-only rows among the session's
+    newest ``window``, newest first.
+
+    The window is picked from the ``(session_id, seq)`` index without
+    reading any row's ``data``; each row's JSON is loaded only when the
+    caller steps to it, and one that does not decode to an object is
+    skipped, the same rows ``v2_rows`` would drop.
+    """
+    marks = ", ".join("?" * len(DECISIVE_TYPES))
+    kinds = sorted(DECISIVE_TYPES)
+    picked = conn.execute(
+        "SELECT id, type FROM ("
+        "SELECT sm.id AS id, sm.type AS type, sm.seq AS seq "
+        "FROM session_message sm WHERE sm.session_id = ? "
+        f"{not_legacy} ORDER BY sm.seq DESC LIMIT ?"
+        f") WHERE type IN ({marks}) ORDER BY seq DESC",
+        [session_id, window, *kinds],
+    ).fetchall()
+    for row_id, kind in picked:
+        row = conn.execute(
+            "SELECT data FROM session_message WHERE id = ?", (row_id,)
+        ).fetchone()
+        try:
+            data = json.loads(row[0]) if row else None
+        except (TypeError, ValueError, RecursionError):
+            continue
+        if isinstance(data, dict):
+            yield str(kind or ""), data
+
+
+def newest_phase(
+    conn: sqlite3.Connection,
+    session_id: str,
+    window: int,
+    shape: str | None,
+) -> tuple[str | None, str]:
+    """(phase, text) from the session's newest ``window`` v2-only rows.
 
     A prompt (``user``, ``synthetic``) means the model has not replied.
     An assistant ``finish`` of ``tool-calls`` (or none) is a turn still
     running, ``error`` a failure, any other value a closed turn. ``idle``
     is OpenCode's own end-of-turn record: ``failed`` and ``interrupted``
     map to error and aborted, ``succeeded`` closes the turn with the text
-    of the assistant row before it.
+    of the assistant row before it. ``shape`` is ``v2_shape(conn)``;
+    ``None`` (no v2 table) decides nothing.
     """
-    decisive = [r for r in rows if r[1] in DECISIVE_TYPES]
-    if not decisive:
+    if shape is None:
         return None, ""
-    kind, data = decisive[-1][1], decisive[-1][4]
+    rows = _decisive_newest_first(conn, session_id, window, shape)
+    head = next(rows, None)
+    if head is None:
+        return None, ""
+    kind, data = head
     if kind in PROMPT_TYPES:
         return "midturn", ""
     if kind == "idle":
@@ -158,7 +211,7 @@ def v2_phase(rows: list[tuple[str, str, int, int, dict]]) -> tuple[str | None, s
             return "error", ""
         if outcome == "interrupted":
             return "aborted", ""
-        for _id, k, _seq, _ts, d in reversed(decisive[:-1]):
+        for k, d in rows:
             if k == "assistant":
                 return "finished", last_text(d)
             if k in PROMPT_TYPES:
