@@ -11,24 +11,54 @@ enum LinkCards {
     /// and so is every other scheme (files, mailto, tel). Both Markdown
     /// links and bare URLs count.
     static func urls(in text: String) -> [URL] {
+        urls(in: Markdown.parse(text))
+    }
+
+    /// The same, for blocks parsed already. Each piece of text's links
+    /// come from `linkCache` when it was scanned before, so a streaming
+    /// reply rescans only its growing last block.
+    static func urls(in blocks: [Markdown.Block]) -> [URL] {
         var seen = Set<String>()
         var out: [URL] = []
-        func add(_ url: URL) {
-            guard isWeb(url), seen.insert(url.absoluteString).inserted else { return }
-            out.append(url)
-        }
-        for block in Markdown.parse(text) {
+        for block in blocks {
             for source in sources(of: block) {
-                let inline = RichText.inline(source)
-                for run in inline.runs {
-                    if let link = run.link { add(link); continue }
-                    if run.inlinePresentationIntent?.contains(.code) == true { continue }
-                    for url in bareURLs(in: String(inline[run.range].characters)) { add(url) }
+                for url in links(in: source) where seen.insert(url.absoluteString).inserted {
+                    out.append(url)
                 }
             }
         }
         return out
     }
+
+    /// The web links in one piece of block text, in order, repeats kept.
+    private static func links(in source: String) -> [URL] {
+        let key = source as NSString
+        if let hit = linkCache.object(forKey: key) { return hit.urls }
+        var found: [URL] = []
+        let inline = RichText.inline(source)
+        for run in inline.runs {
+            if let link = run.link {
+                if isWeb(link) { found.append(link) }
+                continue
+            }
+            if run.inlinePresentationIntent?.contains(.code) == true { continue }
+            found += bareURLs(in: String(inline[run.range].characters)).filter(isWeb)
+        }
+        linkCache.setObject(Found(found), forKey: key, cost: source.utf8.count)
+        return found
+    }
+
+    private final class Found {
+        let urls: [URL]
+        init(_ urls: [URL]) { self.urls = urls }
+    }
+
+    /// Links found by block text, up to about 4 MB of text scanned.
+    private static let linkCache: NSCache<NSString, Found> = {
+        let cache = NSCache<NSString, Found>()
+        cache.totalCostLimit = 4 << 20
+        return cache
+    }()
 
     static func isWeb(_ url: URL) -> Bool {
         ["http", "https"].contains(url.scheme?.lowercased() ?? "") && (url.host?.isEmpty == false)
@@ -70,11 +100,15 @@ enum LinkCards {
 struct AssistantReply: View {
     let text: String
     @State private var browsing: BrowserTarget?
+    /// Parses the reply once per repaint, and while it streams in, only
+    /// what came after its last finished block.
+    @State private var markdown = Markdown.Stream()
 
     var body: some View {
-        let links = Array(LinkCards.urls(in: text).prefix(LinkCards.limit))
+        let blocks = markdown.update(text)
+        let links = Array(LinkCards.urls(in: blocks).prefix(LinkCards.limit))
         VStack(alignment: .leading, spacing: 8) {
-            RichText(text: text).frame(maxWidth: .infinity, alignment: .leading)
+            RichText(blocks: blocks).frame(maxWidth: .infinity, alignment: .leading)
             ForEach(links, id: \.absoluteString) { url in
                 LinkCard(url: url) { browsing = BrowserTarget(url: url) }
             }

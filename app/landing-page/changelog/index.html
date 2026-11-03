@@ -1303,6 +1303,18 @@ Codex's account comparison reads only Codex rows. Measured against a
 copy of a 415,000-event ledger, one ingest tick went from about 6.4 to
 2.0 CPU-seconds. Closes <a href="https://github.com/c-wenlong/swe/issues/1568">#1568</a>.</p>
 </li>
+<li><p><strong>The iPhone chat stops re-parsing a streaming reply from the top.</strong>
+Every 80 ms repaint of a reply still being written parsed the whole
+reply twice (once for the text, once for its link cards), styled every
+block again with <code>AttributedString(markdown:)</code> and rescanned it all for
+bare links. A 16 KB reply over a minute meant about 750 full passes,
+13 s of CPU on a Mac simulator. The bubble now keeps the blocks before
+its last finished blank line and parses only what follows; styled
+text and link scans are cached by block text, and unchanged blocks
+skip layout. The same reply now costs 0.9 s, and every prefix parses
+to exactly the blocks a full parse gives. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1548">#1548</a>.</p>
+</li>
 <li><p><strong>A snapshot session whose store can't be found no longer costs a
 read attempt every poll.</strong> When a Cline, Continue, Gemini, Copilot,
 Forge or Crush read found no source files or a store it couldn't read,
