@@ -983,6 +983,8 @@ class DevinChain:
         self._last_row = 0
         self._full_at = float("-inf")
         self.used_at = float("-inf")
+        # (st_dev, st_ino) of the file the kept nodes came from.
+        self._ident: tuple | None = None
         # How the last read went, for tests and benchmarks: "full" or
         # "step", and how many chain nodes it fetched.
         self.last_read = ("", 0)
@@ -1004,6 +1006,15 @@ class DevinChain:
         limit = max_nodes + _DEVIN_NAME_MARGIN
         now = self._clock()
         self.used_at = now
+        try:
+            st = os.stat(path)
+            ident = (st.st_dev, st.st_ino)
+        except OSError:
+            ident = None
+        if ident != self._ident:
+            # Another file (replaced, restored): nothing kept applies.
+            self.reset()
+            self._ident = ident
         every = DEVIN_FULL_READ_S if self._full_every_s is None else self._full_every_s
         try:
             # Read before the walk: a row landing mid-walk sits above it
@@ -1013,6 +1024,10 @@ class DevinChain:
             ).fetchone()
             last_row = (newest[0] if newest else None) or 0
             head = _devin_head(conn, sid)
+            if last_row < self._last_row:
+                # Rows went away under the watermark (a rewind, a restore
+                # in place): what is kept can't be trusted.
+                self.reset()
             if not (self._nodes and now - self._full_at < every
                     and self._step(conn, sid, head, limit)):
                 self._full(conn, sid, head, limit)

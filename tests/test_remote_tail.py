@@ -969,6 +969,36 @@ class TestDevinChainIncremental(unittest.TestCase):
         texts = [m.text for m in self.tr.read_transcript_tail(self.session, 10, chain=chain).messages]
         self.assertIn("edited", texts)
 
+    def test_a_replaced_or_rewound_store_reads_whole_again(self):
+        import os
+        import shutil
+        import sqlite3
+        chain = self.tr.DevinChain()
+        for i in range(4):
+            self._set_head(self._new(self.head, {"role": "human", "content": f"m{i}"}))
+        self.conn.commit()
+        self._same(chain, 10)
+        # A restored copy: same node ids, other text, lower row ids.
+        copy = self.db.with_name("copy.db")
+        shutil.copy(self.db, copy)
+        c2 = sqlite3.connect(copy)
+        c2.execute("DELETE FROM message_nodes")
+        for node, parent in sorted(self.parents.items()):
+            c2.execute("INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at)"
+                       " VALUES ('s', ?, ?, ?, 0)", (node, parent, json.dumps({"role": "human", "content": f"r{node}"})))
+        c2.commit()
+        c2.close()
+        os.replace(copy, self.db)
+        self.assertEqual(self._same(chain, 10)[0], "full")
+        # Rows deleted in place under the watermark: whole read too.
+        import sqlite3 as _s
+        c3 = _s.connect(self.db)
+        c3.execute("DELETE FROM message_nodes WHERE node_id = (SELECT MAX(node_id) FROM message_nodes)")
+        c3.execute("UPDATE sessions SET main_chain_id = 3 WHERE id = 's'")
+        c3.commit()
+        c3.close()
+        self.assertEqual(self._same(chain, 10)[0], "full")
+
     def test_a_full_read_runs_after_its_interval_and_after_a_reset(self):
         now = [0.0]
         chain = self.tr.DevinChain(full_every_s=60, clock=lambda: now[0])
