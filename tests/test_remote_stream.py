@@ -238,6 +238,128 @@ class TestDeltaStream(unittest.TestCase):
         ds.finish("k", "a")
 
 
+# Pieces that make every cleaning step reach as far as it can: secrets
+# whose name and value sit on different lines, key blocks, escapes that
+# run across line breaks, CR/LF pairs split between chunks.
+_FRAGMENTS = [
+    "Authorization:", "Proxy-Authorization :", "Bearer", "basic", "token",
+    "API_KEY", "my_password", "=", ":", "export", '"api_key"', "'TOKEN'",
+    '"hunter two"', "'x y'", "sk-ant-abcdefghijklmnopqrstuv",
+    "ghp_abcdefghijklmnopqrstuvwxyz", "eyJabcdefgh.abcdefghij.abcdefghij",
+    "-----BEGIN RSA PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----",
+    "-----BEGIN CERTIFICATE-----", "-----BEGIN ", "MIIEsecret",
+    "\x1b]0;title", "\x1b]8;;http://x", "\x07", "\x9c", "\x1b\\", "\x1b",
+    "\x1b[31m", "\x1b[", "\x1b(", "\x00", "\r", "\r\n", "\t", ";", "#",
+    "hello", "world", "the", "code", "value",
+]
+_SEPARATORS = [" ", " ", "\n", "\n", "\n\n", "", "  \n "]
+
+
+def _fuzz_text(rng, n=120):
+    parts = []
+    for _ in range(n):
+        parts.append(rng.choice(_FRAGMENTS))
+        parts.append(rng.choice(_SEPARATORS))
+    return "".join(parts)
+
+
+def _chunks(rng, text):
+    out, i = [], 0
+    while i < len(text):
+        step = rng.randint(1, 24)
+        out.append(text[i:i + step])
+        i += step
+    return out
+
+
+class TestIncrementalClean(unittest.TestCase):
+    """The kept-prefix clean equals cleaning the whole text (#1532)."""
+
+    def _check(self, text, chunks):
+        ds = stream.DeltaStream(lambda k, ev: None, interval=0)
+        seen = ""
+        kept_any = False
+        for chunk in chunks:
+            ds.push("k", "m", "a", "assistant", chunk)
+            seen += chunk
+            st = ds._open[("k", "a")]
+            if st.stalled:
+                break
+            kept_any = kept_any or bool(st.kept)
+            self.assertEqual("".join(st.kept) + "".join(st.tail), seen)
+            self.assertEqual(
+                st.clean + stream.safe_prefix("".join(st.tail), False),
+                stream.safe_prefix(seen, False),
+                msg=repr(seen))
+        return kept_any
+
+    def test_matches_the_whole_text_clean_on_random_streams(self):
+        import random
+        kept = 0
+        for seed in range(100):
+            rng = random.Random(seed)
+            text = _fuzz_text(rng)
+            with self.subTest(seed=seed):
+                kept += self._check(text, _chunks(rng, text))
+        self.assertGreater(kept, 60)  # the fast path is actually taken
+
+    def test_a_secret_named_on_the_line_before_is_redacted(self):
+        for head, value in (
+                ("Authorization:\n", "s3cretvalue"),
+                ("Proxy-Authorization : Bearer\n", "s3cretvalue"),
+                ("API_KEY\n=\n", "s3cretvalue"),
+                ('"api_key":\n', '"s3cretvalue"'),
+                ("export TOKEN=\n\n", "s3cretvalue")):
+            with self.subTest(head=head):
+                ds, out, clock, timers = _stream(interval=0)
+                ds.push("k", "m", "a", "assistant", "intro line\n" + head)
+                ds.push("k", "m", "a", "assistant", value + " more\n")
+                ds.finish("k", "a")
+                self.assertNotIn("s3cretvalue", _texts(out))
+
+    def test_an_osc_across_lines_is_removed_whole(self):
+        ds, out, clock, timers = _stream(interval=0)
+        ds.push("k", "m", "a", "assistant", "a\n\x1b]0;hidden\n")
+        ds.push("k", "m", "a", "assistant", "still hidden\x07 shown\n")
+        ds.finish("k", "a")
+        self.assertEqual(_texts(out), "a\n shown\n")
+
+    def test_each_flush_cleans_only_the_new_text(self):
+        # Before #1532 every flush re-cleaned the whole message: ~n²/2
+        # characters through the cleaner over a stream of n characters.
+        cleaned = []
+        real = stream.sanitize_document
+
+        def counting(text):
+            cleaned.append(len(text))
+            return real(text)
+
+        line = "a line of reply text with some words in it\n"
+        with patch.object(stream, "sanitize_document", counting):
+            ds = stream.DeltaStream(lambda k, ev: None, interval=0)
+            for _ in range(2000):
+                ds.push("k", "m", "a", "assistant", line)
+            ds.finish("k", "a")
+        total = len(line) * 2000
+        self.assertLess(sum(cleaned), 4 * total)
+
+    def test_an_idle_message_is_dropped(self):
+        ds, out, clock, timers = _stream()
+        with patch.object(stream.threading, "Timer", timers):
+            ds.push("k", "m", "dead", "assistant", "half a reply")
+            clock.t += stream.IDLE_S + stream.SWEEP_S
+            ds.push("k", "m", "live", "assistant", "next ")
+        self.assertEqual(list(ds._open), [("k", "live")])
+
+    def test_a_stalled_message_frees_its_text(self):
+        ds, out, clock, timers = _stream(interval=0)
+        with patch.object(stream, "MAX_STREAM_CHARS", 10):
+            ds.push("k", "m", "a", "assistant", "much too long now ")
+        st = ds._open[("k", "a")]
+        self.assertTrue(st.stalled)
+        self.assertEqual((st.kept, st.tail, st.clean), ([], [], ""))
+
+
 # -- channels -----------------------------------------------------------
 
 
