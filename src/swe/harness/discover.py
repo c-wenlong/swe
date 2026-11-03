@@ -107,18 +107,39 @@ def _command_candidates(name: str, command: str) -> list[str]:
     return ordered
 
 
+def _dir_listings(path_dirs: list[Path]) -> dict[Path, frozenset[str] | None]:
+    """Each PATH directory's entry names, casefolded (macOS volumes are
+    usually case-insensitive), listed once per pass (#1537), or ``None``
+    for one that cannot be listed (probed name by name instead)."""
+    listings: dict[Path, frozenset[str] | None] = {}
+    for directory in path_dirs:
+        try:
+            listings[directory] = frozenset(n.casefold() for n in os.listdir(directory))
+        except OSError:
+            listings[directory] = None
+    return listings
+
+
 def _resolve_executable(
     name: str,
     command: str,
     path_env: str | None,
     path_dirs: list[Path],
+    listings: dict[Path, frozenset[str] | None] | None = None,
 ) -> tuple[str | None, str | None]:
+    """The first candidate ``which`` finds, else the first executable in
+    ``path_dirs``. ``listings`` (``_dir_listings``) skips the per-file
+    probes for names a directory does not hold: most catalog harnesses
+    are absent, and each used to cost a stat in every PATH directory."""
     for candidate in _command_candidates(name, command):
         path = shutil.which(candidate, path=path_env)
         if path:
             return path, command
     for directory in path_dirs:
+        names = listings.get(directory) if listings is not None else None
         for candidate in _command_candidates(name, command):
+            if names is not None and candidate.casefold() not in names:
+                continue
             entry = directory / candidate
             try:
                 if entry.is_file() and os.access(entry, os.X_OK):
@@ -137,10 +158,12 @@ def _catalog_findings(
     registered_names = set(registry)
     reg_by_command = _registered_commands(registry)
     path_dirs = _path_dirs(path_env, home)
+    listings = _dir_listings(path_dirs)
 
     for name, meta in HARNESS_CATALOG.items():
         command = meta["command"]
-        path, resolved_command = _resolve_executable(name, command, path_env, path_dirs)
+        path, resolved_command = _resolve_executable(
+            name, command, path_env, path_dirs, listings)
         in_registry = name in registered_names
         if path and resolved_command:
             if in_registry:

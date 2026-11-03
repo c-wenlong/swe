@@ -6,7 +6,7 @@ from pathlib import Path
 
 from swe.paths import HARNESS_SKILL_DIRS, expand_user, skills_dir_for
 from swe.skills.catalogs import load_skill_catalogs
-from swe.skills.layout import SHARED_REL, shared_scopes_for_skill
+from swe.skills.layout import SHARED_REL, enumerate_skill_roots, shared_scopes_for_skill
 
 
 def skill_roots(home: Path | None = None, cwd: Path | None = None) -> list[tuple[str, Path]]:
@@ -120,6 +120,8 @@ def discover_skills(home: Path | None = None, cwd: Path | None = None,
     visibility its own way.
     """
     skills: list[dict] = []
+    # Enumerated once, not once per SKILL.md (#1537).
+    roots = enumerate_skill_roots(home=home) if visibility else None
     for label, root in skill_roots(home=home, cwd=cwd):
         try:
             root_real = root.resolve()
@@ -139,7 +141,7 @@ def discover_skills(home: Path | None = None, cwd: Path | None = None,
                     "scope": label,
                     "path": str(md),
                     "description": desc,
-                    "visible_via": (shared_scopes_for_skill(md, home=home)
+                    "visible_via": (shared_scopes_for_skill(md, home=home, roots=roots)
                                     if visibility else []),
                 }
             )
