@@ -17,7 +17,10 @@ struct SWERemoteApp: App {
                 .onOpenURL { url in Task { await app.handle(url) } }
                 .onChange(of: phase) { _, new in
                     if new == .active, app.hub != nil { app.startRefreshing() }
-                    if new == .background { app.stopRefreshing() }
+                    // Inactive too (the app switcher, Control Centre, a
+                    // call): nobody is reading the list, and .active
+                    // starts the poll again with a refresh at once.
+                    if new != .active { app.stopRefreshing() }
                 }
         }
     }

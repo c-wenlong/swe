@@ -1579,6 +1579,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The queued-send spinner turns with one repeating rotation instead of
   its own per-frame timeline. Closes
   [#1550](https://github.com/c-wenlong/swe/issues/1550).
+- **The iPhone app's 15 s poll changes only what changed.** Every poll
+  of `/v1/sessions` and `/v1/inbox` wrote the sessions, inbox and
+  machines back even when the hub sent the same lists, and
+  `@Observable` reports equal writes, so the Sessions page regrouped
+  every row and an open search asked `/v1/search` again every 15 s.
+  The lists are now written only when they differ, the page's relative
+  times and Earlier cutoff follow a one-minute clock of their own, an
+  open search reruns when the query or the sessions change, on pull to
+  refresh, after a failed try, and otherwise once a minute (four times
+  fewer requests), and the poll pauses
+  while the app is inactive (the app switcher, Control Centre, a call),
+  not only in the background. Closes
+  [#1549](https://github.com/c-wenlong/swe/issues/1549).
 
 ### Fixed
 
