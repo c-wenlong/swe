@@ -1763,6 +1763,13 @@ class TestTmuxBin(unittest.TestCase):
             self.assertIsNone(supervise.tmux_bin())
         self.assertEqual(which.call_count, 2)
 
+    def test_a_path_that_became_a_directory_is_looked_up_again(self):
+        with patch.object(supervise.shutil, "which",
+                          side_effect=["/bin", "/bin/sh"]) as which:
+            self.assertEqual(supervise.tmux_bin(), "/bin")
+            self.assertEqual(supervise.tmux_bin(), "/bin/sh")
+        self.assertEqual(which.call_count, 2)
+
     def test_a_miss_is_never_kept(self):
         with patch.object(supervise.shutil, "which",
                           side_effect=[None, "/bin/sh"]):

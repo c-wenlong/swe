@@ -167,13 +167,14 @@ _TMUX_BIN: tuple[str, str] | None = None
 
 def tmux_bin() -> str | None:
     """tmux's path on PATH, or None. Every tmux call asks, so a hit is
-    kept while PATH is unchanged and the file is still executable: one
-    access() instead of a PATH walk. A miss is never kept, so tmux
+    kept while PATH is unchanged and it is still an executable file: a
+    stat and an access() instead of a PATH walk. A miss is never kept, so tmux
     installed while the hub runs is found on the next call."""
     global _TMUX_BIN
     path_env = os.environ.get("PATH", "")
     hit = _TMUX_BIN
-    if hit is not None and hit[0] == path_env and os.access(hit[1], os.X_OK):
+    if (hit is not None and hit[0] == path_env and os.path.isfile(hit[1])
+            and os.access(hit[1], os.X_OK)):
         return hit[1]
     found = shutil.which("tmux")
     _TMUX_BIN = (path_env, found) if found else None
