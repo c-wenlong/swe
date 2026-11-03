@@ -121,6 +121,9 @@ public final class AccountsModel {
     private let terminal: () -> TerminalApp
     private let terminalInstalled: (TerminalApp) -> Bool
     private let loginPath: @Sendable () async -> String
+    /// The PATH the login shell gave once, cached for the app's life: the
+    /// timer's pass reads this, not a fresh `zsh -il` start.
+    private let cachedLoginPath: @Sendable () async -> String
     private let renewer: ClaudeSignInRenewing
     /// Where a vendor's desktop app is installed (the same AppLocator the
     /// Open-app buttons use); nil means the default /Applications path.
@@ -131,6 +134,9 @@ public final class AccountsModel {
                 terminal: @escaping () -> TerminalApp,
                 terminalInstalled: @escaping (TerminalApp) -> Bool = { _ in true },
                 loginPath: @escaping @Sendable () async -> String = { await CLIPath.terminalShellPath() },
+                cachedLoginPath: @escaping @Sendable () async -> String = {
+                    await LoginShell.cachedEnvironment()["PATH"] ?? ""
+                },
                 renewer: ClaudeSignInRenewing = ClaudeSignInRenewer(),
                 running: RunningInstances = AppRunningInstances(),
                 installedApp: @escaping (String) -> String? = { _ in nil }) {
@@ -141,14 +147,17 @@ public final class AccountsModel {
         self.terminal = terminal
         self.terminalInstalled = terminalInstalled
         self.loginPath = loginPath
+        self.cachedLoginPath = cachedLoginPath
         self.renewer = renewer
         self.installedApp = installedApp
     }
 
     /// Reload profiles, then every account's usage at once. `force` skips the
     /// five-minute cache but never a provider's cooldown; `forcing` skips
-    /// it for just those account ids.
-    public func load(force: Bool, forcing: Set<String> = []) async {
+    /// it for just those account ids. `freshPath` starts a login shell to
+    /// see a CLI installed since launch; the timer passes false and reads
+    /// the cached PATH instead.
+    public func load(force: Bool, forcing: Set<String> = [], freshPath: Bool = true) async {
         generation += 1
         let mine = generation
         let profiles: [Profile]
@@ -161,8 +170,8 @@ public final class AccountsModel {
             isLoading = false
             return
         }
-        // One shell start for every vendor's check.
-        let path = await loginPath()
+        // One shell start for every vendor's check, or none on the timer.
+        let path = freshPath ? await loginPath() : await cachedLoginPath()
         var found: [Vendor: Bool] = [:]
         for vendor in Vendor.allCases { found[vendor] = CLIPath.contains(LaunchPlanner.cliName(for: vendor), path: path) }
         guard mine == generation else { return }
@@ -257,10 +266,13 @@ public final class AccountsModel {
     /// Reload on a timer until the calling task is cancelled, so a page left
     /// open never shows a reading the usage service would no longer stand
     /// behind (it ages out readings past 24 h). Not forced: the five-minute
-    /// cache and any cooldown still apply.
+    /// cache and any cooldown still apply. The CLI check reads the cached
+    /// login PATH: a fresh `zsh -il` every five minutes ran the user's
+    /// whole rc chain for a list that rarely changes, and Refresh and the
+    /// page's own loads still see a newly installed CLI.
     public func keepFresh(every interval: Duration = .seconds(300)) async {
         while !Task.isCancelled {
-            await load(force: false)
+            await load(force: false, freshPath: false)
             do {
                 try await Task.sleep(for: interval)
             } catch {
