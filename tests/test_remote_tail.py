@@ -1181,15 +1181,13 @@ class TestTailManager(unittest.TestCase):
         with patch.object(tail, "make_source", return_value=src):
             mgr.sync([("claude:x", sess, "active")])
         mgr._approval_outstanding["claude:x"] = ("req-1", "fp")
-        mgr._approval_checked_at["claude:x"] = 1.0
         mgr.last_append["claude:x"] = 1.0
         with patch.object(tail.supervise, "set_pending_approval") as pending:
             mgr.sync([])
         pending.assert_called_once_with("claude:x", None)
         resolved = [e for _k, e in self.events if e["type"] == "approval.resolved"]
         self.assertEqual(resolved[-1]["data"]["request_id"], "req-1")
-        for kept in (mgr._approval_outstanding, mgr._approval_checked_at,
-                     mgr.last_append):
+        for kept in (mgr._approval_outstanding, mgr.last_append):
             self.assertNotIn("claude:x", kept)
 
     def test_a_session_dropped_mid_pane_read_raises_no_card(self):
@@ -1205,8 +1203,8 @@ class TestTailManager(unittest.TestCase):
             mgr.sync([])  # the catalog drops it while the pane is read
             return "pane"
 
-        with patch.object(tail.supervise, "meta_for", return_value={"mode": "tmux"}), \
-                patch.object(tail.supervise, "channel_name", return_value="qv-1"), \
+        with patch.object(tail.supervise, "registry",
+                          return_value={"claude:x": {"mode": "tmux", "tmux": "qv-1"}}), \
                 patch.object(tail.supervise, "capture_pane", side_effect=capture), \
                 patch.object(tail.supervise, "pane_shows_approval", return_value=True), \
                 patch.object(tail.supervise, "set_pending_approval"):
@@ -1841,7 +1839,8 @@ class TestApprovalWatcher(unittest.TestCase):
         # Each call lands past the PANE_APPROVAL_S throttle window.
         self._t += 10
         with patch.object(
-            tail.supervise, "meta_for", return_value=meta
+            tail.supervise, "registry",
+            return_value={"k1": meta} if meta is not None else {},
         ), patch.object(
             tail.supervise, "capture_pane", return_value=pane
         ):
@@ -1915,8 +1914,8 @@ class TestApprovalWatcher(unittest.TestCase):
 
     def test_headless_meta_skips_pane_check(self):
         # mode != tmux → never captures a pane, never emits.
-        with patch.object(tail.supervise, "meta_for",
-                          return_value={"mode": "headless"}), \
+        with patch.object(tail.supervise, "registry",
+                          return_value={"k1": {"mode": "headless"}}), \
              patch.object(tail.supervise, "capture_pane") as cap:
             self.mgr._poll_approvals(time.time() + 10)
         cap.assert_not_called()
@@ -1927,9 +1926,9 @@ class TestApprovalWatcher(unittest.TestCase):
         # watcher must still consult the default remote dir, not skip.
         mgr = tail.TailManager(lambda k, ev: None, "mbp", home=None)
         mgr.tailers["k1"] = object()
-        with patch.object(tail.supervise, "meta_for") as mf:
+        with patch.object(tail.supervise, "registry", return_value={}) as reg:
             mgr._poll_approvals(time.time() + 10)
-        mf.assert_called_once_with(None, "k1")
+        reg.assert_called_once_with(None)
 
     def test_prompt_swap_rotates_request_id(self):
         # A menu answered locally then replaced by another one must not
@@ -1953,10 +1952,33 @@ class TestApprovalWatcher(unittest.TestCase):
     def test_poll_throttled(self):
         meta = {"mode": "tmux"}
         self._poll("", meta=meta)
-        with patch.object(tail.supervise, "meta_for") as mf:
+        with patch.object(tail.supervise, "registry") as reg:
             # A second call inside the 3s window doesn't even look.
             self.mgr._poll_approvals(self._t + 1)
-        mf.assert_not_called()
+        reg.assert_not_called()
+
+    def test_one_registry_read_per_pass_whatever_the_tailer_count(self):
+        # #1530: the registry was read once per tailer, every pass.
+        for i in range(50):
+            self.mgr.tailers[f"k{i + 2}"] = object()
+        meta = {"mode": "tmux", "tmux": "qv-k1"}
+        with patch.object(tail.supervise, "registry",
+                          return_value={"k1": meta}) as reg, \
+                patch.object(tail.supervise, "_load_registry") as load, \
+                patch.object(tail.supervise, "capture_pane",
+                             return_value="") as cap:
+            self.mgr._poll_approvals(self._t + 10)
+        reg.assert_called_once_with(self.tmp)
+        load.assert_not_called()
+        cap.assert_called_once_with("qv-k1")
+
+    def test_pane_name_falls_back_to_the_derived_one(self):
+        with patch.object(tail.supervise, "registry",
+                          return_value={"k1": {"mode": "tmux"}}), \
+                patch.object(tail.supervise, "capture_pane",
+                             return_value="") as cap:
+            self.mgr._poll_approvals(self._t + 10)
+        cap.assert_called_once_with(tail.supervise.tmux_name("k1"))
 
     def test_request_carries_the_menu_options(self):
         # The card shows the pane's real rows, so the event lists them —

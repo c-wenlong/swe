@@ -1167,6 +1167,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The hub's approval watcher reads the supervised registry once per
+  pass.** Every 3 s it opened and parsed `supervised.json` once for each
+  tailed session (up to 100), and again for each tmux-attached one to
+  name its pane. It now reads the file once per pass and takes the pane
+  name from the same row. With nothing attached it spawned no `tmux`
+  before and spawns none now. Closes
+  [#1530](https://github.com/c-wenlong/swe/issues/1530).
+
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
   newest 1,000 chain nodes anyway. Devin's change token (the session's
