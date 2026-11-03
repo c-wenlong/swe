@@ -1303,6 +1303,19 @@ nothing until it is shown, and the pairing countdown and Calendar's
 now-line stop ticking while hidden.
 Closes <a href="https://github.com/c-wenlong/swe/issues/1554">#1554</a>.</p>
 </li>
+<li><p><strong>The web chat parses only the growing end of a streaming reply.</strong>
+Each repaint (at most every 80 ms) used to run the whole reply through
+the Markdown parser and syntax highlighter and replace the bubble's
+HTML. Blocks that end at a blank line are now settled: their nodes
+stay, and only the text after them is parsed and drawn again, with
+the same result as a full render. Over a 60 s, 12 KB reply (600
+paints) that is 18 ms of Markdown work instead of 824 ms, and 133 KB
+of HTML handed to the DOM instead of 9.5 MB. A delta no longer
+rebuilds every bubble's text twice to see whether anything changed,
+and the chat log is no longer a live region, so screen readers hear a
+finished reply once from a small status node instead of each repaint.
+Closes <a href="https://github.com/c-wenlong/swe/issues/1555">#1555</a>.</p>
+</li>
 <li><p><strong>The hub's approval watcher reads the supervised registry once per
 pass.</strong> Every 3 s it opened and parsed <code>supervised.json</code> once for each
 tailed session (up to 100), and again for each tmux-attached one to
@@ -1711,6 +1724,18 @@ listing parsed in full every time (about 3 ms per 2 MB file); each file
 now goes through the parse cache, so an unchanged one costs a <code>stat</code>.
 <code>json_engine</code> joins the parse cache's fingerprint. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1534">#1534</a>.</p>
+</li>
+<li><p><strong>The iPhone chat's working pill stops redrawing every frame.</strong> The
+cycling verb under a working agent ran on a <code>.animation</code> timeline,
+so for the whole turn it rebuilt its gradient mask and glow on every
+display frame (60 to 120 times a second), including the rest between
+sweeps. It now swaps the word on a 2.4 s periodic timeline and slides
+a fixed band with one linear animation per word: about 1,500 body
+evaluations an hour instead of 216,000 to 432,000, nothing animating
+while the word rests, and the same picture (the test renders both).
+The queued-send spinner turns with one repeating rotation instead of
+its own per-frame timeline. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1550">#1550</a>.</p>
 </li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
