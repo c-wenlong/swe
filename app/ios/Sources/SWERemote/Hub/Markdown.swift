@@ -43,10 +43,31 @@ enum Markdown {
     }
 
     static func parse(_ text: String) -> [Block] {
-        var lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        parseLines(normalised(text).components(separatedBy: "\n")).blocks
+    }
+
+    /// `text` with Windows line endings made plain newlines.
+    static func normalised(_ text: String) -> String {
+        text.replacingOccurrences(of: "\r\n", with: "\n")
+    }
+
+    /// The blocks of `input`'s lines, and the last point the parse came
+    /// back to with nothing open: just past a blank line between blocks
+    /// that isn't the final, still-open line. `cut.length` is the UTF-8
+    /// length of the lines up to there, newlines included, and
+    /// `cut.blocks` how many blocks they made. Nothing past a cut changes
+    /// the blocks before it (the parser only looks forward), which is
+    /// what `Stream` relies on.
+    static func parseLines(_ input: [String]) -> (blocks: [Block], cut: (length: Int, blocks: Int)?) {
+        var lines = input
         var blocks: [Block] = []
         var paragraph: [String] = []
+        var cut: (length: Int, blocks: Int)?
         var i = 0
+        // UTF-8 offset where line `cutLine` starts, walked forward as cuts
+        // move so finding them stays linear.
+        var cutLine = 0
+        var cutLength = 0
 
         func flushParagraph() {
             let joined = paragraph.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -81,6 +102,15 @@ enum Markdown {
             if trimmed.isEmpty {
                 flushParagraph()
                 i += 1
+                // A blank line between blocks, with a newline after it:
+                // nothing is open, so the text up to here is settled.
+                if i < lines.count {
+                    while cutLine < i {
+                        cutLength += input[cutLine].utf8.count + 1
+                        cutLine += 1
+                    }
+                    cut = (cutLength, blocks.count)
+                }
                 continue
             }
 
@@ -184,7 +214,7 @@ enum Markdown {
             i += 1
         }
         flushParagraph()
-        return blocks
+        return (blocks, cut)
     }
 
     // MARK: Pieces
@@ -374,5 +404,57 @@ extension Markdown {
         }
         out += AttributedString(plain)
         return out
+    }
+}
+
+extension Markdown {
+    /// The blocks of a reply that is still being written, parsed again
+    /// only from its last settled blank line on.
+    ///
+    /// The parser only looks forward, at most one line ahead, and a blank
+    /// line it reaches between blocks (not inside a fence, a
+    /// `<json-render>`, a table or a list item) leaves it with nothing
+    /// open. Everything before such a line is final however the text
+    /// grows: parsing the rest on its own gives the same blocks as parsing
+    /// it all. So each update re-reads only the text after the last blank
+    /// line that is complete (a newline follows it), usually the one
+    /// growing paragraph, instead of the whole reply. Text that doesn't
+    /// extend the last one (an edit, a different reply) parses from the
+    /// start.
+    final class Stream {
+        /// The text the blocks are for, line endings normalised.
+        private(set) var text = ""
+        private(set) var blocks: [Block] = []
+        /// UTF-8 length of the settled prefix, which ends just after a
+        /// blank line's newline; its blocks never change.
+        private var settledLength = 0
+        private var settledBlocks: [Block] = []
+        /// UTF-8 bytes handed to the parser so far, for tests.
+        private(set) var parsedLength = 0
+
+        init() {}
+
+        /// The blocks for `raw`, which usually extends the last text.
+        @discardableResult
+        func update(_ raw: String) -> [Block] {
+            let new = Markdown.normalised(raw)
+            if new == text { return blocks }
+            let keeps = new.utf8.count >= settledLength
+                && new.utf8.prefix(settledLength).elementsEqual(text.utf8.prefix(settledLength))
+            if !keeps {
+                settledLength = 0
+                settledBlocks = []
+            }
+            let rest = Substring(new.utf8.dropFirst(settledLength))
+            let parsed = Markdown.parseLines(rest.components(separatedBy: "\n"))
+            parsedLength += rest.utf8.count
+            blocks = settledBlocks + parsed.blocks
+            if let cut = parsed.cut {
+                settledBlocks += parsed.blocks[..<cut.blocks]
+                settledLength += cut.length
+            }
+            text = new
+            return blocks
+        }
     }
 }
