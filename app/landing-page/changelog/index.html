@@ -1293,6 +1293,16 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The Mac app's ledger ticks cost about a third of the CPU they did.</strong>
+A background scan now counts as new usage only when it wrote a usage
+event, not when it merely read a file, so a tick that appended prompts
+or tool output rebuilds nothing. Ticks that do write usage read less:
+a covering index answers the time-range reads without a table lookup
+per row, grouped reads group by dimension id before joining names, and
+Codex's account comparison reads only Codex rows. Measured against a
+copy of a 415,000-event ledger, one ingest tick went from about 6.4 to
+2.0 CPU-seconds. Closes <a href="https://github.com/c-wenlong/swe/issues/1568">#1568</a>.</p>
+</li>
 <li><p><strong>The hub stops re-reading idle Devin sessions every minute.</strong> A
 snapshot tailer trusted &quot;nothing changed&quot; for 60 s, then re-read the
 newest 1,000 chain nodes anyway. Devin's change token (the session's

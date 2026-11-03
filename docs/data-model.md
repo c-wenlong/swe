@@ -121,20 +121,24 @@ resolve through today's list; rates come from the catalog's history). `msg`, `he
   per-file scan position; a scan commits events and cursor in one
   transaction so a crash cannot double-count.
 
-Indexes: `events_ts(ts)`, `events_msg(msg) WHERE msg IS NOT NULL`, plus the
-`dims` UNIQUE index and the `path`/`key` primary keys. Every hot query is
-covered: range scans use `events_ts`, the dims join is a rowid lookup, and
-`ORDER BY ts, key` is satisfied by `events_ts` since rowid is the implicit
-last index column. `GROUP BY d.*` uses a temp b-tree, unavoidable without
-denormalizing.
+Indexes: `events_ts_cover(ts, dim, input, output, cache_read, cache_write,
+cache_write_1h, reasoning, session_total, cost)`, `events_dim(dim)`,
+`events_msg(msg) WHERE msg IS NOT NULL`, plus the `dims` UNIQUE index and
+the `path`/`key` primary keys. Rows sit in `key` (hash) order, so a range
+read through a plain `ts` index paid a table lookup per row scattered over
+the file; the covering index answers range reads alone and replaced
+`events_ts` (#1568). `groups()` groups in two passes: events by integer
+`dim` and price inputs first, then only those groups join `dims` and merge
+by the strings asked for, which roughly halves its CPU again.
 
 ```
-groups()          SEARCH e USING INDEX events_ts (ts>? AND ts<?) + PK join + temp b-tree group
-events(in:)       SEARCH e USING INDEX events_ts (ts>? AND ts<?) + PK join
+groups()          SEARCH e USING COVERING INDEX events_ts_cover (ts>? AND ts<?) + temp b-tree group by dim, then PK join + group
+groups(harness:)  SEARCH e USING INDEX events_dim (dim=?) over the harness's dims + temp b-tree group
+events(in:)       SEARCH e USING COVERING INDEX events_ts_cover (ts>? AND ts<?) + PK join + sort of ts ties by key
 selectByMessage   SEARCH events USING COVERING INDEX events_msg (msg=?)
 selectDim         SEARCH dims USING COVERING INDEX sqlite_autoindex_dims_1 (all six cols)
 cursor(for:)      SEARCH cursors USING INDEX sqlite_autoindex_cursors_1 (path=?)
-MAX(ts)           SEARCH events USING COVERING INDEX events_ts
+MAX(ts)           SEARCH events USING COVERING INDEX events_ts_cover
 ```
 
 ### Migration history
