@@ -1286,7 +1286,7 @@ class _Handler(BaseHTTPRequestHandler):
         if device_id.startswith(devices_mod.TAILNET_PREFIX):
             return pairing.signin_revoked(
                 home, device_id[len(devices_mod.TAILNET_PREFIX):])
-        row = pairing.load_devices(home).get(device_id) or {}
+        row = pairing.peek_devices(home).get(device_id) or {}
         return bool(row.get("revoked_at"))
 
     def _approver_node(self, peer: dict | None) -> str | None:
@@ -1959,7 +1959,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "sessions": readstate.annotate(
                     self._state.home, device_id, self._state.catalog.rows()),
                 "machines": list(
-                    catalog_mod.load_machines(self._state.home).values()
+                    catalog_mod.peek_machines(self._state.home).values()
                 ),
                 "server_time": time.time(),
             })
@@ -1981,7 +1981,7 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/v1/machines":
             self._send_json(200, {
                 "machines": list(
-                    catalog_mod.load_machines(self._state.home).values()
+                    catalog_mod.peek_machines(self._state.home).values()
                 )
             })
             return
