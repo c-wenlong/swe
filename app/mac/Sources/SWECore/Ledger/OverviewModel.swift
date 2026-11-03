@@ -247,8 +247,8 @@ public final class OverviewModel {
         var computedAt: Date
     }
 
-    /// Bumped when the ledger's content or pricing changes: a scan that read
-    /// anything, or a new price list. Invalidates every cached summary.
+    /// Bumped when the ledger's content or pricing changes: a scan that
+    /// wrote usage events, or a new price list. Invalidates every cached summary.
     /// Tests read it, and the Sessions page rereads usage when it moves.
     public private(set) var revision = 0
     private var summaryCache: [OverviewPeriod: CachedSummary] = [:]
@@ -405,7 +405,7 @@ public final class OverviewModel {
 
     /// What one scan changed, for the caller to decide what to rebuild.
     private struct ScanOutcome {
-        /// The scan read a file or database: the ledger may hold new usage.
+        /// The scan wrote usage events: the ledger's figures moved.
         var read = false
         /// A newer price list was set: every past cost may have moved.
         var repriced = false
@@ -437,7 +437,10 @@ public final class OverviewModel {
             scanNotes = report.notes
             scansRun += 1
             if recentLimit == nil { fullScanFinished = true }
-            if report.filesRead + report.filesRescanned + report.databasesRead > 0 {
+            // Only written usage moves a figure: a file read for a prompt
+            // or tool line, or rescanned into the rows it already had,
+            // leaves every consumer's figures as they were (#1568).
+            if report.eventsWritten > 0 {
                 revision += 1
                 outcome.read = true
             }
@@ -460,13 +463,13 @@ public final class OverviewModel {
     /// rebuilds only what is on show and changed, so an idle tick costs
     /// the scan alone (#1542):
     ///
-    /// - Read nothing: no figure query, no `completedScans` bump, no
-    ///   warming. The exceptions: a shown rolling period older than ten
+    /// - Wrote no usage event (nothing read, or only lines without usage):
+    ///   no figure query, no `completedScans` bump, no warming. The exceptions: a shown rolling period older than ten
     ///   minutes is rebuilt; spend and the last 30 days are rebuilt once
     ///   they are `rollingRefresh` old, and the first scan of a new day
     ///   also rereads the heatmap, both moving `completedScans` so pages
     ///   on "today" or a rolling period (Pricing, Calendar) move with them.
-    /// - Read new usage: `completedScans` moves for the other views, and
+    /// - Wrote usage events: `completedScans` moves for the other views, and
     ///   the menu bar's spend, the last 30 days (widgets, the heatmap's
     ///   recent days) and, while the page shows, the selected period are
     ///   rebuilt. Other periods and the heatmap's older days wait for the

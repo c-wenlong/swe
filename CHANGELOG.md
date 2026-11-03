@@ -1167,6 +1167,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The Mac app's ledger ticks cost about a third of the CPU they did.**
+  A background scan now counts as new usage only when it wrote a usage
+  event, not when it merely read a file, so a tick that appended prompts
+  or tool output rebuilds nothing. Ticks that do write usage read less:
+  a covering index answers the time-range reads without a table lookup
+  per row, grouped reads group by dimension id before joining names, and
+  Codex's account comparison reads only Codex rows. Measured against a
+  copy of a 415,000-event ledger, one ingest tick went from about 6.4 to
+  2.0 CPU-seconds. Closes [#1568](https://github.com/c-wenlong/swe/issues/1568).
 - **The hub slows down while nobody is watching.** With no client
   stream open (the ntfy notifier holds one whenever it can push;
   satellite command streams don't count) and no client request for two
