@@ -694,14 +694,22 @@ def _read_kilo(session: Session) -> NormalizedTranscript:
 
 
 @register_reader("copilot")
-def _read_copilot(session: Session) -> NormalizedTranscript:
+def _read_copilot(session: Session, max_turns: int | None = None) -> NormalizedTranscript:
+    """``max_turns`` reads only the newest that many turns (the live
+    tailer); reports read them all."""
     path = Path(os.path.expanduser("~/.copilot/session-store.db"))
     conn = _open_ro(path)
     if conn is None:
         return _unreadable(session, "Copilot store not found", [path])
     transcript = _new(session, [path])
     try:
-        rows = conn.execute("SELECT user_message, assistant_response FROM turns WHERE session_id = ? ORDER BY turn_index", (session.session_id,))
+        if max_turns is None:
+            rows = conn.execute("SELECT user_message, assistant_response FROM turns WHERE session_id = ? ORDER BY turn_index", (session.session_id,)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT user_message, assistant_response FROM turns WHERE session_id = ? "
+                "ORDER BY turn_index DESC LIMIT ?", (session.session_id, max_turns)).fetchall()
+            rows.reverse()
         for user, assistant in rows:
             for role, content in (("human", user), ("assistant", assistant)):
                 msg = _message(role, content)
@@ -852,12 +860,24 @@ def _devin_chain_tail(
     return ordered
 
 
+# Readers that can stop at the newest rows, keyed by tool. The rest keep
+# a whole JSON document per session (Cline, Continue, Gemini, Forge's
+# context blob), which has to be parsed whole to find its end anyway.
+_TAIL_READERS: dict[str, Callable[[Session, int], NormalizedTranscript]] = {
+    "devin": lambda session, n: _read_devin(session, max_nodes=n),
+    "copilot": lambda session, n: _read_copilot(session, max_turns=n),
+    "crush": lambda session, n: _read_crush(session, max_messages=n),
+}
+
+
 def read_transcript_tail(session: Session, max_messages: int) -> NormalizedTranscript:
     """``read_transcript`` bounded to roughly the newest ``max_messages``
-    where the store allows it (Devin); a full read elsewhere."""
-    if session.tool_name == "devin":
+    where the store allows it (Devin, Copilot, Crush); a full read
+    elsewhere."""
+    reader = _TAIL_READERS.get(session.tool_name)
+    if reader is not None:
         try:
-            transcript = _read_devin(session, max_nodes=max_messages)
+            transcript = reader(session, max_messages)
             transcript.messages = _deduplicate(transcript.messages)
             return transcript
         except Exception as exc:
@@ -885,7 +905,9 @@ def _read_forge(session: Session) -> NormalizedTranscript:
 
 
 @register_reader("crush")
-def _read_crush(session: Session) -> NormalizedTranscript:
+def _read_crush(session: Session, max_messages: int | None = None) -> NormalizedTranscript:
+    """``max_messages`` reads only the newest that many rows (the live
+    tailer); reports read them all."""
     index = Path(os.path.expanduser("~/.local/share/crush/projects.json"))
     try:
         data = json.loads(index.read_text(encoding="utf-8"))
@@ -906,7 +928,14 @@ def _read_crush(session: Session) -> NormalizedTranscript:
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
                 role_col = "role" if "role" in columns else "sender"
                 text_col = "content" if "content" in columns else "message"
-                for role, content in conn.execute(f"SELECT {role_col}, {text_col} FROM messages WHERE session_id = ? ORDER BY rowid", (session.session_id,)):
+                query = f"SELECT {role_col}, {text_col} FROM messages WHERE session_id = ?"
+                if max_messages is None:
+                    rows = conn.execute(query + " ORDER BY rowid", (session.session_id,)).fetchall()
+                else:
+                    rows = conn.execute(query + " ORDER BY rowid DESC LIMIT ?",
+                                        (session.session_id, max_messages)).fetchall()
+                    rows.reverse()
+                for role, content in rows:
                     msg = _message(_role(role), content)
                     if msg:
                         transcript.messages.append(msg)

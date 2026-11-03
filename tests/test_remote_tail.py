@@ -486,6 +486,10 @@ class TestSnapshotSource(unittest.TestCase):
             from swe.reports.transcripts import NormalizedMessage
             return NormalizedMessage(role=role, text=text, kind="message")
 
+        # No source files to stat: every poll reads (no miss backoff).
+        miss = patch.object(tail, "SNAPSHOT_MISS_S", 0.0)
+        miss.start()
+        self.addCleanup(miss.stop)
         with patch.object(tail._tr, "read_transcript",
                           return_value=FakeTranscript(["a", "b"])):
             self.assertEqual(len(src.poll()), 2)
@@ -550,6 +554,49 @@ class TestSnapshotChangeGate(unittest.TestCase):
                 patch.object(tail, "SNAPSHOT_RECHECK_S", 0.0):
             src.poll(); src.poll(); src.poll()
             self.assertEqual(rt.call_count, 3)
+
+    def test_a_read_with_no_sources_backs_off_instead_of_every_poll(self):
+        # #1526: no files means no token, which read on every poll.
+        src = tail.SnapshotSource(self._session())
+        missing = _Transcript([])
+        missing.readable = False
+        clock = [100.0]
+        reads = []
+
+        def read(_s):
+            reads.append(clock[0])
+            return missing
+
+        with patch.object(tail._tr, "read_transcript", side_effect=read), \
+                patch.object(tail.time, "monotonic", side_effect=lambda: clock[0]):
+            for _ in range(600):
+                src.poll()
+                clock[0] += 0.5
+        gaps = [b - a for a, b in zip(reads, reads[1:])]
+        self.assertEqual(gaps[:6], [1.0, 2.0, 4.0, 8.0, 16.0, 32.0])
+        self.assertEqual(set(gaps[6:]), {tail.SNAPSHOT_RECHECK_S})
+
+    def test_sources_appearing_end_the_backoff(self):
+        src = tail.SnapshotSource(self._session())
+        missing = _Transcript([])
+        missing.readable = False
+        clock = [100.0]
+        found = [missing]
+        with patch.object(tail._tr, "read_transcript", side_effect=lambda _s: found[0]) as rt, \
+                patch.object(tail.time, "monotonic", side_effect=lambda: clock[0]):
+            for _ in range(10):
+                src.poll()
+                clock[0] += 1.0
+            found[0] = _Transcript(["a"], [str(self.store)])
+            clock[0] += tail.SNAPSHOT_RECHECK_S
+            self.assertEqual([m["text"] for m in src.poll()], ["a"])
+            calls = rt.call_count
+            # From here the file's stat gates reads, as for any store.
+            self.store.write_text('{"more": 1}')
+            found[0] = _Transcript(["a", "b"], [str(self.store)])
+            clock[0] += 0.5
+            self.assertEqual([m["text"] for m in src.poll()], ["b"])
+            self.assertEqual(rt.call_count, calls + 1)
 
     def test_devin_uses_its_row_token(self):
         src = tail.SnapshotSource(self._session("devin"))
@@ -630,6 +677,7 @@ class TestSlidingWindowDiff(unittest.TestCase):
         # A repeated message makes [a] a chance prefix; the slide overlap [a, c] wins.
         self.assertEqual(tail._new_from(["a", "b", "a", "c"], ["a", "c", "d", "e"]), 2)
 
+    @patch.object(tail, "SNAPSHOT_MISS_S", 0.0)  # sourceless fakes read every poll
     def test_windowed_snapshot_emits_only_the_slid_in_messages(self):
         src = tail.SnapshotSource(Session(timestamp=0, agent="X", path="/tmp", session_id="s", tool_name="nope"))
         with patch.object(tail._tr, "read_transcript", return_value=_Transcript(["m1", "m2", "m3"])):
@@ -738,6 +786,7 @@ class TestBackfillCap(unittest.TestCase):
         src.start_near_end(max_bytes=1 << 20)
         self.assertEqual([m["text"] for m in src.poll()], ["only"])
 
+    @patch.object(tail, "SNAPSHOT_MISS_S", 0.0)  # sourceless fakes read every poll
     def test_snapshot_emits_the_newest_messages_first_time_only(self):
         src = tail.SnapshotSource(Session(timestamp=0, agent="X", path="/tmp", session_id="s", tool_name="nope"))
         src.start_near_end(max_messages=2)

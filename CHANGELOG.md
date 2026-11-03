@@ -1167,6 +1167,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A snapshot session whose store can't be found no longer costs a
+  read attempt every poll.** When a Cline, Continue, Gemini, Copilot,
+  Forge or Crush read found no source files, the tailer had nothing to
+  stat for a change token and tried a whole read on every poll, every
+  second for an active session. It now waits 1 s, then 2, 4 and so on up
+  to a minute between attempts, and goes back to the stat check once the
+  files exist. Copilot and Crush tail reads also stop at the newest 1,000
+  turns or rows instead of reading the whole session; the other stores
+  keep one JSON document per session, which has to be parsed whole.
+  Closes [#1526](https://github.com/c-wenlong/swe/issues/1526).
+
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
   newest 1,000 chain nodes anyway. Devin's change token (the session's
