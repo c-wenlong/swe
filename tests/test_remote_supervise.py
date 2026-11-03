@@ -1738,6 +1738,38 @@ class TestAttachModeGates(unittest.TestCase):
             supervise.approval_fingerprint(p3))
 
 
+class TestTmuxBin(unittest.TestCase):
+    """tmux's path is looked up once, not per tmux call (#1531)."""
+
+    def setUp(self):
+        supervise._TMUX_BIN = None
+        self.addCleanup(setattr, supervise, "_TMUX_BIN", None)
+
+    def test_a_hit_is_kept_while_path_and_file_stay(self):
+        with patch.object(supervise.shutil, "which",
+                          return_value="/bin/sh") as which, \
+                patch.dict(os.environ, {"PATH": "/bin"}):
+            for _ in range(5):
+                self.assertEqual(supervise.tmux_bin(), "/bin/sh")
+            self.assertEqual(which.call_count, 1)
+            os.environ["PATH"] = "/usr/bin:/bin"
+            supervise.tmux_bin()
+            self.assertEqual(which.call_count, 2)
+
+    def test_a_vanished_binary_is_looked_up_again(self):
+        with patch.object(supervise.shutil, "which",
+                          side_effect=["/nonexistent/tmux", None]) as which:
+            self.assertEqual(supervise.tmux_bin(), "/nonexistent/tmux")
+            self.assertIsNone(supervise.tmux_bin())
+        self.assertEqual(which.call_count, 2)
+
+    def test_a_miss_is_never_kept(self):
+        with patch.object(supervise.shutil, "which",
+                          side_effect=[None, "/bin/sh"]):
+            self.assertIsNone(supervise.tmux_bin())
+            self.assertEqual(supervise.tmux_bin(), "/bin/sh")
+
+
 class TestResolveMode(unittest.TestCase):
     def test_claude_auto_prefers_tmux(self):
         with patch.object(supervise, "tmux_bin", return_value="/x/tmux"):

@@ -253,11 +253,19 @@ def provider_fields(launchable: list[dict],
             Path(home) if home is not None else None))
     except ValueError:
         keys = {}
+    from swe.harness import registry
+
+    # One registry read for every harness: capability() and configured()
+    # each read harness.json again when they aren't handed it.
+    try:
+        reg = registry.load_registry_readonly()
+    except (OSError, ValueError):
+        reg = {}
     offered: dict[str, list[str]] = {}
     names: dict[str, str] = {}
     for item in launchable:
-        caps = launch_provider.capability(item["name"]) or {}
-        slugs = launch_provider.configured(item["name"], keys)
+        caps = launch_provider.capability(item["name"], reg) or {}
+        slugs = launch_provider.configured(item["name"], keys, reg)
         if slugs:
             offered[item["name"]] = slugs
             for slug in slugs:

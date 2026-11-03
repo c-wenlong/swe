@@ -1167,6 +1167,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The hub reads `harness.json` once per launch-field refresh and
+  finds tmux once.** Every 10 s catalog tick read the registry twice
+  per launchable harness to list its launch providers (about 1.1 ms
+  of 2 ms with ten harnesses); it now reads it once. Every tmux call
+  walked `PATH` for the tmux binary (21 us); the path is now kept
+  while `PATH` is unchanged and the file is still executable (5 us). A
+  missing tmux is looked up again each time, so one installed later is
+  found. Closes [#1531](https://github.com/c-wenlong/swe/issues/1531).
 - **A snapshot session whose store can't be found no longer costs a
   read attempt every poll.** When a Cline, Continue, Gemini, Copilot,
   Forge or Crush read found no source files or a store it couldn't read,
