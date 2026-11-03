@@ -595,6 +595,10 @@ class TestKeptTmuxSessions(unittest.TestCase):
 
     def test_a_different_process_under_the_name_is_not_adopted(self):
         self._run_harness()
+        # Killing the server's only session shuts it down, and on newer
+        # tmux (ubuntu-26.04) a new-session right after can reach it
+        # mid-exit: "server exited unexpectedly". A second session keeps it up.
+        self._run_harness("keeper")
         supervise.mark(self.home, self.key, _tmux_meta(self.name))
         supervise.keep(self.home, self.key)
         subprocess.run(["tmux", "-L", self.socket, "kill-session", "-t",
