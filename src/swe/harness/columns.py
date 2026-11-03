@@ -70,9 +70,16 @@ def window_label(days: int | None) -> str:
     return "All" if days is None else f"{days}d"
 
 
-def load_window() -> int | None:
+def list_section() -> dict:
+    """config.json's ``list`` object, read once: ``swe list`` passes it
+    to ``load_columns`` and ``load_window`` instead of each re-reading
+    config.json (#1536)."""
+    return _section()
+
+
+def load_window(section: dict | None = None) -> int | None:
     """The configured session window, or the default when unset."""
-    section = _section()
+    section = _section() if section is None else section
     if _WINDOW_KEY not in section:
         return DEFAULT_WINDOW
     value = section[_WINDOW_KEY]
@@ -114,9 +121,9 @@ def normalise(keys) -> list[str]:
     return [c.key for c in COLUMNS if c.key in wanted]
 
 
-def load_columns() -> list[str]:
+def load_columns(section: dict | None = None) -> list[str]:
     """The configured column set, or the default when unset."""
-    configured = _section().get(_CONFIG_KEY)
+    configured = (_section() if section is None else section).get(_CONFIG_KEY)
     if not configured:
         return list(DEFAULT_COLUMNS)
     return normalise(configured)

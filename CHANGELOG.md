@@ -1179,6 +1179,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry goes after a day. A hub event going to several open streams is now cleaned and
   encoded once, not once per stream. Closes
   [#1532](https://github.com/c-wenlong/swe/issues/1532).
+- **The hub stops re-parsing its small stores on every request.** The
+  credential check, an open stream's revocation check, the session
+  list's unread flags and the machine list read `devices.json`, the
+  sign-ins file, `session_reads.json` (twice per session list) and
+  `machines.json` from disk each time. They now share one memo that
+  parses a file again only when it changes: a session list over 2,000
+  read cursors went from 1.8 ms to 0.7 ms, and a credential check from
+  37 to 11 us. Closes
+  [#1528](https://github.com/c-wenlong/swe/issues/1528).
+- **The Mac app's background polls no longer keep the Mac awake.**
+  Every `swe` the app ran held a user-initiated activity, which also
+  blocks idle system sleep while the child runs, so the GitHub poll, the
+  3 s pair-request poll on Remote settings and the account, feed and
+  limit refreshes each held it off several times a minute. Polls and
+  timers now run their `swe` with no activity; runs from a button keep
+  it. The activity always ended with each run, so App Nap was only off
+  while a child ran, never for the whole app. Closes
+  [#1540](https://github.com/c-wenlong/swe/issues/1540).
+- **The Mac app's ledger ticks cost about a third of the CPU they did.**
+  A background scan now counts as new usage only when it wrote a usage
+  event, not when it merely read a file, so a tick that appended prompts
+  or tool output rebuilds nothing. Ticks that do write usage read less:
+  a covering index answers the time-range reads without a table lookup
+  per row, grouped reads group by dimension id before joining names, and
+  Codex's account comparison reads only Codex rows. Measured against a
+  copy of a 415,000-event ledger, one ingest tick went from about 6.4 to
+  2.0 CPU-seconds. Closes [#1568](https://github.com/c-wenlong/swe/issues/1568).
+- **The hub slows down while nobody is watching.** With no client
+  stream open (the ntfy notifier holds one whenever it can push;
+  satellite command streams don't count) and no client request for two
+  minutes, `swe remote serve` polls
+  active sessions every 5 s instead of 1 s and idle ones every 60 s
+  instead of 8 s, refreshes the catalog every 60 s instead of 10 s, and
+  ticks its tail loop once a second instead of four times. Transcripts
+  stay on disk, so this only delays the journal's copy. The next client
+  request ends it at once: every tailer polls, the catalog refreshes, and
+  the first `/v1/sessions` or `/v1/inbox` read waits up to 5 s for that
+  refresh instead of serving a minute-old list. An unwatched hub on this
+  Mac used about 8% of a core, split about evenly between the catalog
+  and tail threads. Closes
+  [#1520](https://github.com/c-wenlong/swe/issues/1520).
+- **`swe` starts faster: each command imports only its own code.**
+  `cli.py` imported every command's module tree before dispatching, so
+  `import swe.cli` took about 330 ms on a loaded machine, nearly all of
+  a `swe version` run, and every `swe` the Mac app spawns paid it. Each
+  command now imports its module when it runs, which brings
+  `import swe.cli` to about 33 ms. A rate limits call also reads its
+  cache file once instead of five times, and `swe list` reads
+  config.json's `list` section once instead of three times. Closes
+  [#1536](https://github.com/c-wenlong/swe/issues/1536).
 - **The status column reads less per session.** OpenCode's probe
   pulled the full JSON of a session's newest 50 messages and ran two
   `PRAGMA table_info` reads for every session; it now reads the table
