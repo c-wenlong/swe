@@ -1167,6 +1167,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The status column reads less per session.** OpenCode's probe
+  pulled the full JSON of a session's newest 50 messages and ran two
+  `PRAGMA table_info` reads for every session; it now reads the table
+  shape once per pass, picks the deciding row by type, and loads only
+  that row's JSON. Devin's probe lets SQLite pull the role, tool calls
+  and text out of the head message instead of decoding all of it.
+  Cline caches the follow-up check against its `messages.json`
+  signature and reads the metadata file once per pass, and the tail
+  probes decode JSONL lines newest-first only until the walk decides.
+  CPU per pass here: OpenCode 381 sessions about 66 to 50 ms, Devin
+  216 sessions about 10 to 6 ms, a 64 KB transcript tail walk about
+  half. Closes [#1535](https://github.com/c-wenlong/swe/issues/1535).
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
   newest 1,000 chain nodes anyway. Devin's change token (the session's
