@@ -498,12 +498,19 @@ private struct SearchRunner: View {
     @Environment(AppModel.self) private var app
     let search: SessionSearch
     let pulls: Int
+    /// Polls that arrived while the last search had failed. The search's
+    /// own result never moves the trigger, so a failure (or the success
+    /// after it) doesn't send a request of its own; the next poll does.
+    @State private var retries = 0
 
     var body: some View {
         Color.clear
             .task(id: SearchTrigger(query: search.query, sessions: app.sessions, pulls: pulls,
-                                    tick: SearchTrigger.tick(refreshedAt: app.refreshedAt, failed: search.error != nil))) {
+                                    tick: SearchTrigger.tick(refreshedAt: app.refreshedAt), retries: retries)) {
                 await search.run(app: app)
+            }
+            .onChange(of: app.refreshedAt) {
+                retries = SearchTrigger.retries(retries, pollWhileFailed: search.error != nil)
             }
     }
 }
@@ -513,16 +520,20 @@ struct SearchTrigger: Equatable {
     var sessions: [SessionRow]
     var pulls = 0
     var tick = 0
+    var retries = 0
 
     /// How often an unchanged list reruns a search.
     static let every: TimeInterval = 60
 
-    /// Every refresh while the last search failed; else the minute the
-    /// lists last refreshed in.
-    static func tick(refreshedAt: Date?, failed: Bool) -> Int {
+    /// The minute the lists last refreshed in.
+    static func tick(refreshedAt: Date?) -> Int {
         guard let refreshedAt else { return 0 }
-        let t = refreshedAt.timeIntervalSinceReferenceDate
-        return failed ? Int(t * 1000) : Int(t / every)
+        return Int(refreshedAt.timeIntervalSinceReferenceDate / every)
+    }
+
+    /// The retry count after a poll: one more when the last search failed.
+    static func retries(_ count: Int, pollWhileFailed failed: Bool) -> Int {
+        failed ? count + 1 : count
     }
 }
 

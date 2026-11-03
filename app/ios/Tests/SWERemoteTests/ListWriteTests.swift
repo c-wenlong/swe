@@ -91,11 +91,15 @@ final class ListWriteTests: XCTestCase {
         // 15 s polls: four in a minute share a tick, so the hub's
         // transcript index still gets asked once a minute.
         let start = Date(timeIntervalSinceReferenceDate: 60 * 1000)
-        let ticks = (0..<8).map { SearchTrigger.tick(refreshedAt: start.addingTimeInterval(Double($0) * 15), failed: false) }
+        let ticks = (0..<8).map { SearchTrigger.tick(refreshedAt: start.addingTimeInterval(Double($0) * 15)) }
         XCTAssertEqual(Set(ticks).count, 2)
-        // After a failed search, every poll tries again.
-        let failing = (0..<4).map { SearchTrigger.tick(refreshedAt: start.addingTimeInterval(Double($0) * 15), failed: true) }
-        XCTAssertEqual(Set(failing).count, 4)
-        XCTAssertEqual(SearchTrigger.tick(refreshedAt: nil, failed: true), 0)
+        XCTAssertEqual(SearchTrigger.tick(refreshedAt: nil), 0)
+        // After a failed search, each poll tries again; a poll after a
+        // good one doesn't.
+        var retries = 0
+        retries = SearchTrigger.retries(retries, pollWhileFailed: true)
+        retries = SearchTrigger.retries(retries, pollWhileFailed: true)
+        XCTAssertEqual(retries, 2)
+        XCTAssertEqual(SearchTrigger.retries(retries, pollWhileFailed: false), 2)
     }
 }
