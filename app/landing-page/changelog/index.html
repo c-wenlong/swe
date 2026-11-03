@@ -1293,6 +1293,16 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The Mac app keeps fewer things in memory for its whole life.</strong>
+Switching machines kept a live web view and WebContent process for
+every hub ever shown; only the last two shown stay now, and an older
+one reloads when picked. The Calendar's day cache stops at 400 days,
+dropping the days farthest from the ones on show, so scrolling back
+through years no longer grows it without end. The Sessions page lists
+at most 20,000 sessions instead of 100,000, with the existing note
+when older ones are left out. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1544">#1544</a>.</p>
+</li>
 <li><p><strong>The hub stops re-parsing its small stores on every request.</strong> The
 credential check, an open stream's revocation check, the session
 list's unread flags and the machine list read <code>devices.json</code>, the
