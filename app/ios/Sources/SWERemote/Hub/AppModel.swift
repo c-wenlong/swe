@@ -92,31 +92,12 @@ final class AppModel {
             let (sessionsBody, inboxBody) = try await (s, i)
             guard hub == pairedAtStart else { return }
             let fetched = pins.overlay(sessionsBody.sessions, fetchedFrom: pinMark)
-            // Attached both when this refresh asked and now, and the hub
-            // says it isn't: detached elsewhere. One attached while the
-            // request was out isn't judged by an answer older than that.
-            let attachedNow = Set(sessions.filter(\.isAttached).map(\.key))
-            sessions = fetched
-            unread.reconcile(fetched)
-            for key in attachedAtStart.intersection(attachedNow)
-            where fetched.first(where: { $0.key == key })?.isAttached != true {
-                handedBack(key)
-            }
-            let now = Date()
-            pendingDetaches = pendingDetaches.filter { key, at in
-                now.timeIntervalSince(at) < Self.detachWaitCap && fetched.first { $0.key == key }?.isAttached != false
-            }
-            machines = sessionsBody.machines ?? machines
+            applyLists(sessions: fetched, machines: sessionsBody.machines, inbox: inboxBody.items,
+                       attachedAtStart: attachedAtStart)
             rememberName(machines.first?.displayName, of: pairedAtStart)
-            // Overlay dismissals still in flight: a response captured
-            // before the hub saw the POST would resurrect a cleared row.
-            inbox = dismissals.overlay(inboxBody.items)
-            refreshedAt = Date()
-            connection = .online
             if let paired = pairedAtStart {
                 widgets?.publish(hubId: paired.id, hubName: hubName, sessions: sessions, inbox: inbox)
             }
-            loadError = nil
         } catch is CancellationError {
             // The app left the screen, or another hub went on it: not a
             // hub that can't be reached.
@@ -124,13 +105,47 @@ final class AppModel {
         } catch let error as HubError {
             guard hub == pairedAtStart, !Task.isCancelled else { return }
             if error.isUnauthorized { unpair(from: client); return }
-            connection = .offline
-            loadError = error.message
+            if connection != .offline { connection = .offline }
+            if loadError != error.message { loadError = error.message }
         } catch {
             guard hub == pairedAtStart, !Task.isCancelled else { return }
-            connection = .offline
+            if connection != .offline { connection = .offline }
         }
-        loadedOnce = true
+        if !loadedOnce { loadedOnce = true }
+    }
+
+    /// Stores one poll's lists. `@Observable` reports every write, equal
+    /// or not, and the 15 s poll mostly brings back what is already
+    /// here, so each list is written only when it changed: an unchanged
+    /// poll leaves the Sessions page's grouping, its search and the inbox
+    /// alone. Only `refreshedAt` moves every time (the model switch reads
+    /// it).
+    func applyLists(sessions fetched: [SessionRow], machines fetchedMachines: [Machine]?,
+                    inbox items: [InboxItem], attachedAtStart: Set<String>, now: Date = Date()) {
+        // Attached both when this refresh asked and now, and the hub
+        // says it isn't: detached elsewhere. One attached while the
+        // request was out isn't judged by an answer older than that.
+        let attachedNow = Set(sessions.filter(\.isAttached).map(\.key))
+        if sessions != fetched { sessions = fetched }
+        var reconciled = unread
+        reconciled.reconcile(fetched)
+        if reconciled != unread { unread = reconciled }
+        for key in attachedAtStart.intersection(attachedNow)
+        where fetched.first(where: { $0.key == key })?.isAttached != true {
+            handedBack(key)
+        }
+        let detaches = pendingDetaches.filter { key, at in
+            now.timeIntervalSince(at) < Self.detachWaitCap && fetched.first { $0.key == key }?.isAttached != false
+        }
+        if detaches != pendingDetaches { pendingDetaches = detaches }
+        if let fetchedMachines, fetchedMachines != machines { machines = fetchedMachines }
+        // Overlay dismissals still in flight: a response captured
+        // before the hub saw the POST would resurrect a cleared row.
+        let shown = dismissals.overlay(items)
+        if shown != inbox { inbox = shown }
+        refreshedAt = now
+        if connection != .online { connection = .online }
+        if loadError != nil { loadError = nil }
     }
 
     /// Sessions as the list shows them: a session with an approval open is

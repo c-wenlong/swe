@@ -77,8 +77,11 @@ const SessionChat = (() => {
       ended.push(id);
       if (ended.length > 256) ended.splice(0, ended.length - 256);
     };
-    const shown = () => bubbles.filter((b) => !b.broken && b.kind === "assistant" && b.text);
-    const key = () => shown().map((b) => `${b.id}\u0000${b.text}`).join("\u0001");
+    // Whether a bubble is drawn. Each change below asks this of the one
+    // bubble it touches, rather than comparing every bubble's text before
+    // and after (#1555).
+    const drawn = (b) => !b.broken && b.kind === "assistant" && !!b.text;
+    const shown = () => bubbles.filter(drawn);
     return {
       shown,
       openIds: () => bubbles.filter((b) => !b.claimed).map((b) => b.id),
@@ -87,18 +90,24 @@ const SessionChat = (() => {
         const id = d && typeof d.id === "string" ? d.id : "";
         const seq = d && Number.isInteger(d.seq) ? d.seq : 0;
         if (!id || ended.includes(id)) return false;
-        const before = key();
         const b = bubbles.find((x) => x.id === id);
-        if (b) {
-          if (d.done === true) b.done = true;
-          if (b.broken) return false;
-          if (seq !== b.seq + 1) { b.broken = true; b.text = ""; }
-          else { b.text += d.text || ""; b.seq = seq; }
-        } else {
-          bubbles.push({ id, kind: d.kind || "assistant", text: seq === 1 ? d.text || "" : "", seq,
-            done: d.done === true, broken: seq !== 1, claimed: false });
+        if (!b) {
+          const nb = { id, kind: d.kind || "assistant", text: seq === 1 ? d.text || "" : "", seq,
+            done: d.done === true, broken: seq !== 1, claimed: false };
+          bubbles.push(nb);
+          return drawn(nb);
         }
-        return key() !== before;
+        if (d.done === true) b.done = true;
+        if (b.broken) return false;
+        if (seq !== b.seq + 1) {
+          const was = drawn(b);
+          b.broken = true;
+          b.text = "";
+          return was;
+        }
+        b.text += d.text || "";
+        b.seq = seq;
+        return !!d.text && drawn(b);
       },
       /* A live final of ``kind``: the id of the bubble it replaces, or "". */
       claim(kind) {
@@ -109,18 +118,19 @@ const SessionChat = (() => {
         return b.id;
       },
       release(id) {
-        const before = key();
+        const had = bubbles.some((b) => b.id === id && drawn(b));
         bubbles = bubbles.filter((b) => b.id !== id);
-        return key() !== before;
+        return had;
       },
       /* The session went idle: of ``ids`` (open when it did), the ones no
        * final claimed go. */
       sweep(ids) {
-        const before = key();
         const gone = new Set(ids);
-        for (const b of bubbles) if (gone.has(b.id) && !b.claimed) end(b.id);
-        bubbles = bubbles.filter((b) => !(gone.has(b.id) && !b.claimed));
-        return key() !== before;
+        const goes = (b) => gone.has(b.id) && !b.claimed;
+        const had = bubbles.some((b) => goes(b) && drawn(b));
+        for (const b of bubbles) if (goes(b)) end(b.id);
+        bubbles = bubbles.filter((b) => !goes(b));
+        return had;
       },
       clear() {
         const had = shown().length > 0;
@@ -166,8 +176,13 @@ const SessionChat = (() => {
    * shows as a file name (the phone's code-intent rule), and a lone
    * `![alt](src)` or a harness's `<json-render>` folds into a note. */
 
-  function mdBlocks(text) {
+  /* `marks`, when given, collects every blank line the parse stops on
+   * between blocks, as [line, blocks before it]: nothing before such a
+   * line looks past it, so the blocks before it never change when text
+   * is added after it (mdStream relies on that). */
+  function mdBlocks(text, marks) {
     const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+    if (marks) marks.lines = lines.length;
     const blocks = [];
     let paragraph = [];
     const flush = () => {
@@ -210,7 +225,12 @@ const SessionChat = (() => {
         continue;
       }
 
-      if (!trimmed) { flush(); i += 1; continue; }
+      if (!trimmed) {
+        flush();
+        if (marks) marks.push([i, blocks.length]);
+        i += 1;
+        continue;
+      }
 
       // A view a harness drew (Droid's <json-render>) folds into a note;
       // text after the closing tag on its line parses as usual.
@@ -566,6 +586,38 @@ const SessionChat = (() => {
     return renderMd(mdBlocks(text));
   }
 
+  /* md() for a reply still being written (#1555). Blocks that end at a
+   * blank line the parse stops on, before the last line (which may still
+   * grow), are settled: `state.head` keeps the text they came from and
+   * `state.html` their HTML, and only the text after them is parsed again.
+   * Returns { reset, fresh, tail }: whether the settled part started over
+   * (the text no longer starts with `head`), the HTML settled by this
+   * call, and the HTML of the unsettled rest. state.html + tail is always
+   * md(text). Before this a long reply was parsed and highlighted whole
+   * on every repaint. */
+  function mdStream(state, text) {
+    text = String(text || "");
+    const reset = state.head === undefined || !text.startsWith(state.head);
+    if (reset) { state.head = ""; state.html = ""; }
+    const rest = text.slice(state.head.length);
+    const marks = [];
+    const blocks = mdBlocks(rest, marks);
+    let mark = null;
+    for (let k = marks.length - 1; k >= 0; k--) {
+      if (marks[k][0] < marks.lines - 1) { mark = marks[k]; break; }
+    }
+    if (!mark) return { reset, fresh: "", tail: renderMd(blocks) };
+    const fresh = renderMd(blocks.slice(0, mark[1]));
+    state.html += fresh;
+    // Settle up to the start of the mark's line, counting breaks the way
+    // mdBlocks reads them (\r\n, \r or \n). The blank line itself stays in
+    // the rest, where it opens nothing.
+    const br = /\r\n?|\n/g;
+    for (let n = 0; n < mark[0]; n++) br.exec(rest);
+    state.head = text.slice(0, state.head.length + br.lastIndex);
+    return { reset, fresh, tail: renderMd(blocks.slice(mark[1])) };
+  }
+
   function newClientId() {
     // The hub accepts 1-64 of [A-Za-z0-9_-]; uuid dashes are already legal.
     if (crypto.randomUUID) return crypto.randomUUID();
@@ -599,11 +651,32 @@ const SessionChat = (() => {
     return last && last === chat.streamBox ? last.previousElementSibling : last;
   }
 
+  /* One streaming bubble's text, drawn through mdStream: the settled
+   * blocks' nodes stay put (a selection in them survives), and only the
+   * nodes after them are replaced. `st.kept` counts the settled nodes. */
+  function paintBubble(el, text) {
+    const st = el.mdState || (el.mdState = { kept: 0 });
+    const out = mdStream(st, text);
+    let box = el.querySelector(".text");
+    if (!box || out.reset) {
+      el.innerHTML = '<div class="text"></div>';
+      box = el.querySelector(".text");
+      st.kept = 0;
+    }
+    while (box.childNodes.length > st.kept) box.lastChild.remove();
+    if (out.fresh) {
+      box.insertAdjacentHTML("beforeend", out.fresh);
+      st.kept = box.childNodes.length;
+    }
+    if (out.tail) box.insertAdjacentHTML("beforeend", out.tail);
+  }
+
   /* Draws the bubbles as they are now. Streaming text gets the same
    * Markdown as the final message: it only grows, so a half-written block
    * (an unclosed fence, a ** not yet closed) is the only flicker, and
    * switching to Markdown at the end would reflow the whole reply at once.
-   * Only a bubble whose text changed is drawn again. */
+   * Only a bubble whose text changed is drawn again, and only from its
+   * last settled block on (paintBubble). */
   function paintStreams() {
     clearTimeout(chat.streamPaint);
     chat.streamPaint = null;
@@ -626,18 +699,24 @@ const SessionChat = (() => {
       log.appendChild(box);
     }
     const keep = new Set(shown.map((b) => b.id));
-    for (const el of [...box.children]) if (!keep.has(el.dataset.streamId)) el.remove();
+    const els = new Map();
+    for (const el of [...box.children]) {
+      if (keep.has(el.dataset.streamId)) els.set(el.dataset.streamId, el);
+      else el.remove();
+    }
     for (const b of shown) {
-      let el = [...box.children].find((x) => x.dataset.streamId === b.id);
+      let el = els.get(b.id);
       if (!el) {
         el = document.createElement("div");
         el.className = "msg assistant streaming arrive";
         el.dataset.streamId = b.id;
         box.appendChild(el);
       }
-      if (el.dataset.text !== b.text) {
-        el.dataset.text = b.text;
-        el.innerHTML = `<div class="text">${md(b.text)}</div>`;
+      // The text drawn, kept as a property: an attribute would copy the
+      // whole reply into the DOM on every paint.
+      if (el.streamText !== b.text) {
+        el.streamText = b.text;
+        paintBubble(el, b.text);
       }
     }
     if (stick) scrollBottom();
@@ -1684,7 +1763,7 @@ const SessionChat = (() => {
       <div class="chat-bar" id="chat-bar"></div>
       <div class="card error-card hidden" id="chat-error"></div>
       <div class="card chat-banner hidden" id="chat-banner"></div>
-      <div class="chat-log" id="chat-log" aria-live="polite"><div class="chat-skel" id="chat-loading" role="status" aria-label="Loading the transcript">
+      <div class="chat-log" id="chat-log"><div class="chat-skel" id="chat-loading" role="status" aria-label="Loading the transcript">
         <div class="skel-lines"><div class="skel skel-line" style="--w:72%"></div><div class="skel skel-line" style="--w:88%"></div><div class="skel skel-line" style="--w:55%"></div></div>
         <div class="skel skel-bubble"></div>
         <div class="skel skel-tool"></div>
@@ -1693,6 +1772,7 @@ const SessionChat = (() => {
         <div class="skel-lines"><div class="skel skel-line" style="--w:78%"></div><div class="skel skel-line" style="--w:90%"></div><div class="skel skel-line" style="--w:48%"></div></div>
       </div></div>
       <div class="chat-working hidden" id="chat-working" role="status" aria-label="Agent is working"><span></span><span></span><span></span></div>
+      <div class="chat-announce" id="chat-announce" role="status" aria-live="polite" aria-atomic="true"></div>
       <div class="chat-tray hidden" id="chat-tray" role="region" aria-label="Queued messages"></div>
       <div class="chat-editbar hidden" id="chat-editbar"></div>
       <div class="chat-menu hidden" id="chat-menu" role="listbox" aria-label="Commands"></div>
@@ -2226,7 +2306,9 @@ const SessionChat = (() => {
           }
         } else {
           b.classList.add("failed");
-          if (note) note.textContent = d.cancelled ? "Removed before sending" : (d.note || "Send failed");
+          const why = d.cancelled ? "Removed before sending" : (d.note || "Send failed");
+          if (note) note.textContent = why;
+          announceFailure(why);
           chat.awaitingReply = false;
           updateWorking();
         }
@@ -2266,6 +2348,7 @@ const SessionChat = (() => {
             .forEach((b) => b.classList.remove("chosen"));
           card.querySelectorAll(".approval-actions button").forEach((b) => { b.disabled = false; });
           approvalNote(card).textContent = `Approval failed: ${d.note || "the satellite rejected it"}`;
+          announceFailure(approvalNote(card).textContent);
         }
       }
     }
@@ -2396,6 +2479,49 @@ const SessionChat = (() => {
     }
     if (live && !chat.replacing) div.classList.add("arrive");
     put(div);
+    if (live && ANNOUNCED[kind] !== undefined) announce(ANNOUNCED[kind], div);
+  }
+
+  /* The log is no live region (#1555): a screen reader would read a
+   * streaming bubble out again on every repaint. A finished reply, an
+   * error or a prompt that waits for an answer is said once instead, in
+   * the small status node under the log, cut to its start. Entries drawn
+   * in one pass (a backlog landing at once) are said together, so none
+   * overwrites another: past ANNOUNCE_BATCH of them, a count, then every
+   * error and prompt, then the newest entry. */
+  const ANNOUNCED = { assistant: "", error: "Error: ", approval: "Approval needed: ", system: "" };
+  const ANNOUNCE_MAX = 300, ANNOUNCE_BATCH = 3;
+  let announcing = [];
+
+  function announce(lead, div) {
+    const text = String((div.querySelector(".text") || div).textContent || "").replace(/\s+/g, " ").trim();
+    queueAnnouncement(lead, lead + (text.length > ANNOUNCE_MAX ? `${text.slice(0, ANNOUNCE_MAX)}…` : text));
+  }
+
+  /* A failure written into a card already on screen (a send or an
+   * approval the hub refused): said like an error, since the log that
+   * holds the card is no live region. */
+  function announceFailure(text) {
+    queueAnnouncement("failure", text);
+  }
+
+  function queueAnnouncement(lead, text) {
+    if (!announcing.length) queueMicrotask(sayAnnounced);
+    announcing.push({ lead, text });
+  }
+
+  function sayAnnounced() {
+    const all = announcing;
+    announcing = [];
+    const node = $("chat-announce");
+    if (!node || !all.length) return;
+    let said = all;
+    if (all.length > ANNOUNCE_BATCH) {
+      const last = all[all.length - 1];
+      said = [{ text: `${all.length} new entries.` },
+        ...all.slice(0, -1).filter((a) => a.lead), last];
+    }
+    node.textContent = said.map((a) => a.text).join(" ");
   }
 
   /* An answer folds the card like a folded tool callout: the chevron
@@ -2485,6 +2611,7 @@ const SessionChat = (() => {
           buttons().forEach((b) => { b.disabled = false; });
           note.textContent = status === 0 ? "Request failed: connection lost"
             : `Approval failed: ${errorText(data) || "the prompt may have closed"}`;
+          announceFailure(note.textContent);
           noteRefusal(data);
         } else {
           note.remove();
@@ -3471,6 +3598,7 @@ const SessionChat = (() => {
     note.className = "send-note";
     note.textContent = text;
     bubble.appendChild(note);
+    announceFailure(text);
   }
 
   async function send() {
@@ -4611,12 +4739,12 @@ const SessionChat = (() => {
       barSub, refreshModel, railDay, railGroups, slashToken, commandInsert, sourceLabel, filterCommands, insertCommand, menuKey,
       cmds, cmdLists, warmCommands, loadCommands, resetMenus, chat,
       ATTACH, fileExt, attachProblem, formatBytes, uploadError, uploads, addFiles, removeUpload,
-      messageBody, send, updateOwnership, restoreUploads,
+      messageBody, send, updateOwnership, restoreUploads, failBubble,
       mentionToken, insertMention, splitPath, filesError, files, FILES, searchFiles, trackMenus, menu,
       echoes, sendsToTray, mergeQueue, queueNote, trayHtml, posted, takeQueued, echoLeavesTray, sendText,
       sendNow, removeQueued, removeAllQueued, beginEdit, cancelEdit, saveEdit, loadQueue, commandResult, appendMessage,
       backfill, showLive, cancelDetach, loadRail,
-      replyStreams, receiveDelta, paintStreams, clearStreams, revealNext, enqueue, STREAM_MS },
+      replyStreams, receiveDelta, paintStreams, clearStreams, revealNext, enqueue, STREAM_MS, mdStream, renderMd },
   };
 })();
 

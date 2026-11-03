@@ -1179,6 +1179,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry goes after a day. A hub event going to several open streams is now cleaned and
   encoded once, not once per stream. Closes
   [#1532](https://github.com/c-wenlong/swe/issues/1532).
+- **The web chat parses only the growing end of a streaming reply.**
+  Each repaint (at most every 80 ms) used to run the whole reply through
+  the Markdown parser and syntax highlighter and replace the bubble's
+  HTML. Blocks that end at a blank line are now settled: their nodes
+  stay, and only the text after them is parsed and drawn again, with
+  the same result as a full render. Over a 60 s, 12 KB reply (600
+  paints) that is 18 ms of Markdown work instead of 824 ms, and 133 KB
+  of HTML handed to the DOM instead of 9.5 MB. A delta no longer
+  rebuilds every bubble's text twice to see whether anything changed,
+  and the chat log is no longer a live region, so screen readers hear a
+  finished reply once from a small status node instead of each repaint.
+  Closes [#1555](https://github.com/c-wenlong/swe/issues/1555).
+
 - **The hub's approval watcher reads the supervised registry once per
   pass.** Every 3 s it opened and parsed `supervised.json` once for each
   tailed session (up to 100), and again for each tmux-attached one to
@@ -1578,6 +1591,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The queued-send spinner turns with one repeating rotation instead of
   its own per-frame timeline. Closes
   [#1550](https://github.com/c-wenlong/swe/issues/1550).
+- **The iPhone app's 15 s poll changes only what changed.** Every poll
+  of `/v1/sessions` and `/v1/inbox` wrote the sessions, inbox and
+  machines back even when the hub sent the same lists, and
+  `@Observable` reports equal writes, so the Sessions page regrouped
+  every row and an open search asked `/v1/search` again every 15 s.
+  The lists are now written only when they differ, the page's relative
+  times and Earlier cutoff follow a one-minute clock of their own, an
+  open search reruns when the query or the sessions change, on pull to
+  refresh, after a failed try, and otherwise once a minute (four times
+  fewer requests), and the poll pauses
+  while the app is inactive (the app switcher, Control Centre, a call),
+  not only in the background. Closes
+  [#1549](https://github.com/c-wenlong/swe/issues/1549).
 
 ### Fixed
 
