@@ -1176,6 +1176,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at most 20,000 sessions instead of 100,000, with the existing note
   when older ones are left out. Closes
   [#1544](https://github.com/c-wenlong/swe/issues/1544).
+- **The iPhone chat stops re-parsing a streaming reply from the top.**
+  Every 80 ms repaint of a reply still being written parsed the whole
+  reply twice (once for the text, once for its link cards), styled every
+  block again with `AttributedString(markdown:)` and rescanned it all for
+  bare links. A 16 KB reply over a minute meant about 750 full passes,
+  13 s of CPU on a Mac simulator. The bubble now keeps the blocks before
+  its last finished blank line and parses only what follows; styled
+  text and link scans are cached by block text, and unchanged blocks
+  skip layout. The same reply now costs 0.9 s, and every prefix parses
+  to exactly the blocks a full parse gives. Closes
+  [#1548](https://github.com/c-wenlong/swe/issues/1548).
 - **A snapshot session whose store can't be found no longer costs a
   read attempt every poll.** When a Cline, Continue, Gemini, Copilot,
   Forge or Crush read found no source files or a store it couldn't read,
