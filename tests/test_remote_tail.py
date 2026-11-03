@@ -2388,6 +2388,45 @@ class TestTailWake(unittest.TestCase):
         self.assertEqual(self.tailer.interval(active=True, hot=True),
                          tail.POLL_HOT_S)
 
+    def test_low_power_stretches_active_and_idle_but_not_hot(self):
+        # #1520: nobody watching, so a slower poll only delays the
+        # journal's copy of a transcript that is on disk anyway.
+        self.assertEqual(self.tailer.interval(active=True, low_power=True),
+                         tail.POLL_ACTIVE_LOW_S)
+        self.assertEqual(self.tailer.interval(active=False, low_power=True),
+                         tail.POLL_IDLE_LOW_S)
+        self.assertEqual(
+            self.tailer.interval(active=True, hot=True, low_power=True),
+            tail.POLL_HOT_S)
+        self.mgr.set_low_power(True)
+        self._append("hi")
+        self.mgr.tick(self.t0 + tail.POLL_IDLE_S)
+        self.assertIn("hi", self._texts())
+        self.assertEqual(self.tailer.next_poll_at,
+                         self.t0 + tail.POLL_IDLE_S + tail.POLL_IDLE_LOW_S)
+
+    def test_leaving_low_power_polls_every_tailer_at_once(self):
+        self.mgr.set_low_power(True)
+        self.mgr.tick(self.t0 + tail.POLL_IDLE_S)  # next poll a minute out
+        self._append("while away")
+        self.mgr.tick(self.t0 + tail.POLL_IDLE_S + 1)
+        self.assertNotIn("while away", self._texts())
+        self.mgr._wake_event.clear()
+        self.mgr.set_low_power(False)
+        # The loop parked in wait() returns at once...
+        self.assertTrue(self.mgr.wait(0))
+        # ...and the next tick reads it, with no hot window opened.
+        self.mgr.tick(self.t0 + tail.POLL_IDLE_S + 2)
+        self.assertIn("while away", self._texts())
+        self.assertFalse(self.mgr.is_hot(self.KEY, now=self.t0 + 20))
+        self.assertEqual(self.tailer.next_poll_at,
+                         self.t0 + tail.POLL_IDLE_S + 2 + tail.POLL_IDLE_S)
+
+    def test_set_low_power_to_the_same_value_wakes_nothing(self):
+        self.mgr._wake_event.clear()
+        self.mgr.set_low_power(False)
+        self.assertFalse(self.mgr.wait(0))
+
     def test_waking_injector_wakes_around_writes_only(self):
         from unittest.mock import MagicMock
         inner = MagicMock()

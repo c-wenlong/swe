@@ -1177,6 +1177,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which catches a delete below the newest row, is read again at most once
   a minute per session. Closes
   [#1521](https://github.com/c-wenlong/swe/issues/1521).
+- **The hub slows down while nobody is watching.** With no client
+  stream open (the ntfy notifier holds one whenever it can push;
+  satellite command streams don't count) and no client request for two
+  minutes, `swe remote serve` polls
+  active sessions every 5 s instead of 1 s and idle ones every 60 s
+  instead of 8 s, refreshes the catalog every 60 s instead of 10 s, and
+  ticks its tail loop once a second instead of four times. Transcripts
+  stay on disk, so this only delays the journal's copy. The next client
+  request ends it at once: every tailer polls, the catalog refreshes, and
+  the first `/v1/sessions` or `/v1/inbox` read waits up to 5 s for that
+  refresh instead of serving a minute-old list. An unwatched hub on this
+  Mac used about 8% of a core, split about evenly between the catalog
+  and tail threads. Closes
+  [#1520](https://github.com/c-wenlong/swe/issues/1520).
+- **The status column reads less per session.** OpenCode's probe
+  pulled the full JSON of a session's newest 50 messages and ran two
+  `PRAGMA table_info` reads for every session; it now reads the table
+  shape once per pass, picks the deciding row by type, and loads only
+  that row's JSON. Devin's probe lets SQLite pull the role, tool calls
+  and text out of the head message instead of decoding all of it.
+  Cline caches the follow-up check against its `messages.json`
+  signature and reads the metadata file once per pass, and the tail
+  probes decode JSONL lines newest-first only until the walk decides.
+  CPU per pass here: OpenCode 381 sessions about 66 to 50 ms, Devin
+  216 sessions about 10 to 6 ms, a 64 KB transcript tail walk about
+  half. Closes [#1535](https://github.com/c-wenlong/swe/issues/1535).
+- **The Mac app's Compute sampler runs at full rate only while a
+  trend view is on screen.** It used to sweep every process, the GPU
+  clients and the SMC at the chosen interval (3 s on one Mac) for as
+  long as the app ran, about 80 ms of CPU per sweep with 700 processes.
+  The Compute page, the menu bar's Compute tab and the Widgets page's
+  Compute preview now ask for the full rate while their window can be
+  seen. Otherwise the sampler reads only what auto clean (processes),
+  the fan threshold (temperatures) and a placed Compute widget need,
+  every 30 s, and nothing at all when none of them is on. The page's
+  own three-second refresh also stops while its window is minimised or
+  covered, the temperature reads keep one SMC connection, and process
+  attribution works each pid's harness out once. Closes
+  [#1539](https://github.com/c-wenlong/swe/issues/1539).
+
+- **The iPhone chat stops re-parsing a streaming reply from the top.**
+  Every 80 ms repaint of a reply still being written parsed the whole
+  reply twice (once for the text, once for its link cards), styled every
+  block again with `AttributedString(markdown:)` and rescanned it all for
+  bare links. A 16 KB reply over a minute meant about 750 full passes,
+  13 s of CPU on a Mac simulator. The bubble now keeps the blocks before
+  its last finished blank line and parses only what follows; styled
+  text and link scans are cached by block text, and unchanged blocks
+  skip layout. The same reply now costs 0.9 s, and every prefix parses
+  to exactly the blocks a full parse gives. Closes
+  [#1548](https://github.com/c-wenlong/swe/issues/1548).
+
 - **A snapshot session whose store can't be found no longer costs a
   read attempt every poll.** When a Cline, Continue, Gemini, Copilot,
   Forge or Crush read found no source files or a store it couldn't read,
