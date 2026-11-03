@@ -1705,9 +1705,13 @@ public actor Ledger {
     public nonisolated func dailyTokens(for keys: [AccountHistory.Key], in range: DateInterval,
                                         calendar: Calendar) async -> [AccountHistory.Key: [Date: Int]] {
         var result = Dictionary(keys.map { ($0, [Date: Int]()) }, uniquingKeysWith: { a, _ in a })
+        // Keys of one harness (Codex's account usage, rebuilt after every
+        // scan that wrote usage) read only that harness's rows: grouping
+        // every harness's 200 days cost about 2 CPU-seconds a call (#1568).
+        let harnesses = Set(keys.map(\.harness))
         guard !keys.isEmpty, let groups = try? readGroups(
             in: range, by: [.harness, .account], bucketSeconds: 900, pricing: pricing,
-            splitsAtPriceChanges: false)
+            splitsAtPriceChanges: false, harness: harnesses.count == 1 ? harnesses.first : nil)
         else { return result }
         for group in groups {
             let harness = group.dimensions[.harness] ?? ""

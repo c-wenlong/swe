@@ -106,7 +106,6 @@ final class LedgerStore {
                 cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL, cache_write_1h INTEGER NOT NULL,
                 reasoning INTEGER NOT NULL,
                 cost REAL);
-            CREATE INDEX IF NOT EXISTS events_ts ON events (ts);
             CREATE INDEX IF NOT EXISTS events_dim ON events (dim);
             CREATE INDEX IF NOT EXISTS events_msg ON events (msg) WHERE msg IS NOT NULL;
             CREATE TABLE IF NOT EXISTS cursors (
@@ -119,6 +118,17 @@ final class LedgerStore {
         // Session-total events never count toward long-context surcharges.
         // Old rows are correct with the 0 default, so no schema bump.
         try? db.execute("ALTER TABLE events ADD COLUMN session_total INTEGER NOT NULL DEFAULT 0")
+        // Every figure is a time-range read of these columns. The rows sit
+        // in key (hash) order, so a plain `ts` index cost a table lookup
+        // per row, scattered over the whole file; this one answers the
+        // range reads alone, at about half the CPU (#1568). It replaces
+        // `events_ts`, whose `ts` prefix it has; built once, about a
+        // second on a 400,000-event ledger.
+        try db.execute("""
+            CREATE INDEX IF NOT EXISTS events_ts_cover ON events (ts, dim, input, output, cache_read,
+                cache_write, cache_write_1h, reasoning, session_total, cost);
+            DROP INDEX IF EXISTS events_ts;
+            """)
         // The cursor fingerprint grew a ctime stamp and a middle sample.
         // Old rows keep NULL: a NULL `changed` is checked the old way and a
         // NULL `mid_hash` fails closed into one rescan.
@@ -534,21 +544,32 @@ extension SQLiteDatabase {
             ? "0"
             : thresholds.map { "(e.session_total = 0 AND e.input + e.cache_read + e.cache_write > \($0))" }
                 .joined(separator: " + ")
-        let groupColumns = (dims + ["d.model", "d.tier", "logged", "crossed", "era"]
-            + (bucket.map { _ in ["bucket"] } ?? []))
-            .joined(separator: ", ")
-        let select = (dims + ["d.model", "d.tier", "(e.cost IS NOT NULL) AS logged", "\(crossed) AS crossed",
-                              "\(era) AS era"]
-            + (bucket.map { ["\($0) AS bucket"] } ?? []))
-            .joined(separator: ", ")
+        // Two passes (#1568): the events group first by their integer
+        // `dim` and price inputs, straight off the covering index with no
+        // join per row, and only those groups join `dims` to merge by the
+        // strings asked for. Sums, counts and min/max compose, so the
+        // groups are the one-pass query's.
+        let inner = ["e.dim AS dim", "(e.cost IS NOT NULL) AS logged", "\(crossed) AS crossed", "\(era) AS era"]
+            + (bucket.map { ["\($0) AS bucket"] } ?? [])
+        let innerGroup = ["e.dim", "logged", "crossed", "era"] + (bucket.map { _ in ["bucket"] } ?? [])
+        let outer = dims + ["d.model", "d.tier", "g.logged", "g.crossed", "g.era"]
+            + (bucket.map { _ in ["g.bucket"] } ?? [])
         let statement = try prepare("""
-            SELECT \(select),
-                SUM(e.input), SUM(e.output), SUM(e.cache_read), SUM(e.cache_write), SUM(e.cache_write_1h),
-                SUM(e.reasoning), TOTAL(e.cost), COUNT(*), MIN(e.ts), MAX(e.ts)
-            FROM events e JOIN dims d ON d.id = e.dim
-            WHERE e.ts >= ? AND e.ts < ?
-            \(harness.map { _ in "AND d.harness = ?" } ?? "")
-            GROUP BY \(groupColumns)
+            SELECT \(outer.joined(separator: ", ")),
+                SUM(g.input), SUM(g.output), SUM(g.cache_read), SUM(g.cache_write), SUM(g.cache_write_1h),
+                SUM(g.reasoning), TOTAL(g.cost), SUM(g.n), MIN(g.first), MAX(g.last)
+            FROM (
+                SELECT \(inner.joined(separator: ", ")),
+                    SUM(e.input) AS input, SUM(e.output) AS output, SUM(e.cache_read) AS cache_read,
+                    SUM(e.cache_write) AS cache_write, SUM(e.cache_write_1h) AS cache_write_1h,
+                    SUM(e.reasoning) AS reasoning, TOTAL(e.cost) AS cost, COUNT(*) AS n,
+                    MIN(e.ts) AS first, MAX(e.ts) AS last
+                FROM events e
+                WHERE e.ts >= ? AND e.ts < ?
+                \(harness.map { _ in "AND e.dim IN (SELECT id FROM dims WHERE harness = ?)" } ?? "")
+                GROUP BY \(innerGroup.joined(separator: ", "))
+            ) g JOIN dims d ON d.id = g.dim
+            GROUP BY \(outer.joined(separator: ", "))
             """)
         statement.bind([.double(range.start.timeIntervalSince1970), .double(range.end.timeIntervalSince1970)]
                        + (harness.map { [SQLiteValue.text($0)] } ?? []))
