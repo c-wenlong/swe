@@ -452,6 +452,34 @@ class DevinStatusTest(StatusTestBase):
         self.assertEqual(DONE, session_status(s4, now=NOW))
         self.assertEqual(FOLLOWUP, session_status(s5, now=NOW))
 
+    def test_head_is_read_without_decoding_it_in_python(self):
+        # A head row carries its whole turn; SQLite pulls out the role,
+        # the tool calls and a string content instead of json.loads.
+        from swe.sessions import status
+
+        big = "x" * 50_000
+        self._write_devin_db(
+            [("h1", "n1"), ("h2", "n1"), ("h3", "n1"), ("h4", "n1"),
+             ("h5", "n1"), ("h6", None)],
+            [("n1", None, "h1", self._mk("assistant", content="All set.", tool_calls=[], log=big)),
+             ("n1", None, "h2", self._mk("assistant", content="x", tool_calls=[{"id": "t"}])),
+             ("n1", None, "h3", self._mk("assistant", content=[{"type": "text"}], tool_calls={})),
+             ("n1", None, "h4", self._mk("tool", content=big)),
+             ("n1", None, "h5", self._mk("system", content="sys")),
+             ("n9", None, "h6", self._mk("assistant", content="Fallback.", tool_calls=None))],
+        )
+        conn = status._open_devin_db()
+        try:
+            with patch.object(status.json, "loads", side_effect=AssertionError("decoded")):
+                got = [status._probe_devin(_session("devin", sid), {"devin_conn": conn})
+                       for sid in ("h1", "h2", "h3", "h4", "h5", "h6", "none")]
+        finally:
+            conn.close()
+        self.assertEqual(got, [
+            ("finished", "All set."), ("midturn", ""), ("finished", ""),
+            ("midturn", ""), (None, ""), ("finished", "Fallback."), (None, ""),
+        ])
+
     def test_live_lock_pid_counts_as_active(self):
         self._tool_head_db("d6")
         self._write_lock("d6", str(os.getpid()))
@@ -986,6 +1014,62 @@ class ClineStatusTest(StatusTestBase):
         s = _session("cline", "c13", age_s=9999)
         self.assertEqual(DONE, session_status(s, now=NOW))
 
+    def test_unchanged_messages_file_is_not_read_again(self):
+        # The follow-up flag comes from <id>.messages.json alone, so it is
+        # cached against that file's signature; the small metadata file
+        # is still read every pass, since its status moves on its own.
+        from swe.sessions import status
+
+        self._write_cline(
+            "c14", "waiting",
+            messages=[self._msg("assistant", "Which branch should I use?")],
+        )
+        s = _session("cline", "c14", age_s=9999)
+        reads = []
+        real = status._cline_read_text
+
+        def counting(path):
+            reads.append(path)
+            return real(path)
+
+        with patch.object(status, "_cline_read_text", side_effect=counting):
+            self.assertEqual(FOLLOWUP, session_status(s, now=NOW))
+            self.assertEqual(FOLLOWUP, session_status(s, now=NOW))
+            self.assertEqual(len(reads), 1)
+            self._write_cline("c14", "completed")
+            self.assertEqual(FOLLOWUP, session_status(s, now=NOW))
+            self.assertEqual(len(reads), 1)
+            self._write_cline(
+                "c14", "waiting",
+                messages=[self._msg("assistant", "Pushed and merged.")],
+            )
+            self.assertEqual(DONE, session_status(s, now=NOW))
+            self.assertEqual(len(reads), 2)
+            self._write_cline("c14", "running", pid=os.getpid())
+            self.assertEqual(ACTIVE, session_status(s, now=NOW))
+
+    def test_a_messages_read_error_is_not_cached(self):
+        from swe.sessions import status
+
+        self._write_cline(
+            "c15", "waiting",
+            messages=[self._msg("assistant", "Which branch should I use?")],
+        )
+        s = _session("cline", "c15", age_s=9999)
+        with patch.object(status, "_cline_read_text", side_effect=OSError("EIO")):
+            self.assertEqual(DONE, session_status(s, now=NOW))
+        self.assertEqual(FOLLOWUP, session_status(s, now=NOW))
+
+    def test_metadata_is_read_once_per_pass(self):
+        from swe.sessions import status
+
+        self._write_cline("c16", "running", pid=os.getpid())
+        s = _session("cline", "c16", age_s=9999)
+        real = status._cline_meta
+        with patch.object(status, "_cline_meta", side_effect=real) as meta:
+            self.assertEqual(ACTIVE, session_status(s, now=NOW))
+        self.assertEqual(meta.call_count, 1)
+
     def test_pid_liveness_tolerates_missing_meta(self):
         from swe.sessions.status import _cline_pid_alive
 
@@ -1106,6 +1190,39 @@ class TailRecordsTest(unittest.TestCase):
         records, complete = _tail_records(path, 64)
         self.assertFalse(complete)
         self.assertEqual([{"tail": 1}], list(records))
+
+    def test_a_walk_decodes_only_the_records_it_reaches(self):
+        from swe.sessions import status
+
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as fh:
+            for i in range(200):
+                fh.write(json.dumps({"type": "user", "message": {"content": f"q{i}"}}) + "\n")
+            fh.write("not json\n\n")
+            fh.write(json.dumps({"type": "assistant", "message": {
+                "content": [{"type": "text", "text": "Done."}], "stop_reason": "end_turn"}}) + "\n")
+            fh.write("[1, 2]\n")
+            path = fh.name
+        self.addCleanup(os.unlink, path)
+        real = json.loads
+        with patch.object(status.json, "loads", side_effect=real) as loads:
+            self.assertEqual(status._walk_tail(path, status._claude_walk), ("finished", "Done."))
+        # The trailing array, then the assistant record; nothing older.
+        self.assertEqual(loads.call_count, 2)
+
+    def test_records_walk_newest_first_and_oldest_first_alike(self):
+        from swe.sessions.status import _tail_records
+
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as fh:
+            for i in range(5):
+                fh.write(json.dumps({"i": i}) + "\n")
+            path = fh.name
+        self.addCleanup(os.unlink, path)
+        records, _ = _tail_records(path, 65536)
+        newest = reversed(records)
+        self.assertEqual(next(newest), {"i": 4})
+        self.assertEqual([r["i"] for r in records], [0, 1, 2, 3, 4])
+        self.assertEqual([r["i"] for r in newest], [3, 2, 1, 0])
+        self.assertEqual([r["i"] for r in reversed(records)], [4, 3, 2, 1, 0])
 
 
 class StatusLegendTest(unittest.TestCase):

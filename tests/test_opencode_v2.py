@@ -194,6 +194,42 @@ class StatusTest(OpencodeV2Case):
         for sid in ("s_prompt", "s_tools", "s_synth"):
             self.assertEqual(self.probe(sid), ("midturn", ""), sid)
 
+    def test_a_pass_reads_the_shape_once_and_only_the_deciding_row(self):
+        # The status column probes every session each pass: the table
+        # shape is read once per connection, and only the newest decisive
+        # row's JSON is fetched, not the whole 50-row window.
+        from swe.sessions import status
+
+        sids = ["s_a", "s_b", "s_c"]
+        for sid in sids:
+            self.add_session(sid, [("user", {"text": "go"})] + [
+                ("assistant", _assistant([{"type": "text", "text": f"reply {i}"}]))
+                for i in range(10)
+            ])
+        conn = status._open_opencode_db()
+        statements = []
+        conn.set_trace_callback(statements.append)
+        ctx = {"opencode_conn": conn}
+        try:
+            for sid in sids:
+                self.assertEqual(status._probe_opencode(self.session(sid), ctx),
+                                 ("finished", "reply 9"))
+        finally:
+            conn.close()
+        self.assertEqual(sum("PRAGMA" in s for s in statements), 2)
+        self.assertFalse([s for s in statements if "sm.data" in s])
+        self.assertEqual(sum(s.startswith("SELECT data FROM session_message") for s in statements),
+                         len(sids))
+
+    def test_idle_skips_a_row_whose_json_does_not_decode(self):
+        self.add_session("s_bad", [("assistant", _assistant([{"type": "text", "text": "Earlier."}])),
+                                   ("assistant", {"x": 1}), ("idle", {"outcome": "succeeded"})])
+        conn = self.conn()
+        conn.execute("UPDATE session_message SET data = 'not json' WHERE id = 's_bad_1'")
+        conn.commit()
+        conn.close()
+        self.assertEqual(self.probe("s_bad"), ("finished", "Earlier."))
+
     def test_bookkeeping_alone_keeps_the_legacy_verdict(self):
         conn = self.conn()
         self.v2_row(conn, "m_switch", "ses_old", "model-switched", 9, {"model": {"id": "x"}}, T0 + 9000)
