@@ -1167,6 +1167,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The Mac app's Compute sampler runs at full rate only while a
+  trend view is on screen.** It used to sweep every process, the GPU
+  clients and the SMC at the chosen interval (3 s on one Mac) for as
+  long as the app ran, about 80 ms of CPU per sweep with 700 processes.
+  The Compute page, the menu bar's Compute tab and the Widgets page's
+  Compute preview now ask for the full rate while their window can be
+  seen. Otherwise the sampler reads only what auto clean (processes),
+  the fan threshold (temperatures) and a placed Compute widget need,
+  every 30 s, and nothing at all when none of them is on. The page's
+  own three-second refresh also stops while its window is minimised or
+  covered, the temperature reads keep one SMC connection, and process
+  attribution works each pid's harness out once. Closes
+  [#1539](https://github.com/c-wenlong/swe/issues/1539).
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
   newest 1,000 chain nodes anyway. Devin's change token (the session's

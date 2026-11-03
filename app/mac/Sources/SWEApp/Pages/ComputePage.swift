@@ -15,6 +15,7 @@ struct ComputePage: View {
     /// full-rate trends run only then.
     @State private var onScreen = false
     @State private var viewerID = UUID()
+    @State private var matchersLoaded = false
 
     private var model: ComputeModel { app.compute }
 
@@ -94,7 +95,12 @@ struct ComputePage: View {
         }
         .task(id: onScreen) {
             guard onScreen else { return }
-            await model.loadMatchers()
+            // Once per visit: uncovering the window resumes the refresh
+            // without running swe again.
+            if !matchersLoaded {
+                matchersLoaded = true
+                await model.loadMatchers()
+            }
             while !Task.isCancelled {
                 await model.refresh()
                 await app.fans.refresh()
