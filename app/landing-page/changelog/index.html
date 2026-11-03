@@ -1304,6 +1304,16 @@ which catches a delete below the newest row, is read again at most once
 a minute per session. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1521">#1521</a>.</p>
 </li>
+<li><p><strong>The hub stops re-parsing its small stores on every request.</strong> The
+credential check, an open stream's revocation check, the session
+list's unread flags and the machine list read <code>devices.json</code>, the
+sign-ins file, <code>session_reads.json</code> (twice per session list) and
+<code>machines.json</code> from disk each time. They now share one memo that
+parses a file again only when it changes: a session list over 2,000
+read cursors went from 1.8 ms to 0.7 ms, and a credential check from
+37 to 11 us. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1528">#1528</a>.</p>
+</li>
 <li><p><strong>The Mac app's background polls no longer keep the Mac awake.</strong>
 Every <code>swe</code> the app ran held a user-initiated activity, which also
 blocks idle system sleep while the child runs, so the GitHub poll, the
@@ -1338,6 +1348,16 @@ refresh instead of serving a minute-old list. An unwatched hub on this
 Mac used about 8% of a core, split about evenly between the catalog
 and tail threads. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1520">#1520</a>.</p>
+</li>
+<li><p><strong><code>swe</code> starts faster: each command imports only its own code.</strong>
+<code>cli.py</code> imported every command's module tree before dispatching, so
+<code>import swe.cli</code> took about 330 ms on a loaded machine, nearly all of
+a <code>swe version</code> run, and every <code>swe</code> the Mac app spawns paid it. Each
+command now imports its module when it runs, which brings
+<code>import swe.cli</code> to about 33 ms. A rate limits call also reads its
+cache file once instead of five times, and <code>swe list</code> reads
+config.json's <code>list</code> section once instead of three times. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1536">#1536</a>.</p>
 </li>
 <li><p><strong>The status column reads less per session.</strong> OpenCode's probe
 pulled the full JSON of a session's newest 50 messages and ran two

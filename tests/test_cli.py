@@ -136,7 +136,7 @@ class VersionCompletionTest(unittest.TestCase):
 
 class ProvidersCliRoutingTest(unittest.TestCase):
     def test_cmd_providers_forwards_arguments_and_status(self):
-        with mock.patch("swe.cli.providers_cli.main", return_value=7) as provider_main:
+        with mock.patch("swe.providers.cli.main", return_value=7) as provider_main:
             result = cmd_providers(["info", "anthropic"])
 
         self.assertEqual(result, 7)
@@ -168,6 +168,40 @@ class LazyRemoteImportTest(unittest.TestCase):
                               capture_output=True, text=True, timeout=60)
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    def test_cli_import_loads_no_command_module(self):
+        # #1536: `swe version` paid for every command's import tree.
+        import subprocess
+        import sys
+        heavy = ("swe.harness", "swe.sessions", "swe.reports", "swe.setup",
+                 "swe.skills", "swe.mcp", "swe.find", "swe.hooks", "swe.init",
+                 "swe.plugins", "swe.providers", "swe.sync", "swe.github",
+                 "swe.instructions", "swe.help_text", "swe.config_commands",
+                 "swe.bug", "swe.configuration")
+        code = (
+            "import sys, swe.cli\n"
+            f"heavy = {heavy!r}\n"
+            "loaded = sorted(m for m in sys.modules\n"
+            "                if any(m == h or m.startswith(h + '.') for h in heavy))\n"
+            "print(loaded)\n"
+            "sys.exit(bool(loaded))"
+        )
+        proc = subprocess.run([sys.executable, "-c", code],
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_every_lazy_command_names_a_real_function(self):
+        import importlib
+
+        from swe.cli import COMMANDS
+
+        for key, command in COMMANDS.items():
+            doc = getattr(command, "__doc__", "") or ""
+            if "imported when run" not in doc:
+                continue
+            module, _, name = doc.split("``")[1].rpartition(".")
+            with self.subTest(command=key):
+                self.assertTrue(callable(getattr(importlib.import_module(module), name)))
+
 
 class ProvidersHelpRouteTest(unittest.TestCase):
     """`swe providers --help` reaches the group's own fuller help, not
@@ -180,7 +214,7 @@ class ProvidersHelpRouteTest(unittest.TestCase):
         for argv in (["swe", "providers", "--help"], ["swe", "pv", "-h"]):
             with self.subTest(argv=argv):
                 with mock.patch.object(sys, "argv", argv), mock.patch(
-                    "swe.cli.providers_cli.main", return_value=0
+                    "swe.providers.cli.main", return_value=0
                 ) as provider_main:
                     result = main()
                 self.assertEqual(result, 0)
