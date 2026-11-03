@@ -857,10 +857,17 @@ if (typeof window.matchMedia === "function") {
     if (nav) revealActiveTab(nav);
   });
 }
+// A drag fires resize many times a frame: the charts redraw once per
+// frame at most (#1557).
+let overviewResizeFrame = 0;
 window.addEventListener("resize", () => {
-  if (!overview.data || !document.getElementById("marbles")) return;
-  drawMarbles();
-  drawHeatmap();
+  if (overviewResizeFrame) return;
+  overviewResizeFrame = requestAnimationFrame(() => {
+    overviewResizeFrame = 0;
+    if (!overview.data || !document.getElementById("marbles")) return;
+    drawMarbles();
+    drawHeatmap();
+  });
 });
 // After every script, page plugins included, has run.
 document.addEventListener("DOMContentLoaded", route);

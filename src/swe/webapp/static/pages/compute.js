@@ -185,7 +185,7 @@ function paintCompute(busy) {
   if (!document.getElementById("compute-body")) {
     panel.innerHTML = `<div class="page compute-page"><div id="compute-header"></div><div class="stack" id="compute-body"></div></div>`;
   }
-  document.getElementById("compute-header").innerHTML = computeHeader(busy);
+  computePatch(document.getElementById("compute-header"), computeHeader(busy));
   bindComputeHeader();
   const body = document.getElementById("compute-body");
   if (!d.supported) {
@@ -205,15 +205,64 @@ function paintCompute(busy) {
     document.getElementById("compute-trend-head").innerHTML = trendHead();
     p.headKey = key;
   }
-  document.getElementById("compute-top").innerHTML = computeTop(d);
-  document.getElementById("compute-trend-body").innerHTML = trendBody(d);
-  document.getElementById("compute-rest").innerHTML = computeRest(d);
+  computePatch(document.getElementById("compute-top"), computeTop(d));
+  computePatch(document.getElementById("compute-trend-body"), trendBody(d));
+  computePatch(document.getElementById("compute-rest"), computeRest(d));
   bindComputeBody(body);
   drawComputeChart();
   if (focus && !body.contains(document.activeElement)) {
     const again = body.querySelector(focus);
     if (again) again.focus({ preventScroll: true });
   }
+}
+
+/* Puts `html` into `el` the way innerHTML would, but keeps the nodes
+ * already there (#1557): a sample every 3 s changes a few figures, so
+ * only those text nodes and attributes are written, and a part whose
+ * markup didn't change is skipped. A node of another kind, or a form
+ * control, is replaced whole. */
+function computePatch(el, html) {
+  if (!el || el.computeHtml === html) return;
+  el.computeHtml = html;
+  const next = document.createElement("template");
+  next.innerHTML = html;
+  computeMorphChildren(el, next.content);
+}
+
+function computeMorphChildren(el, from) {
+  let cur = el.firstChild;
+  // Position by position: a node of another kind replaces the one in its
+  // place, so the nodes after it still line up with theirs.
+  for (const n of [...from.childNodes]) {
+    if (!cur) { el.insertBefore(n, null); continue; }
+    const following = cur.nextSibling;
+    if (computeSameKind(cur, n)) computeMorphNode(cur, n);
+    else { el.insertBefore(n, cur); el.removeChild(cur); }
+    cur = following;
+  }
+  while (cur) {
+    const following = cur.nextSibling;
+    el.removeChild(cur);
+    cur = following;
+  }
+}
+
+function computeSameKind(a, b) {
+  if (a.nodeType !== b.nodeType) return false;
+  if (a.nodeType !== 1) return true;
+  return a.nodeName === b.nodeName && a.namespaceURI === b.namespaceURI
+    && !["INPUT", "SELECT", "TEXTAREA"].includes(a.nodeName);
+}
+
+function computeMorphNode(a, b) {
+  if (a.nodeType !== 1) {
+    if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
+    return;
+  }
+  for (const { name } of [...a.attributes]) if (!b.hasAttribute(name)) a.removeAttribute(name);
+  for (const { name, value } of [...b.attributes]) if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+  // A node patched on its own (the chart box) keeps what it drew.
+  if (a.computeHtml === undefined) computeMorphChildren(a, b);
 }
 
 /* The totals line and the machine line, above the trend card. */
@@ -578,7 +627,7 @@ function drawComputeChart() {
   const box = document.getElementById("compute-chart");
   if (!box) return;
   const spec = chartSpec();
-  if (spec.empty) { box.innerHTML = placeholder(spec.empty); return; }
+  if (spec.empty) { computePatch(box, placeholder(spec.empty)); return; }
   const width = Math.max(240, Math.round(box.getBoundingClientRect().width) || 600);
   const height = 180;
   const names = spec.series.some((s) => s.endLabel);
@@ -618,10 +667,12 @@ function drawComputeChart() {
     if (s.logo) ends.push(`<span class="end-icon" style="left:${(ex + 5).toFixed(1)}px; top:${(ey - 8).toFixed(1)}px">${Fmt.logo(s.logo)}</span>`);
     else if (s.endLabel) svg.push(`<text class="end-label" x="${(ex + 6).toFixed(1)}" y="${ey.toFixed(1)}" dominant-baseline="middle">${esc(s.endLabel)}</text>`);
   }
-  box.innerHTML = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img"
+  // Patched rather than redrawn: a new sample moves the lines' `d` and a
+  // few labels, and the svg, its nodes and the bubble stay.
+  computePatch(box, `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img"
       aria-label="${esc(COMPUTE_TABS.find(([id]) => id === computePage.tab)[1])} over time">${svg.join("")}
       <line class="hover-rule" id="compute-rule" y1="${m.top}" y2="${m.top + ph}" visibility="hidden"/></svg>
-    ${ends.join("")}<div class="bubble compute-bubble" id="compute-bubble" hidden></div>`;
+    ${ends.join("")}<div class="bubble compute-bubble" id="compute-bubble" hidden></div>`);
   const geometry = { m, pw, x0, x1, X, spec };
   box.onmousemove = (e) => {
     const rect = box.getBoundingClientRect();
