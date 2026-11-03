@@ -227,11 +227,38 @@ class TailCacheTest(unittest.TestCase):
         # A one-row call (``swe session 1``, a remote row) leaves b alone.
         session_statuses([_session("claude", "a")], now=NOW)
         self.assertEqual(set(self.entries()["claude"]), {a, b})
-        # Once b is deleted, the next rewrite drops its entry.
+        # Once b is deleted, the next rewrite drops its entry, but only
+        # once the sweep interval has passed since the last sweep.
         os.remove(b)
         c = self.write_claude("c", [_assistant("All finished.")])
         session_statuses([_session("claude", "c")], now=NOW)
-        self.assertEqual(set(self.entries()["claude"]), {a, c})
+        self.assertEqual(set(self.entries()["claude"]), {a, b, c})
+        d = self.write_claude("d", [_assistant("All finished.")])
+        with patch.object(parse_cache, "_SWEEP_INTERVAL_S", 0.0):
+            session_statuses([_session("claude", "d")], now=NOW)
+        self.assertEqual(set(self.entries()["claude"]), {a, c, d})
+
+    def test_busy_rewrites_do_not_stat_every_entry(self):
+        # The hub's ~1 Hz probes rewrite the cache for one busy row; the
+        # gone-file sweep (a stat per entry) runs once per interval.
+        paths = [self.write_claude(f"s{i}", [_assistant("All finished.")]) for i in range(20)]
+        session_statuses([_session("claude", f"s{i}") for i in range(20)], now=NOW)
+        busy = self.write_claude("busy", [_tool_use()])
+        real_exists = os.path.exists
+        swept = []
+
+        def counting(p):
+            if p in paths:
+                swept.append(p)
+            return real_exists(p)
+
+        with patch("swe.sessions.parse_cache.os.path.exists", side_effect=counting):
+            for i in range(3):
+                with open(busy, "a") as fh:
+                    fh.write(json.dumps(_assistant(f"step {i}")) + "\n")
+                session_statuses([_session("claude", "busy")], now=NOW)
+        self.assertEqual(swept, [])
+        self.assertIn(busy, self.entries()["claude"])
 
     def test_direct_probe_calls_are_uncached(self):
         self.write_claude("s", [_assistant("Shall I merge it?")])
