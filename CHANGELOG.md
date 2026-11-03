@@ -1167,6 +1167,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The Mac app's ledger ticks cost about a third of the CPU they did.**
+  A background scan now counts as new usage only when it wrote a usage
+  event, not when it merely read a file, so a tick that appended prompts
+  or tool output rebuilds nothing. Ticks that do write usage read less:
+  a covering index answers the time-range reads without a table lookup
+  per row, grouped reads group by dimension id before joining names, and
+  Codex's account comparison reads only Codex rows. Measured against a
+  copy of a 415,000-event ledger, one ingest tick went from about 6.4 to
+  2.0 CPU-seconds. Closes [#1568](https://github.com/c-wenlong/swe/issues/1568).
+- **The hub slows down while nobody is watching.** With no client
+  stream open (the ntfy notifier holds one whenever it can push;
+  satellite command streams don't count) and no client request for two
+  minutes, `swe remote serve` polls
+  active sessions every 5 s instead of 1 s and idle ones every 60 s
+  instead of 8 s, refreshes the catalog every 60 s instead of 10 s, and
+  ticks its tail loop once a second instead of four times. Transcripts
+  stay on disk, so this only delays the journal's copy. The next client
+  request ends it at once: every tailer polls, the catalog refreshes, and
+  the first `/v1/sessions` or `/v1/inbox` read waits up to 5 s for that
+  refresh instead of serving a minute-old list. An unwatched hub on this
+  Mac used about 8% of a core, split about evenly between the catalog
+  and tail threads. Closes
+  [#1520](https://github.com/c-wenlong/swe/issues/1520).
 - **`swe` starts faster: each command imports only its own code.**
   `cli.py` imported every command's module tree before dispatching, so
   `import swe.cli` took about 330 ms on a loaded machine, nearly all of

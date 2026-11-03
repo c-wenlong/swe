@@ -372,6 +372,7 @@ struct ScanFailed: Error, LocalizedError {
         await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)])
         var report = ScanReport()
         report.filesRead = 1
+        report.eventsWritten = 1
         await ledger.set(report: report)
         await ledger.holdNextScan()
         let model = model(ledger)
@@ -465,6 +466,7 @@ final class OverviewClock {
         await model.warming?.value
         var report = ScanReport()
         report.filesRead = 2
+        report.eventsWritten = 3
         await ledger.set(report: report)
         let before = await ledger.ranges.count
         await model.load(scan: true)
@@ -567,6 +569,7 @@ final class OverviewClock {
         let stamped = model.revision
         var report = ScanReport()
         report.filesRead = 1
+        report.eventsWritten = 1
         await ledger.set(report: report)
         await model.load(scan: true)
         await model.warming?.value
@@ -878,6 +881,7 @@ final class WatchTicks: Sendable {
     func readUsage(_ ledger: FakeLedger) async {
         var report = ScanReport()
         report.filesRead = 1
+        report.eventsWritten = 1
         await ledger.set(report: report)
     }
 
@@ -901,6 +905,31 @@ final class WatchTicks: Sendable {
         #expect(model.revision == revision)
         #expect(await ledger.figureReads == reads)
         // The figures shown are still the ledger's, as of this scan.
+        #expect(model.updatedAt == clock.now)
+    }
+
+    /// A tick that read appended lines without usage in them (a prompt,
+    /// tool output) or rescanned into the rows it had is idle (#1568).
+    @Test func aTickThatReadFilesButWroteNoUsageIsIdle() async throws {
+        let ledger = FakeLedger()
+        await ledger.set(harnesses: ["claude": totals(tokens: 1, cost: 1)], days: usage(today: 1, old: 5))
+        let model = model(ledger)
+        await model.load(scan: false)
+        await model.warming?.value
+        var report = ScanReport()
+        report.filesRead = 3
+        report.filesRescanned = 1
+        report.databasesRead = 1
+        await ledger.set(report: report)
+        let reads = await ledger.figureReads
+        let revision = model.revision
+        clock.now = clock.now.addingTimeInterval(60)
+
+        await model.backgroundScan(recentLimit: 12)
+        await model.warming?.value
+        #expect(model.completedScans == 0)
+        #expect(model.revision == revision)
+        #expect(await ledger.figureReads == reads)
         #expect(model.updatedAt == clock.now)
     }
 
