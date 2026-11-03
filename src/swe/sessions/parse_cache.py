@@ -60,6 +60,7 @@ _FINGERPRINT_MODULES = (
     "swe.sessions.parsers",
     "swe.sessions.engines.jsonl_engine",
     "swe.sessions.engines.common",
+    "swe.sessions.engines.json_engine",
 )
 
 _local = threading.local()

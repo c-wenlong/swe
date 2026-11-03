@@ -16,7 +16,7 @@ from swe.sessions.engines.common import (
     parse_iso_ts,
     strip_file_uri,
 )
-from swe.sessions import failures
+from swe.sessions import failures, parse_cache
 from swe.sessions.models import Session
 
 
@@ -59,6 +59,10 @@ class JsonParserConfig:
     # says where the title came from.
     enrich: Callable[[dict, Any, str], None] | None = None
     skip_basenames: set[str] = field(default_factory=set)
+    # files mode: reuse each file's result from the parse cache while the
+    # file is unchanged. Only for a config whose callbacks read nothing but
+    # the entry and its path (no ``enrich``, no side files, no clock).
+    cache: bool = False
 
 
 def parse_json_store(config: JsonParserConfig) -> list[Session]:
@@ -108,6 +112,16 @@ def _parse_files(config: JsonParserConfig) -> list[Session]:
                 continue
             if os.path.basename(fp) in config.skip_basenames:
                 continue
+            if config.cache and config.enrich is None:
+                fields = parse_cache.lookup(
+                    f"{config.tool_name}:json",
+                    fp,
+                    lambda fp=fp: _file_fields(fp, config),
+                    valid=_valid_fields,
+                )
+                if fields:
+                    sessions.append(Session(**fields))
+                continue
             try:
                 with open(fp) as f:
                     data = json.load(f)
@@ -123,6 +137,41 @@ def _parse_files(config: JsonParserConfig) -> list[Session]:
         # Recorded so it reads as an error rather than as no history.
         failures.record(config.tool_name, exc)
     return sessions
+
+
+_SESSION_FIELDS = frozenset(
+    ("timestamp", "agent", "path", "title", "session_id", "tool_name", "title_source")
+)
+
+
+def _file_fields(fp: str, config: JsonParserConfig) -> dict | None:
+    """One ``files``-mode file as Session fields, or ``None`` to skip it.
+
+    An ``OSError`` reading it is noted, so the parse cache does not pin
+    that failed read; bytes that do not parse are the file's own answer.
+    """
+    try:
+        with open(fp, "rb") as f:
+            raw = f.read()
+    except OSError:
+        parse_cache.note_read_error()
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    if config.include and not config.include(data, fp):
+        return None
+    sess = _to_session(data, fp, config)
+    if sess is None:
+        return None
+    return {name: getattr(sess, name) for name in _SESSION_FIELDS}
+
+
+def _valid_fields(value) -> bool:
+    return value is None or (
+        isinstance(value, dict) and set(value) == _SESSION_FIELDS
+    )
 
 
 def _parse_nested_dirs(config: JsonParserConfig) -> list[Session]:
