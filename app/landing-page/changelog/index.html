@@ -1304,6 +1304,26 @@ which catches a delete below the newest row, is read again at most once
 a minute per session. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1521">#1521</a>.</p>
 </li>
+<li><p><strong>The Mac app's background polls no longer keep the Mac awake.</strong>
+Every <code>swe</code> the app ran held a user-initiated activity, which also
+blocks idle system sleep while the child runs, so the GitHub poll, the
+3 s pair-request poll on Remote settings and the account, feed and
+limit refreshes each held it off several times a minute. Polls and
+timers now run their <code>swe</code> with no activity; runs from a button keep
+it. The activity always ended with each run, so App Nap was only off
+while a child ran, never for the whole app. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1540">#1540</a>.</p>
+</li>
+<li><p><strong>The Mac app's ledger ticks cost about a third of the CPU they did.</strong>
+A background scan now counts as new usage only when it wrote a usage
+event, not when it merely read a file, so a tick that appended prompts
+or tool output rebuilds nothing. Ticks that do write usage read less:
+a covering index answers the time-range reads without a table lookup
+per row, grouped reads group by dimension id before joining names, and
+Codex's account comparison reads only Codex rows. Measured against a
+copy of a 415,000-event ledger, one ingest tick went from about 6.4 to
+2.0 CPU-seconds. Closes <a href="https://github.com/c-wenlong/swe/issues/1568">#1568</a>.</p>
+</li>
 <li><p><strong>The hub slows down while nobody is watching.</strong> With no client
 stream open (the ntfy notifier holds one whenever it can push;
 satellite command streams don't count) and no client request for two
