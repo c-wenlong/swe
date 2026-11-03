@@ -38,6 +38,9 @@ function patchEl(e) {
 const baseCreate = document.createElement;
 document.createElement = (t) => patchEl(baseCreate(t));
 for (const id in ids) patchEl(ids[id]);
+// The page's own listeners, so a test can hide and show the tab.
+const docListeners = {};
+document.addEventListener = (t, f) => { docListeners[t] = f; };
 """
 
 HELPERS = r"""
@@ -197,6 +200,28 @@ class TestLiveReply(unittest.TestCase):
             delta('x', 'hi', 1); T.paintStreams();
             return shape();""")
         self.assertEqual(out, [["streams", [["x", "hi"]]]])
+
+    def test_a_hidden_tab_keeps_every_event_and_draws_on_show(self):
+        """#1554: while hidden, deltas and events still reach the chat's
+        state but nothing is drawn and the cursor stays; showing the tab
+        draws the bubbles and reveals every held event, in order."""
+        out = self.run_js("""
+            T.chat.opened = true; T.chat.stream = {};
+            document.hidden = true; document.visibilityState = 'hidden';
+            delta('x', 'Hel', 1); delta('x', 'lo', 2);
+            appended(5, { kind: 'system', text: 'one' });
+            appended(6, { kind: 'system', text: 'two' });
+            await wait(T.STREAM_MS.paint + 20);
+            const hidden = { shape: shape(), pending: T.chat.pending.length, seq: T.chat.seq,
+                             bubble: T.chat.replies.shown().map((b) => b.text) };
+            document.hidden = false; document.visibilityState = 'visible';
+            docListeners.visibilitychange();
+            drain();
+            return { hidden, shown: shape(), seq: T.chat.seq };""")
+        self.assertEqual(out["hidden"], {"shape": [], "pending": 2, "seq": 0, "bubble": ["Hello"]})
+        self.assertEqual(out["shown"], [["msg system arrive", "5"], ["msg system arrive", "6"],
+                                        ["streams", [["x", "Hello"]]]])
+        self.assertEqual(out["seq"], 6)
 
 
 if __name__ == "__main__":

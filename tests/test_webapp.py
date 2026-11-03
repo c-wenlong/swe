@@ -551,6 +551,41 @@ process.stdout.write(JSON.stringify(nav.scrollLeft));
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestPairPollWhileHidden(unittest.TestCase):
+    """#1554: "Pair with Tailscale" asks for the owner's answer every 2 s,
+    but a hidden tab asks nothing; showing it asks at once."""
+
+    def test_a_hidden_tab_waits_for_the_tab_to_show(self):
+        src = app_js_function("pairRequestPoll") + r"""
+let pairGen = 1, routeGen = 0, failed = null;
+const timers = [], listeners = new Set(), asked = [];
+globalThis.setTimeout = (fn) => { timers.push(fn); };
+globalThis.document = { hidden: false,
+  addEventListener: (t, f) => listeners.add(f), removeEventListener: (t, f) => listeners.delete(f) };
+globalThis.fetch = async (url) => { asked.push(url); return { status: 200, json: async () => ({ status: "pending" }) }; };
+const pairRequestFailed = (m) => { failed = m; };
+const settle = () => new Promise((r) => setImmediate(r));
+(async () => {
+  pairRequestPoll("r1", "s", 1, 0);
+  await timers.shift()(); const first = asked.length;
+  document.hidden = true;
+  await timers.shift()(); const hidden = [asked.length - first, timers.length, listeners.size];
+  // Still hidden: a visibilitychange to hidden asks nothing.
+  for (const f of [...listeners]) f(); await settle();
+  const stillHidden = asked.length - first;
+  document.hidden = false;
+  for (const f of [...listeners]) f(); await settle();
+  process.stdout.write(JSON.stringify({ first, hidden, stillHidden, shown: asked.length - first,
+    listeners: listeners.size, next: timers.length }));
+})();
+"""
+        done = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout), {
+            "first": 1, "hidden": [0, 0, 1], "stillHidden": 0, "shown": 1, "listeners": 0, "next": 1})
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
 class TestOverviewMachines(unittest.TestCase):
     """Overview's machine filter (#525): the Machines card and header."""
 
