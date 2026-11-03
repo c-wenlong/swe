@@ -1293,6 +1293,19 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>Live reply text costs the hub linear work, not quadratic.</strong> Every
+100 ms flush of a streamed reply re-cleaned the whole message so far:
+a 100 KB reply took 3.3 s of cleaning, now 58 ms. Each message keeps
+its cleaned text up to a line break no redaction can reach across and
+re-cleans only what follows; the <code>done</code> flush still cleans the whole
+text. A reply with no line breaks makes each flush wait longer once
+8 KB of it is pending, so its cleaning stays linear too. A message
+whose channel dies mid-reply stops streaming and frees its text after
+15 idle minutes (a late chunk for it never streams), and its empty
+entry goes after a day. A hub event going to several open streams is now cleaned and
+encoded once, not once per stream. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1532">#1532</a>.</p>
+</li>
 <li><p><strong>The web chat parses only the growing end of a streaming reply.</strong>
 Each repaint (at most every 80 ms) used to run the whole reply through
 the Markdown parser and syntax highlighter and replace the bubble's
