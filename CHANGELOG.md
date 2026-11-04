@@ -1180,6 +1180,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Web app tabs in the background stop polling the hub.** Settings ›
+  Integrations relisted pair requests every 3 s (each relist costs the
+  hub about five file reads and a JSON build), and "Pair with Tailscale"
+  asked for the owner's answer every 2 s, both while the tab was
+  hidden. Now a hidden tab asks nothing and asks once the moment it is
+  shown again. A hidden chat keeps its stream and every event but draws
+  nothing until it is shown, and the pairing countdown and Calendar's
+  now-line stop ticking while hidden.
+  Closes [#1554](https://github.com/c-wenlong/swe/issues/1554).
+
 - **The web chat reads its one session row, not the whole catalog.**
   The chat read `GET /v1/sessions` (every row, read-state and machines)
   to find its own row on open, on resync, at every turn's end (up to

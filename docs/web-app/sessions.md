@@ -61,7 +61,10 @@ the chat, like the Repositories rail's fold.
    read with a fetch stream (EventSource can't send the bearer). Events
    are revealed one at a time with a short gap; a replay of
    more than 24 lands at once. A dropped stream reconnects after 2 s from
-   the last seq shown, and again when the tab becomes visible. Leaving the
+   the last seq shown, and again when the tab becomes visible. A hidden
+   tab keeps the stream and every event but draws nothing: live reply
+   text and held events are drawn when the tab is shown, through the same
+   reveal, and the cursor moves only as each is shown. Leaving the
    chat by any route aborts the stream, so it never keeps one of the
    browser's few connections to the hub. When the waiting approval was
    asked before that message (codex's app-server journals the ask before

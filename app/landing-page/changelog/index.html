@@ -1304,6 +1304,16 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>Web app tabs in the background stop polling the hub.</strong> Settings ›
+Integrations relisted pair requests every 3 s (each relist costs the
+hub about five file reads and a JSON build), and &quot;Pair with Tailscale&quot;
+asked for the owner's answer every 2 s, both while the tab was
+hidden. Now a hidden tab asks nothing and asks once the moment it is
+shown again. A hidden chat keeps its stream and every event but draws
+nothing until it is shown, and the pairing countdown and Calendar's
+now-line stop ticking while hidden.
+Closes <a href="https://github.com/c-wenlong/swe/issues/1554">#1554</a>.</p>
+</li>
 <li><p><strong>The web chat reads its one session row, not the whole catalog.</strong>
 The chat read <code>GET /v1/sessions</code> (every row, read-state and machines)
 to find its own row on open, on resync, at every turn's end (up to

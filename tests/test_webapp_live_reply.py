@@ -57,6 +57,9 @@ function patchEl(e) {
 const baseCreate = document.createElement;
 document.createElement = (t) => patchEl(baseCreate(t));
 for (const id in ids) patchEl(ids[id]);
+// The page's own listeners, so a test can hide and show the tab.
+const docListeners = {};
+document.addEventListener = (t, f) => { docListeners[t] = f; };
 """
 
 HELPERS = r"""
@@ -221,6 +224,64 @@ class TestLiveReply(ChatScript):
             delta('x', 'hi', 1); T.paintStreams();
             return shape();""")
         self.assertEqual(out, [["streams", [["x", "hi"]]]])
+
+    def test_a_hidden_tab_keeps_every_event_and_draws_on_show(self):
+        """#1554: while hidden, deltas and events still reach the chat's
+        state but nothing is drawn and the cursor stays; showing the tab
+        draws the bubbles and reveals every held event, in order."""
+        out = self.run_js("""
+            T.chat.opened = true; T.chat.stream = {};
+            document.hidden = true; document.visibilityState = 'hidden';
+            delta('x', 'Hel', 1); delta('x', 'lo', 2);
+            appended(5, { kind: 'system', text: 'one' });
+            appended(6, { kind: 'system', text: 'two' });
+            await wait(T.STREAM_MS.paint + 20);
+            const hidden = { shape: shape(), pending: T.chat.pending.length, seq: T.chat.seq,
+                             bubble: T.chat.replies.shown().map((b) => b.text) };
+            document.hidden = false; document.visibilityState = 'visible';
+            docListeners.visibilitychange();
+            drain();
+            return { hidden, shown: shape(), seq: T.chat.seq };""")
+        self.assertEqual(out["hidden"], {"shape": [], "pending": 2, "seq": 0, "bubble": ["Hello"]})
+        self.assertEqual(out["shown"], [["msg system arrive", "5"], ["msg system arrive", "6"],
+                                        ["streams", [["x", "Hello"]]]])
+        self.assertEqual(out["seq"], 6)
+
+    def test_a_stream_dropped_while_hidden_shows_what_it_received_first(self):
+        """Reopening the stream clears what waits; everything received is
+        shown before it, so a trimmed journal can't lose it, and the
+        reopened stream resumes after it."""
+        out = self.run_js("""
+            const opened = [];
+            globalThis.authHeaders = () => ({});
+            globalThis.fetch = (url) => { opened.push(url); return new Promise(() => {}); };
+            T.chat.opened = true; T.chat.stream = {};
+            document.hidden = true; document.visibilityState = 'hidden';
+            appended(5, { kind: 'system', text: 'one' });
+            appended(6, { kind: 'system', text: 'two' });
+            appended(7, { kind: 'system', text: 'three' });
+            T.chat.stream = null;   // dropped while hidden
+            document.hidden = false; document.visibilityState = 'visible';
+            docListeners.visibilitychange();
+            return { shown: shape().map((e) => e[1]), seq: T.chat.seq, opened };""")
+        self.assertEqual(out["shown"], ["5", "6", "7"])
+        self.assertEqual(out["seq"], 7)
+        self.assertEqual(len(out["opened"]), 1)
+        self.assertIn("last=7", out["opened"][0])
+
+    def test_a_backlog_of_finals_draws_the_bubbles_once(self):
+        out = self.run_js("""
+            document.hidden = true; document.visibilityState = 'hidden';
+            for (let i = 1; i <= 30; i++) delta('r' + i, 'reply ' + i, 1, true);
+            for (let i = 1; i <= 30; i++) appended(100 + i, { kind: 'assistant', text: 'reply ' + i });
+            document.hidden = false; document.visibilityState = 'visible';
+            const shown = T.chat.replies.shown;
+            let paints = 0;
+            T.chat.replies.shown = () => { paints++; return shown(); };
+            T.chat.opened = true; T.chat.stream = {};
+            docListeners.visibilitychange();
+            return { paints, entries: shape().length, streams: shape().filter((e) => e[0] === 'streams').length };""")
+        self.assertEqual(out, {"paints": 1, "entries": 30, "streams": 0})
 
     def test_change_detection_looks_at_the_touched_bubble_only(self):
         """apply, release and sweep say whether what's drawn changed
