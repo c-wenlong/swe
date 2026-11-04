@@ -141,11 +141,16 @@ public final class PairRequestsModel {
     }
 
     /// Refreshes every `interval` until the calling task is cancelled, which
-    /// SwiftUI does when the section leaves the screen.
-    public func poll(every interval: Duration = PairRequestsModel.pollInterval) async {
+    /// SwiftUI does when the section leaves the screen. While `onScreen`
+    /// says no (the window minimised or covered) a tick skips its `swe`
+    /// run, so a Settings page left open costs nothing behind other
+    /// windows; the next tick after it shows again looks at once.
+    public func poll(every interval: Duration = PairRequestsModel.pollInterval,
+                     onScreen: @escaping @MainActor () -> Bool = { true },
+                     sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) async {
         while !Task.isCancelled {
-            await refresh()
-            do { try await Task.sleep(for: interval) } catch { return }
+            if onScreen() { await refresh() }
+            do { try await sleep(interval) } catch { return }
         }
     }
 

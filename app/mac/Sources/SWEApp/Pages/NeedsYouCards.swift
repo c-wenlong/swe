@@ -51,14 +51,32 @@ struct NeedsYouCards: View {
         }
     }
 
-    /// Loads while the page is open, every 15 s as the phone does, and
-    /// only once a minute while the hub doesn't answer: each try asks
-    /// swe where the hub listens.
-    static func poll(_ model: NeedsYouModel, hub: LocalHub) async {
+    /// Loads while the page is open, every 15 s as the phone does. While
+    /// the hub doesn't answer, each try asks swe where the hub listens,
+    /// so the wait doubles from a minute up to `maxRetry`. Ticks behind
+    /// other windows (`onScreen` false) skip the load.
+    static func poll(_ model: NeedsYouModel, hub: LocalHub,
+                     onScreen: @escaping @MainActor () -> Bool = { true }) async {
+        var retry = Self.firstRetry
+        var loaded = false
         while !Task.isCancelled {
-            await model.load { try await hub.withClient { try await $0.inbox(done: true) } }
-            try? await Task.sleep(for: .seconds(model.reachable ? 15 : 60))
+            if onScreen() || !loaded {
+                await model.load { try await hub.withClient { try await $0.inbox(done: true) } }
+                loaded = true
+                retry = model.reachable ? Self.firstRetry : retry
+            }
+            let wait = model.reachable ? 15 : retry
+            if !model.reachable { retry = Self.nextRetry(after: retry) }
+            try? await Task.sleep(for: .seconds(wait))
         }
+    }
+
+    static let firstRetry: TimeInterval = 60
+    static let maxRetry: TimeInterval = 300
+
+    /// The hub-down wait after `retry`: double it, up to `maxRetry`.
+    static func nextRetry(after retry: TimeInterval) -> TimeInterval {
+        min(retry * 2, maxRetry)
     }
 
     private func fetch() async throws -> [HubInboxItem] {
