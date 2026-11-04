@@ -267,6 +267,9 @@ public final class ChaptersModel {
     /// Dirty drafts whose files are gone: the rail shows a "deleted" row
     /// for each so its unsaved text stays reachable.
     public private(set) var ghosts: [String] = []
+    /// Chapters index.txt lists whose files are not on disk, in index
+    /// order: the rail shows a "missing" row for each.
+    public private(set) var missing: [String] = []
     /// Every folder path in `tree`, top level first as "" — for the New
     /// chapter sheet's folder menu.
     public private(set) var folders: [String] = []
@@ -334,7 +337,13 @@ public final class ChaptersModel {
         // draws a ghost row for it so Save/Revert keep working.
         ghosts = documents.filter { $0.value.isDirty && !files.contains($0.key) }
             .map(\.key).sorted()
-        if selected.map({ !files.contains($0) && !ghosts.contains($0) }) ?? true {
+        // An indexed chapter with no file keeps a row too, so it can be
+        // opened and saved back into existence rather than fixed by hand.
+        missing = check.chapters.map(\.name).filter {
+            !files.contains($0) && !ghosts.contains($0)
+                && Self.inside($0, under: check.directory) != nil
+        }
+        if selected.map({ !files.contains($0) && !ghosts.contains($0) && !missing.contains($0) }) ?? true {
             selected = check.chapters.first?.name
                 ?? treeFilesInOrder.first
                 ?? ghosts.first

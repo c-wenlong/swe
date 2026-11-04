@@ -238,6 +238,9 @@ private struct ChaptersEditor: View {
                     ForEach(chapters.ghosts, id: \.self) { name in
                         GhostRow(name: name)
                     }
+                    ForEach(chapters.missing, id: \.self) { name in
+                        GhostRow(name: name, missing: true)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -251,6 +254,8 @@ private struct ChaptersEditor: View {
     /// stays reachable so Save/Revert keep working.
     private struct GhostRow: View {
         var name: String
+        /// Listed in index.txt with no file, rather than a deleted draft.
+        var missing = false
         @Environment(AppModel.self) private var app
         @State private var hovering = false
 
@@ -258,13 +263,16 @@ private struct ChaptersEditor: View {
             let chapters = app.chapters
             let selected = chapters.selected == name
             HStack(spacing: 6) {
-                Text((name as NSString).lastPathComponent)
+                Text(missing ? name : (name as NSString).lastPathComponent)
                     .font(Theme.nav)
-                    .lineLimit(1).truncationMode(.tail)
+                    .lineLimit(1).truncationMode(.head)
                     .foregroundStyle(selected ? Theme.textPrimary : Theme.textMuted)
-                Circle().fill(Theme.warning)
-                    .frame(width: Theme.statusDot, height: Theme.statusDot)
-                Text("deleted").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                if !missing {
+                    Circle().fill(Theme.warning)
+                        .frame(width: Theme.statusDot, height: Theme.statusDot)
+                }
+                Text(missing ? "missing" : "deleted").font(Theme.caption)
+                    .foregroundStyle(missing ? Theme.dangerText : Theme.textMuted)
                 Spacer(minLength: 4)
             }
             .padding(.leading, 23)
@@ -274,7 +282,9 @@ private struct ChaptersEditor: View {
             .contentShape(.rect)
             .onTapGesture { chapters.selected = name }
             .onHover { hovering = $0 }
-            .hoverTip("The file is gone but the unsaved text is still here; Save writes it back", replacesLabel: false)
+            .hoverTip(missing ? "index.txt lists this chapter but the file is gone; Save creates it"
+                      : "The file is gone but the unsaved text is still here; Save writes it back",
+                      replacesLabel: false)
         }
     }
 
