@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The New chapter sheet no longer resizes as it suggests.** Its
+  folder/file autocomplete now floats under the focused field instead of
+  pushing the card taller, capped to the room between the field and the
+  card's bottom edge with the list scrolling beyond.
+
 - **The New chapter/folder sheet suggests what exists.** Typing in its
   Folder or File field opens an inline list of matching folders and
   chapters — ranked by closeness, the folder's own children first — plus
