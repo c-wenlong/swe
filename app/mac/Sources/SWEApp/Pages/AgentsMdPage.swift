@@ -1036,6 +1036,17 @@ private struct NewChapterSheet: View {
     /// Escape pressed with a list open: it stays closed until the query
     /// changes again.
     @State private var listDismissed = false
+    /// The card's own bounds (in the "newChapterSheet" space) and each
+    /// field's bottom, so the floating list's height is measured, not
+    /// hardcoded. 8pt stays clear of the card edge.
+    @State private var cardHeight: CGFloat = 0
+    @State private var folderFieldMaxY: CGFloat = 0
+    @State private var fileFieldMaxY: CGFloat = 0
+
+    private var listMaxHeight: CGFloat {
+        let fieldMaxY = activeField == .file ? fileFieldMaxY : folderFieldMaxY
+        return min(6 * 28, max(0, cardHeight - fieldMaxY - 4 - 8))
+    }
 
     private enum Field { case folder, file }
 
@@ -1145,49 +1156,71 @@ private struct NewChapterSheet: View {
             Text("Folders group the chapters so you and agents can navigate without reading everything.")
                 .font(Theme.caption).foregroundStyle(Theme.textSecondary)
             FormField("Folder") {
-                VStack(alignment: .leading, spacing: 4) {
-                    TextField("engineering/review, or empty for top level", text: $folder)
+                TextField("engineering/review, or empty for top level", text: $folder)
+                    .sweField(monospaced: true)
+                    .focused($focus, equals: .folder)
+                    .onKeyPress(.upArrow, phases: .down) { _ in move(-1); return .handled }
+                    .onKeyPress(.downArrow, phases: .down) { _ in move(1); return .handled }
+                    .onKeyPress(.return, phases: .down) { _ in pickHighlighted() }
+                    .onKeyPress(.escape, phases: .down) { _ in escape() }
+                    // The list floats below the field; it takes no layout
+                    // space, so its height never resizes the card.
+                    .onGeometryChange(for: CGFloat.self) {
+                        $0.frame(in: .named("newChapterSheet")).maxY
+                    } action: { folderFieldMaxY = $0 }
+                    .overlay(alignment: .bottomLeading) {
+                        if listOpen && activeField == .folder {
+                            SuggestList(rows: rows, highlight: highlight,
+                                        folderField: true,
+                                        maxHeight: listMaxHeight) { pick($0) }
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(width: nil, alignment: .topLeading)
+                                .alignmentGuide(.bottom) { $0[.top] - 4 }
+                        }
+                    }
+            }
+            .zIndex(listOpen && activeField == .folder ? 1 : 0)
+            if initial.mode == .chapter {
+                FormField("File") {
+                    TextField("name (.md added)", text: $file)
                         .sweField(monospaced: true)
-                        .focused($focus, equals: .folder)
+                        .focused($focus, equals: .file)
                         .onKeyPress(.upArrow, phases: .down) { _ in move(-1); return .handled }
                         .onKeyPress(.downArrow, phases: .down) { _ in move(1); return .handled }
                         .onKeyPress(.return, phases: .down) { _ in pickHighlighted() }
                         .onKeyPress(.escape, phases: .down) { _ in escape() }
-                    if listOpen && activeField == .folder {
-                        SuggestList(rows: rows, highlight: highlight,
-                                    folderField: true) { pick($0) }
-                    }
-                }
-            }
-            if initial.mode == .chapter {
-                FormField("File") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        TextField("name (.md added)", text: $file)
-                            .sweField(monospaced: true)
-                            .focused($focus, equals: .file)
-                            .onKeyPress(.upArrow, phases: .down) { _ in move(-1); return .handled }
-                            .onKeyPress(.downArrow, phases: .down) { _ in move(1); return .handled }
-                            .onKeyPress(.return, phases: .down) { _ in pickHighlighted() }
-                            .onKeyPress(.escape, phases: .down) { _ in escape() }
-                        if listOpen && activeField == .file {
-                            SuggestList(rows: rows, highlight: highlight,
-                                        folderField: false) { pick($0) }
+                        .onGeometryChange(for: CGFloat.self) {
+                            $0.frame(in: .named("newChapterSheet")).maxY
+                        } action: { fileFieldMaxY = $0 }
+                        .overlay(alignment: .bottomLeading) {
+                            if listOpen && activeField == .file {
+                                SuggestList(rows: rows, highlight: highlight,
+                                            folderField: false,
+                                            maxHeight: listMaxHeight) { pick($0) }
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(width: nil, alignment: .topLeading)
+                                    .alignmentGuide(.bottom) { $0[.top] - 4 }
+                            }
                         }
-                    }
                 }
+                .zIndex(listOpen && activeField == .file ? 1 : 0)
             }
             // Only a chapter goes in the index; a folder alone does not.
-            if !fileName.isEmpty {
+            // Always visible in chapter mode so the card keeps its height.
+            if initial.mode == .chapter {
                 Toggle("Include in AGENTS.md", isOn: $include)
                     .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
                     .toggleStyle(.checkbox)
+                    .disabled(fileName.isEmpty)
             }
-            if let problem = folderProblem ?? fileProblem {
-                Text(problem).font(Theme.caption).foregroundStyle(Theme.dangerText)
-            } else if !fullPath.isEmpty {
-                Text(fullPath).font(Theme.caption).foregroundStyle(Theme.textMuted)
-                    .lineLimit(1).truncationMode(.middle)
-            }
+            // One line tall whether it carries a problem, a path preview,
+            // or only the placeholder.
+            Text(folderProblem ?? fileProblem
+                 ?? (fullPath.isEmpty ? "~/.swe/AGENTS_MD/" : fullPath))
+                .font(Theme.caption)
+                .foregroundStyle(folderProblem ?? fileProblem != nil
+                                 ? Theme.dangerText : Theme.textMuted)
+                .lineLimit(1).truncationMode(.middle)
             if let error {
                 Text(error).font(Theme.caption).foregroundStyle(Theme.dangerText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1210,6 +1243,16 @@ private struct NewChapterSheet: View {
             }
         }
         .sheetScaffold(width: 480)
+        // A click on empty card space closes the floating list; rows,
+        // fields and buttons still get their own clicks since they sit
+        // above the background.
+        .background {
+            Color.clear.contentShape(.rect)
+                .onTapGesture { if listOpen { listDismissed = true } }
+        }
+        .coordinateSpace(.named("newChapterSheet"))
+        .onGeometryChange(for: CGFloat.self) { $0.size.height }
+            action: { cardHeight = $0 }
         .onAppear {
             // A prefilled folder (from a rail "+" click) starts the user
             // on File; otherwise on Folder.
@@ -1241,6 +1284,9 @@ private struct NewChapterSheet: View {
         /// true when the list is under the Folder field: `.create` rows
         /// read "New folder", `.file` never appears.
         var folderField: Bool
+        /// Measured room between the field's bottom and the card edge;
+        /// the ScrollView scrolls past it.
+        var maxHeight: CGFloat
         var pick: (ChapterSuggest.Row) -> Void
 
         var body: some View {
@@ -1256,11 +1302,13 @@ private struct NewChapterSheet: View {
                     }
                     .onChange(of: highlight) { proxy.scrollTo(highlight) }
                 }
-                .frame(maxHeight: 6 * 28)
-                .background(Theme.card, in: .rect(cornerRadius: Theme.controlRadius))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxHeight: maxHeight, alignment: .top)
+                .background(Theme.dialog, in: .rect(cornerRadius: Theme.controlRadius))
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.controlRadius)
                         .strokeBorder(Theme.border, lineWidth: 1))
+                .shadow(color: Theme.dialogShadow, radius: 8, y: 4)
             }
         }
 
