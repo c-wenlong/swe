@@ -333,8 +333,8 @@ dialog .close { margin-left: auto; }
       </div>
       <div class="steps">
         <div class="step"><span class="n">1</span><div>
-          <p>Install with pipx (or <a href="overview/#nix">Nix</a>).</p>
-          <div class="cmd"><code><span class="p">$ </span>pipx install git+https://github.com/c-wenlong/swe.git</code><button class="copy" type="button" data-copy="pipx install git+https://github.com/c-wenlong/swe.git">Copy</button></div>
+          <p>Install with Homebrew (or <a href="overview/#nix">Nix</a>).</p>
+          <div class="cmd"><code><span class="p">$ </span>brew install c-wenlong/swe/swe</code><button class="copy" type="button" data-copy="brew install c-wenlong/swe/swe">Copy</button></div>
         </div></div>
         <div class="step"><span class="n">2</span><div>
           <p>Run setup. It finds your agents, providers, MCP servers and skills.</p>
@@ -358,7 +358,7 @@ dialog .close { margin-left: auto; }
   <div class="faq">
     <details><summary>What is swe?</summary><p>A home base for the AI coding agents on your machine. It keeps a registry of them, lists and resumes their sessions, tracks usage, cost and limits, and keeps skills, MCP servers and AGENTS.md in sync. You use it from the <code>swe</code> command, the Mac app, or your phone.</p></details>
     <details><summary>Does it replace or wrap my agents?</summary><p>No. swe reads each tool's own logs and configs read-only, and <code>swe use</code> hands off to the real binary. Your agents keep working exactly as they do without it.</p></details>
-    <details><summary>Where does my data go?</summary><p>It stays on your machine, under <code>~/.quiver</code>. The phone remote talks to a hub on your own machine over your Tailscale network, so no third party stores your transcripts.</p></details>
+    <details><summary>Where does my data go?</summary><p>It stays on your machine, under <code>~/.swe</code>. The phone remote talks to a hub on your own machine over your Tailscale network, so no third party stores your transcripts.</p></details>
     <details><summary>Which agents does it support?</summary><p>Session history covers 16 agents today, including Claude Code, Codex, Gemini CLI, Cursor CLI, opencode, Copilot, Droid and Devin. Any other CLI can be registered so <code>swe</code> can launch it.</p></details>
     <details><summary>What does it need?</summary><p>Python 3.11 or newer for the CLI, with no other dependencies. The Mac app needs macOS 26 and bundles its own copy of <code>swe</code>.</p></details>
     <details><summary>Is it free?</summary><p>Yes. swe is open source under the MIT license.</p></details>
@@ -367,7 +367,7 @@ dialog .close { margin-left: auto; }
 
 <div class="final">
   <h2>Get swe.</h2>
-  <div class="cmd"><code><span class="p">$ </span>pipx install git+https://github.com/c-wenlong/swe.git</code><button class="copy" type="button" data-copy="pipx install git+https://github.com/c-wenlong/swe.git">Copy</button></div>
+  <div class="cmd"><code><span class="p">$ </span>brew install --cask c-wenlong/swe/swe</code><button class="copy" type="button" data-copy="brew install --cask c-wenlong/swe/swe">Copy</button></div>
   <div class="ctas">
     <a class="btn light" href="#install" data-dmg="Download for Mac" hidden><svg class="i"><use href="#apple"/></svg><span>Download for Mac</span></a>
     <a class="btn" href="overview/">Read the docs</a>
@@ -487,14 +487,15 @@ dialog .close { margin-left: auto; }
       .then(function (rel) {
         var dmg = rel && (rel.assets || []).filter(function (a) { return /\.dmg$/i.test(a.name); })[0];
         if (!dmg) return;
+        var ver = String(rel.tag_name || "").replace(/[^\w.\-]/g, "");
         document.querySelectorAll("[data-dmg]").forEach(function (a) {
           a.href = dmg.browser_download_url;
           a.querySelector("use").setAttribute("href", "#apple");
-          a.querySelector("span").textContent = a.getAttribute("data-dmg");
+          a.querySelector("span").textContent = a.getAttribute("data-dmg") + " " + ver;
           a.hidden = false;
         });
         var hint = document.getElementById("dmg-hint");
-        hint.textContent = "SWE " + String(rel.tag_name || "").replace(/[^\w.\-]/g, "") +
+        hint.textContent = "SWE " + ver +
           " for macOS 26 or later. Prefer the terminal? ";
         var cli = document.createElement("a");
         cli.href = "#install";
