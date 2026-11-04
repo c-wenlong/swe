@@ -1033,9 +1033,17 @@ private struct NewChapterSheet: View {
     @State private var activeField: Field?
     /// Row the keyboard is on; resets whenever the rows change.
     @State private var highlight = 0
-    /// Escape pressed with a list open: it stays closed until the query
-    /// changes again.
-    @State private var listDismissed = false
+    /// Which field's list is open; nil when closed. Not derived from the
+    /// rows: the list opens only on typing (after a short debounce) or
+    /// on Down Arrow, and closes on Escape, an outside click, an empty
+    /// field, or a pick.
+    @State private var openField: Field?
+    /// The pending "open 250ms after typing stopped" task; each
+    /// keystroke cancels the previous one.
+    @State private var openTask: Task<Void, Never>?
+    /// A pick that writes the field (a chosen folder) must not trigger
+    /// the text-change open for it.
+    @State private var suppressOpen = false
     /// The card's own bounds (in the "newChapterSheet" space) and each
     /// field's bottom, so the floating list's height is measured, not
     /// hardcoded. 8pt stays clear of the card edge.
@@ -1098,12 +1106,21 @@ private struct NewChapterSheet: View {
     }
 
     private var listOpen: Bool {
-        activeField != nil && !listDismissed && !rows.isEmpty
+        openField != nil && openField == activeField && !rows.isEmpty
     }
 
-    private func move(_ delta: Int) {
-        guard !rows.isEmpty else { return }
+    /// Down on a closed list opens it at once (an empty field lists
+    /// everything); on an open list the arrows move the highlight.
+    private func move(_ delta: Int) -> KeyPress.Result {
+        guard listOpen else {
+            guard delta > 0, let field = activeField else { return .ignored }
+            openTask?.cancel()
+            highlight = 0
+            openField = field
+            return .handled
+        }
         highlight = min(max(highlight + delta, 0), rows.count - 1)
+        return .handled
     }
 
     /// Return picks the highlighted row when the list is open; closed,
@@ -1116,7 +1133,7 @@ private struct NewChapterSheet: View {
 
     private func escape() -> KeyPress.Result {
         if listOpen {
-            listDismissed = true
+            openField = nil
             return .handled
         }
         return .ignored  // falls through to the Cancel shortcut
@@ -1125,12 +1142,16 @@ private struct NewChapterSheet: View {
     private func pick(_ row: ChapterSuggest.Row) {
         switch row {
         case .folder(let path):
+            // Writing the field is a pick, not typing: it must not
+            // reopen this list through the text-change path. A pick of
+            // what is already typed fires no onChange, so leave the
+            // flag off or it would swallow the next real keystroke.
+            if folder != path { suppressOpen = true }
             folder = path
+            openField = nil
             if initial.mode == .chapter {
                 focus = .file
                 activeField = .file
-            } else {
-                listDismissed = true
             }
         case .file(let path):
             // Same select path the rail's file rows use; the sheet only
@@ -1138,6 +1159,7 @@ private struct NewChapterSheet: View {
             app.chapters.selected = path
             dismiss()
         case .create(let path):
+            openField = nil
             if activeField == .folder && initial.mode == .chapter {
                 focus = .file  // keep the typed folder, move on to the name
                 activeField = .file
@@ -1159,8 +1181,8 @@ private struct NewChapterSheet: View {
                 TextField("engineering/review, or empty for top level", text: $folder)
                     .sweField(monospaced: true)
                     .focused($focus, equals: .folder)
-                    .onKeyPress(.upArrow, phases: .down) { _ in move(-1); return .handled }
-                    .onKeyPress(.downArrow, phases: .down) { _ in move(1); return .handled }
+                    .onKeyPress(.upArrow, phases: .down) { _ in move(-1) }
+                    .onKeyPress(.downArrow, phases: .down) { _ in move(1) }
                     .onKeyPress(.return, phases: .down) { _ in pickHighlighted() }
                     .onKeyPress(.escape, phases: .down) { _ in escape() }
                     // The list floats below the field; it takes no layout
@@ -1168,15 +1190,10 @@ private struct NewChapterSheet: View {
                     .onGeometryChange(for: CGFloat.self) {
                         $0.frame(in: .named("newChapterSheet")).maxY
                     } action: { folderFieldMaxY = $0 }
-                    .overlay(alignment: .bottomLeading) {
-                        if listOpen && activeField == .folder {
-                            SuggestList(rows: rows, highlight: highlight,
-                                        folderField: true,
-                                        maxHeight: listMaxHeight) { pick($0) }
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(width: nil, alignment: .topLeading)
-                                .alignmentGuide(.bottom) { $0[.top] - 4 }
-                        }
+                    .dropdownBelow(isPresented: listOpen && activeField == .folder) {
+                        SuggestList(rows: rows, highlight: highlight,
+                                    folderField: true,
+                                    maxHeight: listMaxHeight) { pick($0) }
                     }
             }
             .zIndex(listOpen && activeField == .folder ? 1 : 0)
@@ -1185,22 +1202,17 @@ private struct NewChapterSheet: View {
                     TextField("name (.md added)", text: $file)
                         .sweField(monospaced: true)
                         .focused($focus, equals: .file)
-                        .onKeyPress(.upArrow, phases: .down) { _ in move(-1); return .handled }
-                        .onKeyPress(.downArrow, phases: .down) { _ in move(1); return .handled }
+                        .onKeyPress(.upArrow, phases: .down) { _ in move(-1) }
+                        .onKeyPress(.downArrow, phases: .down) { _ in move(1) }
                         .onKeyPress(.return, phases: .down) { _ in pickHighlighted() }
                         .onKeyPress(.escape, phases: .down) { _ in escape() }
                         .onGeometryChange(for: CGFloat.self) {
                             $0.frame(in: .named("newChapterSheet")).maxY
                         } action: { fileFieldMaxY = $0 }
-                        .overlay(alignment: .bottomLeading) {
-                            if listOpen && activeField == .file {
-                                SuggestList(rows: rows, highlight: highlight,
-                                            folderField: false,
-                                            maxHeight: listMaxHeight) { pick($0) }
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(width: nil, alignment: .topLeading)
-                                    .alignmentGuide(.bottom) { $0[.top] - 4 }
-                            }
+                        .dropdownBelow(isPresented: listOpen && activeField == .file) {
+                            SuggestList(rows: rows, highlight: highlight,
+                                        folderField: false,
+                                        maxHeight: listMaxHeight) { pick($0) }
                         }
                 }
                 .zIndex(listOpen && activeField == .file ? 1 : 0)
@@ -1248,7 +1260,7 @@ private struct NewChapterSheet: View {
         // above the background.
         .background {
             Color.clear.contentShape(.rect)
-                .onTapGesture { if listOpen { listDismissed = true } }
+                .onTapGesture { if listOpen { openField = nil } }
         }
         .coordinateSpace(.named("newChapterSheet"))
         .onGeometryChange(for: CGFloat.self) { $0.size.height }
@@ -1261,19 +1273,43 @@ private struct NewChapterSheet: View {
             focus = field
             activeField = field
         }
-        .onChange(of: folder) { resetList() }
-        .onChange(of: file) { resetList() }
+        .onChange(of: folder) { textChanged(folder, field: .folder) }
+        .onChange(of: file) { textChanged(file, field: .file) }
         .onChange(of: focus) {
             // Latch: a blur doesn't close the list; only moving to the
             // other field (or nothing) does.
-            if let focus { activeField = focus }
-            resetList()
+            if let focus {
+                // Moving to the other field closes this one's list for
+                // good: coming back needs typing or Down again.
+                if focus != activeField { openField = nil }
+                activeField = focus
+            }
+            highlight = 0
+            openTask?.cancel()
         }
     }
 
-    private func resetList() {
+    /// The open rules: an empty field never shows a list; typing opens
+    /// the list 250ms after the last keystroke, still focused; an open
+    /// list follows the text live and closes at once on empty.
+    private func textChanged(_ text: String, field: Field) {
         highlight = 0
-        listDismissed = false
+        openTask?.cancel()
+        // Consume the pick flag first, so a pick that empties the field
+        // can't leave it set for the next real edit.
+        let picked = suppressOpen
+        suppressOpen = false
+        if text.trimmingCharacters(in: .whitespaces).isEmpty {
+            openField = nil
+            return
+        }
+        if picked { return }
+        guard focus == field, openField != field else { return }
+        openTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, self.focus == field else { return }
+            self.openField = field
+        }
     }
 
     /// The inline suggestion list under the focused field — inside the
