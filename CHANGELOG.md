@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-04
+
+### Fixed
+
+- **The tag build's Swift test step compiles again.** `SilentHubStub`'s
+  `await Self.started.bump()` inside a `Task` tripped a region-isolation
+  checker bug in the macos-26 runner's Swift 6.3.3 ("pattern that the
+  region-based isolation checker does not understand how to check"); the
+  test now names the class. V1.2.0 never got its DMG, so this ships as a
+  patch.
+
+## [1.2.0] - 2026-11-04
+
 ### Added
 
 - **The Mac app's chat renders the agent's Markdown tables.** The chat
@@ -1179,6 +1192,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frame while the window is resized.
   Closes [#1557](https://github.com/c-wenlong/swe/issues/1557).
 
+- **The hub reads `harness.json` once per launch-field refresh and
+  finds tmux once.** Every 10 s catalog tick read the registry twice
+  per launchable harness to list its launch providers (about 1.1 ms
+  of 2 ms with ten harnesses); it now reads it once. Every tmux call
+  walked `PATH` for the tmux binary (21 us); the path is now kept
+  while `PATH` is unchanged and the file is still executable (5 us). A
+  missing tmux is looked up again each time, so one installed later is
+  found. Closes [#1531](https://github.com/c-wenlong/swe/issues/1531).
+- **A streaming Devin session costs the hub its new rows, not its
+  whole window.** Each time a tailed Devin session changed, the hub
+  re-read up to 1,064 chain nodes with one query and one JSON parse each:
+  160 to 410 ms per read for long sessions on a 9.8 GB `sessions.db`,
+  about once a second while the session streams. The tailer now keeps the
+  window's decoded nodes and fetches only the rows written since its last
+  read, splicing a switched chain head at its fork: about 2 ms a read on
+  the same sessions, for 0.4 to 2 MB kept per session. A whole read still
+  runs at least once a minute while the session changes, and the kept
+  nodes go after five quiet minutes. Closes
+  [#1522](https://github.com/c-wenlong/swe/issues/1522).
+
+- **A long-running hub stops keeping state for sessions and panes that
+  are gone.** The rate-limit notice memory kept one entry per session
+  that ever hit a limit, and the tmux keystroke locks one per pane ever
+  typed into. A session leaving the catalog now drops its limit entry,
+  and a pane's lock lives only while a write holds it. Streamed messages
+  whose channel died mid-reply were bounded in
+  [#1532](https://github.com/c-wenlong/swe/issues/1532). Closes
+  [#1533](https://github.com/c-wenlong/swe/issues/1533).
 - **Live reply text costs the hub linear work, not quadratic.** Every
   100 ms flush of a streamed reply re-cleaned the whole message so far:
   a 100 KB reply took 3.3 s of cleaning, now 58 ms. Each message keeps
@@ -1232,6 +1273,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at most 20,000 sessions instead of 100,000, with the existing note
   when older ones are left out. Closes
   [#1544](https://github.com/c-wenlong/swe/issues/1544).
+- **`swe check` and `swe mcp status` probe side by side.** `swe check`
+  asked each installed harness for its version one after another (up to
+  three subprocesses each); it now runs them on a small thread pool,
+  7.5 s down to 2.4 s for 11 harnesses here. `swe mcp status` does the
+  same for its server health checks, where each HTTP server can take its
+  whole five-second timeout. The rows keep their order. `swe list` asks
+  `which` once per command instead of twice, harness discovery lists
+  each PATH directory once instead of probing every absent name in each
+  (8.7 to 5.8 ms), and skill discovery enumerates the skill roots once
+  instead of once per `SKILL.md`. Closes
+  [#1537](https://github.com/c-wenlong/swe/issues/1537).
 - **The hub stops re-parsing its small stores on every request.** The
   credential check, an open stream's revocation check, the session
   list's unread flags and the machine list read `devices.json`, the
@@ -1616,6 +1668,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while the app is inactive (the app switcher, Control Centre, a call),
   not only in the background. Closes
   [#1549](https://github.com/c-wenlong/swe/issues/1549).
+- **The iPhone console, uploads and Devices page wake the app less.**
+  The console hopped to the main queue once per SSH read, hundreds of
+  times a second while a command printed; reads now queue up and reach
+  the terminal in one batch per main-queue turn, in order. Upload
+  progress redrew the chip for every chunk URLSession sent; it now
+  reports at most ten times a second, plus the end. The Devices page
+  fetched both pair requests and the device list every 5 s while open;
+  it now loads devices once (and again after an approval, a removal or
+  a pull to refresh) and asks for pending requests every 10 s. Closes
+  [#1553](https://github.com/c-wenlong/swe/issues/1553).
 
 ### Fixed
 
@@ -5129,6 +5191,8 @@ service / model layering, tests with an 84% coverage floor).
 - Stdlib-only core; optional FastMCP server extra for session history MCP tool
 - Test suite (15 unit tests) with isolated `$HOME` fixtures
 
+[1.2.1]: https://github.com/c-wenlong/swe/releases/tag/v1.2.1
+[1.2.0]: https://github.com/c-wenlong/swe/releases/tag/v1.2.0
 [1.1.1]: https://github.com/c-wenlong/swe/releases/tag/v1.1.1
 [1.1.0]: https://github.com/c-wenlong/swe/releases/tag/v1.1.0
 [1.0.0]: https://github.com/c-wenlong/swe/releases/tag/v1.0.0

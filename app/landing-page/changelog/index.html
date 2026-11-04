@@ -111,6 +111,17 @@ footer a:hover { color: var(--text); }
 <p>The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>,
 and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a>[Unreleased]</h2>
+<h2 id="121---2026-11-04"><a class="anchor" href="#121---2026-11-04"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v1.2.1">1.2.1</a> - 2026-11-04</h2>
+<h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
+<ul>
+<li><strong>The tag build's Swift test step compiles again.</strong> <code>SilentHubStub</code>'s
+<code>await Self.started.bump()</code> inside a <code>Task</code> tripped a region-isolation
+checker bug in the macos-26 runner's Swift 6.3.3 (&quot;pattern that the
+region-based isolation checker does not understand how to check&quot;); the
+test now names the class. V1.2.0 never got its DMG, so this ships as a
+patch.</li>
+</ul>
+<h2 id="120---2026-11-04"><a class="anchor" href="#120---2026-11-04"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v1.2.0">1.2.0</a> - 2026-11-04</h2>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
 <li><p><strong>The Mac app's chat renders the agent's Markdown tables.</strong> The chat
@@ -1305,6 +1316,36 @@ ms after typing pauses. Overview redraws its charts at most once per
 frame while the window is resized.
 Closes <a href="https://github.com/c-wenlong/swe/issues/1557">#1557</a>.</p>
 </li>
+<li><p><strong>The hub reads <code>harness.json</code> once per launch-field refresh and
+finds tmux once.</strong> Every 10 s catalog tick read the registry twice
+per launchable harness to list its launch providers (about 1.1 ms
+of 2 ms with ten harnesses); it now reads it once. Every tmux call
+walked <code>PATH</code> for the tmux binary (21 us); the path is now kept
+while <code>PATH</code> is unchanged and the file is still executable (5 us). A
+missing tmux is looked up again each time, so one installed later is
+found. Closes <a href="https://github.com/c-wenlong/swe/issues/1531">#1531</a>.</p>
+</li>
+<li><p><strong>A streaming Devin session costs the hub its new rows, not its
+whole window.</strong> Each time a tailed Devin session changed, the hub
+re-read up to 1,064 chain nodes with one query and one JSON parse each:
+160 to 410 ms per read for long sessions on a 9.8 GB <code>sessions.db</code>,
+about once a second while the session streams. The tailer now keeps the
+window's decoded nodes and fetches only the rows written since its last
+read, splicing a switched chain head at its fork: about 2 ms a read on
+the same sessions, for 0.4 to 2 MB kept per session. A whole read still
+runs at least once a minute while the session changes, and the kept
+nodes go after five quiet minutes. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1522">#1522</a>.</p>
+</li>
+<li><p><strong>A long-running hub stops keeping state for sessions and panes that
+are gone.</strong> The rate-limit notice memory kept one entry per session
+that ever hit a limit, and the tmux keystroke locks one per pane ever
+typed into. A session leaving the catalog now drops its limit entry,
+and a pane's lock lives only while a write holds it. Streamed messages
+whose channel died mid-reply were bounded in
+<a href="https://github.com/c-wenlong/swe/issues/1532">#1532</a>. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1533">#1533</a>.</p>
+</li>
 <li><p><strong>Live reply text costs the hub linear work, not quadratic.</strong> Every
 100 ms flush of a streamed reply re-cleaned the whole message so far:
 a 100 KB reply took 3.3 s of cleaning, now 58 ms. Each message keeps
@@ -1359,6 +1400,18 @@ through years no longer grows it without end. The Sessions page lists
 at most 20,000 sessions instead of 100,000, with the existing note
 when older ones are left out. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1544">#1544</a>.</p>
+</li>
+<li><p><strong><code>swe check</code> and <code>swe mcp status</code> probe side by side.</strong> <code>swe check</code>
+asked each installed harness for its version one after another (up to
+three subprocesses each); it now runs them on a small thread pool,
+7.5 s down to 2.4 s for 11 harnesses here. <code>swe mcp status</code> does the
+same for its server health checks, where each HTTP server can take its
+whole five-second timeout. The rows keep their order. <code>swe list</code> asks
+<code>which</code> once per command instead of twice, harness discovery lists
+each PATH directory once instead of probing every absent name in each
+(8.7 to 5.8 ms), and skill discovery enumerates the skill roots once
+instead of once per <code>SKILL.md</code>. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1537">#1537</a>.</p>
 </li>
 <li><p><strong>The hub stops re-parsing its small stores on every request.</strong> The
 credential check, an open stream's revocation check, the session
@@ -1766,8 +1819,19 @@ while the app is inactive (the app switcher, Control Centre, a call),
 not only in the background. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1549">#1549</a>.</p>
 </li>
+<li><p><strong>The iPhone console, uploads and Devices page wake the app less.</strong>
+The console hopped to the main queue once per SSH read, hundreds of
+times a second while a command printed; reads now queue up and reach
+the terminal in one batch per main-queue turn, in order. Upload
+progress redrew the chip for every chunk URLSession sent; it now
+reports at most ten times a second, plus the end. The Devices page
+fetched both pair requests and the device list every 5 s while open;
+it now loads devices once (and again after an approval, a removal or
+a pull to refresh) and asks for pending requests every 10 s. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1553">#1553</a>.</p>
+</li>
 </ul>
-<h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
+<h3 id="fixed-1"><a class="anchor" href="#fixed-1"></a>Fixed</h3>
 <ul>
 <li><p><strong><code>build_ios.sh</code> reaches a real iPhone and a named signing team.</strong>
 The device picker took the first paired iOS device <code>devicectl</code>
@@ -2334,7 +2398,7 @@ devices keep working on the approval route unchanged.</p>
 </li>
 </ul>
 <h2 id="111---2026-10-26"><a class="anchor" href="#111---2026-10-26"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v1.1.1">1.1.1</a> - 2026-10-26</h2>
-<h3 id="fixed-1"><a class="anchor" href="#fixed-1"></a>Fixed</h3>
+<h3 id="fixed-2"><a class="anchor" href="#fixed-2"></a>Fixed</h3>
 <ul>
 <li><p><strong>&quot;Clear search data&quot; could hang the app.</strong> With the session-index
 switch still on, the clear ran its rebuild inside the same flight it
@@ -2972,7 +3036,7 @@ it, with a hairline once they do. Collapsed, the button sits over the
 icon column as before.</p>
 </li>
 </ul>
-<h3 id="fixed-2"><a class="anchor" href="#fixed-2"></a>Fixed</h3>
+<h3 id="fixed-3"><a class="anchor" href="#fixed-3"></a>Fixed</h3>
 <ul>
 <li><p><strong>MCP sync no longer writes remote servers into Claude Desktop.</strong> Its
 config file launches local servers only (a remote one is added in
@@ -3639,7 +3703,7 @@ panel.</p>
 General as its Display and Updates cards, and GitHub and Remote share one
 Integrations page under Advanced. The list goes from 12 items to 9.</li>
 </ul>
-<h3 id="fixed-3"><a class="anchor" href="#fixed-3"></a>Fixed</h3>
+<h3 id="fixed-4"><a class="anchor" href="#fixed-4"></a>Fixed</h3>
 <ul>
 <li><p><strong>OpenCode 2.x sessions show up again.</strong> OpenCode 2.x writes new
 sessions only to <code>session_v2</code> and their turns only to
@@ -3968,7 +4032,7 @@ setup preview under <code>data.harness</code> / <code>data.mcp</code> / <code>da
 <code>--json --apply</code> invocation prints one document instead of two.</p>
 </li>
 </ul>
-<h3 id="fixed-4"><a class="anchor" href="#fixed-4"></a>Fixed</h3>
+<h3 id="fixed-5"><a class="anchor" href="#fixed-5"></a>Fixed</h3>
 <ul>
 <li><p><strong><code>swe list --usage --json</code> served an hour-old limit reading instead of
 a fresh one.</strong> Piped output gave each provider's fetch a 2 second cap,
@@ -4243,7 +4307,7 @@ harness.json&quot;) instead, so archiving a harness stops init from touching
 its config. A path already linked stays linked — init never unlinks —
 and <code>.linkignore</code> still wins when both apply.</li>
 </ul>
-<h3 id="fixed-5"><a class="anchor" href="#fixed-5"></a>Fixed</h3>
+<h3 id="fixed-6"><a class="anchor" href="#fixed-6"></a>Fixed</h3>
 <ul>
 <li><strong><code>swe list</code> columns no longer drift when a field's content outgrows
 its declared width.</strong> <code>preformatted</code> cells are now padded to the
@@ -4462,7 +4526,7 @@ every column after it.</li>
 rather than the right. Paths in a listing tend to share a long prefix,
 and cutting the tail made whole runs of rows look identical.</li>
 </ul>
-<h3 id="fixed-6"><a class="anchor" href="#fixed-6"></a>Fixed</h3>
+<h3 id="fixed-7"><a class="anchor" href="#fixed-7"></a>Fixed</h3>
 <ul>
 <li><p><code>swe session use &lt;n&gt;</code> resumes a Cursor session again. It treated
 Cursor as limited-resume and launched a bare <code>cursor-agent</code> in the
@@ -4587,7 +4651,7 @@ already documents <code>swe harness star</code>.</li>
 notes (parked under <code>.archive/</code>, gitignored) cleaned out of the repo.</li>
 </ul>
 <h2 id="029---2026-08-20"><a class="anchor" href="#029---2026-08-20"></a>[0.2.9] - 2026-08-20</h2>
-<h3 id="fixed-7"><a class="anchor" href="#fixed-7"></a>Fixed</h3>
+<h3 id="fixed-8"><a class="anchor" href="#fixed-8"></a>Fixed</h3>
 <ul>
 <li><strong>v0.2.8 could not start on Python 3.10 or 3.11.</strong> <code>swe find</code>'s summary line
 used a nested f-string with implicit concatenation inside a replacement
@@ -5172,7 +5236,7 @@ new files in one shot.</li>
 <li><code>swe list --refresh</code> now also invalidates the rate limits cache (in
 addition to the session cache).</li>
 </ul>
-<h3 id="fixed-8"><a class="anchor" href="#fixed-8"></a>Fixed</h3>
+<h3 id="fixed-9"><a class="anchor" href="#fixed-9"></a>Fixed</h3>
 <ul>
 <li><p><strong><code>mcp.json</code>'s <code>updated</code> timestamp never changed.</strong> It used <code>setdefault</code>, so
 only the first write was ever stamped; the file claimed to be hours older
