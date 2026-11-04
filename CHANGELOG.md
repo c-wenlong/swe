@@ -1622,8 +1622,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to disk, photos arrive from Photos as a file and their JPEG is made
   from it through ImageIO, and every upload streams its body from the
   file. A failed upload keeps only the file; it goes once the hub has
-  it or the chip is removed or sent, and leftovers from a crash are
-  swept after a day. Closes
+  it or the chip is removed or sent, and what a crash left behind is
+  swept at the next launch. Closes
   [#1551](https://github.com/c-wenlong/swe/issues/1551).
 
 ### Fixed

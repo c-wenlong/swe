@@ -226,8 +226,8 @@ final class ComposerAttachments {
     @ObservationIgnored private var photoCount = 0
 
     init() {
-        // Spool files a crash or a killed app left behind.
-        AttachmentSpool.sweep()
+        // Spool files an earlier run (a crash, a killed app) left behind.
+        AttachmentSpool.sweepLeftovers()
     }
 
     var isEmpty: Bool { items.isEmpty }
@@ -539,7 +539,8 @@ extension ComposerAttachments.Picked {
 /// app's temporary directory. A pick is copied (or, for a photo, its JPEG
 /// written) here and uploads from the file, so neither a 20 MB PDF nor a
 /// failed upload kept for Retry sits in memory. Each file goes once the
-/// hub has it or its chip is dropped; `sweep` clears what a crash left.
+/// hub has it or its chip is dropped; `sweepLeftovers` clears, once per
+/// launch, what an earlier run left.
 enum AttachmentSpool {
     static var folder: URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("attachment-spool", isDirectory: true)
@@ -572,15 +573,26 @@ enum AttachmentSpool {
         try? FileManager.default.removeItem(at: url)
     }
 
-    /// Drops spool files older than `age`; a live composer's are minutes old.
-    static func sweep(olderThan age: TimeInterval = 24 * 3600, now: Date = Date()) {
-        let fm = FileManager.default
-        guard let names = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])
-        else { return }
-        for url in names {
-            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            if let modified, now.timeIntervalSince(modified) > age { remove(url) }
+    /// Empties the folder once per launch, before the first composer
+    /// spools anything: every file there then belongs to an earlier run
+    /// (a crash, or the app killed mid-upload), and no live composer's
+    /// Retry file can be swept by another chat opening.
+    static func sweepLeftovers() {
+        lock.withLock {
+            guard !swept else { return }
+            swept = true
+            clear()
         }
+    }
+
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var swept = false
+
+    /// Deletes every file in the folder.
+    static func clear() {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return }
+        for url in names { remove(url) }
     }
 }
 

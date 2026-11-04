@@ -453,15 +453,26 @@ final class ComposerAttachmentsTests: XCTestCase {
         XCTAssertTrue(uploads.isEmpty)
     }
 
-    func testSweepDropsOnlyStaleSpoolFiles() throws {
-        let stale = try AttachmentSpool.write(Data("old".utf8))
-        let fresh = try AttachmentSpool.write(Data("new".utf8))
-        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3 * 24 * 3600)],
-                                              ofItemAtPath: stale.path)
-        AttachmentSpool.sweep()
-        XCTAssertFalse(exists(stale))
-        XCTAssertTrue(exists(fresh))
-        AttachmentSpool.remove(fresh)
+    func testOpeningAnotherChatNeverSweepsALiveRetryFile() throws {
+        // The launch's sweep has run (the first composer does it).
+        AttachmentSpool.sweepLeftovers()
+        // A file kept for Retry, copied from an original last changed
+        // long ago, so its date says nothing about how live it is.
+        let kept = try AttachmentSpool.write(Data("pdf".utf8))
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-30 * 24 * 3600)],
+                                              ofItemAtPath: kept.path)
+        _ = ComposerAttachments()
+        AttachmentSpool.sweepLeftovers()
+        XCTAssertTrue(exists(kept), "only an earlier run's files are swept, once per launch")
+        AttachmentSpool.remove(kept)
+    }
+
+    func testClearingTheSpoolEmptiesIt() throws {
+        let a = try AttachmentSpool.write(Data("a".utf8))
+        let b = try AttachmentSpool.copy(a)
+        AttachmentSpool.clear()
+        XCTAssertFalse(exists(a))
+        XCTAssertFalse(exists(b))
     }
 
     func testClearEmptiesTheComposer() {
