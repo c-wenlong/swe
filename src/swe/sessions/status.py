@@ -512,13 +512,15 @@ def _probe_devin(session: Session, ctx: dict):
 
 # Rollout files sit at ``~/.codex/sessions/Y/M/D/rollout-<iso>-<uuid>.jsonl``
 # and a codex ``Session.session_id`` is that file's stem, so the date in
-# the stem reconstructs the path directly; the glob is only a fallback for
-# a file that was moved.
+# the stem reconstructs the path directly; archiving moves the file flat
+# into ``archived_sessions/`` and the glob is a last resort for anything
+# else that moved it.
 _CODEX_ROLLOUT_DATE_RE = re.compile(r"rollout-(\d{4})-(\d{2})-(\d{2})T")
 
 
 def _codex_rollout_path(session_id: str, home: str = "") -> str:
-    root = os.path.join(home or os.path.expanduser("~/.codex"), "sessions")
+    base = home or os.path.expanduser("~/.codex")
+    root = os.path.join(base, "sessions")
     match = _CODEX_ROLLOUT_DATE_RE.match(session_id or "")
     if match:
         path = os.path.join(
@@ -527,6 +529,9 @@ def _codex_rollout_path(session_id: str, home: str = "") -> str:
         )
         if os.path.exists(path):
             return path
+    archived = os.path.join(base, "archived_sessions", session_id + ".jsonl")
+    if os.path.exists(archived):
+        return archived
     hits = glob.glob(os.path.join(root, "*", "*", "*", session_id + ".jsonl"))
     return hits[0] if hits else ""
 

@@ -70,15 +70,22 @@ def _index(name, at="2026-09-09T14:52:50Z", tid=THREAD_ID):
 
 
 def _write_store(path, rows):
-    """``rows`` is a list of ``(id, name, preview)``."""
+    """``rows`` is a list of ``(id, name, preview)``; a longer tuple may add
+    ``tokens_used``, ``agent_path`` and ``agent_nickname`` in that order."""
     conn = sqlite3.connect(path)
     conn.execute(
         "CREATE TABLE threads (id TEXT, name TEXT, preview TEXT, "
-        "first_user_message TEXT)"
+        "first_user_message TEXT, tokens_used INTEGER, "
+        "agent_path TEXT, agent_nickname TEXT)"
     )
-    for tid, name, preview in rows:
+    for row in rows:
+        tid, name, preview = row[:3]
+        tokens = row[3] if len(row) > 3 else 0
+        apath = row[4] if len(row) > 4 else None
+        nick = row[5] if len(row) > 5 else None
         conn.execute(
-            "INSERT INTO threads VALUES (?, ?, ?, ?)", (tid, name, preview, preview)
+            "INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (tid, name, preview, preview, tokens, apath, nick),
         )
     conn.commit()
     conn.close()
@@ -86,12 +93,18 @@ def _write_store(path, rows):
 
 class ParseCodexTitleTest(unittest.TestCase):
     def _run(self, index_lines=None, store_rows=None, records=None,
-             rollout_name=ROLLOUT, expect=1, store_bytes=None):
+             rollout_name=ROLLOUT, expect=1, store_bytes=None,
+             archived=False):
         if records is None:
             records = [_session_meta(), _user_message("Fix the login bug")]
         with tempfile.TemporaryDirectory() as tmp:
             codex_home = Path(tmp) / ".codex"
-            day_dir = codex_home / "sessions" / "2026" / "09" / "09"
+            if archived:
+                # Archived threads sit flat in archived_sessions/, not in
+                # the dated sessions/Y/M/D tree.
+                day_dir = codex_home / "archived_sessions"
+            else:
+                day_dir = codex_home / "sessions" / "2026" / "09" / "09"
             day_dir.mkdir(parents=True)
             with open(day_dir / rollout_name, "w") as f:
                 for rec in records:
@@ -207,6 +220,51 @@ class ParseCodexTitleTest(unittest.TestCase):
 
     def test_empty_preview_is_dropped_even_with_a_name(self):
         self._run(store_rows=[(THREAD_ID, "leftover", "")], expect=0)
+
+    # -- spawned threads --------------------------------------------------
+    # Subagents and automations never have a preview: nobody typed into
+    # them. The token ledger is what separates one that ran from one opened
+    # and abandoned, so an empty preview only drops when it agrees.
+
+    def test_a_worked_thread_with_empty_preview_is_kept(self):
+        sess = self._run(
+            store_rows=[(THREAD_ID, "", "", 42_000, "/root/gcp_api_research", "Wegener")],
+        )
+        self.assertIsNotNone(sess)
+
+    def test_a_worked_spawned_thread_takes_its_agent_label(self):
+        sess = self._run(
+            store_rows=[(THREAD_ID, "", "", 42_000, "/root/gcp_api_research", "Wegener")],
+            # The transcript's first user item is injected context that must
+            # not become the title.
+            records=[_session_meta(), _user_message("Here is a list of plugins...")],
+        )
+        self.assertEqual(sess.title, "gcp_api_research")
+
+    def test_the_nickname_names_a_spawned_thread_with_no_path(self):
+        sess = self._run(
+            store_rows=[(THREAD_ID, "", "", 42_000, None, "Bohr")],
+        )
+        self.assertEqual(sess.title, "Bohr")
+
+    def test_a_spawned_thread_that_never_ran_is_dropped(self):
+        self._run(
+            store_rows=[(THREAD_ID, "", "", 0, "/root/gcp_api_research", "Wegener")],
+            expect=0,
+        )
+
+    # -- archived threads --------------------------------------------------
+
+    def test_an_archived_thread_is_listed(self):
+        sess = self._run(
+            archived=True,
+            store_rows=[(THREAD_ID, "vendor-table", "Fix the login bug")],
+        )
+        self.assertEqual(sess.title, "vendor-table")
+
+    def test_an_archived_thread_the_store_never_heard_of_is_listed(self):
+        sess = self._run(archived=True)
+        self.assertEqual(sess.title, "Fix the login bug")
 
     def test_nothing_is_dropped_when_the_store_is_unreadable(self):
         sess = self._run(index_lines=[_index("vendor-table")],

@@ -784,7 +784,7 @@ class CodexThreadStoreTest(unittest.TestCase):
             ):
                 from swe.sessions.parsers import _codex_thread_store
                 store = _codex_thread_store()
-            self.assertEqual(store, {"abc": ("My Title", "first msg")})
+            self.assertEqual(store, {"abc": ("My Title", "first msg", False, "")})
 
 
 class CursorMetaTest(unittest.TestCase):
