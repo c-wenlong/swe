@@ -1109,9 +1109,18 @@ private struct NewChapterSheet: View {
         openField != nil && openField == activeField && !rows.isEmpty
     }
 
-    private func move(_ delta: Int) {
-        guard !rows.isEmpty else { return }
+    /// Down on a closed list opens it at once (an empty field lists
+    /// everything); on an open list the arrows move the highlight.
+    private func move(_ delta: Int) -> KeyPress.Result {
+        guard listOpen else {
+            guard delta > 0, let field = activeField else { return .ignored }
+            openTask?.cancel()
+            highlight = 0
+            openField = field
+            return .handled
+        }
         highlight = min(max(highlight + delta, 0), rows.count - 1)
+        return .handled
     }
 
     /// Return picks the highlighted row when the list is open; closed,
@@ -1172,8 +1181,8 @@ private struct NewChapterSheet: View {
                 TextField("engineering/review, or empty for top level", text: $folder)
                     .sweField(monospaced: true)
                     .focused($focus, equals: .folder)
-                    .onKeyPress(.upArrow, phases: .down) { _ in move(-1); return .handled }
-                    .onKeyPress(.downArrow, phases: .down) { _ in move(1); return .handled }
+                    .onKeyPress(.upArrow, phases: .down) { _ in move(-1) }
+                    .onKeyPress(.downArrow, phases: .down) { _ in move(1) }
                     .onKeyPress(.return, phases: .down) { _ in pickHighlighted() }
                     .onKeyPress(.escape, phases: .down) { _ in escape() }
                     // The list floats below the field; it takes no layout
@@ -1193,8 +1202,8 @@ private struct NewChapterSheet: View {
                     TextField("name (.md added)", text: $file)
                         .sweField(monospaced: true)
                         .focused($focus, equals: .file)
-                        .onKeyPress(.upArrow, phases: .down) { _ in move(-1); return .handled }
-                        .onKeyPress(.downArrow, phases: .down) { _ in move(1); return .handled }
+                        .onKeyPress(.upArrow, phases: .down) { _ in move(-1) }
+                        .onKeyPress(.downArrow, phases: .down) { _ in move(1) }
                         .onKeyPress(.return, phases: .down) { _ in pickHighlighted() }
                         .onKeyPress(.escape, phases: .down) { _ in escape() }
                         .onGeometryChange(for: CGFloat.self) {
