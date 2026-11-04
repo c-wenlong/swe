@@ -2109,6 +2109,10 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_error(401, "unauthorized", "pair this device first")
                 return
 
+        if path == "/v1/sessions" and args.get("key"):
+            self._session_row(device_id, str(args["key"][0]))
+            return
+
         if path == "/v1/sessions":
             self._state.fresh_catalog()
             self._send_json(200, {
@@ -3771,6 +3775,25 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_error(422, "bad_attachment", err or "stage failed")
             return
         self._send_json(200, payload)
+
+    def _session_row(self, device_id: str | None, key: str) -> None:
+        """``GET /v1/sessions?key=``: one catalog row, in the shape the
+        whole list has, with only its own machine (#1556). The web chat
+        reads a row on open and after each turn; serialising every row
+        for that was most of the cost."""
+        # The same freshness wait as the whole list after low power.
+        self._state.fresh_catalog()
+        row = self._state.catalog.row_for(key)
+        if row is None:
+            self._send_error(404, "unknown_session", "no such session")
+            return
+        machine_id = row.get("machine_id")
+        machines = catalog_mod.peek_machines(self._state.home)
+        self._send_json(200, {
+            "sessions": readstate.annotate(self._state.home, device_id, [row]),
+            "machines": [m for mid, m in machines.items() if mid == machine_id],
+            "server_time": time.time(),
+        })
 
     def _slash_commands(self, key: str) -> None:
         """``GET /v1/sessions/{key}/commands``: the "/" menu (``slash.py``)."""

@@ -1192,6 +1192,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redraw behind it for the app's whole life. Closes
   [#1543](https://github.com/c-wenlong/swe/issues/1543).
 
+- **The web chat reads its one session row, not the whole catalog.**
+  The chat read `GET /v1/sessions` (every row, read-state and machines)
+  to find its own row on open, on resync, at every turn's end (up to
+  three times, 6 s apart) and on every return to the tab. The hub now
+  answers `GET /v1/sessions?key=<key>` with that row and its machine:
+  0.4 ms and under 1 KB against 34 ms and 1.6 MB for a 2,000-row
+  catalog. A return to the tab reads once, unless a turn's re-reads
+  are still running.
+  Closes [#1556](https://github.com/c-wenlong/swe/issues/1556).
+
+- **Three small rendering costs in the Mac app are gone.** GitHub's
+  octicons parsed their SVG path data on every layout; each glyph now
+  parses once. An open Calendar hover card polled the pointer every
+  50 ms; it polls every 100 ms, so a card closes at most 300 ms after
+  the pointer leaves instead of 250. A sheet's shadow was worked out from its whole content on each
+  frame of the open animation; it now comes from one rounded shape
+  behind the card. Closes
+  [#1545](https://github.com/c-wenlong/swe/issues/1545).
+
 - **The Mac app's background polls slow down while nobody can see
   them.** The GitHub inbox poll ran `swe gh inbox` every minute for the
   app's whole life. It now keeps the minute only while the main window
@@ -1699,6 +1718,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it now loads devices once (and again after an approval, a removal or
   a pull to refresh) and asks for pending requests every 10 s. Closes
   [#1553](https://github.com/c-wenlong/swe/issues/1553).
+- **The iPhone composer keeps picked files on disk, not in memory.** A
+  file from Files was read whole into memory (up to 20 MB, or 200 MB
+  for an image to convert), a photo from Photos loaded as one `Data`,
+  and a failed upload kept those bytes for Retry. Picks now go into a
+  spool folder in the app's temporary directory: files are copied disk
+  to disk, photos arrive from Photos as a file and their JPEG is made
+  from it through ImageIO, and every upload streams its body from the
+  file. A failed upload keeps only the file; it goes once the hub has
+  it or the chip is removed or sent, and what a crash left behind is
+  swept at the next launch. Closes
+  [#1551](https://github.com/c-wenlong/swe/issues/1551).
 
 ### Fixed
 

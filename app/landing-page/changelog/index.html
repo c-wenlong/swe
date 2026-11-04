@@ -1316,6 +1316,25 @@ menu bar panel's tabs unmount while the panel is closed rather than
 redraw behind it for the app's whole life. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1543">#1543</a>.</p>
 </li>
+<li><p><strong>The web chat reads its one session row, not the whole catalog.</strong>
+The chat read <code>GET /v1/sessions</code> (every row, read-state and machines)
+to find its own row on open, on resync, at every turn's end (up to
+three times, 6 s apart) and on every return to the tab. The hub now
+answers <code>GET /v1/sessions?key=&lt;key&gt;</code> with that row and its machine:
+0.4 ms and under 1 KB against 34 ms and 1.6 MB for a 2,000-row
+catalog. A return to the tab reads once, unless a turn's re-reads
+are still running.
+Closes <a href="https://github.com/c-wenlong/swe/issues/1556">#1556</a>.</p>
+</li>
+<li><p><strong>Three small rendering costs in the Mac app are gone.</strong> GitHub's
+octicons parsed their SVG path data on every layout; each glyph now
+parses once. An open Calendar hover card polled the pointer every
+50 ms; it polls every 100 ms, so a card closes at most 300 ms after
+the pointer leaves instead of 250. A sheet's shadow was worked out from its whole content on each
+frame of the open animation; it now comes from one rounded shape
+behind the card. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1545">#1545</a>.</p>
+</li>
 <li><p><strong>The Mac app's background polls slow down while nobody can see
 them.</strong> The GitHub inbox poll ran <code>swe gh inbox</code> every minute for the
 app's whole life. It now keeps the minute only while the main window
@@ -1851,6 +1870,18 @@ fetched both pair requests and the device list every 5 s while open;
 it now loads devices once (and again after an approval, a removal or
 a pull to refresh) and asks for pending requests every 10 s. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1553">#1553</a>.</p>
+</li>
+<li><p><strong>The iPhone composer keeps picked files on disk, not in memory.</strong> A
+file from Files was read whole into memory (up to 20 MB, or 200 MB
+for an image to convert), a photo from Photos loaded as one <code>Data</code>,
+and a failed upload kept those bytes for Retry. Picks now go into a
+spool folder in the app's temporary directory: files are copied disk
+to disk, photos arrive from Photos as a file and their JPEG is made
+from it through ImageIO, and every upload streams its body from the
+file. A failed upload keeps only the file; it goes once the hub has
+it or the chip is removed or sent, and what a crash left behind is
+swept at the next launch. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1551">#1551</a>.</p>
 </li>
 </ul>
 <h3 id="fixed-1"><a class="anchor" href="#fixed-1"></a>Fixed</h3>

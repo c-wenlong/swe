@@ -33,7 +33,7 @@ private struct OcticonShape: Shape {
     func path(in rect: CGRect) -> Path {
         var t = CGAffineTransform(translationX: rect.minX, y: rect.minY)
             .scaledBy(x: rect.width / 16, y: rect.height / 16)
-        guard let cg = SVGPath.path(data).copy(using: &t) else {
+        guard let cg = SVGPath.cached(data).copy(using: &t) else {
             return Path()
         }
         return Path(cg)
