@@ -35,8 +35,11 @@ import Observation
     @ObservationIgnored private let pollWait: (Duration) async -> Void
 
     /// While a card is open, the pointer's screen position is polled
-    /// this often against the anchor ∪ card safe region.
-    public static let pollInterval: Duration = .milliseconds(50)
+    /// this often against the anchor ∪ card safe region. The grace
+    /// starts at the first poll outside and the close lands on the first
+    /// poll past it, so a card closes at most 300 ms after the pointer
+    /// leaves (250 ms at the old 50 ms, which polled twice as often).
+    public static let pollInterval: Duration = .milliseconds(100)
 
     /// - Parameters:
     ///   - pointer: the pointer's screen position.

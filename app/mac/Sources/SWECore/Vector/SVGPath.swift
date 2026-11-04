@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// An SVG path-data string (`d="M…"`) as a `CGPath`. Enough of the
 /// spec for vendored icon paths (octicons, simple marks): every
@@ -11,6 +12,25 @@ public enum SVGPath {
         p.run()
         return p.path
     }
+
+    /// `path(d)` parsed once per distinct `d` and kept: a Shape's
+    /// `path(in:)` runs on every layout, and its data never changes.
+    /// A CGPath is immutable, so one copy serves every thread.
+    public static func cached(_ d: String) -> CGPath {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let hit = cache[d] { return hit }
+        let parsed = path(d)
+        if cache.count >= cacheLimit { cache.removeAll() }
+        cache[d] = parsed
+        return parsed
+    }
+
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var cache: [String: CGPath] = [:]
+    /// Far above the handful of vendored glyphs; a bound in case a caller
+    /// ever feeds it arbitrary data.
+    static let cacheLimit = 256
 }
 
 private struct Parser {

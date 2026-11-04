@@ -9,6 +9,7 @@ import SwiftUI
 /// for every step SWE can do itself.
 struct RemoteSetupSheet: View {
     @Environment(\.dismissSheet) private var dismiss
+    @Environment(AppModel.self) private var app
     @Bindable var setup: RemoteSetupModel
     /// Pairing reuses the Hub card's model, so a phone paired here shows
     /// in Paired devices at once.
@@ -25,7 +26,7 @@ struct RemoteSetupSheet: View {
         .frame(width: 600)
         .background(Theme.panel)
         // Ends when the sheet closes, and the poll with it.
-        .task { await setup.watch() }
+        .task { await setup.watch(onScreen: { [app] in app.mainWindowOnScreen }) }
         .quiverSheet(isPresented: showTicket, onDismiss: { remote.dismissTicket() }) {
             PairSheet(model: remote, target: $target)
         }

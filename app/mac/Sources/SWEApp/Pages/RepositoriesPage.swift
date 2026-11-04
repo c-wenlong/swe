@@ -91,6 +91,9 @@ struct RepositoriesPage: View {
                 // try? swallows the cancel: without this every filter
                 // keystroke ran one more round of fetches.
                 guard !Task.isCancelled else { return }
+                // Behind other windows nobody reads the boards; the next
+                // minute after the window shows again catches up.
+                guard app.mainWindowOnScreen else { continue }
                 // A timer's round: its swe runs don't hold off idle sleep (#1540).
                 await CommandActivity.background { await withTaskGroup(of: Void.self) { group in
                     for repo in visibleRepos {
