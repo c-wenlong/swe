@@ -1159,6 +1159,9 @@ public final class ChaptersModel {
             // nothing rather than flipping it back.
             let state = Self.compileState(of: name, in: docs.index.text)
             if on == (state == .on) { return nil }
+            // Enabling writes the name into index.txt; a name the
+            // compiler can't use would just break the next build.
+            if on, let problem = ChapterIndex.nameProblem(name) { return problem }
             return await self.applyCompile(writes: CompileToggle.all(
                 index: docs.index.text,
                 state: state,
@@ -1177,11 +1180,15 @@ public final class ChaptersModel {
             let rules = docs.targets.existsOnDisk
                 ? (try? ChapterTargets.parse(docs.targets.text))?.rules ?? [:]
                 : [:]
+            let state = Self.compileState(of: name, in: docs.index.text)
+            // Enabling an off or unlisted chapter writes its name into
+            // index.txt; refuse names the compiler can't use.
+            if want, state != .on,
+               let problem = ChapterIndex.nameProblem(name) { return problem }
             do {
                 return try await self.applyCompile(writes: CompileToggle.harness(
                     harness, want: want, index: docs.index.text,
-                    rules: rules,
-                    state: Self.compileState(of: name, in: docs.index.text),
+                    rules: rules, state: state,
                     name: name,
                     folder: (name as NSString).deletingLastPathComponent), swe: swe)
             } catch {
@@ -1203,15 +1210,31 @@ public final class ChaptersModel {
             let rules = docs.targets.existsOnDisk
                 ? (try? ChapterTargets.parse(docs.targets.text))?.rules ?? [:]
                 : [:]
-            let members = self.files(under: folder).map {
+            var members = self.files(under: folder).map {
                 (name: $0,
                  state: Self.compileState(of: $0, in: docs.index.text),
                  rule: rules[ChapterIndex.normalize($0)] ?? rules[$0])
             }
+            // Enabling writes each name into index.txt: files the
+            // compiler can't use are skipped, not enabled, and reported.
+            var skipped: [String] = []
+            if on {
+                members = members.filter { member in
+                    if let problem = ChapterIndex.nameProblem(member.name) {
+                        skipped.append("\(member.name): \(problem)")
+                        return false
+                    }
+                    return true
+                }
+            }
             do {
-                return try await self.applyCompile(writes: CompileToggle.folder(
+                let problem = try await self.applyCompile(writes: CompileToggle.folder(
                     on: on, harness: harness, index: docs.index.text,
                     rules: rules, members: members), swe: swe)
+                if !skipped.isEmpty {
+                    return "Skipped \(skipped.joined(separator: "; "))"
+                }
+                return problem
             } catch {
                 return error.localizedDescription
             }

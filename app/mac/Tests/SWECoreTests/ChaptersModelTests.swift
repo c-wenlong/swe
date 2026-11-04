@@ -621,21 +621,49 @@ import Testing
         #expect(text == "# in order\na.md\n# off.md\n")
     }
 
+    @Test func enablingANameTheCompilerRejectsIsRefused() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        // "-->" reads as a comment marker to the compiler: enabling it
+        // must refuse before index.txt changes at all.
+        try dir.write("bad-->name.md", "# Bad\n")
+        let problem = await model.setIncluded(
+            name: "bad-->name.md", on: true, swe: SweClient(runner: runner))
+        #expect(problem != nil)
+        #expect(try String(contentsOf: dir.path("index.txt"),
+                         encoding: .utf8) == "# in order\na.md\nb.md\n")
+    }
+
+    @Test func aFolderIncludeSkipsUnusableNamesOnly() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url), check(dir.url)])
+        try dir.write("bad-->name.md", "# Bad\n")
+        let model = try await model(dir, runner: runner)
+        let problem = await model.setFolder(
+            "", on: true, harness: nil, swe: SweClient(runner: runner))
+        // The good names were enabled; the bad one was skipped and named.
+        #expect(problem?.contains("bad-->name.md") == true)
+        let text = try String(contentsOf: dir.path("index.txt"), encoding: .utf8)
+        #expect(!text.contains("bad-->name.md"))
+        #expect(text.contains("a.md"))
+    }
+
     @Test func aToggleHitByADiskChangeReloadsAndReports() async throws {
         let dir = try TempDir()
         let runner = Runner([check(dir.url)])
         let model = try await model(dir, runner: runner)
-        // index.txt changed on disk after the doc loaded; checkDisk flags
-        // it, and the save is refused rather than overwriting.
-        try "outside.md\n".write(to: dir.path("index.txt"),
-                               atomically: true, encoding: .utf8)
-        await model.checkDisk()
+        // index.txt changes on disk after the toggle read state from the
+        // loaded text but before the save lands: the save's own compare
+        // must refuse it rather than overwriting.
+        try "outside.md\na.md\n".write(to: dir.path("index.txt"),
+                                      atomically: true, encoding: .utf8)
         let problem = await model.setIncluded(
             name: "a.md", on: false, swe: SweClient(runner: runner))
         #expect(problem == "The chapter files changed on disk; try again.")
         // The refused edit is dropped, not left dirty on the document.
         let text = try String(contentsOf: dir.path("index.txt"), encoding: .utf8)
-        #expect(text == "outside.md\n")
+        #expect(text == "outside.md\na.md\n")
     }
 
     @Test func receivesCoversStateAndRules() {
