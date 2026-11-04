@@ -113,7 +113,12 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a>[Unreleased]</h2>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
-<li><strong><code>swe list</code> shows Muse's weekly quota.</strong> Meta's Muse app
+<li><p><strong>Muse shows Meta's logo.</strong> The <code>muse</code> harness id is aliased to the
+bundled <code>meta</code> mark (<code>harness-meta-color.svg</code>) on the Mac, iPhone and
+web apps, so its limit card carries Meta's logo and brand colour
+instead of a text chip.</p>
+</li>
+<li><p><strong><code>swe list</code> shows Muse's weekly quota.</strong> Meta's Muse app
 (<code>com.meta.endo</code>) keeps its session tokens in a private keychain group
 nothing else can read, so the new <code>muse</code> rate-limit fetcher borrows the
 logged-in Dia browser instead: it decrypts the <code>hatch_sess</code> cookie from
@@ -122,7 +127,8 @@ reads the short-lived ABRA bearer token every <code>muse.ai</code> page embeds, 
 calls <code>hatch-api.meta.ai/hatch/subscription</code> for the tier, percent used
 and weekly reset. Register Muse as a harness (<code>swe add muse muse</code>) and
 star it to add it to the polled set; the first run prompts once for the
-Safe Storage item.</li>
+Safe Storage item.</p>
+</li>
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
