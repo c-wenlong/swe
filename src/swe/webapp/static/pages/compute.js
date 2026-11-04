@@ -259,10 +259,20 @@ function computeMorphNode(a, b) {
     if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
     return;
   }
+  // A node patched on its own (the chart box) keeps what it drew, but
+  // only while it stays that box: one reused as something else (the
+  // Temperature legend in the chart's place) forgets it and is patched.
+  const id = a.getAttribute("id");
+  const owned = a.computeHtml !== undefined && !!id && id === b.getAttribute("id");
   for (const { name } of [...a.attributes]) if (!b.hasAttribute(name)) a.removeAttribute(name);
   for (const { name, value } of [...b.attributes]) if (a.getAttribute(name) !== value) a.setAttribute(name, value);
-  // A node patched on its own (the chart box) keeps what it drew.
-  if (a.computeHtml === undefined) computeMorphChildren(a, b);
+  if (owned) return;
+  if (a.computeHtml !== undefined) {
+    // Its chart's hover handlers go with the chart.
+    delete a.computeHtml;
+    a.onmousemove = a.onmouseleave = null;
+  }
+  computeMorphChildren(a, b);
 }
 
 /* The totals line and the machine line, above the trend card. */
@@ -627,7 +637,12 @@ function drawComputeChart() {
   const box = document.getElementById("compute-chart");
   if (!box) return;
   const spec = chartSpec();
-  if (spec.empty) { computePatch(box, placeholder(spec.empty)); return; }
+  if (spec.empty) {
+    // No rule or bubble left for the hover handlers to move.
+    box.onmousemove = box.onmouseleave = null;
+    computePatch(box, placeholder(spec.empty));
+    return;
+  }
   const width = Math.max(240, Math.round(box.getBoundingClientRect().width) || 600);
   const height = 180;
   const names = spec.series.some((s) => s.endLabel);

@@ -950,6 +950,26 @@ const shape = (n) => n.nodeType === 3 ? n.nodeValue
         self.assertTrue(out["inputReplaced"])
         self.assertTrue(out["ownedKept"], "the chart box keeps what it drew; drawComputeChart patches it")
 
+    def test_a_chart_box_reused_as_something_else_is_patched(self):
+        """Switching to Temperature puts the legend where the drawn chart
+        was: that node forgets its chart, hover handlers included, and
+        takes the legend's children."""
+        out = self.run_js("""
+            const chart = h("div", { id: "compute-chart", class: "compute-chart" }, h("svg", {}, "drawn"));
+            chart.computeHtml = "<svg>drawn</svg>";
+            chart.onmousemove = () => {}; chart.onmouseleave = () => {};
+            const el = h("div", {}, chart);
+            computeMorphChildren(el, h("div", {}, h("div", { class: "legend" }, h("button", {}, "CPU")),
+              h("div", { id: "compute-chart", class: "compute-chart" })));
+            const legend = el.childNodes[0];
+            return { shape: shape(el), reused: legend === chart, owned: legend.computeHtml !== undefined,
+                     handlers: [legend.onmousemove, legend.onmouseleave] };""")
+        self.assertEqual(out["shape"], ["DIV", {}, ["DIV", {"class": "legend"}, ["BUTTON", {}, "CPU"]],
+                                        ["DIV", {"id": "compute-chart", "class": "compute-chart"}]])
+        self.assertTrue(out["reused"])
+        self.assertFalse(out["owned"])
+        self.assertEqual(out["handlers"], [None, None])
+
     def test_an_unchanged_part_is_skipped(self):
         out = self.run_js("""
             let parsed = 0;
