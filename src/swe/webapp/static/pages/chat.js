@@ -2991,14 +2991,10 @@ const SessionChat = (() => {
    * The hub answers from a catalog it rebuilds every 10 seconds, and a
    * turn's end (`afterTurn`) can reach the stream before that, so one
    * read may still hold the old model. Until the model differs, it reads
-   * again after each of MODEL_RETRY_MS, but stops once a read comes from
-   * a catalog rebuilt after the first read (`catalog_as_of` past that
-   * read's `server_time`): that catalog holds the finished turn, so the
-   * model really is unchanged (#1556). A satellite's row is pushed on its
-   * own clock, so a newer hub rebuild proves nothing for it: it keeps
-   * every retry. A tab coming back reads once, unless a turn's retries
-   * are still running, which it then takes over. A newer call takes over
-   * from one still waiting. Returns the model now shown. */
+   * again after each of MODEL_RETRY_MS (each read is one row, #1556). A
+   * tab coming back reads once, unless a turn's retries are still
+   * running, which it then takes over. A newer call takes over from one
+   * still waiting. Returns the model now shown. */
   const MODEL_RETRY_MS = [6000, 6000];
   let modelCall = 0, modelSettling = 0;
   async function refreshModel(afterTurn = false) {
@@ -3007,10 +3003,9 @@ const SessionChat = (() => {
     const call = ++modelCall;
     afterTurn = afterTurn || modelSettling > 0;
     if (afterTurn) modelSettling = call;
-    let since = null;
     try {
       for (let i = 0; ; i++) {
-        const { data, row } = await fetchRow(chat.key);
+        const { row } = await fetchRow(chat.key);
         if (gen !== chat.gen || call !== modelCall) break;
         if (row && row.model && chat.row && row.model !== chat.row.model) {
           chat.row.model = row.model;
@@ -3018,9 +3013,6 @@ const SessionChat = (() => {
           break;
         }
         if (!afterTurn || i >= MODEL_RETRY_MS.length) break;
-        const asOf = data && typeof data.catalog_as_of === "number" ? data.catalog_as_of : null;
-        if (since === null) since = data && typeof data.server_time === "number" ? data.server_time : null;
-        else if (!(row && row.remote) && asOf !== null && since !== null && asOf >= since) break;
         await new Promise((resolve) => setTimeout(resolve, MODEL_RETRY_MS[i]));
         if (gen !== chat.gen || call !== modelCall) break;
       }

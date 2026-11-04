@@ -443,7 +443,6 @@ class TestChatContract(unittest.TestCase):
         one = json.loads(data)
         self.assertEqual(one["sessions"], [row])
         self.assertEqual([m["id"] for m in one["machines"]], [row["machine_id"]] if row.get("machine_id") else [])
-        self.assertEqual(one["catalog_as_of"], self.srv.state.catalog.refreshed_at)
         self.assertIn("server_time", one)
         status, data = self.srv.request("GET", "/v1/sessions?key=claude%3Anope", headers=self.hdr)
         self.assertEqual((status, json.loads(data)["error"]["code"]), (404, "unknown_session"))
@@ -1816,11 +1815,9 @@ class TestSessionModelShown(unittest.TestCase):
         self.assertEqual(out["readsBeforeWake"], 2)
         self.assertEqual(out["readsAfterWake"], 4)
 
-    def test_an_unchanged_model_stops_once_the_catalog_is_newer(self):
-        """#1556: a read from a catalog rebuilt after the first read holds
-        the finished turn, so an unchanged model stops there instead of
-        reading on through every wait; a tab coming back reads once. Each
-        read asks for this one row, never the whole catalog."""
+    def test_a_tab_return_reads_this_one_row_once(self):
+        """#1556: a tab coming back with no turn's retries running reads
+        once, and every read asks for this one row, never the catalog."""
         out = self.run_js("""
           const T = SessionChat._test;
           const out = {};
@@ -1828,14 +1825,9 @@ class TestSessionModelShown(unittest.TestCase):
           T.chat.key = "s 1"; T.chat.gen = 3;
           T.chat.row = { harness: "claude", model: "claude-opus-4-5" };
           const asked = [];
-          // Read 1 at t=100 from a catalog built at 95; read 2's catalog
-          // was rebuilt at 104, after it.
-          const answers = [[100, 95], [106, 104], [112, 104]];
           globalThis.api = async (path) => {
-            const [now, asOf] = answers[asked.length] || [200, 200];
             asked.push(path);
-            return { status: 200, data: { sessions: [{ key: "s 1", model: "claude-opus-4-5" }], machines: [],
-                                          server_time: now, catalog_as_of: asOf } };
+            return { status: 200, data: { sessions: [{ key: "s 1", model: "claude-opus-4-5" }], machines: [] } };
           };
           out.same = await T.refreshModel(true);
           out.afterTurn = asked.length;
@@ -1845,14 +1837,13 @@ class TestSessionModelShown(unittest.TestCase):
           out.path = asked[0];
           return out;""", with_sessions=False)
         self.assertEqual(out["same"], "claude-opus-4-5")
-        self.assertEqual(out["afterTurn"], 2)
+        self.assertEqual(out["afterTurn"], 3)
         self.assertEqual(out["tabReturn"], 1)
         self.assertEqual(out["path"], "/v1/sessions?key=s%201")
 
-    def test_satellite_rows_and_a_tab_return_keep_the_turns_retries(self):
-        """A satellite's row is pushed on its own clock, so a newer hub
-        rebuild doesn't stop its retries; a tab coming back while a turn's
-        retries run takes them over instead of ending them."""
+    def test_a_tab_return_keeps_the_turns_retries(self):
+        """A tab coming back while a turn's retries run takes them over
+        instead of ending them with one read."""
         out = self.run_js("""
           const T = SessionChat._test;
           const out = {};
@@ -1862,8 +1853,7 @@ class TestSessionModelShown(unittest.TestCase):
           globalThis.api = async () => {
             reads++;
             if (reads >= newFrom) model = "m-new";
-            return { status: 200, data: { sessions: [{ key: "s1", model, remote }], machines: [],
-                                          server_time: 100 + reads, catalog_as_of: 100 + reads } };
+            return { status: 200, data: { sessions: [{ key: "s1", model, remote }], machines: [] } };
           };
           globalThis.setTimeout = (f) => { f(); return 0; };
           await T.refreshModel(true);
@@ -1887,7 +1877,7 @@ class TestSessionModelShown(unittest.TestCase):
           await T.refreshModel();
           out.plainReads = reads;
           return out;""", with_sessions=False)
-        self.assertEqual(out["remoteReads"], 3, "a satellite row reads through every wait")
+        self.assertEqual(out["remoteReads"], 3, "an unchanged model reads through every wait")
         self.assertEqual(out["shown"], "m-new")
         self.assertEqual(out["plainReads"], 1)
 

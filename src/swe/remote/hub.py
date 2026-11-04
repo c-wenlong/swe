@@ -3742,14 +3742,9 @@ class _Handler(BaseHTTPRequestHandler):
         """``GET /v1/sessions?key=``: one catalog row, in the shape the
         whole list has, with only its own machine (#1556). The web chat
         reads a row on open and after each turn; serialising every row
-        for that was most of the cost. ``catalog_as_of`` is when the
-        catalog's last rebuild started, so a client waiting for a new
-        model can tell a stale read from an unchanged one."""
+        for that was most of the cost."""
         # The same freshness wait as the whole list after low power.
         self._state.fresh_catalog()
-        # The stamp first, then the row: the row comes from that rebuild
-        # or a newer one, never an older one under a newer stamp.
-        as_of = self._state.catalog.refreshed_at
         row = self._state.catalog.row_for(key)
         if row is None:
             self._send_error(404, "unknown_session", "no such session")
@@ -3760,7 +3755,6 @@ class _Handler(BaseHTTPRequestHandler):
             "sessions": readstate.annotate(self._state.home, device_id, [row]),
             "machines": [m for mid, m in machines.items() if mid == machine_id],
             "server_time": time.time(),
-            "catalog_as_of": as_of,
         })
 
     def _slash_commands(self, key: str) -> None:

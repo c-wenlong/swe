@@ -1173,8 +1173,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   three times, 6 s apart) and on every return to the tab. The hub now
   answers `GET /v1/sessions?key=<key>` with that row and its machine:
   0.4 ms and under 1 KB against 34 ms and 1.6 MB for a 2,000-row
-  catalog. A turn's end also stops re-reading once a read comes from a
-  catalog rebuilt after it, and a return to the tab reads once.
+  catalog. A return to the tab reads once, unless a turn's re-reads
+  are still running.
   Closes [#1556](https://github.com/c-wenlong/swe/issues/1556).
 
 - **The hub's approval watcher reads the supervised registry once per
