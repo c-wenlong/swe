@@ -431,6 +431,8 @@ public final class SearchStore: @unchecked Sendable {
                     try setOrphansPending()
                 }
                 try cachedStatement("DELETE FROM files WHERE path = ?").bind([.text(path)]).run()
+                try cachedStatement("DELETE FROM meta WHERE key = ?")
+                    .bind([.text(SearchDevin.markKey(path))]).run()
                 try db.execute("COMMIT")
             } catch {
                 try? db.execute("ROLLBACK")
@@ -566,15 +568,18 @@ public final class SearchStore: @unchecked Sendable {
     ///   - updating: when set, rewrites the session row's fields in the same
     ///     transaction, so a finishing commit publishes the decoded session
     ///     together with its last rows.
+    ///   - mark: a Devin session's read position, stored under its
+    ///     `SearchDevin.markKey` with the session the commit lands on.
     @discardableResult
-    public func commitFile(
+    func commitFile(
         path: String,
         expected: SearchFileFence?,
         stat: SearchFileStat,
         byteOffset: Int64,
         session: IndexSessionCommit,
         messages: [SearchMessageRow],
-        updating fields: SearchSessionFields? = nil
+        updating fields: SearchSessionFields? = nil,
+        mark: SearchDevin.Mark?
     ) throws -> Bool {
         if case .none = session, !messages.isEmpty || fields != nil {
             throw SQLiteDatabase.Failure(
@@ -614,6 +619,9 @@ public final class SearchStore: @unchecked Sendable {
                     }
                 }
                 try upsertFile(path: path, stat: stat, byteOffset: byteOffset, sessionRowID: sessionRowID)
+                if let mark, let sessionRowID {
+                    try setMeta(SearchDevin.markKey(path), mark.value(session: sessionRowID))
+                }
                 try db.execute("COMMIT")
                 return true
             } catch {
@@ -621,6 +629,25 @@ public final class SearchStore: @unchecked Sendable {
                 throw error
             }
         }
+    }
+
+    @discardableResult
+    public func commitFile(
+        path: String,
+        expected: SearchFileFence?,
+        stat: SearchFileStat,
+        byteOffset: Int64,
+        session: IndexSessionCommit,
+        messages: [SearchMessageRow],
+        updating fields: SearchSessionFields? = nil
+    ) throws -> Bool {
+        try commitFile(path: path, expected: expected, stat: stat, byteOffset: byteOffset,
+                       session: session, messages: messages, updating: fields, mark: nil)
+    }
+
+    /// One `meta` row, or nil: a Devin session's `SearchDevin.Mark`.
+    public func meta(_ key: String) throws -> String? {
+        try storeLock.withLock { try metaValue(key) }
     }
 
     /// Rows in `messages` and the FTS rows with the same ids, in the caller's

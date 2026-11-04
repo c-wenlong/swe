@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Search indexing reads only a Devin session's new nodes.** Both index
+  writers (the Mac app's `SearchDevin.swift` and swe's
+  `search_containers.py`) re-read a Devin session's whole chain each
+  time it grew, and the chain walk loaded every node's parent first:
+  1.0 to 2.3 s for each of the largest sessions on every 60 s reconcile.
+  A read now walks the chain node by node from the head and stops at the
+  `rowid` watermark the last commit left in the index's `meta` table
+  (`devin_chain:<path>`, written by either side). A growing session costs
+  about 1 ms; one whose head moved to a streamed copy or whose indexed
+  node was rewritten reads whole in 25 to 45 ms ([#1613](https://github.com/c-wenlong/swe/issues/1613)).
+
 ## [1.2.1] - 2026-11-04
 
 ### Fixed

@@ -12,6 +12,7 @@ import os
 import sqlite3
 import unittest
 from pathlib import Path
+from dataclasses import replace
 from unittest import mock
 
 from swe.sessions import search_containers as containers
@@ -220,6 +221,9 @@ CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY AUTOINCREMENT,
 """
 
 
+_FIXTURE = Path(__file__).parent / "fixtures" / "search" / "devin-chain.json"
+
+
 class DevinTests(_Home):
     """``SearchDevinTests``' fixture and expectations, on swe's writer."""
 
@@ -346,6 +350,79 @@ class DevinTests(_Home):
         messages, prompt = containers.devin_messages(conn, session)
         self.assertEqual([m.text for m in messages], ["ship the lynx", "shipped"])
         self.assertEqual(containers.devin_title(session, prompt), "Lynx deploy")
+
+    # `devin-chain.json`, which `SearchDevinTests` replays too: both writers
+    # leave the same files row, session, rows and mark after every stage,
+    # so either one continues the other's read.
+    def test_the_shared_fixture_grows_the_same_rows_as_the_app(self):
+        fixture = json.loads(_FIXTURE.read_text())
+        path = self.db_path + fixture["path_suffix"]
+        ino = os.stat(self.db_path).st_ino
+        previous = None
+        for stage in fixture["stages"]:
+            with self.subTest(stage=stage["note"]):
+                for sql in stage["sql"]:
+                    self.source.execute(sql)
+                self.assertEqual(self.run_pass().indexed, 1)
+                conn = self.db()
+                offset, mtime, size, session_row = conn.execute(
+                    "SELECT byte_offset, mtime_ms, size_bytes, session_row_id FROM files"
+                    " WHERE path = ?", (path,)).fetchone()
+                self.assertEqual({"byte_offset": offset, "mtime_ms": mtime, "size_bytes": size},
+                                 stage["files"])
+                self.assertEqual(session_row == previous, stage["same_session"])
+                previous = session_row
+                title, updated, count = conn.execute(
+                    "SELECT title, updated_at, message_count FROM sessions WHERE id = ?",
+                    (session_row,)).fetchone()
+                self.assertEqual({"title": title, "updated_at": updated, "message_count": count},
+                                 stage["session"])
+                rows = conn.execute(
+                    "SELECT m.role, f.user_text || f.assistant_text || f.tool_text FROM messages m"
+                    " JOIN messages_fts f ON f.rowid = m.id WHERE m.session_row_id = ?"
+                    " ORDER BY m.id", (session_row,)).fetchall()
+                self.assertEqual([f"{r}: {t}" for r, t in rows], stage["rows"])
+                mark = conn.execute("SELECT value FROM meta WHERE key = ?",
+                                    ("devin_chain:" + path,)).fetchone()[0]
+                self.assertEqual(mark, stage["mark"].replace("{ino}", str(ino))
+                                 .replace("{session}", str(session_row)))
+                again = self.run_pass()
+                self.assertEqual((again.indexed, again.current), (0, 1))
+        # A retired session takes its mark with it.
+        self.source.execute("UPDATE sessions SET hidden = 1")
+        self.add_session("quiet-heron", "Heron work", None, 1_791_300_000, 1_791_300_000)
+        self.add_node("quiet-heron", 0, None, '{"role":"user","content":"count the herons"}')
+        self.run_pass()
+        self.assertIsNone(self.db().execute(
+            "SELECT 1 FROM meta WHERE key = ?", ("devin_chain:" + path,)).fetchone())
+
+    def test_a_mark_from_another_database_file_reads_whole(self):
+        self.seed()
+        self.run_pass()
+        conn = containers.open_read_only(self.db_path)
+        self.addCleanup(conn.close)
+        (session,) = containers.devin_sessions(conn)
+        ino = os.stat(self.db_path).st_ino
+        mark = containers.devin_read(conn, session, None, ino).mark
+        self.assertEqual(mark, containers.DevinMark(ino, 6, 6, 6, 0, "find the walrus config"))
+        self.assertTrue(containers.devin_read(conn, session, mark, ino).appended)
+        self.assertFalse(containers.devin_read(conn, session, mark, ino + 1).appended)
+        self.assertEqual(containers.DevinMark.parse(mark.value(42)), replace(mark, session=42))
+        for junk in (None, "", "1 2 3", "1 2 3 4 x\nt", "1 2 3 4 5 6"):
+            self.assertIsNone(containers.DevinMark.parse(junk))
+
+    def test_a_row_another_writer_replaced_without_a_mark_reads_whole(self):
+        # An older writer commits the files row but no mark: the mark left
+        # names the old session, so it continues nothing.
+        self.seed()
+        self.run_pass()
+        conn = self.db()
+        path = self.db_path + "#brave-otter"
+        conn.execute("UPDATE files SET session_row_id = session_row_id + 100 WHERE path = ?", (path,))
+        conn.commit()
+        row = writer.Store(conn).file_row(path)
+        self.assertEqual(writer._held_mark(row, writer.Store(conn), path,
+                                           os.stat(self.db_path).st_ino), (None, None))
 
     def test_an_unreadable_database_is_skipped(self):
         self.source.execute("DROP TABLE message_nodes")
@@ -724,3 +801,4 @@ class PairedHarnessTests(_Home):
 
 if __name__ == "__main__":
     unittest.main()
+

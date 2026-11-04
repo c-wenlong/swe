@@ -412,9 +412,12 @@ class Store:
     def commit_file(self, path: str, expected: tuple | None, stat: FileStat,
                     byte_offset: int, kind: str, fields: SessionFields | None,
                     rows: list[decode.Row], updating: SessionFields | None = None,
-                    session_row_id: int | None = None) -> bool:
+                    session_row_id: int | None = None,
+                    mark: tuple[str, "containers.DevinMark"] | None = None) -> bool:
         """``SearchStore.commitFile``: one transaction, fenced on the
-        ``files`` row. False (and nothing written) when the row moved."""
+        ``files`` row. False (and nothing written) when the row moved.
+        ``mark`` is a Devin session's ``(meta key, mark)``, stored under
+        the session the commit lands on."""
         conn = self.conn
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -461,6 +464,9 @@ class Store:
                 " state = 'current', fail_count = 0, failed_mtime_ms = NULL",
                 (path, stat.ino, byte_offset, stat.mtime_ms, stat.size, target),
             )
+            if mark is not None and target is not None:
+                conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                             (mark[0], mark[1].value(target)))
             conn.execute("COMMIT")
             self.last_session_row_id = target
             return True
@@ -478,6 +484,10 @@ class Store:
             (path, mtime_ms, mtime_ms),
         )
 
+    def meta(self, key: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
     def files_with_prefix(self, prefix: str) -> list[str]:
         """``files(withPrefix:)``: a range seek, not a ``substr`` scan."""
         return [row[0] for row in self.conn.execute(
@@ -494,6 +504,7 @@ class Store:
             if fence is not None and fence[0] is not None:
                 self._delete_session(fence[0])
             conn.execute("DELETE FROM files WHERE path = ?", (path,))
+            conn.execute("DELETE FROM meta WHERE key = ?", (containers.mark_key(path),))
             conn.execute("COMMIT")
         except BaseException:
             if conn.in_transaction:
@@ -802,19 +813,27 @@ class Indexer:
         return self._finish(pending, stat, stat.size)
 
     def index_session(self, path: str, stat: FileStat, read) -> str:
-        """``finishSession``: one session out of a container, read whole
-        whenever its synthetic stat moves. ``read()`` returns its
-        ``(SessionFields, messages)`` and runs only when a read is owed."""
+        """``finishSession``: one session out of a container, read whenever
+        its synthetic stat moves. ``read(row, store)`` runs only when a read
+        is owed and returns a :class:`ContainerRead`; one that ``appended``
+        adds its messages to the row's session instead of replacing it."""
         row = self.store.file_row(path)
         need = read_need(row, stat)
         if need in (SKIP, CURRENT):
             return need
         try:
-            fields, messages = read()
+            got = read(row, self.store)
             fence = None if row is None else (row.session_row_id, row.byte_offset)
-            kind = REPLACE if row is not None and row.session_row_id is not None else FRESH
-            committed = self.store.commit_file(path, fence, stat, stat.size, kind, fields,
-                                               decode.message_rows(messages))
+            mark = None if got.mark is None else (containers.mark_key(path), got.mark)
+            rows = decode.message_rows(got.messages)
+            if got.appended:
+                committed = self.store.commit_file(
+                    path, fence, stat, stat.size, EXISTING, None, rows, updating=got.fields,
+                    session_row_id=row.session_row_id, mark=mark)
+            else:
+                kind = REPLACE if row is not None and row.session_row_id is not None else FRESH
+                committed = self.store.commit_file(path, fence, stat, stat.size, kind,
+                                                   got.fields, rows, mark=mark)
         except (sqlite3.Error, ValueError, RecursionError):
             try:
                 self.store.mark_failed(path, stat.mtime_ms)
@@ -1159,21 +1178,52 @@ def sources(home: Path) -> list[Source]:
     return out
 
 
+@dataclass
+class ContainerRead:
+    """What one container session's read hands ``index_session``."""
+    fields: SessionFields
+    messages: list
+    appended: bool = False
+    mark: "containers.DevinMark | None" = None
+
+
+def _held_mark(row: FileRow | None, store: Store, path: str, ino: int):
+    """The mark committed with ``row``, and the session it continues, when
+    an append may use them: the row is current at its own size and the
+    mark was written with this very row (same session, same node count,
+    same database file). Either writer's mark qualifies."""
+    if (row is None or row.state != "current" or row.session_row_id is None
+            or row.byte_offset != row.size_bytes):
+        return None, None
+    mark = containers.DevinMark.parse(store.meta(containers.mark_key(path)))
+    if (mark is None or mark.session != row.session_row_id or mark.nodes != row.size_bytes
+            or mark.ino != ino):
+        return None, None
+    existing = store.session(row.session_row_id)
+    return (mark, existing) if existing is not None else (None, None)
+
+
 def _devin_entries(conn: sqlite3.Connection, db_path: str):
     """``Ledger.indexDevinSessions``' listing: ``(path, stat, read)`` per
     visible session."""
+    try:
+        ino = os.stat(db_path).st_ino
+    except OSError:
+        ino = 0
     for session in containers.devin_sessions(conn):
         path = containers.synthetic_path(db_path, session.id)
 
-        def read(session=session, path=path):
-            messages, prompt_title = containers.devin_messages(conn, session)
-            return SessionFields(
+        def read(row, store, session=session, path=path):
+            mark, existing = _held_mark(row, store, path, ino)
+            got = containers.devin_read(conn, session, mark, ino)
+            count = len(got.messages) + (existing.message_count if got.appended else 0)
+            return ContainerRead(SessionFields(
                 agent="devin", session_id=session.id, file_path=path,
-                title=containers.devin_title(session, prompt_title),
+                title=containers.devin_title(session, got.prompt_title),
                 cwd=session.directory,
                 created_at=decode.iso_seconds(session.created_ms / 1000),
                 updated_at=decode.iso_seconds(session.stat_mtime_ms / 1000),
-                message_count=len(messages)), messages
+                message_count=count), got.messages, got.appended, got.mark)
 
         yield path, FileStat(ino=None, mtime_ms=session.stat_mtime_ms, size=session.nodes), read
 
@@ -1183,15 +1233,15 @@ def _opencode_entries(conn: sqlite3.Connection, db_path: str):
     for session in containers.opencode_sessions(conn):
         path = containers.synthetic_path(db_path, session.id)
 
-        def read(session=session, path=path):
+        def read(row, store, session=session, path=path):
             messages = containers.opencode_messages(conn, session)
-            return SessionFields(
+            return ContainerRead(SessionFields(
                 agent="opencode", session_id=session.id, file_path=path,
                 title=containers.opencode_title(session, messages),
                 cwd=session.directory,
                 created_at=decode.iso_seconds(session.created_ms / 1000),
                 updated_at=decode.iso_seconds(session.activity_ms / 1000),
-                message_count=len(messages)), messages
+                message_count=len(messages)), messages)
 
         yield path, FileStat(ino=None, mtime_ms=float(session.activity_ms), size=session.count), read
 

@@ -90,6 +90,14 @@ public struct SearchDecoder {
         promptTitleSent = true
     }
 
+    /// Devin's remembered `tool_call_id → name` pairs: an appended span of
+    /// `message_nodes` starts from the ones the indexed chain assigned
+    /// (`SearchDevin.read`), Python's `_devin.call_names`.
+    var devinCallNames: [String: String] {
+        get { devin.state.callNames }
+        set { devin.state.callNames = newValue }
+    }
+
     /// Feed a line from before an append's offset for its decoder state
     /// only — Python's `Decoder.prime`. Codex's first `session_meta`
     /// decides which record type carries the conversation, and a fresh
