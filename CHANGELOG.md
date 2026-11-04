@@ -1190,6 +1190,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now-line stop ticking while hidden.
   Closes [#1554](https://github.com/c-wenlong/swe/issues/1554).
 
+- **The web chat reads its one session row, not the whole catalog.**
+  The chat read `GET /v1/sessions` (every row, read-state and machines)
+  to find its own row on open, on resync, at every turn's end (up to
+  three times, 6 s apart) and on every return to the tab. The hub now
+  answers `GET /v1/sessions?key=<key>` with that row and its machine:
+  0.4 ms and under 1 KB against 34 ms and 1.6 MB for a 2,000-row
+  catalog. A return to the tab reads once, unless a turn's re-reads
+  are still running.
+  Closes [#1556](https://github.com/c-wenlong/swe/issues/1556).
+
 - **Three small rendering costs in the Mac app are gone.** GitHub's
   octicons parsed their SVG path data on every layout; each glyph now
   parses once. An open Calendar hover card polled the pointer every

@@ -2240,7 +2240,7 @@ const SessionChat = (() => {
       if (ev.session === chat.key && status && status !== "active") {
         chat.awaitingReply = false;
         // A reply just finished: the header's model may be new.
-        if (live) refreshModel();
+        if (live) refreshModel(true);
       }
       if (chat.row && ev.session === chat.key) {
         chat.row.status = status;
@@ -3135,49 +3135,64 @@ const SessionChat = (() => {
    * the terminal, would show as it was until a reopen. A failed read, or
    * a hub that doesn't know the model, leaves the header as it is.
    *
-   * The hub answers /v1/sessions from a catalog it rebuilds every 10
-   * seconds, and a turn's end can reach the stream before that, so one
+   * The hub answers from a catalog it rebuilds every 10 seconds, and a
+   * turn's end (`afterTurn`) can reach the stream before that, so one
    * read may still hold the old model. Until the model differs, it reads
-   * again after each of MODEL_RETRY_MS. A newer call takes over from one
+   * again after each of MODEL_RETRY_MS (each read is one row, #1556). A
+   * tab coming back reads once, unless a turn's retries are still
+   * running, which it then takes over. A newer call takes over from one
    * still waiting. Returns the model now shown. */
   const MODEL_RETRY_MS = [6000, 6000];
-  let modelCall = 0;
-  async function refreshModel() {
+  let modelCall = 0, modelSettling = 0;
+  async function refreshModel(afterTurn = false) {
     if (!chat.key || !chat.row) return "";
     const gen = chat.gen;
     const call = ++modelCall;
-    for (let i = 0; ; i++) {
-      const { status, data } = await api("/v1/sessions");
-      if (gen !== chat.gen || call !== modelCall) break;
-      const row = status === 200 && data && (data.sessions || []).find((r) => r.key === chat.key);
-      if (row && row.model && chat.row && row.model !== chat.row.model) {
-        chat.row.model = row.model;
-        paintBar();
-        break;
+    afterTurn = afterTurn || modelSettling > 0;
+    if (afterTurn) modelSettling = call;
+    try {
+      for (let i = 0; ; i++) {
+        const { row } = await fetchRow(chat.key);
+        if (gen !== chat.gen || call !== modelCall) break;
+        if (row && row.model && chat.row && row.model !== chat.row.model) {
+          chat.row.model = row.model;
+          paintBar();
+          break;
+        }
+        if (!afterTurn || i >= MODEL_RETRY_MS.length) break;
+        await new Promise((resolve) => setTimeout(resolve, MODEL_RETRY_MS[i]));
+        if (gen !== chat.gen || call !== modelCall) break;
       }
-      if (i >= MODEL_RETRY_MS.length) break;
-      await new Promise((resolve) => setTimeout(resolve, MODEL_RETRY_MS[i]));
-      if (gen !== chat.gen || call !== modelCall) break;
+    } finally {
+      if (modelSettling === call) modelSettling = 0;
     }
     return (gen === chat.gen && chat.row && chat.row.model) || "";
+  }
+
+  /* This chat's catalog row and its machine, from `GET /v1/sessions?key=`
+   * (#1556), which serialises that one row instead of the whole catalog.
+   * A session the catalog doesn't hold answers 404. */
+  async function fetchRow(key) {
+    const { status, data } = await api(`/v1/sessions?key=${encodeURIComponent(key)}`);
+    const row = status === 200 && data ? (data.sessions || []).find((r) => r.key === key) || null : null;
+    const machine = row ? (data.machines || []).find((m) => m.id === row.machine_id) || null : null;
+    return { status, data, row, machine };
   }
 
   /* The catalog row: ownership, attachable and status as the hub has them
    * now, not as the list had them when it loaded. */
   async function loadRow(gen) {
-    const { status, data } = await api("/v1/sessions");
+    const { status, data, row, machine } = await fetchRow(chat.key);
     if (gen !== chat.gen) return;
     if (status === 401) return status;
+    if (status === 404 || (status === 200 && data && !row)) {
+      showError("This session isn't in the hub's catalog. It may have ended, or its machine may be offline.");
+      return 404;
+    }
     if (status !== 200 || !data) {
       showError(errorText(data) || (status ? `The hub answered ${status}.` : "Couldn't reach the hub. Check the connection, then reload."));
       return status;
     }
-    const row = (data.sessions || []).find((r) => r.key === chat.key);
-    if (!row) {
-      showError("This session isn't in the hub's catalog. It may have ended, or its machine may be offline.");
-      return 404;
-    }
-    const machine = (data.machines || []).find((m) => m.id === row.machine_id);
     chat.row = Object.assign({}, chat.row || {}, row, machine && machine.name ? { machine: machine.name } : {});
     chat.rowKnown = true;
     unreadHook("seen", chat.key, row.last_active_at);
