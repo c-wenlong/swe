@@ -1,3 +1,4 @@
+import CoreTransferable
 import Foundation
 import ImageIO
 import Observation
@@ -209,16 +210,25 @@ final class ComposerAttachments {
     /// next pick, removal or send.
     private(set) var notice: String?
 
-    typealias Upload = (_ name: String, _ data: Data, _ progress: @escaping @Sendable (Double) -> Void)
+    /// Uploads one spooled file. The body streams from disk, so a 20 MB
+    /// PDF is never in memory whole.
+    typealias Upload = (_ name: String, _ file: URL, _ progress: @escaping @Sendable (Double) -> Void)
         async throws -> StagedAttachment
     /// Where files go; ChatModel points it at the hub's attachments route.
     @ObservationIgnored var upload: Upload = { _, _, _ in throw CancellationError() }
-    /// Turns a photo into what's uploaded; tests swap in a plain copy.
+    /// Turns a photo in memory into what's uploaded; tests swap in a plain copy.
     @ObservationIgnored var convert: @Sendable (Data) -> Data? = { PhotoPrep.jpeg(from: $0) }
+    /// The same for a photo on disk, which ImageIO reads as it needs.
+    @ObservationIgnored var convertFile: @Sendable (URL) -> Data? = { PhotoPrep.jpeg(at: $0) }
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
-    /// The bytes of a failed upload, kept for Retry.
-    @ObservationIgnored private var payloads: [UUID: Data] = [:]
+    /// The spooled file of a failed upload, kept for Retry.
+    @ObservationIgnored private var payloads: [UUID: URL] = [:]
     @ObservationIgnored private var photoCount = 0
+
+    init() {
+        // Spool files an earlier run (a crash, a killed app) left behind.
+        AttachmentSpool.sweepLeftovers()
+    }
 
     var isEmpty: Bool { items.isEmpty }
     var uploading: Bool { items.contains(where: \.inFlight) }
@@ -232,6 +242,8 @@ final class ComposerAttachments {
     /// What a pick's loader came back with.
     enum Picked: Sendable {
         case data(Data)
+        /// A copy in `AttachmentSpool` that this pick owns.
+        case file(URL)
         /// Not read, with why, worded for the notice.
         case refused(String)
     }
@@ -244,16 +256,18 @@ final class ComposerAttachments {
     }
 
     /// A file from the Files picker. Its chip shows "Preparing" while it's
-    /// read off the main thread, so Send waits for it and a send or clear
-    /// in the meantime drops it. One over the cap is refused from its size
-    /// alone, without reading it; an image to convert may be bigger, since
-    /// the JPEG comes out smaller.
+    /// copied into the spool off the main thread, so Send waits for it and
+    /// a send or clear in the meantime drops it. The copy goes disk to
+    /// disk: the file is never read into memory, and it uploads from the
+    /// copy. One over the cap is refused from its size alone, without
+    /// copying it; an image to convert may be bigger, since the JPEG comes
+    /// out smaller.
     @discardableResult
     func addFile(at url: URL) -> Task<Void, Never>? {
         let name = url.lastPathComponent
         return add(name: name) {
-            let read = await Task.detached { Self.read(url, name: name) }.value
-            if let data = read.data { return .data(data) }
+            let read = await Task.detached { Self.spool(url, name: name) }.value
+            if let file = read.file { return .file(file) }
             return .refused(read.size.flatMap { size in
                 // A TIFF's own type isn't the hub's, but it would be
                 // converted: only its size can be the problem.
@@ -263,32 +277,49 @@ final class ComposerAttachments {
         }
     }
 
-    /// Images to convert are read up to this size.
+    /// Images to convert are taken up to this size.
     nonisolated static let convertibleReadLimit = 200 << 20
 
-    nonisolated static func read(_ url: URL, name: String) -> (data: Data?, size: Int?) {
+    /// Copies a picked file into the spool, unless it's over the cap
+    /// (then only its size comes back). Nil file and size: unreadable.
+    nonisolated static func spool(_ url: URL, name: String) -> (file: URL?, size: Int?) {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
         let limit = AttachmentRules.needsConversion(name) ? convertibleReadLimit : AttachmentRules.maxBytes
         if let size, size > limit { return (nil, size) }
-        return (try? Data(contentsOf: url), size)
+        return (try? AttachmentSpool.copy(url), size)
     }
 
     /// A photo from the library. `load` fetches its original bytes; it
     /// always goes up as a JPEG.
     @discardableResult
     func addPhoto(load: @escaping @Sendable () async throws -> Data?) -> Task<Void, Never>? {
+        addPhoto { name in
+            guard let data = try? await load() else { return .refused("\(name) couldn't be read as an image.") }
+            return .data(data)
+        }
+    }
+
+    /// The same, with the original copied into the spool by `load`
+    /// (Photos hands it over as a file), so it's never in memory whole:
+    /// the JPEG is made from the file.
+    @discardableResult
+    func addPhoto(file load: @escaping @Sendable () async throws -> URL?) -> Task<Void, Never>? {
+        addPhoto { name in
+            guard let file = try? await load() else { return .refused("\(name) couldn't be read as an image.") }
+            return .file(file)
+        }
+    }
+
+    private func addPhoto(picking load: @escaping @Sendable (String) async -> Picked) -> Task<Void, Never>? {
         guard room > 0 else {
             notice = Self.fullNote
             return nil
         }
         photoCount += 1
         let name = "photo-\(photoCount).jpg"
-        return add(name: name, photo: true) {
-            guard let data = try? await load() else { return .refused("\(name) couldn't be read as an image.") }
-            return .data(data)
-        }
+        return add(name: name, photo: true) { await load(name) }
     }
 
     /// Every pick goes through here: a "Preparing" chip at once (so it
@@ -312,24 +343,36 @@ final class ComposerAttachments {
         let id = UUID()
         let isImage = converts || AttachmentRules.readableImages.contains(AttachmentRules.ext(name))
         items.append(PendingAttachment(id: id, name: name, size: 0, isImage: isImage, state: .preparing))
-        let convert = self.convert
         let task = Task { [weak self] in
-            guard let loaded = await self?.prepare(name: name, converts: converts, load: load) else { return }
-            guard let self, !Task.isCancelled, self.items.contains(where: { $0.id == id }) else { return }
-            switch loaded {
+            guard let prepared = await self?.prepare(name: name, converts: converts, load: load) else { return }
+            // From here the pick is one spooled file (or a refusal) that
+            // this task owns until `run` takes it.
+            guard let self, !Task.isCancelled, self.items.contains(where: { $0.id == id }) else {
+                prepared.discard()
+                return
+            }
+            switch prepared {
             case .refused(let why):
                 self.drop(id, why)
-            case .data(let data):
-                if let why = AttachmentRules.refusal(name: name, size: data.count) { return self.drop(id, why) }
-                self.update(id) { $0.size = data.count; $0.state = .uploading(0) }
-                await self.run(id, data: data)
+            case .data:
+                // `prepare` always spools; nothing to upload from memory.
+                self.drop(id, "\(name) couldn't be read.")
+            case .file(let file):
+                let size = AttachmentSpool.size(of: file)
+                if let why = AttachmentRules.refusal(name: name, size: size) {
+                    AttachmentSpool.remove(file)
+                    return self.drop(id, why)
+                }
+                self.update(id) { $0.size = size; $0.state = .uploading(0) }
+                await self.run(id, file: file)
             }
         }
         tasks[id] = task
         return task
     }
 
-    /// Loads a pick and converts it if needed; nil when cancelled.
+    /// Loads a pick, converts it if needed, and leaves it as one file in
+    /// the spool (or a refusal); nil when cancelled.
     /// Images load and convert one at a time (ten 200 MB TIFFs read side
     /// by side would run the phone out of memory); the turn ends here,
     /// before the upload, so uploads still run side by side.
@@ -338,11 +381,36 @@ final class ComposerAttachments {
         defer { if converts { prepDone() } }
         guard !Task.isCancelled else { return nil }
         let loaded = await load()
-        guard converts, case .data(let raw) = loaded else { return loaded }
-        guard !Task.isCancelled else { return nil }
-        let convert = self.convert
-        let jpeg = await Task.detached { convert(raw) }.value
-        return jpeg.map(Picked.data) ?? .refused("\(name) couldn't be read as an image.")
+        guard !Task.isCancelled else {
+            loaded.discard()
+            return nil
+        }
+        let convert = self.convert, convertFile = self.convertFile
+        return await Task.detached {
+            Self.spooled(loaded, name: name, converts: converts, convert: convert, convertFile: convertFile)
+        }.value
+    }
+
+    /// `loaded` as a spooled file: bytes in memory are written out (as a
+    /// JPEG first when `converts`), and a spooled original to convert is
+    /// swapped for its JPEG.
+    nonisolated static func spooled(_ loaded: Picked, name: String, converts: Bool,
+                                    convert: (Data) -> Data?, convertFile: (URL) -> Data?) -> Picked {
+        let unreadable = Picked.refused("\(name) couldn't be read as an image.")
+        switch loaded {
+        case .refused:
+            return loaded
+        case .data(let data):
+            guard let bytes = converts ? convert(data) : data else { return unreadable }
+            guard let file = try? AttachmentSpool.write(bytes) else { return .refused("\(name) couldn't be read.") }
+            return .file(file)
+        case .file(let original):
+            guard converts else { return loaded }
+            defer { AttachmentSpool.remove(original) }
+            guard let jpeg = convertFile(original) else { return unreadable }
+            guard let file = try? AttachmentSpool.write(jpeg) else { return .refused("\(name) couldn't be read.") }
+            return .file(file)
+        }
     }
 
     @ObservationIgnored private var prepBusy = false
@@ -372,25 +440,33 @@ final class ComposerAttachments {
         notice = why
     }
 
-    private func start(_ id: UUID, data: Data) -> Task<Void, Never> {
-        let task = Task { [weak self] in await self?.run(id, data: data); return }
+    private func start(_ id: UUID, file: URL) -> Task<Void, Never> {
+        let task = Task { [weak self] in
+            guard let self else { return AttachmentSpool.remove(file) }
+            await self.run(id, file: file)
+        }
         tasks[id] = task
         return task
     }
 
-    private func run(_ id: UUID, data: Data) async {
+    /// Uploads `file`, which it owns: the spool copy goes once the hub has
+    /// it, or when the chip is dropped; a failed one is kept for Retry.
+    private func run(_ id: UUID, file: URL) async {
+        var kept = false
+        defer { if !kept { AttachmentSpool.remove(file) } }
         guard let name = items.first(where: { $0.id == id })?.name else { return }
         let progress: @Sendable (Double) -> Void = { [weak self] fraction in
             Task { @MainActor in self?.progressed(id, fraction) }
         }
         do {
-            let staged = try await upload(name, data, progress)
+            let staged = try await upload(name, file, progress)
             guard !Task.isCancelled else { return }
             payloads[id] = nil
             update(id) { $0.state = .ready(ref: staged.ref) }
         } catch {
-            guard !Task.isCancelled else { return }
-            payloads[id] = data
+            guard !Task.isCancelled, items.contains(where: { $0.id == id }) else { return }
+            payloads[id] = file
+            kept = true
             update(id) { $0.state = .failed(Self.failure(error)) }
         }
         tasks[id] = nil
@@ -407,14 +483,14 @@ final class ComposerAttachments {
         change(&items[i])
     }
 
-    /// Tap on a failed chip: upload the same bytes again.
+    /// Tap on a failed chip: upload the same file again.
     @discardableResult
     func retry(_ id: UUID) -> Task<Void, Never>? {
         guard let i = items.firstIndex(where: { $0.id == id }), case .failed = items[i].state,
-              let data = payloads.removeValue(forKey: id) else { return nil }
+              let file = payloads.removeValue(forKey: id) else { return nil }
         notice = nil
         items[i].state = .uploading(0)
-        return start(id, data: data)
+        return start(id, file: file)
     }
 
     /// The x on a chip: drops it, stopping its upload. A file already on
@@ -422,7 +498,7 @@ final class ComposerAttachments {
     /// when the session ends), since nothing will reference it.
     func remove(_ id: UUID) {
         tasks.removeValue(forKey: id)?.cancel()
-        payloads[id] = nil
+        payloads.removeValue(forKey: id).map(AttachmentSpool.remove)
         notice = nil
         items.removeAll { $0.id == id }
     }
@@ -433,6 +509,7 @@ final class ComposerAttachments {
         guard !items.isEmpty || notice != nil || !tasks.isEmpty else { return }
         for task in tasks.values { task.cancel() }
         tasks = [:]
+        payloads.values.forEach(AttachmentSpool.remove)
         payloads = [:]
         items = []
         notice = nil
@@ -447,6 +524,86 @@ final class ComposerAttachments {
         case "network": return "Can't reach the hub"
         case "too_large": return "Over the hub's 20 MB limit"
         default: return e.message
+        }
+    }
+}
+
+extension ComposerAttachments.Picked {
+    /// Deletes the spooled file a pick that won't be uploaded holds.
+    func discard() {
+        if case .file(let url) = self { AttachmentSpool.remove(url) }
+    }
+}
+
+/// The composer's picks on disk until the hub has them: a folder in the
+/// app's temporary directory. A pick is copied (or, for a photo, its JPEG
+/// written) here and uploads from the file, so neither a 20 MB PDF nor a
+/// failed upload kept for Retry sits in memory. Each file goes once the
+/// hub has it or its chip is dropped; `sweepLeftovers` clears, once per
+/// launch, what an earlier run left.
+enum AttachmentSpool {
+    static var folder: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("attachment-spool", isDirectory: true)
+    }
+
+    /// A fresh path in the folder, which is made if it's missing.
+    static func newFile() throws -> URL {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent(UUID().uuidString)
+    }
+
+    static func write(_ data: Data) throws -> URL {
+        let url = try newFile()
+        try data.write(to: url)
+        return url
+    }
+
+    /// Copies `source` disk to disk.
+    static func copy(_ source: URL) throws -> URL {
+        let url = try newFile()
+        try FileManager.default.copyItem(at: source, to: url)
+        return url
+    }
+
+    static func size(of url: URL) -> Int {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+    }
+
+    static func remove(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Empties the folder once per launch, before the first composer
+    /// spools anything: every file there then belongs to an earlier run
+    /// (a crash, or the app killed mid-upload), and no live composer's
+    /// Retry file can be swept by another chat opening.
+    static func sweepLeftovers() {
+        lock.withLock {
+            guard !swept else { return }
+            swept = true
+            clear()
+        }
+    }
+
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var swept = false
+
+    /// Deletes every file in the folder.
+    static func clear() {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return }
+        for url in names { remove(url) }
+    }
+}
+
+/// A photo Photos hands over as a file, copied into the spool before the
+/// picker's own copy goes.
+struct SpooledPhoto: Transferable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .image) { received in
+            SpooledPhoto(url: try AttachmentSpool.copy(received.file))
         }
     }
 }

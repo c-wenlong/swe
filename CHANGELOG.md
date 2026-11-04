@@ -1192,6 +1192,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frame while the window is resized.
   Closes [#1557](https://github.com/c-wenlong/swe/issues/1557).
 
+- **Web app tabs in the background stop polling the hub.** Settings ›
+  Integrations relisted pair requests every 3 s (each relist costs the
+  hub about five file reads and a JSON build), and "Pair with Tailscale"
+  asked for the owner's answer every 2 s, both while the tab was
+  hidden. Now a hidden tab asks nothing and asks once the moment it is
+  shown again. A hidden chat keeps its stream and every event but draws
+  nothing until it is shown, and the pairing countdown and Calendar's
+  now-line stop ticking while hidden.
+  Closes [#1554](https://github.com/c-wenlong/swe/issues/1554).
+
 - **The web chat reads its one session row, not the whole catalog.**
   The chat read `GET /v1/sessions` (every row, read-state and machines)
   to find its own row on open, on resync, at every turn's end (up to
@@ -1718,6 +1728,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it now loads devices once (and again after an approval, a removal or
   a pull to refresh) and asks for pending requests every 10 s. Closes
   [#1553](https://github.com/c-wenlong/swe/issues/1553).
+- **The iPhone composer keeps picked files on disk, not in memory.** A
+  file from Files was read whole into memory (up to 20 MB, or 200 MB
+  for an image to convert), a photo from Photos loaded as one `Data`,
+  and a failed upload kept those bytes for Retry. Picks now go into a
+  spool folder in the app's temporary directory: files are copied disk
+  to disk, photos arrive from Photos as a file and their JPEG is made
+  from it through ImageIO, and every upload streams its body from the
+  file. A failed upload keeps only the file; it goes once the hub has
+  it or the chip is removed or sent, and what a crash left behind is
+  swept at the next launch. Closes
+  [#1551](https://github.com/c-wenlong/swe/issues/1551).
 
 ### Fixed
 

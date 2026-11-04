@@ -1316,6 +1316,16 @@ ms after typing pauses. Overview redraws its charts at most once per
 frame while the window is resized.
 Closes <a href="https://github.com/c-wenlong/swe/issues/1557">#1557</a>.</p>
 </li>
+<li><p><strong>Web app tabs in the background stop polling the hub.</strong> Settings ›
+Integrations relisted pair requests every 3 s (each relist costs the
+hub about five file reads and a JSON build), and &quot;Pair with Tailscale&quot;
+asked for the owner's answer every 2 s, both while the tab was
+hidden. Now a hidden tab asks nothing and asks once the moment it is
+shown again. A hidden chat keeps its stream and every event but draws
+nothing until it is shown, and the pairing countdown and Calendar's
+now-line stop ticking while hidden.
+Closes <a href="https://github.com/c-wenlong/swe/issues/1554">#1554</a>.</p>
+</li>
 <li><p><strong>The web chat reads its one session row, not the whole catalog.</strong>
 The chat read <code>GET /v1/sessions</code> (every row, read-state and machines)
 to find its own row on open, on resync, at every turn's end (up to
@@ -1870,6 +1880,18 @@ fetched both pair requests and the device list every 5 s while open;
 it now loads devices once (and again after an approval, a removal or
 a pull to refresh) and asks for pending requests every 10 s. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1553">#1553</a>.</p>
+</li>
+<li><p><strong>The iPhone composer keeps picked files on disk, not in memory.</strong> A
+file from Files was read whole into memory (up to 20 MB, or 200 MB
+for an image to convert), a photo from Photos loaded as one <code>Data</code>,
+and a failed upload kept those bytes for Retry. Picks now go into a
+spool folder in the app's temporary directory: files are copied disk
+to disk, photos arrive from Photos as a file and their JPEG is made
+from it through ImageIO, and every upload streams its body from the
+file. A failed upload keeps only the file; it goes once the hub has
+it or the chip is removed or sent, and what a crash left behind is
+swept at the next launch. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1551">#1551</a>.</p>
 </li>
 </ul>
 <h3 id="fixed-1"><a class="anchor" href="#fixed-1"></a>Fixed</h3>

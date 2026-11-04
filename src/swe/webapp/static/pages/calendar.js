@@ -1019,7 +1019,7 @@
    * repaints the sheets, so it waits while one is open. */
   let reloadedFor = null;
   setInterval(() => {
-    if (!onCalendar() || !S.data) return;
+    if (!onCalendar() || !S.data || document.hidden) return;
     const today = localDate();
     if (!S.loading && S.data.today !== today && reloadedFor !== today
         && !document.querySelector("dialog[open]")) {

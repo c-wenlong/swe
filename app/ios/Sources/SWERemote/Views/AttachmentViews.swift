@@ -29,7 +29,8 @@ struct AttachButton: View {
         .onChange(of: picks) { _, items in
             guard !items.isEmpty else { return }
             for item in items {
-                attachments.addPhoto { try await item.loadTransferable(type: Data.self) }
+                // As a file: the original never sits in memory whole.
+                attachments.addPhoto(file: { try await item.loadTransferable(type: SpooledPhoto.self)?.url })
             }
             picks = []
         }

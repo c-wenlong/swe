@@ -1479,6 +1479,7 @@ function bindRemote() {
       p.timer = setInterval(() => {
         const el = document.getElementById("set-countdown");
         if (!el || !p.ticket) return settingsStopClock();
+        if (document.hidden) return;
         const html = settingsCountdown();
         if (el.dataset.drawn === html) return;
         el.innerHTML = html;
@@ -1631,31 +1632,49 @@ function remoteSig(remote) {
 
 /* The remote PWA's approvals page polled every few seconds; the inline
  * rows do the same while Integrations is open, so a phone's new request
- * (or an expired one leaving) shows without a reload. */
+ * (or an expired one leaving) shows without a reload. A tab in the
+ * background reads nothing (each read costs the hub several file reads,
+ * #1554); showing it again reads at once. */
 function settingsPollRequests() {
   const p = settingsPage;
   if (p.reqPoll) return;
-  const poll = p.reqPoll = setInterval(async () => {
-    if (!onSettingsPage() || settingsSection() !== "integrations") {
-      settingsStopPoll();
-      return;
-    }
-    const gen = routeGen;
-    const { status, data } = await api("/v1/app/settings?part=remote");
-    // Left the page, or the poll was stopped (a 401, this browser
-    // revoked) while the read was out.
-    if (gen !== routeGen || p.reqPoll !== poll) return;
-    if (status === 401) {
-      // The gate's inputs would be wiped by the next tick's gate.
-      settingsStopPoll();
-      return renderGate();
-    }
-    if (status === 200 && data && p.data
-        && remoteSig(data.remote) !== remoteSig(p.data.remote)) {
-      p.data.remote = data.remote;
-      settingsRepaintRemote();
-    }
-  }, 3000);
+  settingsWatchVisibility();
+  const poll = p.reqPoll = setInterval(() => settingsPollTick(poll), 3000);
+}
+
+let settingsVisibilityWatched = false;
+function settingsWatchVisibility() {
+  if (settingsVisibilityWatched) return;
+  settingsVisibilityWatched = true;
+  document.addEventListener("visibilitychange", () => {
+    const poll = settingsPage.reqPoll;
+    if (poll && !document.hidden) settingsPollTick(poll);
+  });
+}
+
+async function settingsPollTick(poll) {
+  const p = settingsPage;
+  if (p.reqPoll !== poll) return;
+  if (!onSettingsPage() || settingsSection() !== "integrations") {
+    settingsStopPoll();
+    return;
+  }
+  if (document.hidden) return;
+  const gen = routeGen;
+  const { status, data } = await api("/v1/app/settings?part=remote");
+  // Left the page, or the poll was stopped (a 401, this browser
+  // revoked) while the read was out.
+  if (gen !== routeGen || p.reqPoll !== poll) return;
+  if (status === 401) {
+    // The gate's inputs would be wiped by the next tick's gate.
+    settingsStopPoll();
+    return renderGate();
+  }
+  if (status === 200 && data && p.data
+      && remoteSig(data.remote) !== remoteSig(p.data.remote)) {
+    p.data.remote = data.remote;
+    settingsRepaintRemote();
+  }
 }
 
 function settingsStopPoll() {

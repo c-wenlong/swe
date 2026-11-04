@@ -1280,8 +1280,10 @@ class TestRevokeThisBrowserScript(unittest.TestCase):
             "globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v),"
             " removeItem: (k) => store.delete(k) };\n"
             "globalThis.location = { hash: " + json.dumps(hash_) + " };\n"
+            "const listeners = {};\n"
             "globalThis.document = { documentElement: { dataset: {} }, head: { appendChild() {} },"
-            " getElementById: () => null, createElement: () => ({}), querySelectorAll: () => [] };\n"
+            " getElementById: () => null, createElement: () => ({}), querySelectorAll: () => [],"
+            " hidden: false, addEventListener: (t, f) => { (listeners[t] = listeners[t] || []).push(f); } };\n"
             "let tick = null, cleared = 0, gates = [];\n"
             "globalThis.setInterval = (fn) => { tick = fn; return 7; };\n"
             "globalThis.clearInterval = (id) => { if (id === 7) { cleared++; tick = null; } };\n"
@@ -1289,7 +1291,7 @@ class TestRevokeThisBrowserScript(unittest.TestCase):
             "function registerPage() {}\n"
             "function renderGate(msg) { gates.push(msg); }\n"
             "function renderSettings() {}\n" + app_js_function("currentRoute") +
-            "const api = async () => ({ status: " + str(api_status) + ", data: null });\n"
+            "let api = async () => ({ status: " + str(api_status) + ", data: null });\n"
             "const apiPost = async () => ({ status: 200, data: " + post_data + " });\n"
             + forget + "\n")
         src = prelude + (self.STATIC / "pages/settings.js").read_text(encoding="utf-8") + "\n" + body
@@ -1318,6 +1320,28 @@ class TestRevokeThisBrowserScript(unittest.TestCase):
                           "process.stdout.write(JSON.stringify({ gates: gates.length, cleared, after: after === null,"
                           " polling: settingsPage.reqPoll !== null })); })();\n")
         self.assertEqual(out, {"gates": 1, "cleared": 1, "after": True, "polling": False})
+
+    def test_a_hidden_tab_skips_the_poll_and_showing_it_reads_at_once(self):
+        """#1554: a background tab's ticks read nothing; coming back reads
+        once without waiting for the next tick, and only one listener is
+        added however often the poll restarts."""
+        out = self.run_js(200, "{}", (
+            "let reads = 0;\n"
+            "api = async () => { reads++; return { status: 200, data: null }; };\n"
+            "settingsPollRequests();\n"
+            "(async () => {\n"
+            "  await tick(); const visible = reads;\n"
+            "  document.hidden = true;\n"
+            "  await tick(); await tick(); const hidden = reads - visible;\n"
+            "  document.hidden = false;\n"
+            "  for (const f of listeners.visibilitychange) await f();\n"
+            "  const shown = reads - visible;\n"
+            "  settingsStopPoll(); settingsPollRequests(); settingsStopPoll();\n"
+            "  for (const f of listeners.visibilitychange) await f();\n"
+            "  process.stdout.write(JSON.stringify({ visible, hidden, shown, after: reads - visible,"
+            " listeners: listeners.visibilitychange.length }));\n"
+            "})();\n"))
+        self.assertEqual(out, {"visible": 1, "hidden": 0, "shown": 1, "after": 1, "listeners": 1})
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")

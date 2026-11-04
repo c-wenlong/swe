@@ -73,7 +73,8 @@ badge where its control would be.
 - **Waiting for approval**: tailnet pair requests (`swe remote devices
   --requests`), no codes or secrets, relisted every few seconds while
   the section is open so a phone's new request (or an expired one
-  leaving) shows without a reload. Each row takes the code the asking
+  leaving) shows without a reload. A hidden tab skips the relist and
+  relists once when it is shown again. Each row takes the code the asking
   device shows and decides it inline — Approve or Deny posts
   `/v1/pair/requests/<decide>` with the request id pinned, the same
   routes a paired device or the owner's tailnet identity may call. A
