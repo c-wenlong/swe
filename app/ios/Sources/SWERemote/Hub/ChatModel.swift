@@ -242,9 +242,9 @@ final class ChatModel {
             guard let self, let client = self.hubClient else { throw HubError.network(CancellationError()) }
             return try await client.commands(self.key)
         }
-        attachments.upload = { [weak self] name, data, progress in
+        attachments.upload = { [weak self] name, file, progress in
             guard let self, let client = self.hubClient else { throw HubError.network(CancellationError()) }
-            return try await client.uploadAttachment(self.key, name: name, data: data, progress: progress)
+            return try await client.uploadAttachment(self.key, name: name, file: file, progress: progress)
         }
     }
 

@@ -1614,6 +1614,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it now loads devices once (and again after an approval, a removal or
   a pull to refresh) and asks for pending requests every 10 s. Closes
   [#1553](https://github.com/c-wenlong/swe/issues/1553).
+- **The iPhone composer keeps picked files on disk, not in memory.** A
+  file from Files was read whole into memory (up to 20 MB, or 200 MB
+  for an image to convert), a photo from Photos loaded as one `Data`,
+  and a failed upload kept those bytes for Retry. Picks now go into a
+  spool folder in the app's temporary directory: files are copied disk
+  to disk, photos arrive from Photos as a file and their JPEG is made
+  from it through ImageIO, and every upload streams its body from the
+  file. A failed upload keeps only the file; it goes once the hub has
+  it or the chip is removed or sent, and leftovers from a crash are
+  swept after a day. Closes
+  [#1551](https://github.com/c-wenlong/swe/issues/1551).
 
 ### Fixed
 
