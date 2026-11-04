@@ -939,10 +939,17 @@ struct SkeletonRows: View {
 
     var body: some View {
         Group {
-            if framed { Card { content.skeletonSweep() } } else { content.skeletonSweep() }
+            if framed { Card { swept } } else { swept }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(label))
+    }
+
+    /// One shared band, except over tiles: each tile's opaque card
+    /// would mask the band across the whole tile, so their bars keep
+    /// their own.
+    @ViewBuilder private var swept: some View {
+        if shape == .tiles { content } else { content.skeletonSweep() }
     }
 
     @ViewBuilder private var content: some View {
