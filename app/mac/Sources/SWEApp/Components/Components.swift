@@ -871,7 +871,9 @@ private struct SkeletonSweep: ViewModifier {
                     withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { swept = true }
                 }
                 .task {
-                    try? await Task.sleep(for: Self.limit)
+                    // A cancel (the view leaving, Reduce Motion on) is not
+                    // the minute running out.
+                    do { try await Task.sleep(for: Self.limit) } catch { return }
                     expired = true
                 }
         } else {
