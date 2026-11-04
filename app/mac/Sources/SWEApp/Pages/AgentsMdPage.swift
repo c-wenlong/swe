@@ -318,6 +318,17 @@ private struct CompileView: View {
                             error = problem
                         }
                     }
+                    // Indexed chapters with no row above: missing file or
+                    // a name the outline can't show. All view lets each
+                    // be turned off from here.
+                    if harness == nil {
+                        ForEach(chapters.missing, id: \.self) { name in
+                            MissingRow(name: name,
+                                       absent: chapters.absent.contains(name)) { problem in
+                                error = problem
+                            }
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -325,6 +336,42 @@ private struct CompileView: View {
         }
         .frame(width: 300)
         .frame(maxHeight: .infinity)
+    }
+
+    /// An Include row for an indexed chapter that has no outline row:
+    /// checked (it is compiled) with "missing"/"hidden" saying why.
+    private struct MissingRow: View {
+        var name: String
+        var absent: Bool
+        var onError: (String?) -> Void
+        @Environment(AppModel.self) private var app
+        @State private var hovering = false
+
+        var body: some View {
+            HStack(spacing: 5) {
+                Color.clear.frame(width: 10)
+                TriBox(tri: .all) {
+                    Task {
+                        onError(await app.chapters.setIncluded(
+                            name: name, state: .on, on: false, swe: app.swe))
+                    }
+                }
+                Text(name).font(Theme.nav)
+                    .foregroundStyle(Theme.textNav)
+                    .lineLimit(1).truncationMode(.head)
+                Text(absent ? "missing" : "hidden")
+                    .font(Theme.caption)
+                    .foregroundStyle(absent ? Theme.dangerText : Theme.textMuted)
+                Spacer(minLength: 4)
+            }
+            .padding(.leading, 8).padding(.trailing, 8).padding(.vertical, 4)
+            .background(hovering ? Theme.hover : .clear,
+                        in: .rect(cornerRadius: Theme.controlRadius))
+            .onHover { hovering = $0 }
+            .hoverTip(absent ? "Listed in index.txt but the file is gone; uncheck to comment it out"
+                             : "Listed in index.txt but hidden from the outline; uncheck to comment it out",
+                      replacesLabel: false)
+        }
     }
 
     /// The fixed-width harness column shared by the matrix header and
@@ -1179,7 +1226,7 @@ private struct CompiledOutputSheet: View {
                 .secondaryButton().disabled(chapters.building)
                 .hoverTip("Runs swe instructions build", replacesLabel: false)
                 Button("Copy", systemImage: "doc.on.doc") {
-                    if let text = chapters.output?.text { copyToPasteboard(text) }
+                    if let text = document?.text { copyToPasteboard(text) }
                 }
                 .secondaryButton()
                 Button("Close") { dismiss() }

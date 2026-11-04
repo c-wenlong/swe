@@ -475,6 +475,64 @@ import Testing
         }
     }
 
+    @Test func targetsParseNormalizesChapterKeys() throws {
+        let parsed = try ChapterTargets.parse("""
+            {"version":1,"chapters":{"./a.md":{"only":["claude"]},
+            "eng//x.md":{"except":["codex"]}}}
+            """)
+        #expect(parsed.rules["a.md"] == ["only": ["claude"]])
+        #expect(parsed.rules["eng/x.md"] == ["except": ["codex"]])
+        #expect(throws: (any Error).self) {
+            try ChapterTargets.parse("""
+                {"version":1,"chapters":{"a.md":{"only":["x"]},
+                "./a.md":{"only":["y"]}}}
+                """)
+        }
+    }
+
+    @Test func concurrentReceiptTogglesKeepBothRules() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url), check(dir.url), check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        async let a = model.setReceipt(
+            name: "a.md", state: .on, rule: nil,
+            harness: "claude", want: false, swe: SweClient(runner: runner))
+        async let b = model.setReceipt(
+            name: "b.md", state: .on, rule: nil,
+            harness: "codex", want: false, swe: SweClient(runner: runner))
+        let (pa, pb) = await (a, b)
+        #expect(pa == nil && pb == nil)
+        let text = try String(contentsOf: dir.path("targets.json"), encoding: .utf8)
+        #expect(text.contains(#""a.md": { "except": ["claude"] }"#))
+        #expect(text.contains(#""b.md": { "except": ["codex"] }"#))
+    }
+
+    @Test func aFixedTargetsFileUnblocksToggles() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url), check(dir.url)])
+        // Broken at load: the problem is reported and toggles refuse.
+        try "not json".write(to: dir.path("targets.json"), atomically: true,
+                            encoding: .utf8)
+        let model = try await model(dir, runner: runner)
+        // A toggle awaits the doc first, so the refusal is deterministic.
+        #expect(await model.setReceipt(
+            name: "a.md", state: .on, rule: nil,
+            harness: "claude", want: false,
+            swe: SweClient(runner: runner)) != nil)
+        #expect(model.targetsParseProblem != nil)
+        // Fixed on disk: checkDisk picks it up and toggles write again.
+        try """
+            {"version":1,"chapters":{}}
+            """.write(to: dir.path("targets.json"), atomically: true,
+                      encoding: .utf8)
+        await model.checkDisk()
+        #expect(model.targetsParseProblem == nil)
+        let problem = await model.setReceipt(
+            name: "a.md", state: .on, rule: nil,
+            harness: "claude", want: false, swe: SweClient(runner: runner))
+        #expect(problem == nil)
+    }
+
     @Test func aToggleHitByADiskChangeReloadsAndReports() async throws {
         let dir = try TempDir()
         let runner = Runner([check(dir.url)])

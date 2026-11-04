@@ -249,7 +249,17 @@ public struct ChapterTargets: Equatable, Sendable {
                     NSLocalizedDescriptionKey:
                         "targets.json has a rule the app cannot edit: \(chapter)"])
             }
-            rules[chapter] = [kind: list.map { $0 as! String }]
+            // Chapter names normalize like the compiler's: "." components
+            // drop out and "//" collapses, so "./a.md" is "a.md". Two
+            // spellings of one chapter is a collision, never merged.
+            let name = chapter.split(separator: "/")
+                .filter { $0 != "." }.joined(separator: "/")
+            if rules[name] != nil {
+                throw NSError(domain: "ChapterTargets", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "targets.json lists \(name) twice"])
+            }
+            rules[name] = [kind: list.map { $0 as! String }]
         }
         return ChapterTargets(rules: rules)
     }
@@ -741,6 +751,7 @@ public final class ChaptersModel {
     /// to lose; flag the ones holding unsaved edits.
     public func checkDisk() async {
         await indexDocument?.checkDisk()
+        await targetsDocument?.checkDisk()
         for document in documents.values { await document.checkDisk() }
         await output?.checkDisk()
         for document in outputDocuments.values { await document.checkDisk() }
@@ -1046,6 +1057,20 @@ public final class ChaptersModel {
         return nil
     }
 
+    /// Two quick toggles must not compute from the same baseline: every
+    /// compile op awaits the one before it, so each reads the previous
+    /// op's saved text instead of overwriting it.
+    private var compileTail: Task<String?, Never>?
+    private func queuedCompile(_ work: @escaping () async -> String?) async -> String? {
+        let prior = compileTail
+        let task = Task { () -> String? in
+            if let prior { _ = await prior.value }
+            return await work()
+        }
+        compileTail = task
+        return await task.value
+    }
+
     /// Both documents, ready, or the refusal. `needsTargets` is true when
     /// a rule could be part of the change (any harness-scoped write).
     private func readyCompile(needsTargets: Bool)
@@ -1061,28 +1086,32 @@ public final class ChaptersModel {
     /// The All-harnesses checkbox on one chapter.
     public func setIncluded(name: String, state: CompileState, on: Bool,
                             swe: SweClient) async -> String? {
-        guard let docs = await readyCompile(needsTargets: false) else {
-            return "The chapter files haven't been read."
+        await queuedCompile {
+            guard let docs = await self.readyCompile(needsTargets: false) else {
+                return "The chapter files haven't been read."
+            }
+            return await self.applyCompile(writes: CompileToggle.all(
+                index: docs.index.text, state: state, name: name,
+                folder: (name as NSString).deletingLastPathComponent), swe: swe)
         }
-        return await applyCompile(writes: CompileToggle.all(
-            index: docs.index.text, state: state, name: name,
-            folder: (name as NSString).deletingLastPathComponent), swe: swe)
     }
 
     /// One harness's checkbox on one chapter.
     public func setReceipt(name: String, state: CompileState,
                            rule: [String: [String]]?, harness: String,
                            want: Bool, swe: SweClient) async -> String? {
-        guard let docs = await readyCompile(needsTargets: true) else {
-            return targetsParseProblem ?? "The chapter files haven't been read."
+        await queuedCompile {
+            guard let docs = await self.readyCompile(needsTargets: true) else {
+                return self.targetsParseProblem ?? "The chapter files haven't been read."
+            }
+            let rules = docs.targets.existsOnDisk
+                ? (try? ChapterTargets.parse(docs.targets.text))?.rules ?? [:]
+                : [:]
+            return await self.applyCompile(writes: CompileToggle.harness(
+                harness, want: want, index: docs.index.text,
+                rules: rules, state: state, name: name,
+                folder: (name as NSString).deletingLastPathComponent), swe: swe)
         }
-        let rules = docs.targets.existsOnDisk
-            ? (try? ChapterTargets.parse(docs.targets.text))?.rules ?? [:]
-            : [:]
-        return await applyCompile(writes: CompileToggle.harness(
-            harness, want: want, index: docs.index.text,
-            rules: rules, state: state, name: name,
-            folder: (name as NSString).deletingLastPathComponent), swe: swe)
     }
 
     /// A folder checkbox: one batch over every file under it.
@@ -1091,15 +1120,17 @@ public final class ChaptersModel {
         members: [(name: String, state: CompileState, rule: [String: [String]]?)],
         swe: SweClient
     ) async -> String? {
-        guard let docs = await readyCompile(needsTargets: harness != nil) else {
-            return targetsParseProblem ?? "The chapter files haven't been read."
+        await queuedCompile {
+            guard let docs = await self.readyCompile(needsTargets: harness != nil) else {
+                return self.targetsParseProblem ?? "The chapter files haven't been read."
+            }
+            let rules = docs.targets.existsOnDisk
+                ? (try? ChapterTargets.parse(docs.targets.text))?.rules ?? [:]
+                : [:]
+            return await self.applyCompile(writes: CompileToggle.folder(
+                on: on, harness: harness, index: docs.index.text,
+                rules: rules, members: members), swe: swe)
         }
-        let rules = docs.targets.existsOnDisk
-            ? (try? ChapterTargets.parse(docs.targets.text))?.rules ?? [:]
-            : [:]
-        return await applyCompile(writes: CompileToggle.folder(
-            on: on, harness: harness, index: docs.index.text,
-            rules: rules, members: members), swe: swe)
     }
 
     /// The read-only document for one generated output, kept per path so
