@@ -1024,6 +1024,20 @@ private struct NewChapterSheet: View {
     @State private var include = true
     @State private var working = false
     @State private var error: String?
+    /// Which field's suggestions are showing; nil while neither has focus.
+    @FocusState private var focus: Field?
+    /// The field whose list is showing. Focus alone can't gate it: a row
+    /// click blurs the field before the tap lands, which would drop the
+    /// list out from under the cursor. So this latches on focus and
+    /// clears only when focus moves to the other field.
+    @State private var activeField: Field?
+    /// Row the keyboard is on; resets whenever the rows change.
+    @State private var highlight = 0
+    /// Escape pressed with a list open: it stays closed until the query
+    /// changes again.
+    @State private var listDismissed = false
+
+    private enum Field { case folder, file }
 
     init(initial: Initial) {
         self.initial = initial
@@ -1042,9 +1056,8 @@ private struct NewChapterSheet: View {
 
     private var fileProblem: String? {
         if fileName.isEmpty { return nil }  // folder-only create
-        if fileName.contains("/") { return "The file is a name, not a path." }
-        return ChapterIndex.nameProblem(
-            folder.isEmpty ? fileName : folder + "/" + fileName)
+        return ChapterIndex.newChapterProblem(
+            folder: folder.trimmingCharacters(in: .whitespaces), file: file)
     }
 
     private var fullPath: String {
@@ -1058,6 +1071,73 @@ private struct NewChapterSheet: View {
             && !(folder.trimmingCharacters(in: .whitespaces).isEmpty && fileName.isEmpty)
     }
 
+    /// Rows under the active field; the list shows whenever it is
+    /// non-empty and the user has not dismissed it with Escape.
+    private var rows: [ChapterSuggest.Row] {
+        switch activeField {
+        case .folder:
+            return ChapterSuggest.folders(
+                folder, in: app.chapters.folders, files: app.chapters.files)
+        case .file:
+            return ChapterSuggest.files(
+                file, folder: folder.trimmingCharacters(in: .whitespaces),
+                in: app.chapters.files, folders: app.chapters.folders)
+        case nil: return []
+        }
+    }
+
+    private var listOpen: Bool {
+        activeField != nil && !listDismissed && !rows.isEmpty
+    }
+
+    private func move(_ delta: Int) {
+        guard !rows.isEmpty else { return }
+        highlight = min(max(highlight + delta, 0), rows.count - 1)
+    }
+
+    /// Return picks the highlighted row when the list is open; closed,
+    /// it defers to the Create button's default action.
+    private func pickHighlighted() -> KeyPress.Result {
+        guard listOpen, rows.indices.contains(highlight) else { return .ignored }
+        pick(rows[highlight])
+        return .handled
+    }
+
+    private func escape() -> KeyPress.Result {
+        if listOpen {
+            listDismissed = true
+            return .handled
+        }
+        return .ignored  // falls through to the Cancel shortcut
+    }
+
+    private func pick(_ row: ChapterSuggest.Row) {
+        switch row {
+        case .folder(let path):
+            folder = path
+            if initial.mode == .chapter {
+                focus = .file
+                activeField = .file
+            } else {
+                listDismissed = true
+            }
+        case .file(let path):
+            // Same select path the rail's file rows use; the sheet only
+            // opens from Edit, which already has the editor up.
+            app.chapters.selected = path
+            dismiss()
+        case .create(let path):
+            if activeField == .folder && initial.mode == .chapter {
+                focus = .file  // keep the typed folder, move on to the name
+                activeField = .file
+            } else {
+                folder = activeField == .folder ? path : folder
+                guard canSubmit, !working else { return }
+                submit()
+            }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(initial.mode == .folder ? "New folder" : "New chapter")
@@ -1065,30 +1145,35 @@ private struct NewChapterSheet: View {
             Text("Folders group the chapters so you and agents can navigate without reading everything.")
                 .font(Theme.caption).foregroundStyle(Theme.textSecondary)
             FormField("Folder") {
-                HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     TextField("engineering/review, or empty for top level", text: $folder)
                         .sweField(monospaced: true)
-                    Menu {
-                        Button("Top level") { folder = "" }
-                        if !app.chapters.folders.filter({ !$0.isEmpty }).isEmpty {
-                            Divider()
-                            ForEach(app.chapters.folders.filter { !$0.isEmpty }, id: \.self) { existing in
-                                Button(existing) { folder = existing }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(Theme.font(size: 10))
-                            .foregroundStyle(Theme.textMuted)
-                            .frame(width: 22, height: 22).contentShape(.rect)
+                        .focused($focus, equals: .folder)
+                        .onKeyPress(.upArrow, phases: .down) { _ in move(-1); return .handled }
+                        .onKeyPress(.downArrow, phases: .down) { _ in move(1); return .handled }
+                        .onKeyPress(.return, phases: .down) { _ in pickHighlighted() }
+                        .onKeyPress(.escape, phases: .down) { _ in escape() }
+                    if listOpen && activeField == .folder {
+                        SuggestList(rows: rows, highlight: highlight,
+                                    folderField: true) { pick($0) }
                     }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22)
                 }
             }
             if initial.mode == .chapter {
                 FormField("File") {
-                    TextField("name (.md added)", text: $file)
-                        .sweField(monospaced: true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        TextField("name (.md added)", text: $file)
+                            .sweField(monospaced: true)
+                            .focused($focus, equals: .file)
+                            .onKeyPress(.upArrow, phases: .down) { _ in move(-1); return .handled }
+                            .onKeyPress(.downArrow, phases: .down) { _ in move(1); return .handled }
+                            .onKeyPress(.return, phases: .down) { _ in pickHighlighted() }
+                            .onKeyPress(.escape, phases: .down) { _ in escape() }
+                        if listOpen && activeField == .file {
+                            SuggestList(rows: rows, highlight: highlight,
+                                        folderField: false) { pick($0) }
+                        }
+                    }
                 }
             }
             // Only a chapter goes in the index; a folder alone does not.
@@ -1111,12 +1196,120 @@ private struct NewChapterSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .secondaryButton().keyboardShortcut(.cancelAction)
-                Button(working ? "Creating…" : submitTitle) { submit() }
-                    .primaryButton().keyboardShortcut(.defaultAction)
-                    .disabled(working || !canSubmit)
+                // No default shortcut while the list is open: Return picks
+                // the highlighted row, never both at once.
+                if listOpen {
+                    Button(working ? "Creating…" : submitTitle) { submit() }
+                        .primaryButton()
+                        .disabled(working || !canSubmit)
+                } else {
+                    Button(working ? "Creating…" : submitTitle) { submit() }
+                        .primaryButton().keyboardShortcut(.defaultAction)
+                        .disabled(working || !canSubmit)
+                }
             }
         }
         .sheetScaffold(width: 480)
+        .onAppear {
+            // A prefilled folder (from a rail "+" click) starts the user
+            // on File; otherwise on Folder.
+            let field: Field = initial.mode == .chapter && !initial.folder.isEmpty
+                ? .file : .folder
+            focus = field
+            activeField = field
+        }
+        .onChange(of: folder) { resetList() }
+        .onChange(of: file) { resetList() }
+        .onChange(of: focus) {
+            // Latch: a blur doesn't close the list; only moving to the
+            // other field (or nothing) does.
+            if let focus { activeField = focus }
+            resetList()
+        }
+    }
+
+    private func resetList() {
+        highlight = 0
+        listDismissed = false
+    }
+
+    /// The inline suggestion list under the focused field — inside the
+    /// sheet's own layout, so nothing clips it.
+    private struct SuggestList: View {
+        var rows: [ChapterSuggest.Row]
+        var highlight: Int
+        /// true when the list is under the Folder field: `.create` rows
+        /// read "New folder", `.file` never appears.
+        var folderField: Bool
+        var pick: (ChapterSuggest.Row) -> Void
+
+        var body: some View {
+            if !rows.isEmpty {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(rows.enumerated()), id: \.element) { index, row in
+                                rowView(row, highlighted: index == highlight)
+                                    .id(index)
+                            }
+                        }
+                    }
+                    .onChange(of: highlight) { proxy.scrollTo(highlight) }
+                }
+                .frame(maxHeight: 6 * 28)
+                .background(Theme.card, in: .rect(cornerRadius: Theme.controlRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.controlRadius)
+                        .strokeBorder(Theme.border, lineWidth: 1))
+            }
+        }
+
+        private func rowView(_ row: ChapterSuggest.Row, highlighted: Bool) -> some View {
+            let icon: String
+            let label: String
+            var hint: String?
+            var accessibility: String
+            switch row {
+            case .folder(let path):
+                icon = "folder"
+                label = path.isEmpty ? "Top level" : path
+                accessibility = "Folder \(path.isEmpty ? "top level" : path)"
+            case .file(let path):
+                icon = "doc.text"
+                label = path
+                hint = "Open"
+                accessibility = "Chapter \(path), open"
+            case .create(let path):
+                icon = "plus"
+                label = folderField ? "New folder \"\(path)\""
+                    : "New chapter \"\(path)\""
+                hint = "↵ to add"
+                accessibility = label
+            }
+            return Button { pick(row) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: icon)
+                        .font(Theme.font(size: 11))
+                        .foregroundStyle(Theme.textMuted)
+                        .frame(width: 14)
+                    Text(label)
+                        .font(Theme.font(size: 12, design: .monospaced))
+                        .foregroundStyle(Theme.textNav)
+                        .lineLimit(1).truncationMode(.head)
+                    Spacer(minLength: 4)
+                    if let hint {
+                        Text(hint).font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(highlighted ? Theme.navActive : .clear,
+                            in: .rect(cornerRadius: Theme.controlRadius))
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(accessibility)
+            .accessibilityAddTraits(highlighted ? .isSelected : [])
+        }
     }
 
     private var submitTitle: String {

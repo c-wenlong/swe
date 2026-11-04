@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The New chapter/folder sheet suggests what exists.** Typing in its
+  Folder or File field opens an inline list of matching folders and
+  chapters — ranked by closeness, the folder's own children first — plus
+  a "New ..." row when nothing takes the name, picked with arrows and
+  Return. An existing chapter opens straight into the editor.
+
 - **The Compile tab chooses what every harness compiles.** The AGENTS.md
   page's new Compile tab turns the harness strip into a filter: All shows
   every chapter and folder's include checkbox (on, off, and unlisted
