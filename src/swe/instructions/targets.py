@@ -16,6 +16,7 @@ a cycle.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 
@@ -90,7 +91,7 @@ def load(home: Path | None = None) -> dict[str, dict[str, frozenset[str]]]:
     """
     path = targets_file(home)
     try:
-        return parse(path.read_text(encoding="utf-8"), path)
+        return parse(_read_regular(path), path)
     except (OSError, UnicodeError, TargetsError):
         return {}
 
@@ -106,8 +107,7 @@ def named_harnesses(rules: dict[str, dict[str, frozenset[str]]]) -> set[str]:
 def active_names(home: Path | None = None) -> list[str]:
     """The normalized active index lines, forgiving like the survey read."""
     try:
-        lines = _paths.instructions_index_for(home).read_text(
-            encoding="utf-8").splitlines()
+        lines = _read_regular(_paths.instructions_index_for(home)).splitlines()
     except (OSError, UnicodeError):
         return []
     return [normalized(line.strip()) for line in lines
@@ -151,10 +151,26 @@ def resolve(
 def generated(path: Path) -> bool:
     """True when ``path``'s first line carries the generated marker."""
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
+        if not path.is_file():
+            return False
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "r", encoding="utf-8", errors="replace") as handle:
             return _GENERATED_PREFIX in handle.readline()
     except OSError:
         return False
+
+
+def _read_regular(path: Path) -> str:
+    """``path``'s text, refusing anything but a regular file without blocking.
+
+    A FIFO or device named like a source would otherwise hang a forgiving
+    read (canonical paths, the watcher's output list).
+    """
+    if not path.is_file():
+        raise OSError(f"not a regular file: {path}")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+        return handle.read()
 
 
 def harness_outputs(home: Path | None) -> dict[str, Path]:
@@ -206,8 +222,7 @@ def index_entries(home: Path | None = None) -> list[dict]:
     """
     directory = _paths.instructions_dir_for(home)
     try:
-        lines = _paths.instructions_index_for(home).read_text(
-            encoding="utf-8").splitlines()
+        lines = _read_regular(_paths.instructions_index_for(home)).splitlines()
     except (OSError, UnicodeError):
         return []
     active = {normalized(line.strip()) for line in lines

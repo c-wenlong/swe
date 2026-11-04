@@ -347,6 +347,16 @@ class HarnessTargetsTest(unittest.TestCase):
         self.assertEqual(
             list(self.home.glob(".swe/AGENTS.*.md")), [])
 
+    def test_a_named_pipe_beside_the_outputs_never_blocks(self):
+        # A FIFO named like a per-harness output: the hub scan, the build
+        # and the watcher's output list must skip it, not block reading it.
+        os.mkfifo(self.home / ".swe" / "AGENTS.notes.md")
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        self.assertTrue(build(self.home))
+        self.assertNotIn("notes", compiler._targets.harness_outputs(self.home))
+        self.assertIn(harness_agents_file_for(self.home, "claude"),
+                      compiler.expected_output_paths(self.home))
+
     def test_only_gives_the_named_harness_its_own_output(self):
         self.write_targets({"one.md": {"only": ["claude"]}})
         self.assertTrue(build(self.home))
