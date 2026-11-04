@@ -64,6 +64,49 @@ public enum ChapterIndex {
         return result + name + "\n"
     }
 
+    /// `text` with `name` inserted after the last active entry that lives
+    /// in `afterFolder` — the chapter's folder, so a new file groups with
+    /// its siblings. No active entry in the folder means the end, like
+    /// `appending`. Comment and blank lines never move: the insert point
+    /// is after the matching entry's line, wherever comments sit around it.
+    public static func inserting(_ text: String, name: String, afterFolder folder: String) -> String {
+        var lines = lines(text)
+        var at: Int?
+        if !folder.isEmpty {
+            for (index, line) in lines.enumerated() {
+                guard isEntry(line) else { continue }
+                let entry = line.trimmingCharacters(in: .whitespaces)
+                if (entry as NSString).deletingLastPathComponent == folder {
+                    at = index + 1
+                }
+            }
+        }
+        if let at {
+            lines.insert(name, at: at)
+            return lines.joined(separator: "\n")
+        }
+        return appending(text, name: name)
+    }
+
+    /// Why `folder` cannot be a chapter folder, mirroring the compiler's
+    /// path rules without the .md suffix: relative, inside AGENTS_MD, one
+    /// line, and no characters index.txt or the compiler would read as
+    /// markup. nil means it can. `""` is the top level and also fine.
+    public static func folderProblem(_ folder: String) -> String? {
+        if folder.isEmpty { return nil }
+        if folder.contains("\n") || folder.contains("\r") || folder.contains("\0") {
+            return "A folder name is one line."
+        }
+        if folder.hasPrefix("/") { return "The folder must be relative, inside AGENTS_MD." }
+        if folder.hasPrefix("#") { return "A # name reads as a comment in index.txt." }
+        if folder.hasPrefix(".") { return "A leading . hides the folder." }
+        if folder.contains("-->") { return "The folder cannot contain -->." }
+        if folder.split(separator: "/").contains("..") {
+            return "The path cannot leave AGENTS_MD."
+        }
+        return nil
+    }
+
     /// Why `name` cannot be a chapter, mirroring the compiler's rules; nil
     /// means it can. Kept a client-side pre-check — the build still decides.
     public static func nameProblem(_ name: String) -> String? {
@@ -83,6 +126,72 @@ public enum ChapterIndex {
             return "The name needs letters before .md."
         }
         return nil
+    }
+}
+
+/// One row of the rail's outline: a folder or a `.md` file under
+/// `~/.swe/AGENTS_MD`. Folders hold children; `name` is the display name
+/// and `path` the AGENTS_MD-relative path ("" is never a node).
+public struct ChapterNode: Identifiable, Equatable, Sendable {
+    public let name: String
+    public let path: String
+    public let isFolder: Bool
+    /// A folder's entries, folders first then files, each case-insensitively
+    /// alphabetical. A file's is empty.
+    public let children: [ChapterNode]
+    /// .md files anywhere under a folder, for the muted count it shows.
+    public let fileCount: Int
+
+    public var id: String { path }
+
+    public init(name: String, path: String, isFolder: Bool,
+                children: [ChapterNode] = [], fileCount: Int = 0) {
+        self.name = name
+        self.path = path
+        self.isFolder = isFolder
+        self.children = children
+        self.fileCount = fileCount
+    }
+}
+
+/// The outline the rail draws: every folder and `.md` file under
+/// AGENTS_MD, built from relative paths so it stays testable.
+public enum ChapterTree {
+    /// `files` and `folders` are AGENTS_MD-relative paths ("" not allowed;
+    /// a folder is implied by any deeper path anyway). Result is folders
+    /// first, each level case-insensitively alphabetical.
+    public static func build(files: [String], folders: [String]) -> [ChapterNode] {
+        var fileSet = Set(files)
+        var folderSet = Set(folders)
+        for file in files {
+            var parent = (file as NSString).deletingLastPathComponent
+            while !parent.isEmpty && parent != "." {
+                folderSet.insert(parent)
+                parent = (parent as NSString).deletingLastPathComponent
+            }
+        }
+        func children(of prefix: String) -> [ChapterNode] {
+            var out: [ChapterNode] = []
+            for folder in folderSet where (folder as NSString).deletingLastPathComponent == prefix {
+                let kids = children(of: folder)
+                let count = fileSet.filter { $0.hasPrefix(folder + "/") }.count
+                out.append(ChapterNode(
+                    name: (folder as NSString).lastPathComponent,
+                    path: folder, isFolder: true, children: kids, fileCount: count))
+            }
+            for file in fileSet where (file as NSString).deletingLastPathComponent == prefix {
+                out.append(ChapterNode(
+                    name: (file as NSString).lastPathComponent,
+                    path: file, isFolder: false))
+            }
+            out.sort {
+                ($0.isFolder && !$1.isFolder)
+                    || ($0.isFolder == $1.isFolder
+                        && $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending)
+            }
+            return out
+        }
+        return children(of: "")
     }
 }
 
@@ -106,6 +215,11 @@ public final class ChaptersModel {
     public private(set) var convertError: String?
     /// The selected chapter's index.txt name.
     public var selected: String?
+    /// The AGENTS_MD outline the rail draws, refreshed with `load`.
+    public private(set) var tree: [ChapterNode] = []
+    /// Every folder path in `tree`, top level first as "" — for the New
+    /// chapter sheet's folder menu.
+    public private(set) var folders: [String] = []
     /// A read-only view of the generated output, loaded for the preview.
     public private(set) var output: InstructionDocument?
 
@@ -147,13 +261,6 @@ public final class ChaptersModel {
         status = next
         guard case .loaded(let check) = next, check.indexExists else { return }
 
-        let names = Set(check.chapters.map(\.name))
-        // Drop editors for unlisted chapters — but never a dirty one: an
-        // index edit elsewhere must not throw unsaved text away.
-        documents = documents.filter { names.contains($0.key) || $0.value.isDirty }
-        if selected.map({ !names.contains($0) }) ?? true {
-            selected = check.chapters.first?.name
-        }
         if indexDocument?.url.path != check.index {
             let document = InstructionDocument(url: URL(fileURLWithPath: check.index))
             indexDocument = document
@@ -163,6 +270,70 @@ public final class ChaptersModel {
             let document = InstructionDocument(url: URL(fileURLWithPath: check.output))
             output = document
             Task { await document.load() }
+        }
+        await refreshTree(under: check.directory)
+        // Selection and editors follow the tree, not the index: a file the
+        // user opened that is not listed stays selected, and its editor
+        // survives. A dirty doc is never dropped either way.
+        let files = treeFiles()
+        documents = documents.filter { files.contains($0.key) || $0.value.isDirty }
+        if selected.map({ !files.contains($0) }) ?? true {
+            selected = check.chapters.first?.name
+                ?? treeFilesInOrder.first
+        }
+    }
+
+    /// Every file path in `tree`, in outline order.
+    private var treeFilesInOrder: [String] {
+        func collect(_ nodes: [ChapterNode]) -> [String] {
+            nodes.flatMap { $0.isFolder ? collect($0.children) : [$0.path] }
+        }
+        return collect(tree)
+    }
+
+    private func treeFiles() -> Set<String> { Set(treeFilesInOrder) }
+
+    /// The whole AGENTS_MD folder as an outline: every folder and `.md`
+    /// file, hidden entries, index.txt, targets.json and non-chapter files
+    /// skipped, and nothing followed outside the folder. Runs off the
+    /// main actor; a folder that vanished between load and walk just
+    /// empties the rail.
+    private func refreshTree(under directory: String) async {
+        let root = directory
+        let found: (files: [String], folders: [String]) = await offMain {
+            var files: [String] = []
+            var folders: [String] = []
+            var stack: [(url: URL, rel: String)] = [(URL(fileURLWithPath: root), "")]
+            while let (url, rel) = stack.popLast() {
+                guard let entries = try? FileManager.default.contentsOfDirectory(
+                    at: url, includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles]) else { continue }
+                for entry in entries {
+                    let name = entry.lastPathComponent
+                    let path = rel.isEmpty ? name : rel + "/" + name
+                    var isDirectory: ObjCBool = false
+                    guard FileManager.default.fileExists(
+                        atPath: entry.path, isDirectory: &isDirectory) else { continue }
+                    if isDirectory.boolValue {
+                        folders.append(path)
+                        stack.append((entry, path))
+                    } else if name.lowercased().hasSuffix(".md"),
+                              name != "index.txt", name != "targets.json" {
+                        files.append(path)
+                    }
+                }
+            }
+            return (files, folders)
+        }
+        // Confinement matches inside(): a symlinked entry pointing out of
+        // AGENTS_MD never enters the tree.
+        let confined = found.files.filter { Self.inside($0, under: root) != nil }
+        let confinedFolders = found.folders.filter { Self.inside($0, under: root) != nil }
+        tree = ChapterTree.build(files: confined, folders: confinedFolders)
+        folders = [""] + confinedFolders.sorted {
+            let byDepth = $0.split(separator: "/").count - $1.split(separator: "/").count
+            return byDepth != 0 ? byDepth < 0
+                : $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
         }
     }
 
@@ -181,11 +352,13 @@ public final class ChaptersModel {
     }
 
     /// Whether a change at `path` (relative to `~/.swe`) can change what
-    /// `swe instructions check` reports: the generated AGENTS.md and the
-    /// chapters behind it. The page follows these while it is on screen, so
-    /// a build or an edit made in a terminal shows without a refresh.
+    /// `swe instructions check` reports: the generated AGENTS.md, a
+    /// per-harness `AGENTS.<name>.md`, and the chapters behind them. The
+    /// page follows these while it is on screen, so a build or an edit
+    /// made in a terminal shows without a refresh.
     nonisolated public static func affectsCheck(_ path: String) -> Bool {
-        path == "AGENTS.md" || path == "AGENTS_MD" || path.hasPrefix("AGENTS_MD/")
+        (path.hasPrefix("AGENTS.") && path.hasSuffix(".md"))
+            || path == "AGENTS_MD" || path.hasPrefix("AGENTS_MD/")
     }
 
     /// `name` resolved inside `directory` — links in every component, not
@@ -265,6 +438,79 @@ public final class ChaptersModel {
         if documents[name]?.isDirty != true { documents[name] = nil }
         selected = name
         await build(swe: swe)
+        return nil
+    }
+
+    /// A new chapter `file` inside `folder` ("" is the top level), made
+    /// with the starter heading, listed after the folder's last active
+    /// entry when `include`, and selected. Returns why it was refused.
+    @discardableResult
+    public func createChapter(folder: String, file rawFile: String, include: Bool,
+                              swe: SweClient) async -> String? {
+        if let problem = ChapterIndex.folderProblem(folder) { return problem }
+        var file = rawFile.trimmingCharacters(in: .whitespaces)
+        if file.contains("/") { return "The file is a name, not a path; pick its folder above." }
+        if !file.isEmpty && !file.lowercased().hasSuffix(".md") { file += ".md" }
+        let name = folder.isEmpty ? file : folder + "/" + file
+        if let problem = ChapterIndex.nameProblem(name) { return problem }
+        guard case .loaded(let check) = status else { return "The chapters aren't loaded yet." }
+        if check.entries?.contains(where: { $0.name == name }) == true
+            || check.chapters.contains(where: { $0.name == name }) {
+            return "A chapter named \(name) already exists in the index."
+        }
+        guard let url = Self.inside(name, under: check.directory) else {
+            return "The path cannot leave AGENTS_MD."
+        }
+        // Never overwrite: the file name is taken whether it's listed or not.
+        let exists = await offMain { FileManager.default.fileExists(atPath: url.path) }
+        if exists { return "\(name) already exists." }
+        let starter = Self.starter(for: name)
+        let created = await offMain { () -> Bool in
+            try? FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let descriptor = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)
+            if descriptor < 0 { return false }
+            let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+            return (try? handle.write(contentsOf: Data(starter.utf8))) != nil
+        }
+        guard created else { return "Couldn't create \(name)." }
+        if include {
+            guard let document = await readyIndex() else {
+                return "index.txt hasn't been read, so it can't be updated."
+            }
+            document.text = ChapterIndex.inserting(
+                document.text, name: name, afterFolder: folder)
+            guard await document.save() == .saved else {
+                await document.load()
+                return "index.txt changed on disk; try again."
+            }
+        }
+        if documents[name]?.isDirty != true { documents[name] = nil }
+        selected = name
+        await refreshTree(under: check.directory)
+        if include { await build(swe: swe) }
+        return nil
+    }
+
+    /// A new folder at `path`, parents made as needed. Returns why it
+    /// was refused; an existing folder is fine, not an error.
+    @discardableResult
+    public func createFolder(_ path: String, swe: SweClient) async -> String? {
+        if let problem = ChapterIndex.folderProblem(path) { return problem }
+        guard !path.isEmpty else { return "Name the folder." }
+        guard case .loaded(let check) = status else { return "The chapters aren't loaded yet." }
+        guard let url = Self.inside(path, under: check.directory) else {
+            return "The path cannot leave AGENTS_MD."
+        }
+        let made = await offMain { () -> Bool in
+            do {
+                try FileManager.default.createDirectory(
+                    at: url, withIntermediateDirectories: true)
+                return true
+            } catch { return false }
+        }
+        guard made else { return "Couldn't create \(path)." }
+        await refreshTree(under: check.directory)
         return nil
     }
 
