@@ -112,6 +112,7 @@ h2 { font-size: 44px; line-height: 1.08; letter-spacing: -0.025em; font-weight: 
 .step { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 14px; }
 .step .n { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line-strong); display: grid; place-items: center; font: 13px var(--mono); color: var(--text-2); }
 .step p { margin: 2px 0 10px; color: var(--text-2); font-size: 15px; }
+.step .cmd + p { margin-top: 12px; }
 .cmd { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; padding: 8px 8px 8px 14px; font: 13.5px var(--mono); }
 .cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
 .cmd code::-webkit-scrollbar { display: none; }
@@ -335,6 +336,8 @@ dialog .close { margin-left: auto; }
         <div class="step"><span class="n">1</span><div>
           <p>Install with Homebrew (or <a href="overview/#nix">Nix</a>).</p>
           <div class="cmd"><code><span class="p">$ </span>brew install c-wenlong/swe/swe</code><button class="copy" type="button" data-copy="brew install c-wenlong/swe/swe">Copy</button></div>
+          <p>On Linux:</p>
+          <div class="cmd"><code><span class="p">$ </span>curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh">Copy</button></div>
         </div></div>
         <div class="step"><span class="n">2</span><div>
           <p>Run setup. It finds your agents, providers, MCP servers and skills.</p>

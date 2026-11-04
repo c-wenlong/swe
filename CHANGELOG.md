@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A one-line installer for Linux.** `curl -fsSL
+  https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh`
+  downloads the released wheel (verified against the release's new
+  `SHA256SUMS` asset) and installs it with `uv` when it can, into a venv
+  under `~/.local/share/swe` when it can't, and bootstraps `uv` when
+  neither Python 3.11 nor `uv` is around, which covers Ubuntu 22.04's
+  Python 3.10. Passing `--hub` runs `swe remote setup --apply` so the web
+  app and phone remote come up in the same step. No sudo, nothing written
+  to shell rc files. Releases now attach the script and `SHA256SUMS`, and
+  CI runs the installer end to end in `ubuntu:22.04` and
+  `python:3.12-slim` containers.
+
 - **Instruction chapters can be pinned to harnesses.** An optional
   `~/.swe/AGENTS_MD/targets.json` maps a chapter to `only` or `except`
   lists of harness names, and a chapter can be switched off by commenting
