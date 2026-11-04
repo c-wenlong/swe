@@ -19,7 +19,15 @@ const findId = (root, id) => {
 };
 document.getElementById = (id) => getById(id) || findId(log, id);
 const patch = (e) => {
+  if (e._scroll) return e;
+  e._scroll = true;
+  // A part drawn through innerHTML (a run's items box) gets these too.
+  const query = e.querySelector;
+  e.querySelector = (sel) => { const f = query(sel); return f && patch(f); };
   e.prepend = (c) => { c.parent = e; e.children.unshift(c); };
+  // Like the DOM, a node moved under another leaves its old parent.
+  const append = e.appendChild;
+  e.appendChild = (c) => { if (c.parent) c.remove(); return append(c); };
   e.after = (...cs) => {
     const p = e.parent; const i = p.children.indexOf(e);
     for (const c of cs) c.parent = p;
@@ -27,7 +35,12 @@ const patch = (e) => {
   };
   Object.defineProperty(e, "nextElementSibling", { get: () => {
     const p = e.parent; if (!p) return null; return p.children[p.children.indexOf(e) + 1] || null; } });
-  e.getBoundingClientRect = () => ({ top: 0 });
+  // Each child of the log is 10px tall: its top on screen moves with
+  // what is above it and with the log's scroll.
+  e.getBoundingClientRect = () => {
+    const i = e.parent === log ? log.children.indexOf(e) : 0;
+    return { top: i * 10 - log.scrollTop };
+  };
   // A tag ahead of the classes, which the base stub doesn't read.
   const qsa = e.querySelectorAll;
   e.querySelectorAll = (sel) => {
@@ -125,30 +138,74 @@ class TestScrollbackCap(ChatScript):
 
     def test_a_jump_to_an_old_message_expands_first(self):
         out = self.run_js("""
-            load(2000);
+            // Seqs 8 to 10 are three tools in a row: a run.
+            for (const ev of transcript(2000)) {
+              if (ev.seq === 8 || ev.seq === 9) ev.data = { kind: 'tool_use', tool: { name: 'Read', call_id: 'c' + ev.seq, input: {} } };
+              T.appendEvent(ev, false);
+            }
+            T.scrollBottom();
             const missing = T.chat.earlier.length;
             const hit = T.revealSeq(15);
             const inLog = !!hit && entries().some((c) => c === hit || c.children.some((x) => x === hit
               || (x.children || []).includes(hit)));
             // A tool folded into a run is found inside it.
             const tool = T.revealSeq(10);
-            return { missing, seq: hit && hit.dataset.seq, inLog, scrolled: scrolledTo === tool,
+            const run = entries().find((c) => c.classList.contains('tool-run')
+              && c.querySelector('.tool-run-items').children.includes(tool));
+            return { missing, seq: hit && hit.dataset.seq, inLog, scrolled: scrolledTo === tool, opened: !!(run && run.open),
               tool: tool && tool.className, never: T.revealSeq(99999) };""")
         self.assertGreater(out["missing"], 0)
         self.assertEqual(out["seq"], "15")
         self.assertTrue(out["inLog"])
         self.assertTrue(out["scrolled"])
+        self.assertTrue(out["opened"], "a jump to a tool opens its run")
         self.assertIn("tool", out["tool"])
         self.assertIsNone(out["never"])
 
-    def test_waiting_sends_and_open_approvals_never_fold(self):
+    def test_the_oldest_drawn_entry_keeps_its_place_on_screen(self):
         out = self.run_js("""
-            T.appendMessage({ kind: 'approval', text: 'Run it?', request_id: 'r1', options: [] }, false, 1);
-            const card = log.children[0];
-            for (const ev of transcript(400)) { ev.seq += 1; T.appendEvent(ev, false); }
+            load(500);
+            const tops = [];
+            for (let k = 0; k < 2; k++) {
+              const ref = entries()[0];
+              const before = ref.getBoundingClientRect().top;
+              T.showEarlier();
+              tops.push([before, ref.getBoundingClientRect().top]);
+            }
+            // The second batch was the last: the stub went with it.
+            return { tops, stub: !!document.getElementById('chat-earlier') };""")
+        self.assertEqual([a for a, b in out["tops"]], [b for a, b in out["tops"]])
+        self.assertFalse(out["stub"])
+
+    def test_waiting_sends_and_open_approvals_never_fold_or_reorder(self):
+        out = self.run_js("""
+            for (const ev of transcript(50)) T.appendEvent(ev, false);
+            T.appendMessage({ kind: 'approval', text: 'Run it?', request_id: 'r1', options: [] }, false, 51);
+            const card = entries()[50];
+            for (const ev of transcript(400)) { ev.seq += 51; T.appendEvent(ev, false); }
             T.scrollBottom();
-            return { kept: log.children.includes(card), folded: T.chat.earlier.includes(card) };""")
-        self.assertEqual(out, {"kept": True, "folded": False})
+            const stuck = { kept: log.children.includes(card), folded: T.chat.earlier.length,
+              above: entries().indexOf(card) };
+            // Answered, the fold goes on past it, in order.
+            card.classList.add('resolved');
+            T.scrollBottom();
+            while (T.chat.earlier.length) T.showEarlier();
+            const seqs = entries().map((c) => Number(c.dataset.seq || (c.querySelector('.tool-run-items').children[0].dataset.seq)));
+            return { stuck, entries: seqs.length, ordered: seqs.every((s, i) => !i || s > seqs[i - 1]) };""")
+        # Nothing past the card folds while it waits: the 50 above it do.
+        self.assertEqual(out["stuck"], {"kept": True, "folded": 50, "above": 0})
+        self.assertEqual(out["entries"], 451)
+        self.assertTrue(out["ordered"])
+
+    def test_an_approval_restored_into_folded_history_lands_in_order(self):
+        out = self.run_js("""
+            for (const ev of transcript(400)) { ev.seq *= 2; T.appendEvent(ev, false); }
+            T.scrollBottom();
+            T.appendMessage({ kind: 'approval', text: 'Run it?', request_id: 'r1', options: [] }, false, 101, 101);
+            while (T.chat.earlier.length) T.showEarlier();
+            const seqs = entries().map((c) => Number(c.dataset.seq || (c.querySelector('.tool-run-items').children[0].dataset.seq)));
+            return { has: seqs.includes(101), ordered: seqs.every((s, i) => !i || s > seqs[i - 1]) };""")
+        self.assertEqual(out, {"has": True, "ordered": True})
 
     def test_streaming_still_paints_below_a_capped_log(self):
         out = self.run_js("""

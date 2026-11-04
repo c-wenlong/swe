@@ -658,8 +658,10 @@ const SessionChat = (() => {
    * them back EARLIER_STEP at a time. The fold runs only when the log is
    * scrolled to its end (scrollBottom): a reader up in the history never
    * has entries taken from above them. A send still waiting and an
-   * unanswered approval never fold: the views that settle them look
-   * for them in the log. */
+   * unanswered approval never fold (the views that settle them look for
+   * them in the log), and the fold stops at one: chat.earlier is always
+   * the run of entries just above the oldest drawn one, so putting it
+   * back keeps every entry's place. */
   const LOG_KEEP = 200, EARLIER_STEP = 200;
   chat.keep = LOG_KEEP;
 
@@ -684,14 +686,18 @@ const SessionChat = (() => {
     return n;
   }
 
-  /* Folds the oldest entries past chat.keep out of the log. */
+  /* Folds the oldest entries past chat.keep out of the log, up to the
+   * first that may not fold. */
   function trimLog(log) {
     let extra = entryCount(log) - chat.keep;
     if (extra <= 0) return;
     const fold = [];
     for (const c of log.children) {
       if (extra <= 0) break;
-      if (foldable(c)) { fold.push(c); extra -= 1; }
+      if (!isEntry(c)) continue;
+      if (!foldable(c)) break;
+      fold.push(c);
+      extra -= 1;
     }
     // Put back later, an entry plays no arrival again.
     for (const c of fold) { c.remove(); c.classList.remove("arrive"); }
@@ -761,8 +767,21 @@ const SessionChat = (() => {
     const folded = findSeq(chat.earlier, seq);
     if (folded) showEarlier(chat.earlier.length - chat.earlier.indexOf(folded.top));
     const hit = findSeq(log.children, seq);
-    if (hit) hit.el.scrollIntoView({ block: "center" });
-    return hit ? hit.el : null;
+    if (!hit) return null;
+    // A tool in a closed run: the run opens to show it.
+    if (hit.top !== hit.el) hit.top.open = true;
+    hit.el.scrollIntoView({ block: "center" });
+    return hit.el;
+  }
+
+  /* An entry placed by seq (a restored approval) above the oldest drawn
+   * one: the folded entries after it come back first, so it lands
+   * among them in order. */
+  function unfoldAfter(at) {
+    const i = chat.earlier.findIndex((c) => Number(c.dataset.seq || 0) > at
+      || (c.classList.contains("tool-run")
+        && [...c.querySelector(".tool-run-items").children].some((it) => Number(it.dataset.seq || 0) > at)));
+    if (i >= 0) showEarlier(chat.earlier.length - i);
   }
 
   /* The log's entries go above the streaming bubbles, which stay the
@@ -2498,6 +2517,7 @@ const SessionChat = (() => {
     const put = (el) => {
       if (seq) el.dataset.seq = String(seq);
       if (!at) { logAppend(log, el); return; }
+      if (chat.earlier.length) unfoldAfter(at);
       for (const c of log.children) {
         if (Number(c.dataset.seq || 0) > at) { log.insertBefore(el, c); return; }
         // A folded run has no seq of its own: the point may fall inside

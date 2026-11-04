@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their tool cards intact. On a 2,000-message transcript the log holds
   982 element nodes instead of 9,800. The fold runs only when the log
   is scrolled to its end, so a reader up in the history loses nothing
-  above them; a send still waiting and an unanswered approval never
-  fold. `SessionChat.revealSeq(seq)` expands the history down to one
+  above them; the fold stops at a send still waiting or an
+  unanswered approval, so every entry keeps its place. `SessionChat.revealSeq(seq)` expands the history down to one
   message before it scrolls there. Browser find-in-page sees only the
   drawn entries. Closes [#1615](https://github.com/c-wenlong/swe/issues/1615).
 
