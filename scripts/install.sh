@@ -80,8 +80,8 @@ verify_checksum() {
 install_with_uv() {
     # $1: uv binary (path or name on PATH), $2: wheel path.
     "$1" tool install --force --python '>=3.11' "$2" </dev/null || return 1
-    UV_BIN_DIR="$("$1" tool dir --bin </dev/null)"
-    BIN_DIR="$UV_BIN_DIR"
+    BIN_DIR="$("$1" tool dir --bin </dev/null)" || return 1
+    [ -n "$BIN_DIR" ] || return 1
     return 0
 }
 
@@ -97,7 +97,10 @@ try_venv() {
         rm -rf "$venv_dir"
         return 1
     fi
-    "$venv_dir/bin/pip" install --upgrade "$1" </dev/null
+    if ! "$venv_dir/bin/pip" install --upgrade "$1" </dev/null; then
+        rm -rf "$venv_dir"
+        return 1
+    fi
     BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
     mkdir -p "$BIN_DIR"
     ln -sf "$venv_dir/bin/swe" "$BIN_DIR/swe"
@@ -109,6 +112,7 @@ bootstrap_uv() {
     say "Installing uv into $BIN_DIR to manage swe's Python"
     curl -LsSf https://astral.sh/uv/install.sh </dev/null \
         | env UV_INSTALL_DIR="$BIN_DIR" UV_NO_MODIFY_PATH=1 sh
+    [ -x "$BIN_DIR/uv" ] || die "could not install uv from astral.sh"
     install_with_uv "$BIN_DIR/uv" "$1"
 }
 

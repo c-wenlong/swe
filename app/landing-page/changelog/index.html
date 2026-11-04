@@ -113,14 +113,26 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a>[Unreleased]</h2>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
-<li><strong>Instruction chapters can be pinned to harnesses.</strong> An optional
+<li><p><strong>A one-line installer for Linux.</strong> <code>curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh</code>
+downloads the released wheel (verified against the release's new
+<code>SHA256SUMS</code> asset) and installs it with <code>uv</code> when it can, into a venv
+under <code>~/.local/share/swe</code> when it can't, and bootstraps <code>uv</code> when
+neither Python 3.11 nor <code>uv</code> is around, which covers Ubuntu 22.04's
+Python 3.10. Passing <code>--hub</code> runs <code>swe remote setup --apply</code> so the web
+app and phone remote come up in the same step. No sudo, nothing written
+to shell rc files. Releases now attach the script and <code>SHA256SUMS</code>, and
+CI runs the installer end to end in <code>ubuntu:22.04</code> and
+<code>python:3.12-slim</code> containers.</p>
+</li>
+<li><p><strong>Instruction chapters can be pinned to harnesses.</strong> An optional
 <code>~/.swe/AGENTS_MD/targets.json</code> maps a chapter to <code>only</code> or <code>except</code>
 lists of harness names, and a chapter can be switched off by commenting
 its index.txt line out. <code>swe instructions build</code> compiles a differing
 harness's chapters into <code>~/.swe/AGENTS.&lt;name&gt;.md</code>, repoints swe's
 instruction symlinks (extra account homes included) and prunes retired
 outputs; <code>check</code> and the <code>--json</code> surveys report the per-harness state,
-and <code>swe init</code> links to a harness's own output once it exists.</li>
+and <code>swe init</code> links to a harness's own output once it exists.</p>
+</li>
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>

@@ -28,6 +28,8 @@ def _write(path: Path, body: str) -> Path:
     return path
 
 
+@unittest.skipUnless(os.name == "posix" and shutil.which("sh"),
+                     "needs a POSIX sh")
 class InstallScriptCase(unittest.TestCase):
     """Shared scaffolding: the stub programs and the run helper."""
 
@@ -47,6 +49,8 @@ class InstallScriptCase(unittest.TestCase):
             "STUB_SUMS": "ok",
             "STUB_WHEEL_NAME": WHEEL_NAME,
             "STUB_SETUP_RC": "0",
+            "STUB_PIP_OK": "1",
+            "STUB_ASTRAL_OK": "1",
             # Keep XDG vars unset so the defaults below are what the
             # assertions check.
         }
@@ -82,6 +86,7 @@ for a in "$@"; do
 done
 case "$url" in
     *astral.sh*)
+        [ "$STUB_ASTRAL_OK" = "1" ] || exit 22
         printf 'cp "$STUB_UV_FILE" "$UV_INSTALL_DIR/uv"; chmod +x "$UV_INSTALL_DIR/uv"\\n'
         ;;
     */releases/latest)
@@ -136,6 +141,9 @@ if [ "$1 $2" = "-m venv" ]; then
     cat > "$3/bin/pip" <<'EOF'
 #!/bin/sh
 echo "pip $*" >> "$STUB_LOG"
+if [ "$STUB_PIP_OK" != "1" ]; then
+    exit 1
+fi
 cp "$STUB_SWE_FILE" "$(dirname "$0")/swe"
 chmod +x "$(dirname "$0")/swe"
 EOF
@@ -253,6 +261,22 @@ class TestVenvPath(InstallScriptCase):
         self.assertTrue(any("astral.sh" in l for l in self.curl_log()))
         self.assertFalse((self.home / ".local" / "share" / "swe" / "venv").exists())
 
+    def test_pip_failure_bootstraps_uv(self):
+        self.env["STUB_PIP_OK"] = "0"
+        r = self.run_installer()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(any("astral.sh" in l for l in self.curl_log()))
+        self.assertTrue(any(l.startswith("uv tool install") for l in self.log_lines()))
+        self.assertFalse((self.home / ".local" / "share" / "swe" / "venv").exists())
+        self.assertFalse((self.home / ".local" / "bin" / "swe").is_symlink())
+
+    def test_astral_failure_dies_with_message(self):
+        self.env["STUB_PYTHON_OK"] = "0"
+        self.env["STUB_ASTRAL_OK"] = "0"
+        r = self.run_installer()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("could not install uv from astral.sh", r.stderr)
+
 
 class TestWheelFlag(InstallScriptCase):
     def setUp(self):
@@ -291,7 +315,5 @@ class TestFlags(InstallScriptCase):
         r = self.run_installer("--bogus")
         self.assertEqual(r.returncode, 2)
 
-
-if not (os.name == "posix" and shutil.which("sh")):
-    for cls in (TestDarwin, TestUvPath, TestVenvPath, TestWheelFlag, TestHubFlag, TestFlags):
-        cls = unittest.skip("needs a POSIX sh")(cls)
+if __name__ == "__main__":
+    unittest.main()
