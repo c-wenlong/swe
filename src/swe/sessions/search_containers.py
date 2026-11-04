@@ -2,17 +2,19 @@
 
 Devin CLI keeps every turn in ``sessions.db`` (``message_nodes``) and
 OpenCode in ``opencode.db``. The index reads each session under a
-synthetic ``files.path`` of ``"<db path>#<session id>"`` and reads it whole
-whenever its stat moves: a row in a container has no byte offset to resume
-from. This module is the Python side of ``SearchDevin.swift`` and
-``SearchOpenCode.swift``; keep them in step, since the stat and the fields
-they compute are what let a session one writer read count as current to
-the other.
+synthetic ``files.path`` of ``"<db path>#<session id>"`` whenever its stat
+moves. An OpenCode session is read whole; a Devin session reads only the
+nodes past the ``rowid`` watermark its :class:`DevinMark` records, and
+whole when the mark no longer holds. This module is the Python side of
+``SearchDevin.swift`` and ``SearchOpenCode.swift``; keep them in step,
+since the stat, the mark and the fields they compute are what let a
+session one writer read count as current to the other.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from urllib.parse import quote
@@ -51,6 +53,9 @@ class DevinSession:
     # Every node the session holds, streamed copies included: a streamed
     # reply is stored again as it grows, so the count moves with it.
     nodes: int
+    # The newest ``rowid`` among them, read in the same statement as
+    # ``nodes``: the watermark a read records. 0 for an empty session.
+    max_row: int = 0
 
     @property
     def stat_mtime_ms(self) -> float:
@@ -76,62 +81,242 @@ def devin_sessions(conn: sqlite3.Connection) -> list[DevinSession]:
     rows = conn.execute(
         f"SELECT s.id, {column('title')}, {column('working_directory')},"
         f" s.created_at, s.last_activity_at, {column('main_chain_id')},"
-        " (SELECT COUNT(*) FROM message_nodes n WHERE n.session_id = s.id)"
+        " (SELECT COUNT(*) FROM message_nodes n WHERE n.session_id = s.id),"
+        " (SELECT MAX(n.rowid) FROM message_nodes n WHERE n.session_id = s.id)"
         f" FROM sessions s{hidden}"
         " ORDER BY s.last_activity_at DESC, s.id"
     ).fetchall()
     out = []
-    for sid, title, directory, created, activity, head, nodes in rows:
+    for sid, title, directory, created, activity, head, nodes, max_row in rows:
         if not isinstance(sid, str) or not sid:
             continue
         out.append(DevinSession(
             id=sid, title=title if isinstance(title, str) else "",
             directory=directory if isinstance(directory, str) else None,
             created_ms=_ms(created), activity_ms=_ms(activity),
-            head=head if isinstance(head, int) else None, nodes=int(nodes or 0)))
+            head=head if isinstance(head, int) else None, nodes=int(nodes or 0),
+            max_row=_int(max_row)))
     return out
 
 
-def _chain(conn: sqlite3.Connection, session: DevinSession) -> list[int]:
-    """The main chain's node ids, oldest first. The nodes form a forest
-    (streamed copies are siblings); ``main_chain_id`` is the head of the
-    chain holding each message's final version, and without one the
-    newest node stands in. Only ids are loaded, never the forest's text."""
-    parents: dict[int, int | None] = dict(conn.execute(
-        "SELECT node_id, parent_node_id FROM message_nodes WHERE session_id = ?",
-        (session.id,)))
-    cursor = session.head if session.head in parents else (max(parents) if parents else None)
-    ordered: list[int] = []
+MARK_PREFIX = "devin_chain:"
+
+
+def mark_key(path: str) -> str:
+    """The ``meta`` key holding a Devin session's :class:`DevinMark`."""
+    return MARK_PREFIX + path
+
+
+@dataclass(frozen=True)
+class DevinMark:
+    """Where the last read of one Devin session stopped, kept in the
+    index's ``meta`` table beside the ``files`` row it was committed with
+    (``SearchDevin.Mark``).
+
+    Devin writes nodes with ``INSERT OR REPLACE`` into an ``AUTOINCREMENT``
+    table, so a new or rewritten node always takes a ``rowid`` above
+    ``row``, and a rewrite also removes a row at or below it. A mark holds
+    while the session still has exactly ``nodes`` rows at or below
+    ``row`` and its chain, walked down from the current head, first meets
+    such a row at ``head``: everything past it is new. ``ino`` is the
+    database file's, so a replaced database never continues an old mark.
+    ``session`` is the index session the rows went to; ``title`` the
+    first-prompt title the chain offered, if any.
+    """
+
+    ino: int
+    row: int
+    head: int
+    nodes: int
+    session: int = 0
+    title: str | None = None
+
+    def value(self, session_row_id: int) -> str:
+        """The stored form, the same bytes Swift writes."""
+        return (f"{self.ino} {self.row} {self.head} {self.nodes} {session_row_id}"
+                f"\n{self.title or ''}")
+
+    @staticmethod
+    def parse(value) -> "DevinMark | None":
+        if not isinstance(value, str):
+            return None
+        numbers, _, title = value.partition("\n")
+        parts = numbers.split(" ")
+        if len(parts) != 5 or not all(re.fullmatch(r"-?[0-9]+", p) for p in parts):
+            return None
+        ino, row, head, nodes, session = (int(p) for p in parts)
+        return DevinMark(ino, row, head, nodes, session, title or None)
+
+
+@dataclass
+class DevinRead:
+    """One session's read: every message along the main chain, or with
+    ``appended`` only those past the mark's head. ``mark`` is what the
+    commit records for the next read (None for an empty chain)."""
+
+    messages: list
+    prompt_title: str | None
+    appended: bool
+    mark: DevinMark | None
+
+
+def _node(conn: sqlite3.Connection, session_id: str, node_id: int):
+    """``(rowid, parent, chat_message bytes)`` of one node, through the
+    ``UNIQUE(session_id, node_id)`` index. Loading every node's parent to
+    walk a 50,000-node forest took 1 to 3 s for a 260-node chain (#1613)."""
+    # As bytes, decoded the way Swift's `text()` does (a bad byte becomes
+    # U+FFFD) rather than failing the whole session.
+    row = conn.execute(
+        "SELECT rowid, parent_node_id, CAST(chat_message AS BLOB) FROM message_nodes"
+        " WHERE session_id = ? AND node_id = ?", (session_id, node_id)).fetchone()
+    if row is None:
+        return None
+    rowid, parent, raw = row
+    return (_int(rowid), parent if isinstance(parent, int) else None,
+            raw.decode("utf-8", "replace").encode("utf-8") if isinstance(raw, bytes) else None)
+
+
+def _head(conn: sqlite3.Connection, session: DevinSession) -> int | None:
+    """``main_chain_id`` when that node exists, else the newest node."""
+    if session.head is not None and conn.execute(
+            "SELECT 1 FROM message_nodes WHERE session_id = ? AND node_id = ?",
+            (session.id, session.head)).fetchone():
+        return session.head
+    newest = conn.execute("SELECT MAX(node_id) FROM message_nodes WHERE session_id = ?",
+                          (session.id,)).fetchone()[0]
+    return newest if isinstance(newest, int) else None
+
+
+def _walk(conn: sqlite3.Connection, session: DevinSession, start: int | None,
+          floor: int | None = None):
+    """The chain from ``start`` down, newest first, as ``(node_id, rowid,
+    raw)``. Streamed copies are siblings in a forest; walking parents from
+    the head gives one node per message. With ``floor`` the walk stops at
+    the first node at or below that ``rowid`` and returns it apart:
+    ``(nodes, stop, rooted)``. ``rooted`` says the walk reached a node with
+    no parent; a chain cut short by a missing parent or a cycle is not."""
+    nodes = []
     seen: set[int] = set()
-    while cursor in parents and cursor not in seen:
+    cursor = start
+    while cursor is not None and cursor not in seen:
+        found = _node(conn, session.id, cursor)
+        if found is None:
+            return nodes, None, False
+        rowid, parent, raw = found
+        if floor is not None and rowid <= floor:
+            return nodes, (cursor, raw, parent), False
         seen.add(cursor)
-        ordered.append(cursor)
-        cursor = parents[cursor]
-    ordered.reverse()
-    return ordered
+        nodes.append((cursor, rowid, raw))
+        cursor = parent
+    return nodes, None, cursor is None
 
 
-def devin_messages(conn: sqlite3.Connection, session: DevinSession) -> tuple[list, str | None]:
-    """The session's messages through the Devin decoder, plus the
-    first-prompt title candidate the decoder offered."""
-    decoder = decode.Decoder("devin")
+def _call_names(raw: bytes | None) -> dict:
+    """The ``tool_call_id -> name`` pairs one record adds to the decoder."""
+    if raw is None:
+        return {}
+    scratch = decode.Decoder("devin")
+    scratch.decode_line(raw)
+    return scratch._devin.call_names
+
+
+def _tool_call_id(raw: bytes | None) -> str | None:
+    """The call a ``role: "tool"`` record answers."""
+    if raw is None:
+        return None
+    try:
+        obj = json.loads(raw)
+    except (ValueError, RecursionError):
+        return None
+    if not isinstance(obj, dict) or obj.get("role") != "tool":
+        return None
+    return decode.json_string(obj.get("tool_call_id"))
+
+
+def _prime_calls(conn: sqlite3.Connection, session: DevinSession, span: list,
+                 stop) -> dict:
+    """The call names the appended ``span`` looks up but never assigns,
+    from the indexed chain below it: the nearest assignment walking down,
+    which is the one a whole read's decoder would hold. Usually the node
+    just below the span."""
+    assigned: set[str] = set()
+    needed: set[str] = set()
+    for raw in span:
+        call_id = _tool_call_id(raw)
+        if call_id is not None and call_id not in assigned:
+            needed.add(call_id)
+        assigned.update(_call_names(raw))
+    resolved: dict = {}
+    if not needed:
+        return resolved
+    node, raw, parent = stop
+    seen = {node}
+    while True:
+        for call_id, name in _call_names(raw).items():
+            if call_id in needed and call_id not in resolved:
+                resolved[call_id] = name
+        if len(resolved) == len(needed) or parent is None or parent in seen:
+            return resolved
+        found = _node(conn, session.id, parent)
+        if found is None:
+            return resolved
+        seen.add(parent)
+        _, next_parent, raw = found
+        parent = next_parent
+
+
+def _decode(raws: list, decoder: decode.Decoder) -> tuple[list, str | None]:
     messages: list = []
     title = None
-    for node_id in _chain(conn, session):
-        # As bytes, decoded the way Swift's `text()` does (a bad byte
-        # becomes U+FFFD) rather than failing the whole session.
-        row = conn.execute(
-            "SELECT CAST(chat_message AS BLOB) FROM message_nodes"
-            " WHERE session_id = ? AND node_id = ?",
-            (session.id, node_id)).fetchone()
-        raw = row[0] if row else None
-        if not isinstance(raw, bytes):
+    for raw in raws:
+        if raw is None:
             continue
-        found, hints = decoder.decode_line(raw.decode("utf-8", "replace").encode("utf-8"))
+        found, hints = decoder.decode_line(raw)
         messages += found
         if title is None and hints.title is not None:
             title = hints.title
     return messages, title
+
+
+def devin_read(conn: sqlite3.Connection, session: DevinSession,
+               mark: DevinMark | None = None, ino: int = 0) -> DevinRead:
+    """``SearchDevin.read``: the session's messages through the Devin
+    decoder. With a ``mark`` the last commit recorded, only the chain past
+    its head is read, unless the session lost a row at or below its
+    watermark, the database is another file, or the chain no longer runs
+    through its head (``main_chain_id`` moved to a branch, a streamed copy
+    replaced the head): then the whole chain is read again."""
+    start = _head(conn, session)
+    if (mark is not None and mark.ino == ino and session.max_row >= mark.row
+            and conn.execute(
+                "SELECT COUNT(*) FROM message_nodes WHERE session_id = ? AND rowid <= ?",
+                (session.id, mark.row)).fetchone()[0] == mark.nodes):
+        span, stop, _ = _walk(conn, session, start, floor=mark.row)
+        if stop is not None and stop[0] == mark.head:
+            raws = [raw for _, _, raw in reversed(span)]
+            decoder = decode.Decoder("devin")
+            decoder._devin.call_names.update(_prime_calls(conn, session, raws, stop))
+            # A title the chain already offered stays; only a chain that
+            # had none takes the span's first prompt.
+            decoder.prompt_title_sent = mark.title is not None
+            messages, title = _decode(raws, decoder)
+            title = mark.title if mark.title is not None else title
+            return DevinRead(messages, title, True, DevinMark(
+                ino, session.max_row, start, session.nodes, title=title))
+    chain, _, rooted = _walk(conn, session, start)
+    messages, title = _decode([raw for _, _, raw in reversed(chain)], decode.Decoder("devin"))
+    # A chain cut short by a missing parent gets no mark: the parent may
+    # still arrive, and only a whole read would take it in.
+    next_mark = (DevinMark(ino, session.max_row, start, session.nodes, title=title)
+                 if chain and rooted else None)
+    return DevinRead(messages, title, False, next_mark)
+
+
+def devin_messages(conn: sqlite3.Connection, session: DevinSession) -> tuple[list, str | None]:
+    """The session's whole chain through the Devin decoder, plus the
+    first-prompt title candidate the decoder offered."""
+    read = devin_read(conn, session)
+    return read.messages, read.prompt_title
 
 
 def devin_title(session: DevinSession, prompt_title: str | None) -> str:

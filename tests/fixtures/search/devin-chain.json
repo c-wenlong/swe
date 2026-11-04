@@ -1,0 +1,277 @@
+{
+  "about": "One Devin session growing in stages, replayed by both search index writers: tests/test_search_harnesses.py (DevinChainFixtureTests) and app/mac/Tests/SWECoreTests/SearchDevinTests.swift (sharedFixtureGrowsTheSameRowsAsSwe). After each stage's SQL runs against sessions.db, one pass must leave exactly this files row, session row, message rows and meta mark (null: no mark); {ino} is the database's inode and {session} the session row's id. same_session says whether the stage appended to the previous stage's session (true) or read the chain whole into a new one (false). A second pass right after must index nothing.",
+  "path_suffix": "#brave-otter",
+  "stages": [
+    {
+      "note": "first read: the whole chain, the streamed copy at node 2 off it",
+      "sql": [
+        "INSERT INTO sessions(id, working_directory, created_at, last_activity_at, title, main_chain_id) VALUES ('brave-otter', '/repo/devin', 1791300000, 1791300090, 'Untitled', 6)",
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 0, NULL, '{\"role\":\"system\",\"content\":\"Current workspace directories\"}', 0)",
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 1, 0, '{\"role\":\"user\",\"content\":\"find the walrus config\",\"metadata\":{\"created_at\":\"2026-10-06T10:00:00Z\"}}', 0)",
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 2, 1, '{\"role\":\"assistant\",\"content\":\"Look\",\"metadata\":{\"created_at\":\"2026-10-06T10:00:05Z\"}}', 0)",
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 3, 1, '{\"role\":\"assistant\",\"content\":\"Looking for it.\",\"tool_calls\":[{\"id\":\"c1\",\"name\":\"exec\",\"arguments\":{\"command\":\"grep -r walrus .\"}}],\"metadata\":{\"created_at\":\"2026-10-06T10:00:06Z\"}}', 0)",
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 4, 3, '{\"role\":\"tool\",\"content\":\"conf/walrus.toml\",\"tool_call_id\":\"c1\",\"metadata\":{\"created_at\":\"2026-10-06T10:00:07Z\"}}', 0)",
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 6, 4, '{\"role\":\"assistant\",\"content\":\"It is conf/walrus.toml.\",\"metadata\":{\"created_at\":\"2026-10-06T10:00:09Z\"}}', 0)"
+      ],
+      "same_session": false,
+      "files": {
+        "byte_offset": 6,
+        "mtime_ms": 1791300090000,
+        "size_bytes": 6
+      },
+      "session": {
+        "title": "find the walrus config",
+        "updated_at": "2026-10-06T15:21:30.000Z",
+        "message_count": 5
+      },
+      "rows": [
+        "user: find the walrus config",
+        "assistant: Looking for it.",
+        "tool: exec: grep -r walrus .",
+        "tool: exec: conf/walrus.toml",
+        "assistant: It is conf/walrus.toml."
+      ],
+      "mark": "{ino} 6 6 6 {session}\nfind the walrus config"
+    },
+    {
+      "note": "a reply with a tool call: only the new node is read",
+      "sql": [
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 7, 6, '{\"role\":\"assistant\",\"content\":\"Checking the narwhal too.\",\"tool_calls\":[{\"id\":\"c2\",\"name\":\"exec\",\"arguments\":{\"command\":\"cat conf/narwhal.toml\"}}],\"metadata\":{\"created_at\":\"2026-10-06T10:01:00Z\"}}', 0)",
+        "UPDATE sessions SET main_chain_id = 7, last_activity_at = 1791300100 WHERE id = 'brave-otter'"
+      ],
+      "same_session": true,
+      "files": {
+        "byte_offset": 7,
+        "mtime_ms": 1791300100000,
+        "size_bytes": 7
+      },
+      "session": {
+        "title": "find the walrus config",
+        "updated_at": "2026-10-06T15:21:40.000Z",
+        "message_count": 7
+      },
+      "rows": [
+        "user: find the walrus config",
+        "assistant: Looking for it.",
+        "tool: exec: grep -r walrus .",
+        "tool: exec: conf/walrus.toml",
+        "assistant: It is conf/walrus.toml.",
+        "assistant: Checking the narwhal too.",
+        "tool: exec: cat conf/narwhal.toml"
+      ],
+      "mark": "{ino} 7 7 7 {session}\nfind the walrus config"
+    },
+    {
+      "note": "a tool result whose call was indexed by the last pass keeps its call's name",
+      "sql": [
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 8, 7, '{\"role\":\"tool\",\"content\":\"tusk = 2.4\",\"tool_call_id\":\"c2\",\"metadata\":{\"created_at\":\"2026-10-06T10:01:02Z\"}}', 0)",
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 9, 8, '{\"role\":\"user\",\"content\":\"now the narwhal tusk\"}', 0)",
+        "UPDATE sessions SET main_chain_id = 9, last_activity_at = 1791300110 WHERE id = 'brave-otter'"
+      ],
+      "same_session": true,
+      "files": {
+        "byte_offset": 9,
+        "mtime_ms": 1791300110000,
+        "size_bytes": 9
+      },
+      "session": {
+        "title": "find the walrus config",
+        "updated_at": "2026-10-06T15:21:50.000Z",
+        "message_count": 9
+      },
+      "rows": [
+        "user: find the walrus config",
+        "assistant: Looking for it.",
+        "tool: exec: grep -r walrus .",
+        "tool: exec: conf/walrus.toml",
+        "assistant: It is conf/walrus.toml.",
+        "assistant: Checking the narwhal too.",
+        "tool: exec: cat conf/narwhal.toml",
+        "tool: exec: tusk = 2.4",
+        "user: now the narwhal tusk"
+      ],
+      "mark": "{ino} 9 9 9 {session}\nfind the walrus config"
+    },
+    {
+      "note": "a streamed reply's first copy becomes the head",
+      "sql": [
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 10, 9, '{\"role\":\"assistant\",\"content\":\"Meas\"}', 0)",
+        "UPDATE sessions SET main_chain_id = 10, last_activity_at = 1791300120 WHERE id = 'brave-otter'"
+      ],
+      "same_session": true,
+      "files": {
+        "byte_offset": 10,
+        "mtime_ms": 1791300120000,
+        "size_bytes": 10
+      },
+      "session": {
+        "title": "find the walrus config",
+        "updated_at": "2026-10-06T15:22:00.000Z",
+        "message_count": 10
+      },
+      "rows": [
+        "user: find the walrus config",
+        "assistant: Looking for it.",
+        "tool: exec: grep -r walrus .",
+        "tool: exec: conf/walrus.toml",
+        "assistant: It is conf/walrus.toml.",
+        "assistant: Checking the narwhal too.",
+        "tool: exec: cat conf/narwhal.toml",
+        "tool: exec: tusk = 2.4",
+        "user: now the narwhal tusk",
+        "assistant: Meas"
+      ],
+      "mark": "{ino} 10 10 10 {session}\nfind the walrus config"
+    },
+    {
+      "note": "the finished copy, a sibling, replaces the head: the chain no longer runs through the mark's head, so it is read whole",
+      "sql": [
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 11, 9, '{\"role\":\"assistant\",\"content\":\"Measured: 2.4 m.\"}', 0)",
+        "UPDATE sessions SET main_chain_id = 11, last_activity_at = 1791300130 WHERE id = 'brave-otter'"
+      ],
+      "same_session": false,
+      "files": {
+        "byte_offset": 11,
+        "mtime_ms": 1791300130000,
+        "size_bytes": 11
+      },
+      "session": {
+        "title": "find the walrus config",
+        "updated_at": "2026-10-06T15:22:10.000Z",
+        "message_count": 10
+      },
+      "rows": [
+        "user: find the walrus config",
+        "assistant: Looking for it.",
+        "tool: exec: grep -r walrus .",
+        "tool: exec: conf/walrus.toml",
+        "assistant: It is conf/walrus.toml.",
+        "assistant: Checking the narwhal too.",
+        "tool: exec: cat conf/narwhal.toml",
+        "tool: exec: tusk = 2.4",
+        "user: now the narwhal tusk",
+        "assistant: Measured: 2.4 m."
+      ],
+      "mark": "{ino} 11 11 11 {session}\nfind the walrus config"
+    },
+    {
+      "note": "INSERT OR REPLACE rewrites an indexed node: a row at or below the watermark is gone, so it is read whole",
+      "sql": [
+        "INSERT OR REPLACE INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 4, 3, '{\"role\":\"tool\",\"content\":\"conf/walrus.yaml\",\"tool_call_id\":\"c1\",\"metadata\":{\"created_at\":\"2026-10-06T10:00:07Z\"}}', 0)",
+        "UPDATE sessions SET last_activity_at = 1791300140 WHERE id = 'brave-otter'"
+      ],
+      "same_session": false,
+      "files": {
+        "byte_offset": 11,
+        "mtime_ms": 1791300140000,
+        "size_bytes": 11
+      },
+      "session": {
+        "title": "find the walrus config",
+        "updated_at": "2026-10-06T15:22:20.000Z",
+        "message_count": 10
+      },
+      "rows": [
+        "user: find the walrus config",
+        "assistant: Looking for it.",
+        "tool: exec: grep -r walrus .",
+        "tool: exec: conf/walrus.yaml",
+        "assistant: It is conf/walrus.toml.",
+        "assistant: Checking the narwhal too.",
+        "tool: exec: cat conf/narwhal.toml",
+        "tool: exec: tusk = 2.4",
+        "user: now the narwhal tusk",
+        "assistant: Measured: 2.4 m."
+      ],
+      "mark": "{ino} 12 11 11 {session}\nfind the walrus config"
+    },
+    {
+      "note": "Devin names the session: an append takes the real title and keeps the prompt title in the mark",
+      "sql": [
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 12, 11, '{\"role\":\"user\",\"content\":\"thanks\"}', 0)",
+        "UPDATE sessions SET title = 'Otter hunt', main_chain_id = 12, last_activity_at = 1791300150 WHERE id = 'brave-otter'"
+      ],
+      "same_session": true,
+      "files": {
+        "byte_offset": 12,
+        "mtime_ms": 1791300150000,
+        "size_bytes": 12
+      },
+      "session": {
+        "title": "Otter hunt",
+        "updated_at": "2026-10-06T15:22:30.000Z",
+        "message_count": 11
+      },
+      "rows": [
+        "user: find the walrus config",
+        "assistant: Looking for it.",
+        "tool: exec: grep -r walrus .",
+        "tool: exec: conf/walrus.yaml",
+        "assistant: It is conf/walrus.toml.",
+        "assistant: Checking the narwhal too.",
+        "tool: exec: cat conf/narwhal.toml",
+        "tool: exec: tusk = 2.4",
+        "user: now the narwhal tusk",
+        "assistant: Measured: 2.4 m.",
+        "user: thanks"
+      ],
+      "mark": "{ino} 13 12 12 {session}\nfind the walrus config"
+    },
+    {
+      "note": "a node whose parent has not landed yet: the walk stops short of a root, so the read writes no mark",
+      "sql": [
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 14, 13, '{\"role\":\"assistant\",\"content\":\"Done.\"}', 0)",
+        "UPDATE sessions SET main_chain_id = 14, last_activity_at = 1791300160 WHERE id = 'brave-otter'"
+      ],
+      "same_session": false,
+      "files": {
+        "byte_offset": 13,
+        "mtime_ms": 1791300160000,
+        "size_bytes": 13
+      },
+      "session": {
+        "title": "Otter hunt",
+        "updated_at": "2026-10-06T15:22:40.000Z",
+        "message_count": 1
+      },
+      "rows": [
+        "assistant: Done."
+      ],
+      "mark": null
+    },
+    {
+      "note": "the missing parent arrives: with no mark the chain is read whole and takes it in",
+      "sql": [
+        "INSERT INTO message_nodes(session_id, node_id, parent_node_id, chat_message, created_at) VALUES ('brave-otter', 13, 12, '{\"role\":\"user\",\"content\":\"one more\"}', 0)",
+        "UPDATE sessions SET last_activity_at = 1791300170 WHERE id = 'brave-otter'"
+      ],
+      "same_session": false,
+      "files": {
+        "byte_offset": 14,
+        "mtime_ms": 1791300170000,
+        "size_bytes": 14
+      },
+      "session": {
+        "title": "Otter hunt",
+        "updated_at": "2026-10-06T15:22:50.000Z",
+        "message_count": 13
+      },
+      "rows": [
+        "user: find the walrus config",
+        "assistant: Looking for it.",
+        "tool: exec: grep -r walrus .",
+        "tool: exec: conf/walrus.yaml",
+        "assistant: It is conf/walrus.toml.",
+        "assistant: Checking the narwhal too.",
+        "tool: exec: cat conf/narwhal.toml",
+        "tool: exec: tusk = 2.4",
+        "user: now the narwhal tusk",
+        "assistant: Measured: 2.4 m.",
+        "user: thanks",
+        "user: one more",
+        "assistant: Done."
+      ],
+      "mark": "{ino} 15 14 14 {session}\nfind the walrus config"
+    }
+  ]
+}

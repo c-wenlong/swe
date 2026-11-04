@@ -1209,7 +1209,9 @@ public actor Ledger {
     /// Devin's sessions live inside `sessions.db`: each indexes under a
     /// synthetic `<dbPath>#<sessionId>` path whose stat is the session's
     /// last-activity time and node count (`SearchDevin.Session.stat`), read
-    /// whole whenever that moves. Opened read-only once per pass; a
+    /// whenever that moves: only the nodes past the mark the last commit
+    /// left (`SearchDevin.Mark`, either writer's), else the whole chain.
+    /// Opened read-only once per pass; a
     /// database that will not enumerate becomes one note, and a session
     /// that fails its own read is held out after three failures like a file.
     private func indexDevinSessions(
@@ -1229,6 +1231,7 @@ public actor Ledger {
                 "Skipped \(HarnessMark("devin").name)'s database (\(url.path)): \(error.localizedDescription)")
             return
         }
+        let ino = FileInfo(path: dbPath)?.inode ?? 0
         var live: Set<String> = []
         live.reserveCapacity(sessions.count)
         for session in sessions {
@@ -1245,16 +1248,19 @@ public actor Ledger {
             // The fence is the row as it stood before the read.
             let before = try? indexer.store.fileRow(for: path)
             do {
-                let read = try SearchDevin.messages(in: source, session: session)
+                let held = Self.heldDevinMark(before, store: indexer.store, path: path, ino: ino)
+                let read = try SearchDevin.read(in: source, session: session, mark: held?.mark, ino: ino)
                 let fields = SearchSessionFields(
                     agent: "devin", sessionID: session.id, filePath: path,
                     title: SearchDevin.title(of: session, promptTitle: read.promptTitle),
                     cwd: session.directory, cwdKey: session.directory,
                     createdAt: SearchOpenCode.iso(ms: session.createdMs),
                     updatedAt: SearchOpenCode.iso(ms: session.lastActivityMs),
-                    messageCount: read.messages.count)
+                    messageCount: read.messages.count
+                        + (read.appended ? held?.messageCount ?? 0 : 0))
                 if try indexer.finishSession(path: path, stat: stat, fileRow: before,
-                                             fields: fields, messages: read.messages) {
+                                             fields: fields, messages: read.messages,
+                                             appended: read.appended, mark: read.mark) {
                     report.filesIndexed += 1
                 }
             } catch {
@@ -1266,6 +1272,22 @@ public actor Ledger {
             retireStaleSyntheticSessions(
                 dbPath: dbPath, indexed: indexed, live: live, indexer: indexer, report: &report)
         }
+    }
+
+    /// The mark committed with `row`, and the message count of the session
+    /// it continues, when an append may use them: the row is current at its
+    /// own size and the mark was written with this very row (same session,
+    /// same node count, same database file). Python's `_held_mark`.
+    private static func heldDevinMark(
+        _ row: SearchFileRow?, store: SearchStore, path: String, ino: UInt64
+    ) -> (mark: SearchDevin.Mark, messageCount: Int)? {
+        guard let row, row.state == .current, let sessionRowID = row.sessionRowID,
+              row.byteOffset == row.sizeBytes,
+              let mark = SearchDevin.Mark(parsing: try? store.meta(SearchDevin.markKey(path))),
+              mark.session == sessionRowID, mark.nodes == row.sizeBytes, mark.ino == ino,
+              let existing = try? store.sessionRow(sessionRowID)
+        else { return nil }
+        return (mark, existing.fields.messageCount)
     }
 
     /// Rows for sessions the enumeration no longer returns — the synthetic
