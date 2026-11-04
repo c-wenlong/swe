@@ -171,7 +171,7 @@ footer a:hover { color: var(--text); }
   </section>
 </div>
 
-<div class="panel" id="panel-linux" role="tabpanel" aria-labelledby="tab-linux" hidden>
+<div class="panel" id="panel-linux" role="tabpanel" aria-labelledby="tab-linux">
   <section>
     <h2>Install script</h2>
     <p class="why">Installs the latest released <code>swe</code>: the wheel is verified against the release's <code>SHA256SUMS</code>, then installed through <code>uv</code>, or into a venv under <code>~/.local/share/swe</code> when uv is missing. No sudo, no shell rc edits.</p>
@@ -181,7 +181,7 @@ footer a:hover { color: var(--text); }
     <ul>
       <li>No Python 3.11 (Ubuntu 22.04)? The script installs uv first and brings its own interpreter.</li>
       <li>Pin a version with <code>--version=vX.Y.Z</code>, or install a local wheel with <code>--wheel=PATH</code>.</li>
-      <li>Upgrade by running it again; remove it with <code>uv tool uninstall swe</code>.</li>
+      <li>Upgrade by running it again; remove it with <code>uv tool uninstall swe</code>, or, for the venv install, delete <code>~/.local/share/swe</code> and the <code>~/.local/bin/swe</code> symlink.</li>
     </ul>
   </section>
   <section>
@@ -194,7 +194,7 @@ footer a:hover { color: var(--text); }
 
 <div class="after">
   <h2>Then</h2>
-  <p>Setup finds your agents, providers, MCP servers and skills.</p>
+  <p>Installed the app? It carries its own <code>swe</code>, so nothing needs to run in the terminal: open SWE.app. On a CLI install, setup finds your agents, providers, MCP servers and skills:</p>
   <div class="cmd"><code><span class="p">$ </span>swe setup</code><button class="copy" type="button" data-copy="swe setup">Copy</button></div>
   <p class="opt">Then pick up where you left off, in any agent: <code>swe session -i</code>. More in <a href="../overview/">the docs</a>.</p>
 </div>
@@ -238,11 +238,12 @@ footer a:hover { color: var(--text); }
     });
   });
 
-  // #linux deep-links and Linux user agents open on the Linux tab.
+  // #linux deep-links and Linux user agents open on the Linux tab. The
+  // losing panel only hides here, so the whole page reads without JS.
   var hash = location.hash.replace("#", "");
   var want = panels[hash] ? hash
     : (/linux/i.test(navigator.userAgent) ? "linux" : "macos");
-  if (want !== "macos") select(tabs.filter(function (t) {
+  select(tabs.filter(function (t) {
     return t.getAttribute("data-os") === want;
   })[0]);
 
