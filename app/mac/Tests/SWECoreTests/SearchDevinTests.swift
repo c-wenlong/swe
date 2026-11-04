@@ -4,9 +4,10 @@ import Testing
 
 /// Devin CLI sessions live inside `sessions.db`: each indexes under a
 /// synthetic `<db>#<id>` path whose stat is the session's last activity and
-/// node count, read whole along the main chain on every pass that owes it
-/// one. swe's `search_containers.py` writes the same rows
-/// (`tests/test_search_writer.py` pins its half).
+/// node count, read along the main chain on every pass that owes it one:
+/// past the mark's watermark when it holds, else whole. swe's
+/// `search_containers.py` writes the same rows (`tests/test_search_harnesses.py`
+/// pins its half, and both replay `tests/fixtures/search/devin-chain.json`).
 @Suite struct SearchDevinTests {
     /// `sessions` and `message_nodes` as Devin CLI declares them, trimmed to
     /// the columns the index and the token scan read.
@@ -155,6 +156,102 @@ import Testing
         let session = try #require(try f.store.sessionRow(rowID))
         #expect(session.fields.messageCount == 6)
         #expect(try f.store.status().sessionCount == 1)
+    }
+
+    private struct ChainFixture: Decodable {
+        struct Stage: Decodable {
+            struct Files: Decodable, Equatable {
+                var byte_offset: Int64
+                var mtime_ms: Double
+                var size_bytes: Int64
+            }
+            struct Session: Decodable, Equatable {
+                var title: String
+                var updated_at: String
+                var message_count: Int
+            }
+            var note: String
+            var sql: [String]
+            var same_session: Bool
+            var files: Files
+            var session: Session
+            var rows: [String]
+            var mark: String?
+        }
+        var path_suffix: String
+        var stages: [Stage]
+    }
+
+    /// `tests/fixtures/search/devin-chain.json`, which swe's
+    /// `test_the_shared_fixture_grows_the_same_rows_as_the_app` replays
+    /// too: both writers leave the same files row, session, rows and mark
+    /// after every stage, so either one continues the other's read.
+    @Test func sharedFixtureGrowsTheSameRowsAsSwe() async throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/search/devin-chain.json")
+        let fixture = try JSONDecoder().decode(ChainFixture.self, from: Data(contentsOf: url))
+        let f = try Fixture()
+        await f.attach()
+        let path = f.dbPath + fixture.path_suffix
+        let ino = try #require(FileInfo(path: f.dbPath)).inode
+        var previous: Int64?
+        for stage in fixture.stages {
+            for sql in stage.sql { try f.source.execute(sql) }
+            #expect(try await f.scan().filesIndexed == 1, "\(stage.note)")
+            let row = try #require(try f.store.fileRow(for: path))
+            #expect(ChainFixture.Stage.Files(
+                byte_offset: row.byteOffset, mtime_ms: row.mtimeMs,
+                size_bytes: row.sizeBytes ?? -1) == stage.files, "\(stage.note)")
+            let rowID = try #require(row.sessionRowID)
+            #expect((rowID == previous) == stage.same_session, "\(stage.note)")
+            previous = rowID
+            let session = try #require(try f.store.sessionRow(rowID)).fields
+            #expect(ChainFixture.Stage.Session(
+                title: session.title, updated_at: session.updatedAt ?? "",
+                message_count: session.messageCount) == stage.session, "\(stage.note)")
+            let texts = try f.store.db.prepare("""
+                SELECT m.role, f.user_text || f.assistant_text || f.tool_text
+                FROM messages m JOIN messages_fts f ON f.rowid = m.id
+                WHERE m.session_row_id = ? ORDER BY m.id
+                """)
+            texts.bind([.int(rowID)])
+            var rows: [String] = []
+            while try texts.step() { rows.append("\(texts.text(0) ?? ""): \(texts.text(1) ?? "")") }
+            #expect(rows == stage.rows, "\(stage.note)")
+            let mark = stage.mark.map {
+                $0.replacingOccurrences(of: "{ino}", with: "\(ino)")
+                    .replacingOccurrences(of: "{session}", with: "\(rowID)")
+            }
+            #expect(try f.store.meta(SearchDevin.markKey(path)) == mark, "\(stage.note)")
+            #expect(try await f.scan().filesIndexed == 0, "\(stage.note)")
+        }
+        // A retired session takes its mark with it.
+        try f.source.execute("UPDATE sessions SET hidden = 1")
+        try f.addSession("quiet-heron", title: "Heron work", head: nil,
+                         created: 1_791_300_000, activity: 1_791_300_000)
+        try f.addNode("quiet-heron", 0, parent: nil, #"{"role":"user","content":"count the herons"}"#)
+        _ = try await f.scan()
+        #expect(try f.store.meta(SearchDevin.markKey(path)) == nil)
+    }
+
+    @Test func aMarkRoundTripsAndAnotherDatabaseFileReadsWhole() throws {
+        let f = try Fixture()
+        try f.seed()
+        let session = try #require(try SearchDevin.sessions(in: f.source).first)
+        let mark = try #require(try SearchDevin.read(in: f.source, session: session, ino: 7).mark)
+        #expect(mark == SearchDevin.Mark(ino: 7, row: 6, head: 6, nodes: 6,
+                                         title: "find the walrus config"))
+        #expect(try SearchDevin.read(in: f.source, session: session, mark: mark, ino: 7).appended)
+        #expect(try !SearchDevin.read(in: f.source, session: session, mark: mark, ino: 8).appended)
+        var stored = mark
+        stored.session = 42
+        #expect(SearchDevin.Mark(parsing: mark.value(session: 42)) == stored)
+        for junk: String? in [nil, "", "1 2 3", "1 2 3 4 x\nt", "1 2 3 4 5 6"] {
+            #expect(SearchDevin.Mark(parsing: junk) == nil)
+        }
     }
 
     @Test func aCommitFencesOnTheRowFromBeforeTheRead() async throws {

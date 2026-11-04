@@ -171,6 +171,52 @@ class InstructionsCommandsTest(unittest.TestCase):
         self.assertIn("changed", errors)
         self.assertEqual(output.read_text(encoding="utf-8"), "# Saved meanwhile\n")
 
+    def test_build_json_reports_outputs_relinks_and_removals(self):
+        import json
+
+        (self.source / "more.md").write_text("# More\n", encoding="utf-8")
+        (self.source / "index.txt").write_text(
+            "rules.md\nmore.md\n", encoding="utf-8")
+        (self.source / "targets.json").write_text(json.dumps(
+            {"version": 1, "chapters": {"more.md": {"only": ["claude"]}}}))
+        claude = self.home / ".claude" / "CLAUDE.md"
+        claude.parent.mkdir()
+        claude.symlink_to(self.home / ".swe" / "AGENTS.md")
+
+        code, output, errors = self.run_command(["build", "--json"])
+        self.assertEqual((code, errors), (0, ""))
+        data = json.loads(output)["data"]
+        self.assertTrue(data["changed"])
+        self.assertEqual(
+            [(o["harness"], o["changed"]) for o in data["outputs"]],
+            [(None, True), ("claude", True)])
+        self.assertEqual(data["relinked"], [str(claude)])
+        self.assertEqual(data["removed"], [])
+        self.assertEqual(os.readlink(claude),
+                         str(self.home / ".swe" / "AGENTS.claude.md"))
+
+        # The rule gone: the link returns and the old output is removed.
+        (self.source / "targets.json").write_text(
+            json.dumps({"version": 1, "chapters": {}}))
+        code, output, _ = self.run_command(["build"])
+        self.assertEqual(code, 0)
+        # more.md returns to the shared output once the only-rule is gone.
+        self.assertIn("Built ~/.swe/AGENTS.md", output)
+        self.assertIn("Relinked ~/.claude/CLAUDE.md -> ~/.swe/AGENTS.md", output)
+        self.assertIn("Removed ~/.swe/AGENTS.claude.md", output)
+        self.assertEqual(os.readlink(claude), str(self.home / ".swe" / "AGENTS.md"))
+
+    def test_check_names_the_stale_output(self):
+        import json
+
+        (self.source / "targets.json").write_text(json.dumps(
+            {"version": 1, "chapters": {"rules.md": {"only": ["claude"]}}}))
+        self.run_command(["build"])
+        (self.home / ".swe" / "AGENTS.claude.md").unlink()
+        code, output, _ = self.run_command(["check"])
+        self.assertEqual(code, 1)
+        self.assertIn("AGENTS.claude.md", output)
+
     def test_help_forms(self):
         for args in ([], ["help"], ["--help"], ["-h"], ["build", "--help"]):
             with self.subTest(args=args):
@@ -180,9 +226,13 @@ class InstructionsCommandsTest(unittest.TestCase):
 
     def test_watch_reports_failure_recovery_and_interrupt(self):
         def fake_watch(*, on_result, on_error):
+            from swe.instructions.compiler import BuildResult
+
             on_error(ValueError("missing chapter"))
-            on_result(True)
-            on_result(False)
+            on_result(BuildResult(changed=True, outputs=[], relinked=[],
+                                  removed=[], notes=["a note"], stale=[]))
+            on_result(BuildResult(changed=False, outputs=[], relinked=[],
+                                  removed=[], notes=[], stale=[]))
             raise KeyboardInterrupt
 
         with patch("swe.instructions.commands.watcher.watch", side_effect=fake_watch):
@@ -194,11 +244,11 @@ class InstructionsCommandsTest(unittest.TestCase):
         self.assertIn("Stopped", output)
 
     def test_os_error_and_build_interrupt(self):
-        with patch("swe.instructions.commands.compiler.build", side_effect=OSError("denied")):
+        with patch("swe.instructions.commands.compiler.build_run", side_effect=OSError("denied")):
             code, _, errors = self.run_command(["build"])
         self.assertEqual(code, 1)
         self.assertIn("denied", errors)
-        with patch("swe.instructions.commands.compiler.build", side_effect=KeyboardInterrupt):
+        with patch("swe.instructions.commands.compiler.build_run", side_effect=KeyboardInterrupt):
             self.assertEqual(self.run_command(["build"])[0], 130)
 
     def test_top_level_dispatch_and_help(self):

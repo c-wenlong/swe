@@ -7,9 +7,9 @@ from pathlib import Path
 import stat
 import time
 
-from swe.paths import agents_file_for
 from .compiler import (
-    InstructionError, build, require_supported_platform, source_fingerprint,
+    BuildResult, InstructionError, build_run, expected_output_paths,
+    require_supported_platform, source_fingerprint,
 )
 
 POLL_INTERVAL = 0.5
@@ -39,7 +39,7 @@ def _fingerprint(path: Path) -> bytes:
 
 
 def watch(home: Path | None = None, *,
-          on_result: Callable[[bool], None] | None = None,
+          on_result: Callable[[BuildResult], None] | None = None,
           on_error: Callable[[InstructionError], None] | None = None) -> None:
     """Build immediately, then rebuild after changes settle until interrupted.
 
@@ -49,15 +49,22 @@ def watch(home: Path | None = None, *,
     KeyboardInterrupt and callback exceptions propagate to the caller.
     """
     require_supported_platform()
-    output = agents_file_for(home)
     last_error: tuple[type[Exception], str] | None = None
     retry_at: float | None = None
+
+    def outputs_fingerprint() -> bytes:
+        # Every expected output, not just AGENTS.md: a per-harness output
+        # edited or deleted in a terminal must trigger a rebuild too.
+        digest = hashlib.sha256()
+        for path in expected_output_paths(home):
+            digest.update(_fingerprint(path))
+        return digest.digest()
 
     def attempt() -> tuple[bytes, bytes]:
         nonlocal last_error, retry_at
         source_state = source_fingerprint(home)
         try:
-            changed = build(home)
+            result = build_run(home)
         except InstructionError as exc:
             error = type(exc), str(exc)
             if error != last_error and on_error is not None:
@@ -68,15 +75,15 @@ def watch(home: Path | None = None, *,
             last_error = None
             retry_at = None
             if on_result is not None:
-                on_result(changed)
-        return source_state, _fingerprint(output)
+                on_result(result)
+        return source_state, outputs_fingerprint()
 
     observed = attempt()
     pending: tuple[bytes, bytes] | None = None
     changed_at = 0.0
     while True:
         time.sleep(POLL_INTERVAL)
-        current = source_fingerprint(home), _fingerprint(output)
+        current = source_fingerprint(home), outputs_fingerprint()
         now = time.monotonic()
         if current == observed:
             pending = None

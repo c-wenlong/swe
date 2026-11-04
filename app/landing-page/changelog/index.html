@@ -100,7 +100,7 @@ footer a:hover { color: var(--text); }
       </div>
       <div class="right">
         <a class="plain" href="https://github.com/c-wenlong/swe"><svg class="i"><use href="#gh"/></svg>GitHub</a>
-        <a class="btn light sm" href="../#install"><span>Install</span></a>
+        <a class="btn light sm" href="../install/"><span>Install</span></a>
       </div>
     </nav>
   </div>
@@ -124,6 +124,100 @@ and weekly reset. Register Muse as a harness (<code>swe add muse muse</code>) an
 star it to add it to the polled set; the first run prompts once for the
 Safe Storage item.</li>
 </ul>
+<h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
+<ul>
+<li><p><strong>The chapters rail's &quot;+&quot; opens New chapter in one click.</strong> It was a menu behind a hover tip that swallowed the first click; New folder went with it since an empty File field already creates a folder.</p>
+</li>
+<li><p><strong>The New chapter suggestions drop below their field and wait for typing.</strong> The floating list now hangs 4pt under the focused field (the earlier overlay drew it upward over the field), opens only after a 250ms pause on a non-empty field or on Down Arrow, and an empty field shows no list at all.</p>
+</li>
+<li><p><strong>The New chapter sheet no longer resizes as it suggests.</strong> Its
+folder/file autocomplete now floats under the focused field instead of
+pushing the card taller, capped to the room between the field and the
+card's bottom edge with the list scrolling beyond.</p>
+</li>
+<li><p><strong>The New chapter/folder sheet suggests what exists.</strong> Typing in its
+Folder or File field opens an inline list of matching folders and
+chapters — ranked by closeness, the folder's own children first — plus
+a &quot;New ...&quot; row when nothing takes the name, picked with arrows and
+Return. An existing chapter opens straight into the editor.</p>
+</li>
+<li><p><strong>The Compile tab chooses what every harness compiles.</strong> The AGENTS.md
+page's new Compile tab turns the harness strip into a filter: All shows
+every chapter and folder's include checkbox (on, off, and unlisted
+index.txt states), and picking a harness toggles its only/except rules
+in targets.json. The Order list drags index.txt order back and, in All
+view, shows a chip per harness per chapter for one-click per-harness
+receipt. View AGENTS.md opens the filtered output's own file.</p>
+</li>
+</ul>
+<h2 id="122---2026-11-04"><a class="anchor" href="#122---2026-11-04"></a>[1.2.2] - 2026-11-04</h2>
+<h3 id="added-1"><a class="anchor" href="#added-1"></a>Added</h3>
+<ul>
+<li><p><strong>A one-line installer for Linux.</strong> <code>curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh</code>
+downloads the released wheel (verified against the release's new
+<code>SHA256SUMS</code> asset) and installs it with <code>uv</code> when it can, into a venv
+under <code>~/.local/share/swe</code> when it can't, and bootstraps <code>uv</code> when
+neither Python 3.11 nor <code>uv</code> is around, which covers Ubuntu 22.04's
+Python 3.10. Passing <code>--hub</code> runs <code>swe remote setup --apply</code> so the web
+app and phone remote come up in the same step. No sudo, nothing written
+to shell rc files. Releases now attach the script and <code>SHA256SUMS</code>, and
+CI runs the installer end to end in <code>ubuntu:22.04</code> and
+<code>python:3.12-slim</code> containers.</p>
+</li>
+<li><p><strong>Instruction chapters can be pinned to harnesses.</strong> An optional
+<code>~/.swe/AGENTS_MD/targets.json</code> maps a chapter to <code>only</code> or <code>except</code>
+lists of harness names, and a chapter can be switched off by commenting
+its index.txt line out. <code>swe instructions build</code> compiles a differing
+harness's chapters into <code>~/.swe/AGENTS.&lt;name&gt;.md</code>, repoints swe's
+instruction symlinks (extra account homes included) and prunes retired
+outputs; <code>check</code> and the <code>--json</code> surveys report the per-harness state,
+and <code>swe init</code> links to a harness's own output once it exists.</p>
+</li>
+<li><p><strong>The landing site gets a dedicated install page.</strong> <code>install/</code> puts
+macOS and Linux behind a tab toggle: the Mac side carries the SWE.app
+DMG download, wired to the latest release like the homepage buttons,
+and the brew cask; the Linux side has the <code>install.sh</code> one-liner plus
+its <code>--hub</code> variant for the web app and phone remote. Install buttons
+across the site now open the page instead of scrolling to the
+quickstart, which stays as the on-page summary.</p>
+</li>
+</ul>
+<h3 id="changed-1"><a class="anchor" href="#changed-1"></a>Changed</h3>
+<ul>
+<li><p><strong>The AGENTS.md page edits chapters as an outline.</strong> The Mac app's
+chapter rail is now the <code>~/.swe/AGENTS_MD</code> folder as an indented tree —
+folders group chapters and files not in index.txt read muted — with a
+proper New chapter/New folder sheet instead of the alert. The compiled
+AGENTS.md moved behind a View AGENTS.md button into a centre popup that
+renders it as Markdown and jumps to a chapter on click. Reordering and
+unlisting chapters move to the upcoming Compile tab, so they are
+temporarily unavailable in the app; edit index.txt by hand meanwhile.</p>
+</li>
+<li><p><strong>The web chat keeps its newest 200 entries in the DOM.</strong> A long
+transcript, or a chat left open for hours, kept every entry it ever
+drew, so layout, style recalculation and memory grew with it. Older
+entries now leave the page for a &quot;Show earlier&quot; button at the top of
+the log, which puts them back 200 at a time, still in order and with
+their tool cards intact. On a 2,000-message transcript the log holds
+982 element nodes instead of 9,800. The fold runs only when the log
+is scrolled to its end, so a reader up in the history loses nothing
+above them; the fold stops at a send still waiting or an
+unanswered approval, so every entry keeps its place. <code>SessionChat.revealSeq(seq)</code> expands the history down to one
+message before it scrolls there. Browser find-in-page sees only the
+drawn entries. Closes <a href="https://github.com/c-wenlong/swe/issues/1615">#1615</a>.</p>
+</li>
+<li><p><strong>Search indexing reads only a Devin session's new nodes.</strong> Both index
+writers (the Mac app's <code>SearchDevin.swift</code> and swe's
+<code>search_containers.py</code>) re-read a Devin session's whole chain each
+time it grew, and the chain walk loaded every node's parent first:
+1.0 to 2.3 s for each of the largest sessions on every 60 s reconcile.
+A read now walks the chain node by node from the head and stops at the
+<code>rowid</code> watermark the last commit left in the index's <code>meta</code> table
+(<code>devin_chain:&lt;path&gt;</code>, written by either side). A growing session costs
+about 1 ms; one whose head moved to a streamed copy or whose indexed
+node was rewritten reads whole in 25 to 45 ms (<a href="https://github.com/c-wenlong/swe/issues/1613">#1613</a>).</p>
+</li>
+</ul>
 <h2 id="121---2026-11-04"><a class="anchor" href="#121---2026-11-04"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v1.2.1">1.2.1</a> - 2026-11-04</h2>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
@@ -135,7 +229,7 @@ test now names the class. V1.2.0 never got its DMG, so this ships as a
 patch.</li>
 </ul>
 <h2 id="120---2026-11-04"><a class="anchor" href="#120---2026-11-04"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v1.2.0">1.2.0</a> - 2026-11-04</h2>
-<h3 id="added-1"><a class="anchor" href="#added-1"></a>Added</h3>
+<h3 id="added-2"><a class="anchor" href="#added-2"></a>Added</h3>
 <ul>
 <li><p><strong>The Mac app's chat renders the agent's Markdown tables.</strong> The chat
 used to run the issue/PR-body parser, so a pipe table showed as raw
@@ -1315,7 +1409,7 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 <a href="https://github.com/c-wenlong/swe/issues/970">#970</a>.</p>
 </li>
 </ul>
-<h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
+<h3 id="changed-2"><a class="anchor" href="#changed-2"></a>Changed</h3>
 <ul>
 <li><p><strong>The Mac app redraws less for hovers, chat rows, skeletons and the
 closed menu bar panel.</strong> A mouse move over a Compute chart now
@@ -2623,7 +2717,7 @@ PWA's list shows the logo in place of the harness's name.</p>
 </li>
 </ul>
 <h2 id="110---2026-10-26"><a class="anchor" href="#110---2026-10-26"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v1.1.0">1.1.0</a> - 2026-10-26</h2>
-<h3 id="added-2"><a class="anchor" href="#added-2"></a>Added</h3>
+<h3 id="added-3"><a class="anchor" href="#added-3"></a>Added</h3>
 <ul>
 <li><p><strong>Shared hooks across harnesses, plus hook CRUD.</strong> The <code>hooks</code> domain
 gains a third tier next to per-harness scripts and foreign (unclaimed)
@@ -3094,7 +3188,7 @@ linked script nothing declares, a hub script never linked — and
 <code>swe doctor</code> reports the same findings.</p>
 </li>
 </ul>
-<h3 id="changed-1"><a class="anchor" href="#changed-1"></a>Changed</h3>
+<h3 id="changed-3"><a class="anchor" href="#changed-3"></a>Changed</h3>
 <ul>
 <li><p><strong>MCP Add server: Local or Remote first, in both apps.</strong> The sheet
 starts with &quot;Local: runs on <machine>&quot; (a command, args and env vars) or
@@ -3291,7 +3385,7 @@ keeps in <code>~/.config/cursor/auth.json</code>, so a machine signed in only
 through the CLI shows Cursor's limits.</p>
 </li>
 </ul>
-<h3 id="added-3"><a class="anchor" href="#added-3"></a>Added</h3>
+<h3 id="added-4"><a class="anchor" href="#added-4"></a>Added</h3>
 <ul>
 <li><p><strong>Web app: merge a PR and mark notifications read.</strong> The PR sheet on
 Repositories now has the Mac app's strategy menu, Merge and
@@ -3785,7 +3879,7 @@ inside the popover no longer read as outside clicks that close the
 panel.</p>
 </li>
 </ul>
-<h3 id="changed-2"><a class="anchor" href="#changed-2"></a>Changed</h3>
+<h3 id="changed-4"><a class="anchor" href="#changed-4"></a>Changed</h3>
 <ul>
 <li><strong>Settings: a shorter sub-nav.</strong> Preferences and Updates fold into
 General as its Display and Updates cards, and GitHub and Remote share one
@@ -3933,7 +4027,7 @@ holding non-strings) raises CorruptConfigurationError naming the row
 instead of crashing mid-merge.</p>
 </li>
 </ul>
-<h3 id="added-4"><a class="anchor" href="#added-4"></a>Added</h3>
+<h3 id="added-5"><a class="anchor" href="#added-5"></a>Added</h3>
 <ul>
 <li><p><strong>A docs site</strong> at <a href="https://c-wenlong.github.io/quiver/">https://c-wenlong.github.io/quiver/</a>, built with
 Zensical from the existing Markdown (README, architecture and
@@ -4018,7 +4112,7 @@ takes its trend-chart colour, the aggregate total stays on top, and a
 Total switch at the top of the Counted list turns it off.</p>
 </li>
 </ul>
-<h3 id="changed-3"><a class="anchor" href="#changed-3"></a>Changed</h3>
+<h3 id="changed-5"><a class="anchor" href="#changed-5"></a>Changed</h3>
 <ul>
 <li><p><strong>API keys live under <code>~/.quiver/secrets/</code>.</strong> Provider keys moved from
 <code>~/.api_keys</code> to <code>secrets/providers/.api_keys</code> and MCP values from
@@ -4075,7 +4169,7 @@ skill editing, MCP Local/Remote groups, collapsed service status cards, API
 key checks and editing, a cached and source-isolated Overview, and four
 audits (databases and caches, app structure and contracts, swe controller /
 service / model layering, tests with an 84% coverage floor).</p>
-<h3 id="added-5"><a class="anchor" href="#added-5"></a>Added</h3>
+<h3 id="added-6"><a class="anchor" href="#added-6"></a>Added</h3>
 <ul>
 <li><p><strong>Cursor's Grok Bot allowance shows with its other limits.</strong> Cursor gives
 Grok Bot its own weekly allowance, apart from the billing cycle. <code>swe list --usage --json</code> now lists it as a <code>grok_bot</code> window on Cursor (used
@@ -4103,7 +4197,7 @@ prints exactly as before. Re-adding or reinstalling a harness
 (<code>swe add</code>, <code>swe add -i</code>, <code>swe install</code>) keeps the name you gave it.</p>
 </li>
 </ul>
-<h3 id="changed-4"><a class="anchor" href="#changed-4"></a>Changed</h3>
+<h3 id="changed-6"><a class="anchor" href="#changed-6"></a>Changed</h3>
 <ul>
 <li><p><strong>The desktop widgets get their own sidebar page.</strong> &quot;Menu bar and
 widgets&quot; split in two: &quot;Menu bar&quot; keeps the status item and popup
@@ -4235,7 +4329,7 @@ value alive forever.</p>
 <li><p><strong>Cline sessions read as zero.</strong> <code>parse_cline</code> only read the legacy <code>~/.cline/data/state/taskHistory.json</code> index; Cline 3.x writes one directory per session under <code>~/.cline/data/sessions/&lt;id&gt;/</code> (<code>&lt;id&gt;.json</code> metadata beside a <code>&lt;id&gt;.messages.json</code> transcript) and never creates <code>state/</code>. The parser now reads both layouts — the per-session dirs and, for older installs, the index. Transcript previews/reports follow: the cline reader loads <code>&lt;id&gt;.messages.json</code> (unwrapping <code>&lt;user_input&gt;</code> envelopes, dropping <code>thinking</code> blocks) and falls back to the old <code>data/tasks/&lt;id&gt;/</code> pair.</p>
 </li>
 </ul>
-<h3 id="added-6"><a class="anchor" href="#added-6"></a>Added</h3>
+<h3 id="added-7"><a class="anchor" href="#added-7"></a>Added</h3>
 <ul>
 <li><p><strong><code>swe doctor --json</code> names the harness an off-PATH finding is about.</strong>
 An <code>off-path</code> row now carries <code>&quot;harness&quot;: &quot;&lt;registry name&gt;&quot;</code>, so the app's
@@ -4341,7 +4435,7 @@ lazy migration. Instruction targets are now registry-driven: an entry's
 <code>capabilities.instructions.file</code> wins over the built-in table.</p>
 </li>
 </ul>
-<h3 id="changed-5"><a class="anchor" href="#changed-5"></a>Changed</h3>
+<h3 id="changed-7"><a class="anchor" href="#changed-7"></a>Changed</h3>
 <ul>
 <li><strong>Plugins &gt; Explore nests plugins under source and marketplace.</strong> The
 flat list of about 385 plugins becomes two levels you open and close:
@@ -4427,7 +4521,7 @@ recognises 21.</li>
 seeded skills root and <code>swe list</code> filename are gone. Session parsers now
 cover 19 tools and discovery recognises 23.</li>
 </ul>
-<h3 id="changed-6"><a class="anchor" href="#changed-6"></a>Changed</h3>
+<h3 id="changed-8"><a class="anchor" href="#changed-8"></a>Changed</h3>
 <ul>
 <li><p><strong><code>swe find</code> prints counts by default; <code>--full</code> prints the tree.</strong> Every
 view (<code>amd</code>, <code>skills</code>, <code>plugins</code>, <code>mcps</code>, and bare <code>swe find</code>) now opens
@@ -4469,7 +4563,7 @@ recoverable reset time into <code>0.0</code>. Its comments now say what it reall
 and 14 new tests pin the behaviour.</p>
 </li>
 </ul>
-<h3 id="added-7"><a class="anchor" href="#added-7"></a>Added</h3>
+<h3 id="added-8"><a class="anchor" href="#added-8"></a>Added</h3>
 <ul>
 <li><p><strong>A status column in <code>swe session</code>.</strong> A two-wide <code>ST</code> column after AGENT
 shows where each conversation stands as a single glyph, with a legend
@@ -4563,7 +4657,7 @@ assistant replies render their markdown (headings, emphasis, code,
 lists, quotes, tables, links) instead of showing it raw.</p>
 </li>
 </ul>
-<h3 id="changed-7"><a class="anchor" href="#changed-7"></a>Changed</h3>
+<h3 id="changed-9"><a class="anchor" href="#changed-9"></a>Changed</h3>
 <ul>
 <li><strong>Docs audited against the code.</strong> README: the <code>swe list</code> sample, the
 commands table, the quick start, the supported-tools list (now the 24 the
@@ -4667,7 +4761,7 @@ since quiver cannot refresh it.</p>
 </li>
 </ul>
 <h2 id="0210---2026-08-25"><a class="anchor" href="#0210---2026-08-25"></a>[0.2.10] - 2026-08-25</h2>
-<h3 id="changed-8"><a class="anchor" href="#changed-8"></a>Changed</h3>
+<h3 id="changed-10"><a class="anchor" href="#changed-10"></a>Changed</h3>
 <ul>
 <li><strong>Harness state consolidated into one file: <code>config/harness.json</code>.</strong>
 <code>tools.json</code>, <code>stars.json</code>, and <code>archived.json</code> used to move together in
@@ -4715,7 +4809,7 @@ the <code>~/.factory</code> directory it happens to live in.</li>
 </ul>
 </li>
 </ul>
-<h3 id="added-8"><a class="anchor" href="#added-8"></a>Added</h3>
+<h3 id="added-9"><a class="anchor" href="#added-9"></a>Added</h3>
 <ul>
 <li><strong><code>swe doctor</code> catches drift.</strong> A new <code>harness/drift.py</code> runs four
 read-only checks on every invocation: <code>help_text.py</code>'s HELP topics
@@ -4747,7 +4841,7 @@ field, which is PEP 701 and valid only on 3.12+. It parsed fine locally and
 raised <code>SyntaxError</code> on import for anyone at the declared floor, taking the
 whole CLI down. Anyone on v0.2.8 should upgrade.</li>
 </ul>
-<h3 id="added-9"><a class="anchor" href="#added-9"></a>Added</h3>
+<h3 id="added-10"><a class="anchor" href="#added-10"></a>Added</h3>
 <ul>
 <li><strong>A syntax-floor test.</strong> Compiles every file in <code>src/</code> with an interpreter at
 or below <code>requires-python</code>, so this class of bug fails locally instead of in
@@ -4758,7 +4852,7 @@ reaches the parser. It uses the builtin <code>compile()</code> now, and is verif
 against the actual v0.2.8 defect.</li>
 </ul>
 <h2 id="028---2026-08-20"><a class="anchor" href="#028---2026-08-20"></a>[0.2.8] - 2026-08-20</h2>
-<h3 id="added-10"><a class="anchor" href="#added-10"></a>Added</h3>
+<h3 id="added-11"><a class="anchor" href="#added-11"></a>Added</h3>
 <ul>
 <li><strong><code>swe find</code>.</strong> The read-only counterpart to <code>swe init</code>: where the shared
 assets live and what links to them. <code>swe find amd</code> for AGENTS.md, <code>swe find skills</code> for skills and plugins, bare <code>swe find</code> for both.<ul>
@@ -4799,7 +4893,7 @@ nothing is now named instead of failing silently, so a typo no longer looks
 identical to an empty result.</p>
 </li>
 </ul>
-<h3 id="changed-9"><a class="anchor" href="#changed-9"></a>Changed</h3>
+<h3 id="changed-11"><a class="anchor" href="#changed-11"></a>Changed</h3>
 <ul>
 <li><p><strong><code>swe mcp discover --apply</code> now merges three ways.</strong> It previously skipped
 anything already in the hub by name, so a token rotated in a harness config
@@ -4817,7 +4911,7 @@ file. <code>mcp/servers/</code> is gitignored, since it is 21 nested git repos a
 </li>
 </ul>
 <h2 id="027---2026-08-20"><a class="anchor" href="#027---2026-08-20"></a>[0.2.7] - 2026-08-20</h2>
-<h3 id="added-11"><a class="anchor" href="#added-11"></a>Added</h3>
+<h3 id="added-12"><a class="anchor" href="#added-12"></a>Added</h3>
 <ul>
 <li><p><strong><code>swe init --migrate</code>.</strong> Moves a pre-0.2.7 <code>~/.config/swe</code> into <code>~/.quiver</code>,
 routing authored state to <code>config/</code>, caches to <code>cache/</code>, and leaving
@@ -4930,7 +5024,7 @@ released on scope exit (caught and fixed during triage — bare
 iterators leaked FDs on early-break / exception paths). (PR #18.)</p>
 </li>
 </ul>
-<h3 id="changed-10"><a class="anchor" href="#changed-10"></a>Changed</h3>
+<h3 id="changed-12"><a class="anchor" href="#changed-12"></a>Changed</h3>
 <ul>
 <li><p><strong>One root: <code>~/.quiver</code>.</strong> Quiver used to own two directories, <code>~/.quiver</code>
 for what harnesses read and <code>~/.config/swe</code> for its own state. They are now
@@ -5313,7 +5407,7 @@ three-state SESS coloring, green/red INST glyphs, sort order
 preservation, and tag-filter behavior.</p>
 </li>
 </ul>
-<h3 id="changed-11"><a class="anchor" href="#changed-11"></a>Changed</h3>
+<h3 id="changed-13"><a class="anchor" href="#changed-13"></a>Changed</h3>
 <ul>
 <li><code>swe mcp list</code> / <code>status</code> / <code>validate</code> / <code>doctor</code> hide unverified
 harnesses whose config file does not exist yet, keeping the matrix
@@ -5429,7 +5523,7 @@ per-subtest <code>reset_at</code> mutation into <code>_SAMPLE_RESPONSE</code>, w
 </li>
 </ul>
 <h2 id="026---2026-07-17"><a class="anchor" href="#026---2026-07-17"></a>[0.2.6] - 2026-07-17</h2>
-<h3 id="added-12"><a class="anchor" href="#added-12"></a>Added</h3>
+<h3 id="added-13"><a class="anchor" href="#added-13"></a>Added</h3>
 <ul>
 <li><code>swe autocomplete [zsh|bash|fish]</code> — generate and inject shell tab-completion</li>
 <li><code>swe __complete &lt;words&gt;</code> — hidden command powering dynamic completions (tool names, aliases, tags, flags)</li>
@@ -5447,7 +5541,7 @@ per-subtest <code>reset_at</code> mutation into <code>_SAMPLE_RESPONSE</code>, w
 <li><code>prompt.py</code> — CR-safe <code>read_line()</code> for interactive prompts (fixes <code>^M</code> on Enter in cooked TTY)</li>
 <li>Hermes title cleanup: extracts actual task from cron/skill boilerplate</li>
 </ul>
-<h3 id="changed-12"><a class="anchor" href="#changed-12"></a>Changed</h3>
+<h3 id="changed-14"><a class="anchor" href="#changed-14"></a>Changed</h3>
 <ul>
 <li>Generalized one-off parsers into declarative engine configs with per-tool callbacks</li>
 <li><code>parsers.py</code> slimmed to config-only adapters over family engines</li>
@@ -5455,19 +5549,19 @@ per-subtest <code>reset_at</code> mutation into <code>_SAMPLE_RESPONSE</code>, w
 <li>README updated with autocomplete, favourites, providers, doctor, install, edit, and --search/--refresh docs</li>
 </ul>
 <h2 id="025---2026-07-06"><a class="anchor" href="#025---2026-07-06"></a>[0.2.5] - 2026-07-06</h2>
-<h3 id="added-13"><a class="anchor" href="#added-13"></a>Added</h3>
+<h3 id="added-14"><a class="anchor" href="#added-14"></a>Added</h3>
 <ul>
 <li><code>swe skills help &lt;topic&gt;</code> — per-topic help (catalog, discover, tree, link, unlink, move, scope)</li>
 <li>README <strong>Skills</strong> section with discover, catalog, symlink, and move workflows</li>
 </ul>
-<h3 id="changed-13"><a class="anchor" href="#changed-13"></a>Changed</h3>
+<h3 id="changed-15"><a class="anchor" href="#changed-15"></a>Changed</h3>
 <ul>
 <li>Centralized skills help in <code>skills/help_text.py</code> (used by subcommands and <code>swe skills help</code>)</li>
 <li>Expanded <code>swe help skills</code>, <code>swe help setup</code>, and <code>swe help discover</code></li>
 <li>CONTRIBUTING and tests README updated for package layout and new test files</li>
 </ul>
 <h2 id="024---2026-07-06"><a class="anchor" href="#024---2026-07-06"></a>[0.2.4] - 2026-07-06</h2>
-<h3 id="added-14"><a class="anchor" href="#added-14"></a>Added</h3>
+<h3 id="added-15"><a class="anchor" href="#added-15"></a>Added</h3>
 <ul>
 <li><code>swe skills tree</code> — show harness symlink layout (codex/claude/cursor → shared)</li>
 <li><code>swe skills tree --sync</code> — persist observed symlinks to <code>skill_links.json</code></li>
@@ -5475,26 +5569,26 @@ per-subtest <code>reset_at</code> mutation into <code>_SAMPLE_RESPONSE</code>, w
 <li>Skills list shows <strong>VISIBLE VIA</strong> (all harness scopes that see each skill)</li>
 </ul>
 <h2 id="023---2026-07-06"><a class="anchor" href="#023---2026-07-06"></a>[0.2.3] - 2026-07-06</h2>
-<h3 id="added-15"><a class="anchor" href="#added-15"></a>Added</h3>
+<h3 id="added-16"><a class="anchor" href="#added-16"></a>Added</h3>
 <ul>
 <li><code>swe skills discover</code> — scan <code>~/Desktop</code> and <code>~/Documents</code> for <code>*/skills/</code> catalogs</li>
 <li><code>swe skills catalog add|list|remove</code> — register extra skill directories in <code>skill_catalogs.json</code></li>
 </ul>
 <h2 id="022---2026-07-06"><a class="anchor" href="#022---2026-07-06"></a>[0.2.2] - 2026-07-06</h2>
-<h3 id="added-16"><a class="anchor" href="#added-16"></a>Added</h3>
+<h3 id="added-17"><a class="anchor" href="#added-17"></a>Added</h3>
 <ul>
 <li><code>swe mcp discover</code> — find MCP servers across tool configs vs <code>~/.config/swe/mcp.json</code></li>
 <li>Skills-root symlink hints in <code>swe setup</code> (step 3/3)</li>
 <li><code>assets/social-preview.png</code> (1280×640) for GitHub link previews</li>
 <li><code>scripts/upload_github_images.py</code> — upload avatar/social preview via GitHub token</li>
 </ul>
-<h3 id="changed-14"><a class="anchor" href="#changed-14"></a>Changed</h3>
+<h3 id="changed-16"><a class="anchor" href="#changed-16"></a>Changed</h3>
 <ul>
 <li><code>swe setup</code> now covers harnesses, MCP, and skills roots in one wizard</li>
 <li>README commands table documents <code>setup</code>, <code>discover</code>, and <code>harness discover</code></li>
 </ul>
 <h2 id="021---2026-07-06"><a class="anchor" href="#021---2026-07-06"></a>[0.2.1] - 2026-07-06</h2>
-<h3 id="added-17"><a class="anchor" href="#added-17"></a>Added</h3>
+<h3 id="added-18"><a class="anchor" href="#added-18"></a>Added</h3>
 <ul>
 <li><code>swe harness discover</code> — scan PATH for AI coding CLIs not yet in <code>tools.json</code> (dry-run by default)</li>
 <li><code>swe harness discover --apply</code> / <code>--apply-all</code> — register discovered harnesses</li>
@@ -5503,7 +5597,7 @@ per-subtest <code>reset_at</code> mutation into <code>_SAMPLE_RESPONSE</code>, w
 <li>Repo mascot (<code>assets/mascot.png</code>) in README</li>
 </ul>
 <h2 id="020---2026-07-06"><a class="anchor" href="#020---2026-07-06"></a>[0.2.0] - 2026-07-06</h2>
-<h3 id="changed-15"><a class="anchor" href="#changed-15"></a>Changed</h3>
+<h3 id="changed-17"><a class="anchor" href="#changed-17"></a>Changed</h3>
 <ul>
 <li>Refactored monolithic <code>cli.py</code> into domain packages: <code>harness/</code>, <code>sessions/</code>, <code>skills/</code>, <code>mcp/</code></li>
 <li>Extracted shared <code>console.py</code> and <code>paths.py</code> utilities</li>
@@ -5511,7 +5605,7 @@ per-subtest <code>reset_at</code> mutation into <code>_SAMPLE_RESPONSE</code>, w
 <li>CI runs tests verbosely across Python 3.10–3.13</li>
 </ul>
 <h2 id="010---2026-07-06"><a class="anchor" href="#010---2026-07-06"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v0.1.0">0.1.0</a> - 2026-07-06</h2>
-<h3 id="added-18"><a class="anchor" href="#added-18"></a>Added</h3>
+<h3 id="added-19"><a class="anchor" href="#added-19"></a>Added</h3>
 <ul>
 <li>Initial open-source release of <strong>quiver</strong> (CLI command: <code>swe</code>)</li>
 <li>Tool registry with tags, aliases, install checks, and 100-day usage sorting</li>

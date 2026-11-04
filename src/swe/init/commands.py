@@ -298,7 +298,9 @@ def _pick_new_harnesses(
     return managed, declined
 
 
-def _link_json(instructions: list[LinkStatus], skills: list[LinkStatus]) -> list[dict]:
+def _link_json(
+    instructions: list[LinkStatus], skills: list[LinkStatus], home: Path,
+) -> list[dict]:
     """One row per harness, joining its instruction file and skills root.
 
     Keyed by the registry name, so a row joins ``swe list --json`` on
@@ -313,7 +315,12 @@ def _link_json(instructions: list[LinkStatus], skills: list[LinkStatus]) -> list
             name = registry_name(status.label)
             row = rows.setdefault(name, LinkRow(name))
             if getattr(row, key) is None:
-                setattr(row, key, {"path": str(status.path), "state": status.state})
+                entry = {"path": str(status.path), "state": status.state}
+                if key == "instructions":
+                    # The canonical file init links to: the harness's own
+                    # compiled output when it has one, else shared AGENTS.md.
+                    entry["target"] = str(status.source or agents_file(home))
+                setattr(row, key, entry)
     return [rows[name].to_json() for name in sorted(rows)]
 
 
@@ -459,7 +466,8 @@ def run_init(home: Path, *, check_only: bool = False, force: bool = False,
         hook_rows = [(s, "would-" + s.state if s.changed else s.state) for s in hooks]
     else:
         inst_rows = [
-            (s, _apply(s, agents_file(home), home, force)) for s in instructions
+            (s, _apply(s, s.source or agents_file(home), home, force))
+            for s in instructions
         ]
         skill_rows = [(s, _apply(s, skills_dir(home), home, force)) for s in skills]
         hook_rows = [(s, _apply(s, s.source, home, force)) for s in hooks]
@@ -484,7 +492,7 @@ def check_document(home: Path, run: InitRun | None = None) -> dict:
     return {
         "agents_file": str(agents_file(home)),
         "agents_file_exists": agents_file(home).exists(),
-        "harnesses": _link_json(run.instructions, run.skills),
+        "harnesses": _link_json(run.instructions, run.skills, home),
         "account_sync": flags,
         "accounts": [row.to_json() for row in run.account_rows],
         "account_notes": run.account_notes,

@@ -608,11 +608,15 @@ to use their own login state and environment."""
   {c('cyan', 'swe instructions watch')}    Build now, then rebuild on source changes
 
   Edit chapters under {c('bold', '~/.swe/AGENTS_MD/')} and list their relative .md
-  paths in {c('bold', 'index.txt')}, in order. Blank lines and # comments are ignored.
+  paths in {c('bold', 'index.txt')}, in order. Blank lines and # comments are ignored;
+  a commented-out chapter line keeps its file but stays out of the build.
+  {c('bold', 'targets.json')} next to it can pin a chapter to harnesses
+  ({"only"} or {"except"}); a named harness whose chapters differ gets its own
+  {c('bold', 'AGENTS.<name>.md')} and swe's links are repointed to it.
   Build writes {c('bold', '~/.swe/AGENTS.md')} atomically, only when its SHA256 changes.
   Check writes nothing. Watch reports source errors and keeps waiting; Ctrl-C stops it.
-  Harness symlinks keep pointing at the generated AGENTS.md. Edit the chapters,
-  not the generated file. A running chat may need a new chat to read the update.
+  Edit the chapters, not the generated file. A running chat may need a new chat
+  to read the update.
 
   build, check and init take {c('cyan', '--json')} for the app's document."""
     ),

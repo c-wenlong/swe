@@ -112,6 +112,7 @@ h2 { font-size: 44px; line-height: 1.08; letter-spacing: -0.025em; font-weight: 
 .step { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 14px; }
 .step .n { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line-strong); display: grid; place-items: center; font: 13px var(--mono); color: var(--text-2); }
 .step p { margin: 2px 0 10px; color: var(--text-2); font-size: 15px; }
+.step .cmd + p { margin-top: 12px; }
 .cmd { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; padding: 8px 8px 8px 14px; font: 13.5px var(--mono); }
 .cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
 .cmd code::-webkit-scrollbar { display: none; }
@@ -198,7 +199,7 @@ dialog .close { margin-left: auto; }
       </div>
       <div class="right">
         <a class="plain star" href="https://github.com/c-wenlong/swe"><svg class="i"><use href="#gh"/></svg>GitHub</a>
-        <a class="btn light sm" href="#install" data-dmg="Download"><svg class="i"><use href="#dl"/></svg><span>Install</span></a>
+        <a class="btn light sm" href="install/"><svg class="i"><use href="#dl"/></svg><span>Install</span></a>
       </div>
     </nav>
   </div>
@@ -211,7 +212,7 @@ dialog .close { margin-left: auto; }
   <h1>Home base for every coding agent you run.</h1>
   <p class="lede">Sessions, usage, limits, skills and MCP servers for Claude Code, Codex, Gemini CLI and the rest, in one place. From your terminal, your Mac or your phone.</p>
   <div class="ctas">
-    <a class="btn light" href="#install" data-dmg="Download for Mac"><svg class="i"><use href="#dl"/></svg><span>Install swe</span></a>
+    <a class="btn light" href="install/"><svg class="i"><use href="#dl"/></svg><span>Install swe</span></a>
     <a class="btn" href="https://github.com/c-wenlong/swe"><svg class="i"><use href="#gh"/></svg>View on GitHub</a>
   </div>
   <p class="hint" id="dmg-hint">You install <code>swe</code>. You type <code>swe</code>.</p>
@@ -335,6 +336,8 @@ dialog .close { margin-left: auto; }
         <div class="step"><span class="n">1</span><div>
           <p>Install with Homebrew (or <a href="overview/#nix">Nix</a>).</p>
           <div class="cmd"><code><span class="p">$ </span>brew install c-wenlong/swe/swe</code><button class="copy" type="button" data-copy="brew install c-wenlong/swe/swe">Copy</button></div>
+          <p>On Linux:</p>
+          <div class="cmd"><code><span class="p">$ </span>curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh">Copy</button></div>
         </div></div>
         <div class="step"><span class="n">2</span><div>
           <p>Run setup. It finds your agents, providers, MCP servers and skills.</p>
@@ -369,7 +372,7 @@ dialog .close { margin-left: auto; }
   <h2>Get swe.</h2>
   <div class="cmd"><code><span class="p">$ </span>brew install --cask c-wenlong/swe/swe</code><button class="copy" type="button" data-copy="brew install --cask c-wenlong/swe/swe">Copy</button></div>
   <div class="ctas">
-    <a class="btn light" href="#install" data-dmg="Download for Mac" hidden><svg class="i"><use href="#apple"/></svg><span>Download for Mac</span></a>
+    <a class="btn light" href="install/" data-dmg="Download for Mac" hidden><svg class="i"><use href="#apple"/></svg><span>Download for Mac</span></a>
     <a class="btn" href="overview/">Read the docs</a>
     <a class="btn" href="https://github.com/c-wenlong/swe"><svg class="i"><use href="#gh"/></svg>View on GitHub</a>
   </div>
@@ -498,7 +501,7 @@ dialog .close { margin-left: auto; }
         hint.textContent = "SWE " + ver +
           " for macOS 26 or later. Prefer the terminal? ";
         var cli = document.createElement("a");
-        cli.href = "#install";
+        cli.href = "install/";
         cli.textContent = "Install the CLI";
         hint.appendChild(cli);
       })

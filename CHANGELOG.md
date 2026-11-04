@@ -20,6 +20,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   star it to add it to the polled set; the first run prompts once for the
   Safe Storage item.
 
+### Changed
+
+- **The chapters rail's "+" opens New chapter in one click.** It was a menu behind a hover tip that swallowed the first click; New folder went with it since an empty File field already creates a folder.
+
+- **The New chapter suggestions drop below their field and wait for typing.** The floating list now hangs 4pt under the focused field (the earlier overlay drew it upward over the field), opens only after a 250ms pause on a non-empty field or on Down Arrow, and an empty field shows no list at all.
+
+- **The New chapter sheet no longer resizes as it suggests.** Its
+  folder/file autocomplete now floats under the focused field instead of
+  pushing the card taller, capped to the room between the field and the
+  card's bottom edge with the list scrolling beyond.
+
+- **The New chapter/folder sheet suggests what exists.** Typing in its
+  Folder or File field opens an inline list of matching folders and
+  chapters — ranked by closeness, the folder's own children first — plus
+  a "New ..." row when nothing takes the name, picked with arrows and
+  Return. An existing chapter opens straight into the editor.
+
+- **The Compile tab chooses what every harness compiles.** The AGENTS.md
+  page's new Compile tab turns the harness strip into a filter: All shows
+  every chapter and folder's include checkbox (on, off, and unlisted
+  index.txt states), and picking a harness toggles its only/except rules
+  in targets.json. The Order list drags index.txt order back and, in All
+  view, shows a chip per harness per chapter for one-click per-harness
+  receipt. View AGENTS.md opens the filtered output's own file.
+
+## [1.2.2] - 2026-11-04
+
+### Added
+
+- **A one-line installer for Linux.** `curl -fsSL
+  https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh`
+  downloads the released wheel (verified against the release's new
+  `SHA256SUMS` asset) and installs it with `uv` when it can, into a venv
+  under `~/.local/share/swe` when it can't, and bootstraps `uv` when
+  neither Python 3.11 nor `uv` is around, which covers Ubuntu 22.04's
+  Python 3.10. Passing `--hub` runs `swe remote setup --apply` so the web
+  app and phone remote come up in the same step. No sudo, nothing written
+  to shell rc files. Releases now attach the script and `SHA256SUMS`, and
+  CI runs the installer end to end in `ubuntu:22.04` and
+  `python:3.12-slim` containers.
+
+- **Instruction chapters can be pinned to harnesses.** An optional
+  `~/.swe/AGENTS_MD/targets.json` maps a chapter to `only` or `except`
+  lists of harness names, and a chapter can be switched off by commenting
+  its index.txt line out. `swe instructions build` compiles a differing
+  harness's chapters into `~/.swe/AGENTS.<name>.md`, repoints swe's
+  instruction symlinks (extra account homes included) and prunes retired
+  outputs; `check` and the `--json` surveys report the per-harness state,
+  and `swe init` links to a harness's own output once it exists.
+
+- **The landing site gets a dedicated install page.** `install/` puts
+  macOS and Linux behind a tab toggle: the Mac side carries the SWE.app
+  DMG download, wired to the latest release like the homepage buttons,
+  and the brew cask; the Linux side has the `install.sh` one-liner plus
+  its `--hub` variant for the web app and phone remote. Install buttons
+  across the site now open the page instead of scrolling to the
+  quickstart, which stays as the on-page summary.
+
+### Changed
+
+- **The AGENTS.md page edits chapters as an outline.** The Mac app's
+  chapter rail is now the `~/.swe/AGENTS_MD` folder as an indented tree —
+  folders group chapters and files not in index.txt read muted — with a
+  proper New chapter/New folder sheet instead of the alert. The compiled
+  AGENTS.md moved behind a View AGENTS.md button into a centre popup that
+  renders it as Markdown and jumps to a chapter on click. Reordering and
+  unlisting chapters move to the upcoming Compile tab, so they are
+  temporarily unavailable in the app; edit index.txt by hand meanwhile.
+
+- **The web chat keeps its newest 200 entries in the DOM.** A long
+  transcript, or a chat left open for hours, kept every entry it ever
+  drew, so layout, style recalculation and memory grew with it. Older
+  entries now leave the page for a "Show earlier" button at the top of
+  the log, which puts them back 200 at a time, still in order and with
+  their tool cards intact. On a 2,000-message transcript the log holds
+  982 element nodes instead of 9,800. The fold runs only when the log
+  is scrolled to its end, so a reader up in the history loses nothing
+  above them; the fold stops at a send still waiting or an
+  unanswered approval, so every entry keeps its place. `SessionChat.revealSeq(seq)` expands the history down to one
+  message before it scrolls there. Browser find-in-page sees only the
+  drawn entries. Closes [#1615](https://github.com/c-wenlong/swe/issues/1615).
+
+- **Search indexing reads only a Devin session's new nodes.** Both index
+  writers (the Mac app's `SearchDevin.swift` and swe's
+  `search_containers.py`) re-read a Devin session's whole chain each
+  time it grew, and the chain walk loaded every node's parent first:
+  1.0 to 2.3 s for each of the largest sessions on every 60 s reconcile.
+  A read now walks the chain node by node from the head and stops at the
+  `rowid` watermark the last commit left in the index's `meta` table
+  (`devin_chain:<path>`, written by either side). A growing session costs
+  about 1 ms; one whose head moved to a streamed copy or whose indexed
+  node was rewritten reads whole in 25 to 45 ms ([#1613](https://github.com/c-wenlong/swe/issues/1613)).
+
 ## [1.2.1] - 2026-11-04
 
 ### Fixed

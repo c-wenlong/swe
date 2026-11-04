@@ -176,3 +176,46 @@ jobs:
           # Coverage reporting is a nice-to-have. Codecov being unreachable
           # should not mark a run red when every test job passed.
           fail_ci_if_error: false
+
+  install-script:
+    # scripts/install.sh end to end in a container per distro shape.
+    # ubuntu:22.04 has no Python at all (the uv bootstrap path);
+    # python:3.12-slim has Python but no uv (the venv path).
+    name: install.sh (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:22.04
+            prep: apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates
+          - image: python:3.12-slim
+            prep: "true"
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Build the wheel
+        run: |
+          python -m pip install build
+          python -m build --wheel
+
+      - name: Install and smoke test in ${{ matrix.image }}
+        run: |
+          docker run --rm -v "$PWD:/s" -w /s ${{ matrix.image }} sh -c '
+            set -eu
+            ${{ matrix.prep }}
+            export HOME="$(mktemp -d)"
+            sh scripts/install.sh --wheel="dist/$(ls dist | grep .whl$)"
+            test_home="$(mktemp -d)"
+            HOME="$test_home" "$HOME/.local/bin/swe" --version
+            HOME="$test_home" "$HOME/.local/bin/swe" list
+          '
+
