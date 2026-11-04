@@ -112,6 +112,7 @@ class InitCheckJsonTest(unittest.TestCase):
         self.assertEqual(rows["claude"]["instructions"], {
             "path": str(self.home / ".claude" / "CLAUDE.md"),
             "state": "linked",
+            "target": str(self.home / ".swe" / "AGENTS.md"),
         })
         self.assertEqual(rows["claude"]["skills"], {
             "path": str(self.home / ".claude" / "skills"),
@@ -120,6 +121,7 @@ class InitCheckJsonTest(unittest.TestCase):
         self.assertEqual(rows["codex"]["instructions"], {
             "path": str(self.home / ".codex" / "AGENTS.md"),
             "state": "conflict",
+            "target": str(self.home / ".swe" / "AGENTS.md"),
         })
         self.assertEqual(rows["codex"]["skills"], {
             "path": str(self.home / ".codex" / "skills"),

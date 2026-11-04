@@ -98,6 +98,38 @@ class SwitchedOnTest(unittest.TestCase):
         codex = _acct(home, "codex", "codex-alt") / "AGENTS.md"
         self.assertEqual(os.readlink(codex), str(agents_file(home)))
 
+    def test_instructions_follow_the_vendors_compiled_output(self):
+        # A chapter only claude reads gives claude AGENTS.claude.md; a
+        # claude account's link follows it, codex's stays on the shared file.
+        home = _home(self)
+        directory = home / ".swe" / "AGENTS_MD"
+        directory.mkdir(parents=True)
+        (directory / "one.md").write_text("# Claude only\n")
+        (directory / "rest.md").write_text("# Everyone\n")
+        (directory / "index.txt").write_text("one.md\nrest.md\n")
+        (directory / "targets.json").write_text(json.dumps(
+            {"version": 1, "chapters": {"one.md": {"only": ["claude"]}}}))
+        from swe.instructions.compiler import build
+
+        build(home)
+        own = home / ".swe" / "AGENTS.claude.md"
+        self.assertTrue(own.is_file())
+
+        _profiles(home, WORK, CODEX)
+        _flags(home, instructions=True)
+        _sync(home)
+        self.assertEqual(os.readlink(_acct(home) / "CLAUDE.md"), str(own))
+        codex = _acct(home, "codex", "codex-alt") / "AGENTS.md"
+        self.assertEqual(os.readlink(codex), str(agents_file(home)))
+
+        # The rule gone: build removes the output and repoints the account.
+        (directory / "targets.json").write_text(
+            json.dumps({"version": 1, "chapters": {}}))
+        build(home)
+        self.assertFalse(own.exists())
+        self.assertEqual(os.readlink(_acct(home) / "CLAUDE.md"),
+                         str(agents_file(home)))
+
     def test_hooks_link_per_script_and_skip_disabled_ones(self):
         home = _home(self)
         _profiles(home, WORK)

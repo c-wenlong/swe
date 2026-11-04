@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from swe.instructions import compiler, watcher
 from swe.json_output import emit, take_json_flag
@@ -35,6 +36,12 @@ def cmd_instructions(args) -> int:
               "swe instructions check --json", file=sys.stderr)
         return 1
 
+    def display(path: str) -> str:
+        try:
+            return "~/" + str(Path(path).relative_to(Path.home()))
+        except ValueError:
+            return path
+
     def report(changed: bool) -> None:
         action = "Built" if changed else "Unchanged:"
         print(f"{action} ~/.swe/AGENTS.md", flush=True)
@@ -54,7 +61,8 @@ def cmd_instructions(args) -> int:
             emit(document)
             return 1 if document["error"] or document["stale"] else 0
         else:
-            changed = compiler.build(check=sub == "check")
+            built = compiler.build_run(check=sub == "check")
+            changed = built.changed
     except KeyboardInterrupt:
         if sub == "watch":
             print("Stopped watching instructions.")
@@ -71,12 +79,25 @@ def cmd_instructions(args) -> int:
         report(result["built"])
         return 0
     if sub == "build" and json_view:
-        return emit({"changed": changed})
+        return emit({
+            "changed": built.changed,
+            "outputs": built.outputs,
+            "relinked": [link for link, _ in built.relinked],
+            "removed": built.removed,
+            "notes": built.notes,
+        })
     if sub == "check":
         if changed:
-            print("Stale or missing: ~/.swe/AGENTS.md. Run swe instructions build.")
+            print(f"Stale or missing: {', '.join(display(p) for p in built.stale)}."
+                  " Run swe instructions build.")
             return 1
         print("Current: ~/.swe/AGENTS.md")
     else:
-        report(changed)
+        for output in built.outputs:
+            action = "Built" if output["changed"] else "Unchanged:"
+            print(f"{action} {display(output['path'])}", flush=True)
+        for link, target in built.relinked:
+            print(f"Relinked {display(link)} -> {display(target)}", flush=True)
+        for path in built.removed:
+            print(f"Removed {display(path)}", flush=True)
     return 0

@@ -244,6 +244,11 @@ def agents_file_for(home: Path | None = None) -> Path:
     return swe_dir_for(home) / AGENTS_BASENAME
 
 
+def harness_agents_file_for(home: Path | None, name: str) -> Path:
+    """A harness's own compiled instructions, ``~/.swe/AGENTS.<name>.md``."""
+    return swe_dir_for(home) / f"AGENTS.{name}.md"
+
+
 def instructions_dir_for(home: Path | None = None) -> Path:
     """Authored instruction chapters, compiled into the shared AGENTS.md."""
     return swe_dir_for(home) / INSTRUCTIONS_SUBDIR
@@ -252,6 +257,11 @@ def instructions_dir_for(home: Path | None = None) -> Path:
 def instructions_index_for(home: Path | None = None) -> Path:
     """Ordered chapter manifest for ``swe instructions build``."""
     return instructions_dir_for(home) / "index.txt"
+
+
+def instructions_targets_for(home: Path | None = None) -> Path:
+    """Optional per-chapter harness rules for ``swe instructions build``."""
+    return instructions_dir_for(home) / "targets.json"
 
 
 def linkignore_file_for(home: Path | None = None) -> Path:

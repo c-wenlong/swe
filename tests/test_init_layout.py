@@ -157,6 +157,39 @@ class InspectTest(unittest.TestCase):
             self.assertTrue(any(s.label == "claude" for s in instructions))
             self.assertTrue(any(s.label == "claude" for s in skills))
 
+    def test_plan_uses_the_harnesss_own_output_as_canonical(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _fake_home(tmp)
+            directory = home / ".swe" / "AGENTS_MD"
+            directory.mkdir(parents=True)
+            (directory / "one.md").write_text("# First\n")
+            (directory / "other.md").write_text("# Other\n")
+            (directory / "index.txt").write_text("one.md\nother.md\n")
+            (directory / "targets.json").write_text(json.dumps(
+                {"version": 1, "chapters": {"one.md": {"only": ["claude"]}}}))
+            claude_out = home / ".swe" / "AGENTS.claude.md"
+            shared = agents_file(home)
+
+            instructions, _ = plan(home)
+            claude = next(s for s in instructions if s.label == "claude")
+            # The per-harness output is not built yet: AGENTS.md stays canonical.
+            self.assertEqual(claude.source, shared)
+
+            (directory / "one.md").write_text("# First\n")
+            from swe.instructions import compiler
+
+            compiler.build(home)
+            (home / ".claude" / "CLAUDE.md").symlink_to(shared)
+            instructions, _ = plan(home)
+            claude = next(s for s in instructions if s.label == "claude")
+            self.assertEqual(claude.source, claude_out)
+            self.assertEqual(claude.state, "relink")
+            # An unnamed harness keeps the shared canonical and its link.
+            codex = next(s for s in instructions if s.label == "codex")
+            self.assertEqual(codex.source, shared)
+
 
 class CmdInitTest(unittest.TestCase):
     def _run(self, home: Path, args):

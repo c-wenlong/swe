@@ -51,7 +51,8 @@ half never mix:
 ```
 ~/.swe/
   AGENTS.md          canonical instructions, symlinked into every harness
-  AGENTS_MD/         optional authored chapters and their ordered index.txt
+  AGENTS.<name>.md   a harness's own compiled chapters (targets.json), if any
+  AGENTS_MD/         optional authored chapters, index.txt and targets.json
   .linkignore        paths `swe init` must leave alone
   skills/            the shared skill tree, symlinked into every skills root
   hooks/<harness>/   hook scripts, each file symlinked into that harness only
@@ -160,7 +161,10 @@ Every harness wants its own instruction filename (`CLAUDE.md`, `AGENTS.md`,
 each name, so editing one changes all of them.
 
 With chapter mode, `swe instructions build` generates that complete shared
-file from `~/.swe/AGENTS_MD/index.txt`. `check` detects stale output and
+file from `~/.swe/AGENTS_MD/index.txt`. An optional `targets.json` next to
+it pins chapters to harnesses: a named harness whose chapter set differs
+gets its own `AGENTS.<name>.md`, and build repoints links and prunes
+retired outputs. `check` detects stale output and
 `watch` keeps rebuilding after edits. Edit chapters in this mode: direct
 changes to the generated file are overwritten. See
 [docs/instructions.md](docs/instructions.md).

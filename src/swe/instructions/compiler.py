@@ -14,9 +14,11 @@ except ImportError:
     fcntl = None
 
 from swe.paths import (
-    agents_file_for, cache_dir_for, instructions_dir_for, instructions_index_for,
+    agents_file_for, cache_dir_for, harness_agents_file_for,
+    instructions_dir_for, instructions_index_for, instructions_targets_for,
     swe_dir_for,
 )
+from swe.instructions import targets as _targets
 
 
 class InstructionError(ValueError):
@@ -82,7 +84,45 @@ def _text(source: _Source) -> str:
         raise InstructionError(f"Instruction source is not UTF-8: {source.path}") from exc
 
 
-def _snapshot(home: Path | None) -> tuple[tuple[_Source, ...], bytes]:
+@dataclass(frozen=True)
+class _Output:
+    """One generated file: ``harness`` None is the shared AGENTS.md."""
+    harness: str | None
+    path: Path
+    data: bytes
+
+
+def _render(chapters: list[tuple[str, _Source]], harness: str | None) -> bytes:
+    parts = [GENERATED_MARKER + "\n"]
+    if harness is not None:
+        parts.append(f"<!-- Target: {harness} -->\n")
+    parts.append("\n")
+    for name, source in chapters:
+        parts.append(f"<!-- Source: AGENTS_MD/{name} -->\n")
+        text = _text(source)
+        parts.append(text)
+        if not text.endswith("\n"):
+            parts.append("\n")
+        parts.append("\n")
+    return ("".join(parts).rstrip("\n") + "\n").encode("utf-8")
+
+
+def _stale_outputs(home: Path | None, keep: set[str]) -> list[Path]:
+    """Generated ``AGENTS.<name>.md`` files whose harness no longer differs.
+
+    Only files carrying the generated marker count: anything else in the
+    hub is the user's and is never deleted, only reported as untouched.
+    """
+    stale = []
+    for name, path in _targets.harness_outputs(home).items():
+        if name not in keep and path.is_file() and _targets.generated(path):
+            stale.append(path)
+    return sorted(stale)
+
+
+def _snapshot(
+    home: Path | None,
+) -> tuple[tuple[_Source, ...], list[_Output], list[Path]]:
     directory = instructions_dir_for(home)
     root = directory.resolve(strict=True)
     hub = swe_dir_for(home).resolve()
@@ -91,7 +131,7 @@ def _snapshot(home: Path | None) -> tuple[tuple[_Source, ...], bytes]:
     index = _read(instructions_index_for(home), root)
     sources = [index]
     seen: set[Path] = set()
-    parts = [GENERATED_MARKER + "\n\n"]
+    chapters: list[tuple[str, _Source]] = []
     for number, line in enumerate(_text(index).splitlines(), 1):
         name = line.strip()
         if not name or name.startswith("#"):
@@ -106,15 +146,33 @@ def _snapshot(home: Path | None) -> tuple[tuple[_Source, ...], bytes]:
             raise InstructionError(f"Duplicate instruction chapter: {name}")
         seen.add(source.resolved)
         sources.append(source)
-        parts.append(f"<!-- Source: AGENTS_MD/{relative.as_posix()} -->\n")
-        text = _text(source)
-        parts.append(text)
-        if not text.endswith("\n"):
-            parts.append("\n")
-        parts.append("\n")
-    if len(sources) == 1:
+        chapters.append((relative.as_posix(), source))
+    if not chapters:
         raise InstructionError("AGENTS_MD/index.txt contains no instruction chapters")
-    return tuple(sources), ("".join(parts).rstrip("\n") + "\n").encode("utf-8")
+    rules: dict[str, dict[str, frozenset[str]]] = {}
+    targets_path = instructions_targets_for(home)
+    if targets_path.is_symlink() or targets_path.exists():
+        source = _read(targets_path, root)
+        sources.append(source)
+        try:
+            rules = _targets.parse(_text(source), targets_path)
+        except _targets.TargetsError as exc:
+            raise InstructionError(str(exc)) from exc
+    active = [name for name, _ in chapters]
+    resolved = _targets.resolve(rules, active)
+    by_name = dict(chapters)
+    outputs = [
+        _Output(None, agents_file_for(home),
+                _render([(n, by_name[n]) for n in resolved[None]], None))
+    ]
+    for harness, names in resolved.items():
+        if harness is None:
+            continue
+        outputs.append(_Output(
+            harness, harness_agents_file_for(home, harness),
+            _render([(n, by_name[n]) for n in names], harness)))
+    stale = _stale_outputs(home, {o.harness for o in outputs if o.harness})
+    return tuple(sources), outputs, stale
 
 
 def _unchanged(sources: tuple[_Source, ...], root: Path) -> bool:
@@ -132,7 +190,7 @@ def source_fingerprint(home: Path | None = None) -> bytes:
     digest = hashlib.sha256()
     try:
         require_supported_platform()
-        sources, _ = _snapshot(home)
+        sources, _, _ = _snapshot(home)
     except (InstructionError, OSError, RuntimeError, _SourcesChanged) as exc:
         digest.update(repr((type(exc).__name__, str(exc))).encode("utf-8"))
     else:
@@ -175,42 +233,66 @@ def _locked(home: Path | None):
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
-def _build(home: Path | None, check: bool, expected=_UNSET) -> bool:
-    output = agents_file_for(home)
+def _build(
+    home: Path | None, check: bool, expected=_UNSET,
+) -> tuple[bool, list[dict], list[Path]]:
+    """Compile every output. Returns (changed, per-output rows, stale files).
+
+    A row is ``{"harness", "path", "changed"}``; in check mode nothing is
+    written and ``stale`` paths (differing outputs plus retired generated
+    per-harness files) are still reported in the rows and the file list.
+    """
     for _ in range(3):
-        temporary: str | None = None
+        temporaries: list[str] = []
         try:
-            sources, data = _snapshot(home)
-            previous, mode = _output(output)
-            if expected is not _UNSET and previous != expected:
-                raise InstructionError(
-                    f"{output} changed while its chapters were being created; "
-                    "not overwriting it")
-            differs = previous is None or hashlib.sha256(previous).digest() != hashlib.sha256(data).digest()
-            if check or not differs:
+            sources, outputs, stale = _snapshot(home)
+            rows: list[dict] = []
+            writes: list[tuple[str | None, str, Path]] = []
+            for output in outputs:
+                previous, mode = _output(output.path)
+                if output.harness is None and expected is not _UNSET \
+                        and previous != expected:
+                    raise InstructionError(
+                        f"{output.path} changed while its chapters were being "
+                        "created; not overwriting it")
+                differs = previous is None or (
+                    hashlib.sha256(previous).digest()
+                    != hashlib.sha256(output.data).digest())
+                rows.append({"harness": output.harness, "path": str(output.path),
+                             "changed": bool(differs)})
+                if not differs or check:
+                    continue
+                descriptor, temporary = tempfile.mkstemp(
+                    dir=output.path.parent,
+                    prefix=f".{output.path.name}.", suffix=".tmp")
+                temporaries.append(temporary)
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(output.data)
+                    handle.flush()
+                    os.fchmod(handle.fileno(), mode)
+                    os.fsync(handle.fileno())
+                writes.append((output.harness, temporary, output.path))
+            if check or not (stale or writes):
                 if _unchanged(sources, instructions_dir_for(home).resolve()):
-                    return differs
+                    return bool(stale or writes
+                                or any(row["changed"] for row in rows)), rows, stale
                 continue
-            descriptor, temporary = tempfile.mkstemp(
-                dir=output.parent, prefix=".AGENTS.md.", suffix=".tmp")
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(data)
-                handle.flush()
-                os.fchmod(handle.fileno(), mode)
-                os.fsync(handle.fileno())
             if not _unchanged(sources, instructions_dir_for(home).resolve()):
                 continue
-            latest, _ = _output(output)  # Refuse aliases introduced while the sources were read.
-            if expected is not _UNSET and latest != expected:
-                raise InstructionError(
-                    f"{output} changed while its chapters were being created; "
-                    "not overwriting it")
-            os.replace(temporary, output)
-            return True
+            for harness, temporary, path in writes:
+                # Refuse aliases introduced while the sources were read.
+                latest, _ = _output(path)
+                if harness is None and expected is not _UNSET and latest != expected:
+                    raise InstructionError(
+                        f"{path} changed while its chapters were being created; "
+                        "not overwriting it")
+                os.replace(temporary, path)
+                temporaries.remove(temporary)
+            return True, rows, stale
         except _SourcesChanged:
             continue
         finally:
-            if temporary is not None:
+            for temporary in temporaries:
                 try:
                     os.unlink(temporary)
                 except FileNotFoundError:
@@ -218,25 +300,78 @@ def _build(home: Path | None, check: bool, expected=_UNSET) -> bool:
     raise InstructionError("Instruction sources kept changing; try the build again")
 
 
+@dataclass
+class BuildResult:
+    """What one build or check did, for ``swe instructions build --json``."""
+
+    changed: bool
+    outputs: list[dict]  # {"harness": str | None, "path": str, "changed": bool}
+    relinked: list[tuple[str, str]]  # (link path, new target)
+    removed: list[str]
+    notes: list[str]
+    # Check mode: the paths that would change (missing or differing outputs,
+    # plus retired generated AGENTS.<name>.md files).
+    stale: list[str]
+
+
+def _remove_stale(stale: list[Path]) -> tuple[list[str], list[str]]:
+    """Delete retired generated outputs; markerless files stay. (removed, notes)"""
+    removed, notes = [], []
+    for path in stale:
+        if not _targets.generated(path):
+            continue  # replaced by a real file between snapshot and now
+        try:
+            path.unlink()
+            removed.append(str(path))
+        except OSError as exc:
+            notes.append(f"could not remove stale output {path}: {exc}")
+    return removed, notes
+
+
+def build_run(
+    home: Path | None = None, *, check: bool = False, expected=_UNSET,
+) -> BuildResult:
+    """Compile all outputs and, on a real build, repoint and prune.
+
+    ``check`` compares every expected output and reports retired generated
+    ``AGENTS.<name>.md`` files without writing, relinking or removing
+    anything.
+    """
+    require_supported_platform()
+    try:
+        if check:
+            changed, rows, stale = _build(home, check=True)
+            return BuildResult(
+                changed=changed, outputs=rows, relinked=[], removed=[], notes=[],
+                stale=[row["path"] for row in rows if row["changed"]]
+                + [str(path) for path in stale])
+        with _locked(home):
+            changed, rows, stale = _build(home, check=False, expected=expected)
+            from swe.instructions import links
+            relinked, notes = links.relink(
+                home, {row["harness"]: Path(row["path"]) for row in rows})
+            removed, removal_notes = _remove_stale(stale)
+            return BuildResult(
+                changed=changed or bool(relinked) or bool(removed),
+                outputs=rows,
+                relinked=[(str(link), str(target)) for link, target in relinked],
+                removed=removed, notes=notes + removal_notes, stale=[])
+    except (OSError, RuntimeError) as exc:
+        raise InstructionError(f"Cannot compile instructions: {exc}") from exc
+
+
 def build(home: Path | None = None, *, check: bool = False, expected=_UNSET) -> bool:
-    """Return whether AGENTS.md differs, replacing it unless ``check`` is set.
+    """Return whether anything changed, replacing outputs unless ``check``.
 
     Writing builds serialize through a hub-local lock. Every source is reread before
     replacement; a source edited during compilation causes a fresh attempt.
     Identical output keeps its inode, timestamps and permissions unchanged.
 
-    ``expected`` pins the output's bytes (None pins its absence), for callers
-    that fold the file's current content into sources and must not overwrite a
-    save that landed meanwhile; the default is no expectation.
+    ``expected`` pins the shared output's bytes (None pins its absence), for
+    callers that fold the file's current content into sources and must not
+    overwrite a save that landed meanwhile; the default is no expectation.
     """
-    require_supported_platform()
-    try:
-        if check:
-            return _build(home, check=True)
-        with _locked(home):
-            return _build(home, check, expected)
-    except (OSError, RuntimeError) as exc:
-        raise InstructionError(f"Cannot compile instructions: {exc}") from exc
+    return build_run(home, check=check, expected=expected).changed
 
 
 def chapter_names(home: Path | None = None) -> list[str]:
@@ -282,6 +417,21 @@ def survey(home: Path | None = None) -> dict:
             stale = build(home, check=True)
         except InstructionError as exc:
             error = str(exc)
+    rules = _targets.load(home)
+    targets_path = instructions_targets_for(home)
+    resolved = _targets.resolve(rules, chapter_names(home))
+    outputs = []
+    for harness, names in resolved.items():
+        path = (agents_file_for(home) if harness is None
+                else harness_agents_file_for(home, harness))
+        outputs.append({"harness": harness, "path": str(path),
+                        "exists": path.is_file(), "chapters": names})
+
+    def rule_for(name: str) -> dict:
+        rule = rules.get(name) or {}
+        return {"only": sorted(rule["only"]) if "only" in rule else None,
+                "except": sorted(rule["except"]) if "except" in rule else None}
+
     return {
         "directory": str(directory),
         "index": str(index),
@@ -291,9 +441,13 @@ def survey(home: Path | None = None) -> dict:
         "output_generated": generated,
         "chapters": [
             {"name": name, "path": str(directory / name),
-             "exists": (directory / name).is_file()}
+             "exists": (directory / name).is_file(), **rule_for(name)}
             for name in chapter_names(home)
         ],
+        "targets": str(targets_path),
+        "targets_exists": os.path.lexists(targets_path),
+        "entries": _targets.index_entries(home),
+        "outputs": outputs,
         "error": error,
         "stale": stale,
     }

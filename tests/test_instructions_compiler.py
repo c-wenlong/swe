@@ -12,9 +12,10 @@ import unittest
 from unittest.mock import patch
 
 from swe.instructions import compiler
-from swe.instructions.compiler import InstructionError, build
+from swe.instructions.compiler import InstructionError, build, build_run
 from swe.paths import (
-    agents_file_for, cache_dir_for, instructions_dir_for, instructions_index_for,
+    agents_file_for, cache_dir_for, harness_agents_file_for,
+    instructions_dir_for, instructions_index_for, instructions_targets_for,
 )
 
 
@@ -311,6 +312,252 @@ raise SystemExit(main())
         with patch.object(compiler.os, "open", side_effect=deny_external):
             invalid = compiler.source_fingerprint(self.home)
         self.assertEqual(compiler.source_fingerprint(self.home), invalid)
+
+
+class HarnessTargetsTest(unittest.TestCase):
+    """Per-harness compilation driven by AGENTS_MD/targets.json."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.home = Path(self.temporary.name)
+        self.directory = instructions_dir_for(self.home)
+        self.directory.mkdir(parents=True)
+        self.index = instructions_index_for(self.home)
+        self.output = agents_file_for(self.home)
+        self.targets = instructions_targets_for(self.home)
+        self.index.write_text("one.md\nparts/two.md\n")
+        (self.directory / "parts").mkdir()
+        (self.directory / "one.md").write_text("# First\n")
+        (self.directory / "parts/two.md").write_text("# Second\n")
+
+    def write_targets(self, chapters: dict) -> None:
+        import json
+
+        self.targets.write_text(
+            json.dumps({"version": 1, "chapters": chapters}))
+
+    def test_no_targets_file_keeps_identical_output_bytes(self):
+        self.assertTrue(build(self.home))
+        content = self.output.read_text()
+        self.assertTrue(content.startswith(compiler.GENERATED_MARKER + "\n\n"))
+        self.assertIn("# First", content)
+        self.assertIn("# Second", content)
+        self.assertNotIn("Target:", content)
+        self.assertEqual(
+            list(self.home.glob(".swe/AGENTS.*.md")), [])
+
+    def test_only_gives_the_named_harness_its_own_output(self):
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        self.assertTrue(build(self.home))
+        shared = self.output.read_text()
+        self.assertNotIn("# First", shared)
+        self.assertIn("# Second", shared)
+        claude = harness_agents_file_for(self.home, "claude")
+        lines = claude.read_text().splitlines()
+        self.assertEqual(lines[0], compiler.GENERATED_MARKER)
+        self.assertEqual(lines[1], "<!-- Target: claude -->")
+        self.assertEqual(lines[2], "")
+        content = claude.read_text()
+        self.assertIn("# First", content)
+        self.assertIn("# Second", content)
+        self.assertLess(content.index("# First"), content.index("# Second"))
+
+    def test_except_drops_the_chapter_from_the_named_harness(self):
+        self.write_targets({"parts/two.md": {"except": ["codex"]}})
+        build(self.home)
+        self.assertIn("# Second", self.output.read_text())
+        codex = harness_agents_file_for(self.home, "codex").read_text()
+        self.assertIn("# First", codex)
+        self.assertNotIn("# Second", codex)
+
+    def test_named_harness_matching_the_default_gets_no_file(self):
+        # codex is named, but only on a chapter that is not active.
+        self.write_targets({"gone.md": {"except": ["codex"]},
+                            "one.md": {"only": ["claude"]}})
+        build(self.home)
+        self.assertFalse(harness_agents_file_for(self.home, "codex").exists())
+        self.assertTrue(harness_agents_file_for(self.home, "claude").exists())
+
+    def test_invalid_targets_fail_and_preserve_outputs(self):
+        self.output.write_text("last good")
+        cases = [
+            "{nope", "[]", '{"version": 2, "chapters": {}}',
+            '{"version": 1, "chapters": []}',
+            '{"version": 1, "chapters": {"one.md": {"only": "claude"}}}',
+            '{"version": 1, "chapters": {"one.md": {"only": ["claude"], "except": []}}}',
+            '{"version": 1, "chapters": {"one.md": {"only": ["Bad Name"]}}}',
+            '{"version": 1, "chapters": {"one.md": {"only": ["claude"], "typo": 1}}}',
+            '{"version": 1, "chapters": {"one.md": {}}}',
+        ]
+        for body in cases:
+            with self.subTest(body=body):
+                self.targets.write_text(body)
+                with self.assertRaisesRegex(InstructionError, "targets.json"):
+                    build(self.home)
+                self.assertEqual(self.output.read_text(), "last good")
+        self.targets.unlink()
+        self.assertTrue(build(self.home))
+        self.assertIn("# First", self.output.read_text())
+
+    def test_check_reports_a_missing_per_harness_output_without_writing(self):
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        build(self.home)
+        self.assertFalse(build(self.home, check=True))
+        harness_agents_file_for(self.home, "claude").unlink()
+        result = build_run(self.home, check=True)
+        self.assertTrue(result.changed)
+        self.assertEqual(result.stale,
+                         [str(harness_agents_file_for(self.home, "claude"))])
+        self.assertFalse(harness_agents_file_for(self.home, "claude").exists())
+
+    def test_rule_removal_repoints_links_and_deletes_the_stale_output(self):
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        (self.home / ".claude").mkdir()
+        link = self.home / ".claude" / "CLAUDE.md"
+        link.symlink_to(self.output)
+        build(self.home)
+        claude = harness_agents_file_for(self.home, "claude")
+        self.assertEqual(link.resolve(), claude.resolve())
+
+        self.write_targets({})
+        result = build_run(self.home)
+        self.assertFalse(claude.exists())
+        self.assertIn(str(claude), result.removed)
+        self.assertEqual(link.resolve(), self.output.resolve())
+        self.assertIn((str(link), str(self.output)), result.relinked)
+        # A markerless lookalike is never removed.
+        markerless = self.home / ".swe" / "AGENTS.foo.md"
+        markerless.write_text("user file\n")
+        build(self.home)
+        self.assertEqual(markerless.read_text(), "user file\n")
+
+    def test_relink_leaves_other_links_and_real_files_alone(self):
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        (self.home / ".claude").mkdir()
+        claude_link = self.home / ".claude" / "CLAUDE.md"
+        claude_link.symlink_to(self.output)
+        elsewhere = self.home / "elsewhere.md"
+        elsewhere.write_text("other\n")
+        alien = self.home / ".claude" / "alien.md"
+        alien.symlink_to(elsewhere)
+        real = self.home / ".claude" / "real.md"
+        real.write_text("real\n")
+        result = build_run(self.home)
+        self.assertEqual((str(claude_link),
+                          str(harness_agents_file_for(self.home, "claude"))),
+                         result.relinked[0])
+        self.assertEqual(os.readlink(alien), str(elsewhere))
+        self.assertEqual(real.read_text(), "real\n")
+        # A harness named in no rule keeps pointing at the shared output.
+        (self.home / ".codex").mkdir()
+        codex_link = self.home / ".codex" / "AGENTS.md"
+        codex_link.symlink_to(self.output)
+        build(self.home)
+        self.assertEqual(codex_link.resolve(), self.output.resolve())
+
+    def test_relink_skips_ignored_and_uninstalled_targets(self):
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        ignored = self.home / ".claude" / "CLAUDE.md"
+        (self.home / ".claude").mkdir()
+        ignored.symlink_to(self.output)
+        (self.home / ".swe" / ".linkignore").write_text(".claude\n")
+        build(self.home)
+        self.assertEqual(ignored.resolve(), self.output.resolve())
+        # A link for a harness with no signature target is never created.
+        self.assertFalse((self.home / ".codex").exists())
+
+    def test_a_chain_into_an_output_is_left_for_its_owner(self):
+        # Home Manager links CLAUDE.md to a nix-store entry that itself
+        # links back to AGENTS.md: the first hop is not swe's, so the link
+        # stays untouched and a note says where to aim the middle link.
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        generation = self.home / "nix" / "generation"
+        generation.parent.mkdir()
+        (self.home / ".claude").mkdir()
+        link = self.home / ".claude" / "CLAUDE.md"
+        generation.symlink_to(self.output)
+        link.symlink_to(generation)
+        result = build_run(self.home)
+        self.assertEqual(os.readlink(link), str(generation))
+        self.assertEqual(result.relinked, [])
+        self.assertTrue(any("through another link" in n for n in result.notes))
+        self.assertTrue(any("AGENTS.claude.md" in n for n in result.notes))
+
+    def test_a_symlinked_hub_root_still_relinks(self):
+        # ~/.swe itself a link elsewhere: the hop key resolves the parent,
+        # so a link into it is still recognised as swe's own.
+        real_swe = self.home / "real-swe"
+        real_swe.mkdir()
+        (self.home / ".swe").rename(real_swe)
+        (self.home / ".swe").symlink_to(real_swe)
+        (self.home / ".claude").mkdir()
+        link = self.home / ".claude" / "CLAUDE.md"
+        link.symlink_to(agents_file_for(self.home))
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        result = build_run(self.home)
+        claude = harness_agents_file_for(self.home, "claude")
+        self.assertEqual(os.readlink(link), str(claude))
+        self.assertIn((str(link), str(claude)), result.relinked)
+
+    def test_unreadable_linkignore_skips_relinking_with_a_note(self):
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        (self.home / ".claude").mkdir()
+        link = self.home / ".claude" / "CLAUDE.md"
+        link.symlink_to(self.output)
+        (self.home / ".swe" / ".linkignore").mkdir()  # a directory: unreadable
+        result = build_run(self.home)
+        self.assertTrue(result.notes)
+        self.assertEqual(link.resolve(), self.output.resolve())
+
+    def test_survey_reports_entries_outputs_and_chapter_rules(self):
+        self.index.write_text("one.md\n# off.md\nparts/two.md\n# note.txt\n")
+        (self.directory / "off.md").write_text("# Off\n")
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        build(self.home)
+        doc = compiler.survey(self.home)
+        self.assertEqual(doc["targets"], str(self.targets))
+        self.assertTrue(doc["targets_exists"])
+        self.assertEqual(doc["entries"], [
+            {"name": "one.md", "enabled": True},
+            {"name": "off.md", "enabled": False},
+            {"name": "parts/two.md", "enabled": True},
+        ])
+        by_name = {c["name"]: c for c in doc["chapters"]}
+        self.assertEqual(by_name["one.md"]["only"], ["claude"])
+        self.assertIsNone(by_name["one.md"]["except"])
+        self.assertEqual(by_name["parts/two.md"]["only"], None)
+        self.assertEqual(doc["outputs"][0]["harness"], None)
+        self.assertEqual(doc["outputs"][0]["chapters"], ["parts/two.md"])
+        self.assertEqual(doc["outputs"][1]["harness"], "claude")
+        self.assertEqual(doc["outputs"][1]["chapters"],
+                         ["one.md", "parts/two.md"])
+        self.assertTrue(all(o["exists"] for o in doc["outputs"]))
+        # A comment naming no real chapter stays a plain comment.
+        self.index.write_text("one.md\n# notes.txt\n# not-real.md\n")
+        self.assertEqual([e["name"] for e in compiler.survey(self.home)["entries"]],
+                         ["one.md"])
+
+    def test_survey_stale_covers_per_harness_outputs(self):
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        doc = compiler.survey(self.home)
+        self.assertTrue(doc["stale"])
+        build(self.home)
+        self.assertFalse(compiler.survey(self.home)["stale"])
+        # A retired generated output is stale even when AGENTS.md is current.
+        ghost = self.home / ".swe" / "AGENTS.ghost.md"
+        ghost.write_text(compiler.GENERATED_MARKER + "\n")
+        self.assertTrue(compiler.survey(self.home)["stale"])
+
+    def test_invalid_targets_survey_carries_the_error(self):
+        self.targets.write_text("{nope")
+        doc = compiler.survey(self.home)
+        self.assertIn("targets.json", doc["error"])
+
+    def test_targets_file_changes_the_source_fingerprint(self):
+        before = compiler.source_fingerprint(self.home)
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        self.assertNotEqual(compiler.source_fingerprint(self.home), before)
 
 
 if __name__ == "__main__":

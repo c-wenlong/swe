@@ -220,8 +220,12 @@ def _targets(primitive: str, acct: AccountHome, registry: dict,
     """(destination, source) pairs for one primitive in one account home."""
     vendor = acct.vendor
     if primitive == "instructions":
+        # An account follows its vendor's output: a claude account reads
+        # claude's compiled file when targets.json gives it one.
+        from swe.instructions.targets import canonical_output
+
         rel = _instruction_rel(vendor, registry, home)
-        return [(acct.path / rel, agents_file(home))] if rel else []
+        return [(acct.path / rel, canonical_output(home, vendor))] if rel else []
     if primitive == "skills":
         rel = _skills_rel(vendor, registry, home)
         return [(acct.path / rel, skills_dir(home))] if rel else []
@@ -253,7 +257,14 @@ def _nearest_existing(path: Path) -> Path:
 
 
 def _shared_roots(home: Path) -> tuple[Path, ...]:
-    return (agents_file(home), skills_dir(home), hooks_dir(home))
+    roots: list[Path] = [agents_file(home), skills_dir(home), hooks_dir(home)]
+    try:
+        # Per-harness compiled outputs are swe's own too: a link from an
+        # older build pointing at AGENTS.<name>.md may be re-pointed.
+        roots += list(_paths.swe_dir_for(home).glob("AGENTS.*.md"))
+    except OSError:
+        pass
+    return tuple(roots)
 
 
 def _points_into_shared(dest: Path, home: Path) -> bool:
