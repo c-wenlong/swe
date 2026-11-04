@@ -6339,6 +6339,15 @@ class MuseFetcherTest(unittest.TestCase):
             {"usage": {"percent_used": 10, "resets_at": 1}})
         self.assertEqual(info.plan_type, "—")
 
+    def test_parse_ignores_a_bad_reset(self):
+        # A non-finite or wrongly typed resets_at must never reach the
+        # countdown arithmetic (int(inf // 86400) raises OverflowError).
+        for resets_at in (float("inf"), 1e309, float("nan"), -1e309,
+                          True, "next week"):
+            info = self.rl._parse_muse_subscription(
+                self._reply(resets_at=resets_at))
+            self.assertEqual(info.reset_at, 0.0, resets_at)
+
     # -- the cookie decrypt ----------------------------------------------
 
     def test_chromium_cookie_value_round_trip(self):
@@ -6423,6 +6432,18 @@ class MuseFetcherTest(unittest.TestCase):
             with patch.object(self.rl, "_fetch_text", return_value=body):
                 self.assertIsNone(self.rl._muse_access_token("cookie"))
 
+    def test_tokenless_page_marks_the_session_stale(self):
+        self.rl._muse_stale_session = False
+        with patch.object(self.rl, "_fetch_text",
+                          return_value="<html>no token here</html>"):
+            self.assertIsNone(self.rl._muse_access_token("cookie"))
+        self.assertTrue(self.rl._muse_stale_session)
+        self.rl._muse_stale_session = False
+        # An empty reply is a fetch failure, not a stale login.
+        with patch.object(self.rl, "_fetch_text", return_value=None):
+            self.assertIsNone(self.rl._muse_access_token("cookie"))
+        self.assertFalse(self.rl._muse_stale_session)
+
     # -- the whole chain ---------------------------------------------------
 
     def test_fetch_muse_chain(self):
@@ -6463,6 +6484,13 @@ class MuseFetcherTest(unittest.TestCase):
                  patch.object(self.rl, "_fetch_json", return_value=reply):
                 self.assertIsNone(self.rl._fetch_muse())
 
+    def test_fetch_muse_resets_the_stale_flag(self):
+        self.rl._muse_stale_session = True
+        with patch.object(self.rl, "_muse_session_cookies",
+                          return_value=[]):
+            self.assertIsNone(self.rl._fetch_muse())
+        self.assertFalse(self.rl._muse_stale_session)
+
     # -- the diagnosis ----------------------------------------------------
 
     def test_diagnose_muse(self):
@@ -6475,8 +6503,31 @@ class MuseFetcherTest(unittest.TestCase):
                              remedies.PERMISSION_REQUIRED)
         with patch.object(self.rl, "_muse_signed_in", return_value=True), \
              patch.object(self.rl, "_dia_safe_storage_key",
-                          return_value=self._KEY):
+                          return_value=self._KEY), \
+             patch.object(self.rl, "_muse_stale_session", True):
+            self.assertEqual(self.rl._diagnose_muse(),
+                             remedies.AUTH_REQUIRED)
+        with patch.object(self.rl, "_muse_signed_in", return_value=True), \
+             patch.object(self.rl, "_dia_safe_storage_key",
+                          return_value=self._KEY), \
+             patch.object(self.rl, "_muse_stale_session", False):
             self.assertEqual(self.rl._diagnose_muse(), remedies.OK)
+
+    def test_refresh_clears_the_safe_storage_backoff(self):
+        """A refused keychain prompt backs off for hours; an explicit
+        refresh deletes the backoff so the dialog can come back."""
+        files = [self.tmp / "cursor_backoff", self.tmp / "dia_backoff"]
+        for f in files:
+            f.write_text("x")
+        with patch.object(self.rl, "_cursor_safe_storage_backoff_file",
+                          return_value=files[0]), \
+             patch.object(self.rl, "_dia_safe_storage_backoff_file",
+                          return_value=files[1]), \
+             patch.object(self.rl, "RATE_LIMITS_CACHE_FILE",
+                          self.tmp / "rate_limits_cache.json"):
+            self.rl.get_all_rate_limits(use_cache=False, tool_names=set())
+        for f in files:
+            self.assertFalse(f.exists())
 
 
 if __name__ == "__main__":

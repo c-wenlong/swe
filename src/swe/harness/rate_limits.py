@@ -3272,6 +3272,11 @@ _DIA_SAFE_STORAGE_SERVICE = "Dia Safe Storage"
 # the one keychain read).
 _dia_safe_storage_key_cache: bytes | None = None
 
+# Set when a fetched muse.ai page rendered without the embedded bearer —
+# the stored cookie was refused server-side, so the fix is signing back
+# in, not retrying. Read by ``_diagnose_muse``.
+_muse_stale_session = False
+
 
 def _dia_safe_storage_backoff_file():
     return RATE_LIMITS_CACHE_FILE.with_name("dia_safe_storage_backoff")
@@ -3397,7 +3402,11 @@ def _muse_access_token(cookie: str) -> str | None:
     if not body:
         return None
     match = _MUSE_ACCESS_TOKEN_RE.search(body)
-    return match.group(1) if match else None
+    if match:
+        return match.group(1)
+    global _muse_stale_session
+    _muse_stale_session = True
+    return None
 
 
 def _parse_muse_subscription(data: dict) -> RateLimitInfo | None:
@@ -3412,8 +3421,15 @@ def _parse_muse_subscription(data: dict) -> RateLimitInfo | None:
         return None
     if not math.isfinite(used) or used < 0:
         return None
-    reset_at = usage.get("resets_at")
-    reset_at = float(reset_at) if isinstance(reset_at, (int, float)) else 0.0
+    reset_raw = usage.get("resets_at")
+    reset_at = 0.0
+    if isinstance(reset_raw, (int, float)) and not isinstance(reset_raw, bool):
+        try:
+            reset_at = float(reset_raw)
+        except (TypeError, ValueError, OverflowError):
+            pass
+    if not math.isfinite(reset_at):
+        reset_at = 0.0
     quota_status = str(usage.get("quota_status") or "").upper()
     tier = data.get("tier")
     name = tier.get("name") if isinstance(tier, dict) else None
@@ -3434,6 +3450,8 @@ def _parse_muse_subscription(data: dict) -> RateLimitInfo | None:
 
 def _fetch_muse() -> RateLimitInfo | None:
     """Muse's weekly allowance, through the browser session the app shares."""
+    global _muse_stale_session
+    _muse_stale_session = False
     for cookie in _muse_session_cookies():
         token = _muse_access_token(cookie)
         if token is None:
@@ -3461,6 +3479,8 @@ def _diagnose_muse() -> str | None:
         return remedies.SIGNED_OUT
     if _dia_safe_storage_key() is None:
         return remedies.PERMISSION_REQUIRED
+    if _muse_stale_session:
+        return remedies.AUTH_REQUIRED
     return remedies.OK
 
 
@@ -3843,6 +3863,17 @@ def get_all_rate_limits(
                 if name not in result:
                     issues[name] = status
         return result
+
+    # An explicit refresh is also the recovery path for a refused or
+    # unanswered keychain prompt: the Safe Storage backoff would otherwise
+    # hold the access dialog off for hours after the user clicked Allow.
+    if refresh_failed or not use_cache:
+        for backoff in (_cursor_safe_storage_backoff_file(),
+                        _dia_safe_storage_backoff_file()):
+            try:
+                backoff.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     requested = None if tool_names is None else set(tool_names)
     fetchers = [
