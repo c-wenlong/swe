@@ -346,16 +346,16 @@ import Testing
         } else { Issue.record("expected an index write") }
     }
 
-    @Test func harnessToggleAddsAndRemovesReceipt() {
+    @Test func harnessToggleAddsAndRemovesReceipt() throws {
         // on with no rule -> except [h] narrows (rule write only)
-        var writes = CompileToggle.harness(
+        var writes = try try CompileToggle.harness(
             "claude", want: false, index: "a.md\n", rules: [:],
             state: .on, name: "a.md", folder: "")
         if case .targets(let t) = writes.first {
             #expect(t.contains(#""a.md": { "except": ["claude"] }"#))
         } else { Issue.record("expected a targets write") }
         // off + want -> only [h] written first, then the enable
-        writes = CompileToggle.harness(
+        writes = try try CompileToggle.harness(
             "claude", want: true, index: "# a.md\n", rules: [:],
             state: .off, name: "a.md", folder: "")
         #expect(writes.count == 2)
@@ -365,13 +365,13 @@ import Testing
         if case .index(let t) = writes[1] { #expect(t == "a.md\n") }
         else { Issue.record("enable after the rule") }
         // unlisted + want -> only [h] then an insert
-        writes = CompileToggle.harness(
+        writes = try try CompileToggle.harness(
             "codex", want: true, index: "a.md\n", rules: [:],
             state: .unlisted, name: "x.md", folder: "")
         if case .index(let t) = writes[1] { #expect(t == "a.md\nx.md\n") }
         else { Issue.record("insert after the rule") }
         // on + only -> removing the last name disables the line first
-        writes = CompileToggle.harness(
+        writes = try try CompileToggle.harness(
             "claude", want: false, index: "a.md\n",
             rules: ["a.md": ["only": ["claude"]]],
             state: .on, name: "a.md", folder: "")
@@ -382,7 +382,7 @@ import Testing
             #expect(!t.contains("\"a.md\""))
         } else { Issue.record("rule dropped after") }
         // on + only -> adding a name widens the rule
-        writes = CompileToggle.harness(
+        writes = try try CompileToggle.harness(
             "codex", want: true, index: "a.md\n",
             rules: ["a.md": ["only": ["claude"]]],
             state: .on, name: "a.md", folder: "")
@@ -390,7 +390,7 @@ import Testing
             #expect(t.contains(#""only": ["claude", "codex"]"#))
         } else { Issue.record("only widens") }
         // on + except -> removing the harness drops an emptied rule
-        writes = CompileToggle.harness(
+        writes = try try CompileToggle.harness(
             "codex", want: true, index: "a.md\n",
             rules: ["a.md": ["except": ["codex"]]],
             state: .on, name: "a.md", folder: "")
@@ -398,29 +398,29 @@ import Testing
             #expect(!t.contains("\"a.md\""))
         } else { Issue.record("emptied except is dropped") }
         // already-received want and already-skipped exclusion are no-ops
-        #expect(CompileToggle.harness(
+        #expect(try CompileToggle.harness(
             "claude", want: true, index: "a.md\n", rules: [:],
             state: .on, name: "a.md", folder: "") == [])
-        #expect(CompileToggle.harness(
+        #expect(try CompileToggle.harness(
             "claude", want: false, index: "a.md\n",
             rules: ["a.md": ["except": ["claude"]]],
             state: .on, name: "a.md", folder: "") == [])
     }
 
-    @Test func folderToggleBatchesEveryFile() {
+    @Test func folderToggleBatchesEveryFile() throws {
         // Any off -> all on; all on -> all off.
         let members: [(String, CompileState, [String: [String]]?)] = [
             ("a.md", .off, nil),
             ("b.md", .on, nil),
             ("c.md", .unlisted, nil),
         ]
-        let onWrites = CompileToggle.folder(
+        let onWrites = try CompileToggle.folder(
             on: true, harness: nil, index: "# a.md\nb.md\n",
             rules: [:], members: members)
         if case .index(let t) = onWrites.first {
             #expect(t == "a.md\nb.md\nc.md\n")
         } else { Issue.record("folder on writes the index once") }
-        let offWrites = CompileToggle.folder(
+        let offWrites = try CompileToggle.folder(
             on: false, harness: nil, index: "a.md\nb.md\nc.md\n",
             rules: [:], members: [
                 ("a.md", .on, nil), ("b.md", .on, nil), ("c.md", .on, nil)])
@@ -428,7 +428,7 @@ import Testing
             #expect(t == "# a.md\n# b.md\n# c.md\n")
         } else { Issue.record("folder off writes the index once") }
         // Harness filter: one index write plus one targets write.
-        let hWrites = CompileToggle.folder(
+        let hWrites = try CompileToggle.folder(
             on: false, harness: "claude", index: "a.md\n", rules: [:],
             members: [("a.md", .on, nil)])
         #expect(hWrites.count == 1)
@@ -437,9 +437,9 @@ import Testing
         } else { Issue.record("folder harness write") }
     }
 
-    @Test func folderHarnessWriteOrderNarrowsFirst() {
+    @Test func folderHarnessWriteOrderNarrowsFirst() throws {
         // Narrowing batch: index disables land before the rule writes.
-        let off = CompileToggle.folder(
+        let off = try CompileToggle.folder(
             on: false, harness: "claude", index: "a.md\n",
             rules: ["a.md": ["only": ["claude"]]],
             members: [("a.md", .on, ["only": ["claude"]])])
@@ -448,7 +448,7 @@ import Testing
             Issue.record("narrowing must write index before targets")
         }
         // Widening batch: the rule lands before the enables.
-        let on = CompileToggle.folder(
+        let on = try CompileToggle.folder(
             on: true, harness: "claude", index: "# a.md\n", rules: [:],
             members: [("a.md", .off, nil)])
         #expect(on.count == 2)
@@ -464,8 +464,7 @@ import Testing
         // must wait for it rather than write over unread text.
         let model = try await model(dir, runner: runner)
         let problem = await model.setIncluded(
-            name: "a.md", state: .on, on: false,
-            swe: SweClient(runner: runner))
+            name: "a.md", on: false, swe: SweClient(runner: runner))
         let text = try String(contentsOf: dir.path("index.txt"), encoding: .utf8)
         if problem == nil {
             #expect(text.contains("# a.md"))
@@ -495,10 +494,10 @@ import Testing
         let runner = Runner([check(dir.url), check(dir.url), check(dir.url)])
         let model = try await model(dir, runner: runner)
         async let a = model.setReceipt(
-            name: "a.md", state: .on, rule: nil,
+            name: "a.md",
             harness: "claude", want: false, swe: SweClient(runner: runner))
         async let b = model.setReceipt(
-            name: "b.md", state: .on, rule: nil,
+            name: "b.md",
             harness: "codex", want: false, swe: SweClient(runner: runner))
         let (pa, pb) = await (a, b)
         #expect(pa == nil && pb == nil)
@@ -516,7 +515,7 @@ import Testing
         let model = try await model(dir, runner: runner)
         // A toggle awaits the doc first, so the refusal is deterministic.
         #expect(await model.setReceipt(
-            name: "a.md", state: .on, rule: nil,
+            name: "a.md",
             harness: "claude", want: false,
             swe: SweClient(runner: runner)) != nil)
         #expect(model.targetsParseProblem != nil)
@@ -528,9 +527,50 @@ import Testing
         await model.checkDisk()
         #expect(model.targetsParseProblem == nil)
         let problem = await model.setReceipt(
-            name: "a.md", state: .on, rule: nil,
+            name: "a.md",
             harness: "claude", want: false, swe: SweClient(runner: runner))
         #expect(problem == nil)
+    }
+
+    @Test func normalizeMatchesPurePosixPath() {
+        #expect(ChapterIndex.normalize("./a.md") == "a.md")
+        #expect(ChapterIndex.normalize("a//b.md") == "a/b.md")
+        #expect(ChapterIndex.normalize("a/./b.md") == "a/b.md")
+        #expect(ChapterIndex.normalize("/a.md") == "/a.md")
+        #expect(ChapterIndex.normalize("//a.md") == "//a.md")
+        #expect(ChapterIndex.normalize("../a.md") == "../a.md")
+        #expect(ChapterIndex.disabling("a.md\n./b.md\n", name: "b.md")
+                == "a.md\n# b.md\n")
+    }
+
+    @Test func queuedIncludesForOneFileListItOnce() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url), check(dir.url), check(dir.url)])
+        try dir.write("new.md", "# New\n")
+        let model = try await model(dir, runner: runner)
+        // Two queued includes for the same unlisted file — a folder batch
+        // and a single toggle — leave exactly one index line.
+        async let folder = model.setFolder(
+            "", on: true, harness: nil, swe: SweClient(runner: runner))
+        async let single = model.setIncluded(
+            name: "new.md", on: true, swe: SweClient(runner: runner))
+        _ = await (folder, single)
+        let text = try String(contentsOf: dir.path("index.txt"), encoding: .utf8)
+        #expect(text.components(separatedBy: "new.md").count - 1 == 1)
+    }
+
+    @Test func theLastChapterIsNeverSwitchedOff() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        try dir.write("a.md", "# A\n")
+        try dir.write("index.txt", "a.md\n")
+        let model = ChaptersModel()
+        await model.load(swe: SweClient(runner: runner))
+        let problem = await model.setIncluded(
+            name: "a.md", on: false, swe: SweClient(runner: runner))
+        #expect(problem == "AGENTS.md needs at least one chapter; include another first.")
+        #expect(try String(contentsOf: dir.path("index.txt"),
+                         encoding: .utf8) == "a.md\n")
     }
 
     @Test func aToggleHitByADiskChangeReloadsAndReports() async throws {
@@ -543,8 +583,7 @@ import Testing
                                atomically: true, encoding: .utf8)
         await model.checkDisk()
         let problem = await model.setIncluded(
-            name: "a.md", state: .on, on: false,
-            swe: SweClient(runner: runner))
+            name: "a.md", on: false, swe: SweClient(runner: runner))
         #expect(problem == "The chapter files changed on disk; try again.")
         // The refused edit is dropped, not left dirty on the document.
         let text = try String(contentsOf: dir.path("index.txt"), encoding: .utf8)

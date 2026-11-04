@@ -31,11 +31,13 @@ struct AgentsMdPage: View {
                                (Scope.project, "Project")],
                      selection: $scope, style: .underline)
                 Spacer(minLength: 8)
-                if scope == .edit && app.chapters.chapterMode { ViewCompiledButton() }
+                if scope == .edit && app.chapters.chapterMode {
+                    ViewCompiledButton(onOpenChapter: { _ in scope = .edit })
+                }
             }
             switch scope {
             case .edit: GlobalInstructions()
-            case .compile: CompileInstructions()
+            case .compile: CompileInstructions(onOpenChapter: { _ in scope = .edit })
             case .project: ProjectInstructions()
             }
         }
@@ -96,6 +98,7 @@ private struct GlobalInstructions: View {
 /// The Compile tab: which chapters and which harnesses compile into what,
 /// plus the compiled order. Resolves the same report and check Edit uses.
 private struct CompileInstructions: View {
+    var onOpenChapter: ((String) -> Void)? = nil
     @Environment(AppModel.self) private var app
 
     var body: some View {
@@ -109,7 +112,8 @@ private struct CompileInstructions: View {
         case .loaded(let report):
             switch chapters.status {
             case .loaded(let check) where check.indexExists:
-                CompileView(check: check, report: report)
+                CompileView(check: check, report: report,
+                            onOpenChapter: onOpenChapter)
             case .idle, .loading:
                 SkeletonRows(rows: 8, shape: .file, label: "Reading chapters…")
             default:
@@ -128,6 +132,7 @@ private struct CompileInstructions: View {
 private struct CompileView: View {
     var check: InstructionsCheck
     var report: InitCheck
+    var onOpenChapter: ((String) -> Void)? = nil
 
     @Environment(AppModel.self) private var app
     /// nil or "" means the All-harnesses view; otherwise a registry name.
@@ -256,7 +261,8 @@ private struct CompileView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                ViewCompiledButton(outputPath: outputPath)
+                ViewCompiledButton(outputPath: outputPath,
+                                   onOpenChapter: onOpenChapter)
                     .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
             }
         }
@@ -353,7 +359,7 @@ private struct CompileView: View {
                 TriBox(tri: .all) {
                     Task {
                         onError(await app.chapters.setIncluded(
-                            name: name, state: .on, on: false, swe: app.swe))
+                            name: name, on: false, swe: app.swe))
                     }
                 }
                 Text(name).font(Theme.nav)
@@ -521,18 +527,14 @@ private struct CompileView: View {
                 let problem: String?
                 if node.isFolder {
                     problem = await app.chapters.setFolder(
-                        node.path, on: on, harness: harness,
-                        members: files.map { ($0, state($0), rule($0)) },
-                        swe: app.swe)
+                        node.path, on: on, harness: harness, swe: app.swe)
                 } else if let harness {
                     problem = await app.chapters.setReceipt(
-                        name: node.path, state: state(node.path),
-                        rule: rule(node.path), harness: harness,
+                        name: node.path, harness: harness,
                         want: on, swe: app.swe)
                 } else {
                     problem = await app.chapters.setIncluded(
-                        name: node.path, state: state(node.path),
-                        on: on, swe: app.swe)
+                        name: node.path, on: on, swe: app.swe)
                 }
                 onError(problem)
             }
@@ -642,7 +644,7 @@ private struct CompileView: View {
             let want = !receives(name)
             Task {
                 onError(await app.chapters.setReceipt(
-                    name: chapter.name, state: .on, rule: rule(chapter.name),
+                    name: chapter.name,
                     harness: name, want: want, swe: app.swe))
             }
         }
@@ -1145,6 +1147,7 @@ private struct NewChapterSheet: View {
 private struct ViewCompiledButton: View {
     /// The output the button opens; nil is the shared AGENTS.md.
     var outputPath: String? = nil
+    var onOpenChapter: ((String) -> Void)? = nil
 
     @Environment(AppModel.self) private var app
     @State private var showing = false
@@ -1162,7 +1165,7 @@ private struct ViewCompiledButton: View {
         .secondaryButton()
         .hoverTip(stateText, replacesLabel: false)
         .quiverSheet(isPresented: $showing) {
-            CompiledOutputSheet(path: outputPath)
+            CompiledOutputSheet(path: outputPath, onOpenChapter: onOpenChapter)
         }
     }
 
@@ -1187,6 +1190,9 @@ private struct ViewCompiledButton: View {
 private struct CompiledOutputSheet: View {
     /// The generated file to show; nil is the check's shared AGENTS.md.
     var path: String? = nil
+    /// A chapter section header was tapped: the page switches to Edit so
+    /// the selected chapter's editor is showing when the sheet closes.
+    var onOpenChapter: ((String) -> Void)? = nil
 
     @Environment(AppModel.self) private var app
     @Environment(\.dismissSheet) private var dismiss
@@ -1289,6 +1295,7 @@ private struct CompiledOutputSheet: View {
                                 if let name = section.name {
                                     Button {
                                         app.chapters.selected = name
+                                        onOpenChapter?(name)
                                         dismiss()
                                     } label: {
                                         Text(name)
