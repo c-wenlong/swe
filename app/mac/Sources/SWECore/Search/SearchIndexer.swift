@@ -452,7 +452,7 @@ public final class SearchIndexer: @unchecked Sendable {
         fields: SearchSessionFields, messages: [SearchMessage]
     ) throws -> Bool {
         try finishSession(path: path, stat: stat, fileRow: fileRow, fields: fields,
-                          messages: messages, appended: false, mark: nil)
+                          messages: messages, appended: false, mark: nil, writesMark: false)
     }
 
     /// `finishSession` for a Devin read: one that `appended` adds its
@@ -462,19 +462,20 @@ public final class SearchIndexer: @unchecked Sendable {
     func finishSession(
         path: String, stat: SearchFileStat, fileRow: SearchFileRow?,
         fields: SearchSessionFields, messages: [SearchMessage],
-        appended: Bool, mark: SearchDevin.Mark?
+        appended: Bool, mark: SearchDevin.Mark?, writesMark: Bool = true
     ) throws -> Bool {
         let rows = Self.messageRows(from: messages)
         let fence = fileRow.map { SearchFileFence(sessionRowID: $0.sessionRowID, byteOffset: $0.byteOffset) }
         if appended, let sessionRowID = fileRow?.sessionRowID {
             return try store.commitFile(
                 path: path, expected: fence, stat: stat, byteOffset: stat.sizeBytes ?? 0,
-                session: .existing(sessionRowID), messages: rows, updating: fields, mark: mark)
+                session: .existing(sessionRowID), messages: rows, updating: fields, mark: mark,
+                writesMark: writesMark, expectedMtimeMs: fileRow?.mtimeMs)
         }
         let session: IndexSessionCommit = fileRow?.sessionRowID != nil ? .replace(fields) : .fresh(fields)
         return try store.commitFile(
             path: path, expected: fence, stat: stat, byteOffset: stat.sizeBytes ?? 0,
-            session: session, messages: rows, mark: mark)
+            session: session, messages: rows, mark: mark, writesMark: writesMark)
     }
 
     /// A read that never committed. Counted against the mtime it failed at:

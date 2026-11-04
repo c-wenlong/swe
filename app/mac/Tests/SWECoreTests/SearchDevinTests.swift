@@ -176,7 +176,7 @@ import Testing
             var files: Files
             var session: Session
             var rows: [String]
-            var mark: String
+            var mark: String?
         }
         var path_suffix: String
         var stages: [Stage]
@@ -221,8 +221,10 @@ import Testing
             var rows: [String] = []
             while try texts.step() { rows.append("\(texts.text(0) ?? ""): \(texts.text(1) ?? "")") }
             #expect(rows == stage.rows, "\(stage.note)")
-            let mark = stage.mark.replacingOccurrences(of: "{ino}", with: "\(ino)")
-                .replacingOccurrences(of: "{session}", with: "\(rowID)")
+            let mark = stage.mark.map {
+                $0.replacingOccurrences(of: "{ino}", with: "\(ino)")
+                    .replacingOccurrences(of: "{session}", with: "\(rowID)")
+            }
             #expect(try f.store.meta(SearchDevin.markKey(path)) == mark, "\(stage.note)")
             #expect(try await f.scan().filesIndexed == 0, "\(stage.note)")
         }

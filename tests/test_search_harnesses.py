@@ -383,9 +383,10 @@ class DevinTests(_Home):
                     " ORDER BY m.id", (session_row,)).fetchall()
                 self.assertEqual([f"{r}: {t}" for r, t in rows], stage["rows"])
                 mark = conn.execute("SELECT value FROM meta WHERE key = ?",
-                                    ("devin_chain:" + path,)).fetchone()[0]
-                self.assertEqual(mark, stage["mark"].replace("{ino}", str(ino))
-                                 .replace("{session}", str(session_row)))
+                                    ("devin_chain:" + path,)).fetchone()
+                expected = stage["mark"] and (stage["mark"].replace("{ino}", str(ino))
+                                              .replace("{session}", str(session_row)))
+                self.assertEqual(mark and mark[0], expected)
                 again = self.run_pass()
                 self.assertEqual((again.indexed, again.current), (0, 1))
         # A retired session takes its mark with it.
@@ -410,6 +411,27 @@ class DevinTests(_Home):
         self.assertEqual(containers.DevinMark.parse(mark.value(42)), replace(mark, session=42))
         for junk in (None, "", "1 2 3", "1 2 3 4 x\nt", "1 2 3 4 5 6"):
             self.assertIsNone(containers.DevinMark.parse(junk))
+
+    def test_an_append_fences_on_the_rows_mtime(self):
+        # Two reads at the same node count keep the session and offset; the
+        # older one must not commit over the newer one's fields.
+        self.seed()
+        self.run_pass()
+        conn = self.db()
+        path = self.db_path + "#brave-otter"
+        store = writer.Store(conn)
+        row = store.file_row(path)
+        fence = (row.session_row_id, row.byte_offset)
+        stat = writer.FileStat(None, row.mtime_ms + 10, row.size_bytes)
+        fields = store.session(row.session_row_id)
+        self.assertFalse(store.commit_file(path, fence, stat, row.byte_offset, writer.EXISTING,
+                                           None, [], updating=fields,
+                                           session_row_id=row.session_row_id,
+                                           expected_mtime=row.mtime_ms - 1))
+        self.assertTrue(store.commit_file(path, fence, stat, row.byte_offset, writer.EXISTING,
+                                          None, [], updating=fields,
+                                          session_row_id=row.session_row_id,
+                                          expected_mtime=row.mtime_ms))
 
     def test_a_row_another_writer_replaced_without_a_mark_reads_whole(self):
         # An older writer commits the files row but no mark: the mark left

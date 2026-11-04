@@ -193,21 +193,22 @@ def _walk(conn: sqlite3.Connection, session: DevinSession, start: int | None,
     raw)``. Streamed copies are siblings in a forest; walking parents from
     the head gives one node per message. With ``floor`` the walk stops at
     the first node at or below that ``rowid`` and returns it apart:
-    ``(nodes, stop)``."""
+    ``(nodes, stop, rooted)``. ``rooted`` says the walk reached a node with
+    no parent; a chain cut short by a missing parent or a cycle is not."""
     nodes = []
     seen: set[int] = set()
     cursor = start
     while cursor is not None and cursor not in seen:
         found = _node(conn, session.id, cursor)
         if found is None:
-            break
+            return nodes, None, False
         rowid, parent, raw = found
         if floor is not None and rowid <= floor:
-            return nodes, (cursor, raw, parent)
+            return nodes, (cursor, raw, parent), False
         seen.add(cursor)
         nodes.append((cursor, rowid, raw))
         cursor = parent
-    return nodes, None
+    return nodes, None, cursor is None
 
 
 def _call_names(raw: bytes | None) -> dict:
@@ -290,7 +291,7 @@ def devin_read(conn: sqlite3.Connection, session: DevinSession,
             and conn.execute(
                 "SELECT COUNT(*) FROM message_nodes WHERE session_id = ? AND rowid <= ?",
                 (session.id, mark.row)).fetchone()[0] == mark.nodes):
-        span, stop = _walk(conn, session, start, floor=mark.row)
+        span, stop, _ = _walk(conn, session, start, floor=mark.row)
         if stop is not None and stop[0] == mark.head:
             raws = [raw for _, _, raw in reversed(span)]
             decoder = decode.Decoder("devin")
@@ -302,10 +303,12 @@ def devin_read(conn: sqlite3.Connection, session: DevinSession,
             title = mark.title if mark.title is not None else title
             return DevinRead(messages, title, True, DevinMark(
                 ino, session.max_row, start, session.nodes, title=title))
-    chain, _ = _walk(conn, session, start)
+    chain, _, rooted = _walk(conn, session, start)
     messages, title = _decode([raw for _, _, raw in reversed(chain)], decode.Decoder("devin"))
+    # A chain cut short by a missing parent gets no mark: the parent may
+    # still arrive, and only a whole read would take it in.
     next_mark = (DevinMark(ino, session.max_row, start, session.nodes, title=title)
-                 if chain else None)
+                 if chain and rooted else None)
     return DevinRead(messages, title, False, next_mark)
 
 

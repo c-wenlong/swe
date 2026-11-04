@@ -413,16 +413,21 @@ class Store:
                     byte_offset: int, kind: str, fields: SessionFields | None,
                     rows: list[decode.Row], updating: SessionFields | None = None,
                     session_row_id: int | None = None,
-                    mark: tuple[str, "containers.DevinMark"] | None = None) -> bool:
+                    mark: tuple[str, "containers.DevinMark"] | None = None,
+                    expected_mtime: float | None = None) -> bool:
         """``SearchStore.commitFile``: one transaction, fenced on the
         ``files`` row. False (and nothing written) when the row moved.
         ``mark`` is a Devin session's ``(meta key, mark)``, stored under
-        the session the commit lands on."""
+        the session the commit lands on; a None mark deletes the key. ``expected_mtime`` also fences on
+        the row's ``mtime_ms``: an append keeps the session and the offset,
+        so without it an older read could commit over a newer one."""
         conn = self.conn
         conn.execute("BEGIN IMMEDIATE")
         try:
             actual = self.fence(path)
-            if actual != expected:
+            if actual != expected or (expected_mtime is not None and conn.execute(
+                    "SELECT mtime_ms FROM files WHERE path = ?", (path,)
+            ).fetchone() != (expected_mtime,)):
                 conn.execute("ROLLBACK")
                 return False
             if kind == NONE:
@@ -464,7 +469,9 @@ class Store:
                 " state = 'current', fail_count = 0, failed_mtime_ms = NULL",
                 (path, stat.ino, byte_offset, stat.mtime_ms, stat.size, target),
             )
-            if mark is not None and target is not None:
+            if mark is not None and mark[1] is None:
+                conn.execute("DELETE FROM meta WHERE key = ?", (mark[0],))
+            elif mark is not None and target is not None:
                 conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
                              (mark[0], mark[1].value(target)))
             conn.execute("COMMIT")
@@ -824,12 +831,12 @@ class Indexer:
         try:
             got = read(row, self.store)
             fence = None if row is None else (row.session_row_id, row.byte_offset)
-            mark = None if got.mark is None else (containers.mark_key(path), got.mark)
+            mark = (containers.mark_key(path), got.mark) if got.marks else None
             rows = decode.message_rows(got.messages)
             if got.appended:
                 committed = self.store.commit_file(
                     path, fence, stat, stat.size, EXISTING, None, rows, updating=got.fields,
-                    session_row_id=row.session_row_id, mark=mark)
+                    session_row_id=row.session_row_id, mark=mark, expected_mtime=row.mtime_ms)
             else:
                 kind = REPLACE if row is not None and row.session_row_id is not None else FRESH
                 committed = self.store.commit_file(path, fence, stat, stat.size, kind,
@@ -1185,6 +1192,9 @@ class ContainerRead:
     messages: list
     appended: bool = False
     mark: "containers.DevinMark | None" = None
+    # Whether this source keeps marks: a Devin read that has none deletes
+    # the one a last read left.
+    marks: bool = False
 
 
 def _held_mark(row: FileRow | None, store: Store, path: str, ino: int):
@@ -1223,7 +1233,7 @@ def _devin_entries(conn: sqlite3.Connection, db_path: str):
                 cwd=session.directory,
                 created_at=decode.iso_seconds(session.created_ms / 1000),
                 updated_at=decode.iso_seconds(session.stat_mtime_ms / 1000),
-                message_count=count), got.messages, got.appended, got.mark)
+                message_count=count), got.messages, got.appended, got.mark, marks=True)
 
         yield path, FileStat(ino=None, mtime_ms=session.stat_mtime_ms, size=session.nodes), read
 

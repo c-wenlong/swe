@@ -570,6 +570,11 @@ public final class SearchStore: @unchecked Sendable {
     ///     together with its last rows.
     ///   - mark: a Devin session's read position, stored under its
     ///     `SearchDevin.markKey` with the session the commit lands on.
+    ///   - writesMark: whether `mark` is written at all; a nil `mark` then
+    ///     deletes the one a last read left.
+    ///   - expectedMtimeMs: also fences on the row's `mtime_ms`. An append
+    ///     keeps the session and the offset, so without it an older read
+    ///     could commit over a newer one.
     @discardableResult
     func commitFile(
         path: String,
@@ -579,7 +584,9 @@ public final class SearchStore: @unchecked Sendable {
         session: IndexSessionCommit,
         messages: [SearchMessageRow],
         updating fields: SearchSessionFields? = nil,
-        mark: SearchDevin.Mark?
+        mark: SearchDevin.Mark?,
+        writesMark: Bool = false,
+        expectedMtimeMs: Double? = nil
     ) throws -> Bool {
         if case .none = session, !messages.isEmpty || fields != nil {
             throw SQLiteDatabase.Failure(
@@ -591,7 +598,9 @@ public final class SearchStore: @unchecked Sendable {
             do {
                 let actual = try fileFence(for: path)
                 guard actual?.sessionRowID == expected?.sessionRowID,
-                      actual?.byteOffset == expected?.byteOffset else {
+                      actual?.byteOffset == expected?.byteOffset,
+                      try expectedMtimeMs.map({ try Self.mtime(of: path, in: db) == $0 }) ?? true
+                else {
                     try db.execute("ROLLBACK")
                     return false
                 }
@@ -619,8 +628,11 @@ public final class SearchStore: @unchecked Sendable {
                     }
                 }
                 try upsertFile(path: path, stat: stat, byteOffset: byteOffset, sessionRowID: sessionRowID)
-                if let mark, let sessionRowID {
+                if writesMark, let mark, let sessionRowID {
                     try setMeta(SearchDevin.markKey(path), mark.value(session: sessionRowID))
+                } else if writesMark, mark == nil {
+                    try cachedStatement("DELETE FROM meta WHERE key = ?")
+                        .bind([.text(SearchDevin.markKey(path))]).run()
                 }
                 try db.execute("COMMIT")
                 return true
@@ -643,6 +655,12 @@ public final class SearchStore: @unchecked Sendable {
     ) throws -> Bool {
         try commitFile(path: path, expected: expected, stat: stat, byteOffset: byteOffset,
                        session: session, messages: messages, updating: fields, mark: nil)
+    }
+
+    private static func mtime(of path: String, in db: SQLiteDatabase) throws -> Double? {
+        let statement = try db.prepare("SELECT mtime_ms FROM files WHERE path = ?")
+        statement.bind([.text(path)])
+        return try statement.step() ? statement.double(0) : nil
     }
 
     /// One `meta` row, or nil: a Devin session's `SearchDevin.Mark`.

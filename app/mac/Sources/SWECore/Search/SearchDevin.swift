@@ -200,21 +200,25 @@ enum SearchDevin {
     /// The chain from `start` down, newest first. Streamed copies are
     /// siblings in a forest; walking parents from the head gives one node
     /// per message. With `floor` the walk stops at the first node at or
-    /// below that `rowid` and returns it as `stop`.
+    /// below that `rowid` and returns it as `stop`. `rooted` says the walk
+    /// reached a node with no parent; a chain cut short by a missing parent
+    /// or a cycle is not.
     private static func walk(
         _ statement: Statement, session: Session, from start: Int64?, floor: Int64? = nil
-    ) throws -> (nodes: [Node], stop: Node?) {
+    ) throws -> (nodes: [Node], stop: Node?, rooted: Bool) {
         var nodes: [Node] = []
         var seen: Set<Int64> = []
         var cursor = start
         while let id = cursor, !seen.contains(id) {
-            guard let found = try node(statement, session: session, id: id) else { break }
-            if let floor, found.row <= floor { return (nodes, found) }
+            guard let found = try node(statement, session: session, id: id) else {
+                return (nodes, nil, false)
+            }
+            if let floor, found.row <= floor { return (nodes, found, false) }
             seen.insert(id)
             nodes.append(found)
             cursor = found.parent
         }
-        return (nodes, nil)
+        return (nodes, nil, cursor == nil)
     }
 
     /// The `tool_call_id → name` pairs one record adds to the decoder.
@@ -294,7 +298,7 @@ enum SearchDevin {
                 "SELECT COUNT(*) FROM message_nodes WHERE session_id = ? AND rowid <= ?")
             below.bind([.text(session.id), .int(mark.row)])
             if try below.step(), below.int(0) == mark.nodes {
-                let (span, stop) = try walk(statement, session: session, from: start, floor: mark.row)
+                let (span, stop, _) = try walk(statement, session: session, from: start, floor: mark.row)
                 if let stop, stop.id == mark.head {
                     let nodes = Array(span.reversed())
                     var decoder = SearchDecoder(.devin)
@@ -311,11 +315,13 @@ enum SearchDevin {
                 }
             }
         }
-        let chain = try walk(statement, session: session, from: start).nodes
+        let (chain, _, rooted) = try walk(statement, session: session, from: start)
         var decoder = SearchDecoder(.devin)
         let decoded = decode(chain.reversed(), with: &decoder)
+        // A chain cut short by a missing parent gets no mark: the parent may
+        // still arrive, and only a whole read would take it in.
         let next = start.flatMap { head in
-            chain.isEmpty ? nil : Mark(ino: ino, row: session.maxRow, head: head,
+            chain.isEmpty || !rooted ? nil : Mark(ino: ino, row: session.maxRow, head: head,
                                        nodes: session.nodes, title: decoded.title)
         }
         return Read(messages: decoded.messages, promptTitle: decoded.title, appended: false, mark: next)
