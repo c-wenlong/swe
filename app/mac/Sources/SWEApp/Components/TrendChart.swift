@@ -17,9 +17,9 @@ struct TrendChart: View {
     var showsXAxis = true
     /// The RAM chart's dashed flag line and its label.
     var showsFlag = true
+    /// Read only by the hover layer: the chart body never touches it, so
+    /// a mouse move redraws the rule and bubble, not the lines.
     @Binding var hovered: Date?
-    @State private var pointerInside = false
-    @State private var bubbleSize: CGSize = .zero
 
     private var model: ComputeModel { app.compute }
     /// The popup's stacked size: fewer ticks, smaller icons.
@@ -92,13 +92,6 @@ struct TrendChart: View {
                             .font(Theme.caption).foregroundStyle(Theme.warning)
                     }
             }
-            // An x-only rule cannot touch the y domain, and the bubble
-            // lives in the overlay where no chart mark or annotation can
-            // grow the scale.
-            if let hovered {
-                RuleMark(x: .value("Time", hovered))
-                    .foregroundStyle(Theme.border)
-            }
         }
         .chartXScale(domain: domain)
         .chartYScale(domain: 0...yTop)
@@ -122,7 +115,11 @@ struct TrendChart: View {
         }
         .padding(.trailing, compact ? 16 : 22)
         .frame(height: height)
-        .chartOverlay { proxy in hoverOverlay(proxy) }
+        // The rule and the bubble live in the overlay, where no chart
+        // mark can grow the scale and a hover never rebuilds the marks.
+        .chartOverlay { proxy in
+            ChartHoverLayer(proxy: proxy, hovered: $hovered) { time in bubble(at: time) }
+        }
     }
 
     private func axisLabel(_ value: AxisValue) -> some View {
@@ -131,44 +128,6 @@ struct TrendChart: View {
             return Text("\(number.formatted(.number.precision(.fractionLength(compact ? 0 : 1)))) GB")
         }
         return Text("\(Int(number.rounded()))%")
-    }
-
-    private func hoverOverlay(_ proxy: ChartProxy) -> some View {
-        GeometryReader { geometry in
-            Rectangle().fill(.clear).contentShape(.rect)
-                .onContinuousHover { phase in
-                    switch phase {
-                    case .active(let point):
-                        guard let plot = proxy.plotFrame else { return }
-                        let x = point.x - geometry[plot].origin.x
-                        pointerInside = true
-                        hovered = proxy.value(atX: x, as: Date.self)
-                    case .ended:
-                        pointerInside = false
-                        hovered = nil
-                    }
-                }
-            // The readout rides the overlay: positioned against the plot
-            // and clamped inside it, never a mark the scales can see.
-            if pointerInside, let hovered, let plot = proxy.plotFrame,
-               let x = proxy.position(forX: hovered) {
-                bubble(at: hovered)
-                    .fixedSize()
-                    .onGeometryChange(for: CGSize.self) { $0.size } action: { bubbleSize = $0 }
-                    .position(bubbleOrigin(atX: x, plot: geometry[plot]))
-                    .allowsHitTesting(false)
-            }
-        }
-    }
-
-    /// The bubble's center at the hovered x, just under the plot's top
-    /// edge, slid sideways until it clears both edges of the plot.
-    private func bubbleOrigin(atX x: CGFloat, plot: CGRect) -> CGPoint {
-        let half = bubbleSize.width / 2
-        let px = plot.origin.x + x
-        let lo = plot.minX + half + 4, hi = plot.maxX - half - 4
-        let cx = lo <= hi ? min(max(px, lo), hi) : plot.midX
-        return CGPoint(x: cx, y: plot.minY + bubbleSize.height / 2 + 4)
     }
 
     /// Each harness's value at the point nearest the hovered time.
@@ -211,5 +170,61 @@ enum ChartTimeAxis {
         let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
         guard span > 0 else { return true }
         return domain.upperBound.timeIntervalSince(date) >= span * edge(compact: compact)
+    }
+}
+
+/// A chart's hover furniture, kept in its own view so only it redraws
+/// on a mouse move: the shared rule at the hovered time on every chart
+/// bound to `hovered`, and the readout bubble on the one under the
+/// pointer, clamped inside the plot.
+struct ChartHoverLayer<Bubble: View>: View {
+    let proxy: ChartProxy
+    @Binding var hovered: Date?
+    @ViewBuilder var bubble: (Date) -> Bubble
+    @State private var pointerInside = false
+    @State private var bubbleSize: CGSize = .zero
+
+    var body: some View {
+        GeometryReader { geometry in
+            if let hovered, let plotFrame = proxy.plotFrame,
+               let x = proxy.position(forX: hovered) {
+                let plot = geometry[plotFrame]
+                Rectangle().fill(Theme.border)
+                    .frame(width: 1, height: plot.height)
+                    .position(x: plot.minX + x, y: plot.midY)
+                    .allowsHitTesting(false)
+            }
+            Rectangle().fill(.clear).contentShape(.rect)
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let point):
+                        guard let plot = proxy.plotFrame else { return }
+                        pointerInside = true
+                        let time = proxy.value(atX: point.x - geometry[plot].origin.x, as: Date.self)
+                        if time != hovered { hovered = time }
+                    case .ended:
+                        pointerInside = false
+                        hovered = nil
+                    }
+                }
+            if pointerInside, let hovered, let plotFrame = proxy.plotFrame,
+               let x = proxy.position(forX: hovered) {
+                bubble(hovered)
+                    .fixedSize()
+                    .onGeometryChange(for: CGSize.self) { $0.size } action: { bubbleSize = $0 }
+                    .position(origin(atX: x, plot: geometry[plotFrame]))
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    /// The bubble's center at the hovered x, just under the plot's top
+    /// edge, slid sideways until it clears both edges of the plot.
+    private func origin(atX x: CGFloat, plot: CGRect) -> CGPoint {
+        let half = bubbleSize.width / 2
+        let px = plot.origin.x + x
+        let lo = plot.minX + half + 4, hi = plot.maxX - half - 4
+        let cx = lo <= hi ? min(max(px, lo), hi) : plot.midX
+        return CGPoint(x: cx, y: plot.minY + bubbleSize.height / 2 + 4)
     }
 }

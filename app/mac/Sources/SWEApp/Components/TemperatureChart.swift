@@ -27,9 +27,8 @@ extension ThermalComponent {
 struct TemperatureChart: View {
     @Environment(AppModel.self) private var app
     var height: CGFloat = 180
+    /// Read only by the hover layer, never by the chart body.
     @Binding var hovered: Date?
-    @State private var pointerInside = false
-    @State private var bubbleSize: CGSize = .zero
 
     private var model: ComputeModel { app.compute }
     /// The popup's stacked size: the same trailing edge and tick counts as
@@ -179,10 +178,6 @@ struct TemperatureChart: View {
                         }
                 }
             }
-            if let hovered {
-                RuleMark(x: .value("Time", hovered))
-                    .foregroundStyle(Theme.border)
-            }
         }
         .chartXScale(domain: domain)
         .chartYScale(domain: yDomain)
@@ -206,45 +201,15 @@ struct TemperatureChart: View {
         // it makes room for are skipped at this height anyway.
         .padding(.trailing, compact ? 16 : 64)
         .frame(height: height)
-        .chartOverlay { proxy in hoverOverlay(proxy, points: points, shown: shown) }
-    }
-
-    private func hoverOverlay(_ proxy: ChartProxy, points: [TemperaturePoint],
-                              shown: [ThermalComponent]) -> some View {
-        GeometryReader { geometry in
-            Rectangle().fill(.clear).contentShape(.rect)
-                .onContinuousHover { phase in
-                    switch phase {
-                    case .active(let point):
-                        guard let plot = proxy.plotFrame else { return }
-                        pointerInside = true
-                        hovered = proxy.value(atX: point.x - geometry[plot].origin.x, as: Date.self)
-                    case .ended:
-                        pointerInside = false
-                        hovered = nil
-                    }
+        .chartOverlay { proxy in
+            ChartHoverLayer(proxy: proxy, hovered: $hovered) { time in
+                if let nearest = points.min(by: {
+                    abs($0.at.timeIntervalSince(time)) < abs($1.at.timeIntervalSince(time))
+                }) {
+                    bubble(nearest, shown: shown)
                 }
-            if pointerInside, let hovered, let plot = proxy.plotFrame,
-               let x = proxy.position(forX: hovered),
-               let nearest = points.min(by: {
-                   abs($0.at.timeIntervalSince(hovered)) < abs($1.at.timeIntervalSince(hovered))
-               }) {
-                bubble(nearest, shown: shown)
-                    .fixedSize()
-                    .onGeometryChange(for: CGSize.self) { $0.size } action: { bubbleSize = $0 }
-                    .position(bubbleOrigin(atX: x, plot: geometry[plot]))
-                    .allowsHitTesting(false)
             }
         }
-    }
-
-    /// Centred on the hovered x under the plot's top edge, kept inside it.
-    private func bubbleOrigin(atX x: CGFloat, plot: CGRect) -> CGPoint {
-        let half = bubbleSize.width / 2
-        let px = plot.origin.x + x
-        let lo = plot.minX + half + 4, hi = plot.maxX - half - 4
-        let cx = lo <= hi ? min(max(px, lo), hi) : plot.midX
-        return CGPoint(x: cx, y: plot.minY + bubbleSize.height / 2 + 4)
     }
 
     private func bubble(_ point: TemperaturePoint, shown: [ThermalComponent]) -> some View {

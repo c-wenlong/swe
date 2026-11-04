@@ -1304,6 +1304,18 @@ hub still holds (<code>GET</code>/<code>POST /v1/sessions/{key}/queue</code>). P
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The Mac app redraws less for hovers, chat rows, skeletons and the
+closed menu bar panel.</strong> A mouse move over a Compute chart now
+redraws only its rule and readout, not every line on every stacked
+chart. Chat rows keep their parsed Markdown, styled spans and
+highlighted code by text, so a redraw no longer parses again (about
+2 ms per 6.5 KB reply each time). A skeleton list sweeps one band
+over all its bars instead of one animation per bar, and the sweep
+stops after a minute so a stuck load doesn't animate forever. The
+menu bar panel's tabs unmount while the panel is closed rather than
+redraw behind it for the app's whole life. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1543">#1543</a>.</p>
+</li>
 <li><p><strong>Web Compute, Sessions search and Overview do less DOM work.</strong>
 Compute rebuilt its totals, trend card, harness cards and chart with
 <code>innerHTML</code> on every 3 s sample. It now patches them in place: only the

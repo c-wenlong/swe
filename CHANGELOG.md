@@ -1180,6 +1180,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The Mac app redraws less for hovers, chat rows, skeletons and the
+  closed menu bar panel.** A mouse move over a Compute chart now
+  redraws only its rule and readout, not every line on every stacked
+  chart. Chat rows keep their parsed Markdown, styled spans and
+  highlighted code by text, so a redraw no longer parses again (about
+  2 ms per 6.5 KB reply each time). A skeleton list sweeps one band
+  over all its bars instead of one animation per bar, and the sweep
+  stops after a minute so a stuck load doesn't animate forever. The
+  menu bar panel's tabs unmount while the panel is closed rather than
+  redraw behind it for the app's whole life. Closes
+  [#1543](https://github.com/c-wenlong/swe/issues/1543).
+
 - **Web Compute, Sessions search and Overview do less DOM work.**
   Compute rebuilt its totals, trend card, harness cards and chart with
   `innerHTML` on every 3 s sample. It now patches them in place: only the

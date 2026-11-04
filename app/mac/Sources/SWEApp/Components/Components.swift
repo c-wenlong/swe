@@ -788,35 +788,97 @@ struct LoadingCard: View {
 
 /// A placeholder bar with a light band sweeping across it, for skeleton
 /// loading states laid out like what they stand in for. The band is an
-/// offset, so the sweep never lays the page out again.
+/// offset, so the sweep never lays the page out again. Inside a
+/// `.skeletonSweep()` container the bar draws flat and the container's
+/// one band sweeps every bar at once.
 struct SkeletonBlock: View {
     var width: CGFloat?
     var height: CGFloat
     var radius: CGFloat = 6
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var swept = false
+    @Environment(\.skeletonSweepShared) private var shared
+    @Environment(\.skeletonMaskPass) private var maskPass
 
     var body: some View {
         RoundedRectangle(cornerRadius: radius)
-            .fill(Theme.border)
-            .overlay {
-                if !reduceMotion {
-                    GeometryReader { geometry in
+            // In the shared band's mask the bar is solid, so the band
+            // keeps its full strength over the translucent bar.
+            .fill(maskPass ? Color.black : Theme.border)
+            .modifier(SkeletonSweep(active: !shared))
+            .clipShape(.rect(cornerRadius: radius))
+            .frame(width: width, height: height)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+            .accessibilityHidden(true)
+    }
+}
+
+extension EnvironmentValues {
+    /// Set by `.skeletonSweep()`: an ancestor sweeps, so bars don't.
+    @Entry var skeletonSweepShared = false
+    /// Set on the copy a shared band uses as its mask.
+    @Entry var skeletonMaskPass = false
+}
+
+extension View {
+    /// One sweeping band over every `SkeletonBlock` inside, masked to
+    /// their shapes: a single animation for the whole stand-in rather
+    /// than one per bar.
+    func skeletonSweep() -> some View {
+        modifier(SkeletonSweepContainer())
+    }
+}
+
+/// A container's sweep, unless an outer container already sweeps it:
+/// nested stand-ins share the outermost band.
+private struct SkeletonSweepContainer: ViewModifier {
+    @Environment(\.skeletonSweepShared) private var outerSweeps
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.skeletonSweepShared, true)
+            .modifier(SkeletonSweep(active: !outerSweeps, masked: true))
+    }
+}
+
+/// The light band. It stops after `limit`, so a fetch that hangs does not
+/// animate the page forever.
+private struct SkeletonSweep: ViewModifier {
+    var active: Bool
+    var masked = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var swept = false
+    @State private var expired = false
+
+    static let limit: Duration = .seconds(60)
+
+    func body(content: Content) -> some View {
+        if active && !reduceMotion && !expired {
+            content
+                .overlay {
+                    let band = GeometryReader { geometry in
                         LinearGradient(colors: [.clear, Theme.borderStrong.opacity(0.7), .clear],
                                        startPoint: .leading, endPoint: .trailing)
                             .frame(width: 160)
                             .offset(x: swept ? geometry.size.width : -160)
                     }
+                    if masked {
+                        band.mask(content.environment(\.skeletonMaskPass, true))
+                    } else {
+                        band
+                    }
                 }
-            }
-            .clipShape(.rect(cornerRadius: radius))
-            .frame(width: width, height: height)
-            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
-            .onAppear {
-                withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { swept = true }
-            }
-            .accessibilityHidden(true)
+                .onAppear {
+                    withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { swept = true }
+                }
+                .task {
+                    // A cancel (the view leaving, Reduce Motion on) is not
+                    // the minute running out.
+                    do { try await Task.sleep(for: Self.limit) } catch { return }
+                    expired = true
+                }
+        } else {
+            content
+        }
     }
 }
 
@@ -877,10 +939,17 @@ struct SkeletonRows: View {
 
     var body: some View {
         Group {
-            if framed { Card { content } } else { content }
+            if framed { Card { swept } } else { swept }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(label))
+    }
+
+    /// One shared band, except over tiles: each tile's opaque card
+    /// would mask the band across the whole tile, so their bars keep
+    /// their own.
+    @ViewBuilder private var swept: some View {
+        if shape == .tiles { content } else { content.skeletonSweep() }
     }
 
     @ViewBuilder private var content: some View {
@@ -1271,7 +1340,7 @@ struct SkeletonLines: View {
 
     var body: some View {
         Group {
-            if framed { Card { content } } else { content }
+            if framed { Card { content.skeletonSweep() } } else { content.skeletonSweep() }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(label))
@@ -1299,7 +1368,7 @@ struct SkeletonDetail: View {
 
     var body: some View {
         Group {
-            if framed { Card { content } } else { content }
+            if framed { Card { content.skeletonSweep() } } else { content.skeletonSweep() }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(label))
