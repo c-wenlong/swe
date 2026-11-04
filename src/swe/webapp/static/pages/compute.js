@@ -210,10 +210,18 @@ function paintCompute(busy) {
   computePatch(document.getElementById("compute-rest"), computeRest(d));
   bindComputeBody(body);
   drawComputeChart();
-  if (focus && !body.contains(document.activeElement)) {
-    const again = body.querySelector(focus);
-    if (again) again.focus({ preventScroll: true });
-  }
+  computeRefocus(body, focus);
+}
+
+/* After a repaint, focus goes back to the control that had it (`focus`,
+ * from computeFocusKey). The focused node may be gone, or patched into
+ * another control (the next harness's button in a card that left): then
+ * the one it was gets focus, or none does when that control left. */
+function computeRefocus(body, focus) {
+  if (!focus || computeFocusKey(body) === focus) return;
+  const again = body.querySelector(focus);
+  if (again) again.focus({ preventScroll: true });
+  else if (body.contains(document.activeElement)) document.activeElement.blur();
 }
 
 /* Puts `html` into `el` the way innerHTML would, but keeps the nodes

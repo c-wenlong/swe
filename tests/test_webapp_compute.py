@@ -970,6 +970,30 @@ const shape = (n) => n.nodeType === 3 ? n.nodeValue
         self.assertFalse(out["owned"])
         self.assertEqual(out["handlers"], [None, None])
 
+    def test_focus_follows_the_control_not_the_node(self):
+        """A focused button patched into the next harness's button gives
+        focus back to the control it was, or drops it when that left."""
+        out = self.run_js("""
+            const btn = (id) => { const b = h("button", { "data-collapse": id }); b.focus = () => { document.activeElement = b; };
+              b.blur = () => { document.activeElement = null; }; b.hasAttribute = (k) => b.attrs.has(k); return b; };
+            const a = btn("claude"), b = btn("codex");
+            const body = { contains: (n) => n === a || n === b,
+              querySelector: (sel) => [a, b].find((n) => sel === `[data-collapse="${n.getAttribute("data-collapse")}"]`) || null };
+            globalThis.CSS = { escape: (s) => s };
+            globalThis.document = { activeElement: a };
+            const key = computeFocusKey(body);
+            // claude's card left: its focused button now reads codex, and b is gone.
+            a.setAttribute("data-collapse", "codex"); b.setAttribute("data-collapse", "gemini");
+            computeRefocus(body, key);
+            const dropped = document.activeElement;
+            // Still there under another node: that node gets focus.
+            document.activeElement = a; a.setAttribute("data-collapse", "x"); b.setAttribute("data-collapse", "claude");
+            computeRefocus(body, key);
+            return { key, dropped, moved: document.activeElement === b };""")
+        self.assertEqual(out["key"], '[data-collapse="claude"]')
+        self.assertIsNone(out["dropped"])
+        self.assertTrue(out["moved"])
+
     def test_an_unchanged_part_is_skipped(self):
         out = self.run_js("""
             let parsed = 0;
