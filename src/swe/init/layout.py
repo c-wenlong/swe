@@ -21,6 +21,7 @@ from pathlib import Path
 from swe import paths as _paths
 from swe.configuration import CorruptConfigurationError
 from swe.harness.catalog import HARNESS_CATALOG
+from swe.instructions import targets as _instr_targets
 
 # The layout itself is defined in swe.paths so runtime code and this
 # module cannot drift apart. Only the harness target maps live here.
@@ -931,14 +932,19 @@ def plan(
     archived = archived_names(registry)
     instructions = []
     for label, rel, installed in _instruction_targets(registry, home):
+        # Per-harness compiled output when one is built and still named in
+        # targets.json; otherwise the shared AGENTS.md.
+        canonical = _instr_targets.canonical_output(home, registry_name(label))
         if is_linkignored(home / rel, home, patterns):
-            instructions.append(LinkStatus(label, home / rel, "ignored", IGNORED_DETAIL))
+            instructions.append(
+                LinkStatus(label, home / rel, "ignored", IGNORED_DETAIL, canonical))
         else:
-            status = inspect(label, rel, agents_file(home), home)
+            status = inspect(label, rel, canonical, home)
+            status.source = canonical
             if status.state == "skipped" and installed:
                 # Evidence says the harness is here; only the directory is
                 # missing, and init creates that anyway.
-                status = LinkStatus(label, home / rel, "create", "")
+                status = LinkStatus(label, home / rel, "create", "", canonical)
             archived_override(status, archived)
             instructions.append(status)
     skills = []
