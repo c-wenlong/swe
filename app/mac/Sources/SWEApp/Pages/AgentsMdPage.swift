@@ -1278,7 +1278,12 @@ private struct NewChapterSheet: View {
         .onChange(of: focus) {
             // Latch: a blur doesn't close the list; only moving to the
             // other field (or nothing) does.
-            if let focus { activeField = focus }
+            if let focus {
+                // Moving to the other field closes this one's list for
+                // good: coming back needs typing or Down again.
+                if focus != activeField { openField = nil }
+                activeField = focus
+            }
             highlight = 0
             openTask?.cancel()
         }
@@ -1290,14 +1295,15 @@ private struct NewChapterSheet: View {
     private func textChanged(_ text: String, field: Field) {
         highlight = 0
         openTask?.cancel()
+        // Consume the pick flag first, so a pick that empties the field
+        // can't leave it set for the next real edit.
+        let picked = suppressOpen
+        suppressOpen = false
         if text.trimmingCharacters(in: .whitespaces).isEmpty {
             openField = nil
             return
         }
-        if suppressOpen {
-            suppressOpen = false
-            return
-        }
+        if picked { return }
         guard focus == field, openField != field else { return }
         openTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(250))
