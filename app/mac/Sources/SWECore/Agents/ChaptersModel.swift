@@ -23,18 +23,37 @@ public enum ChapterIndex {
         lines(text).filter(isEntry).map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
+    /// A chapter name as the compiler reads it — PurePosixPath: "." and
+    /// doubled inner slashes collapse, ".." stays, and leading slashes
+    /// survive ("/a.md", "//a.md"), so "./a.md" is the same chapter as
+    /// "a.md" while a leading slash is a different, unused name.
+    public static func normalize(_ name: String) -> String {
+        let slash = name.hasPrefix("//") ? "//"
+            : name.hasPrefix("/") ? "/" : ""
+        let parts = name.split(separator: "/", omittingEmptySubsequences: true)
+            .filter { $0 != "." }
+        if parts.isEmpty { return slash.isEmpty ? "." : slash }
+        return slash + parts.joined(separator: "/")
+    }
+
+    /// Whether a raw index line (entry or `# off` comment) names the
+    /// chapter, compared through normalize.
+    static func names(_ line: String, _ name: String) -> Bool {
+        normalize(line.trimmingCharacters(in: .whitespaces)) == normalize(name)
+    }
+
     /// `text` with `name` moved to just before `before` — to the end when
     /// `before` is nil, which means before a final newline's empty line.
     public static func move(_ text: String, name: String, before: String?) -> String {
         var lines = lines(text)
         guard let from = lines.firstIndex(where: {
-            isEntry($0) && $0.trimmingCharacters(in: .whitespaces) == name
+            isEntry($0) && names($0, name)
         }) else { return text }
         let entry = lines.remove(at: from)
         let to: Int
         if let before,
            let index = lines.firstIndex(where: {
-               isEntry($0) && $0.trimmingCharacters(in: .whitespaces) == before
+               isEntry($0) && names($0, before)
            }) {
             to = index
         } else {
@@ -50,7 +69,7 @@ public enum ChapterIndex {
     public static func removing(_ text: String, name: String) -> String {
         var lines = lines(text)
         guard let index = lines.firstIndex(where: {
-            isEntry($0) && $0.trimmingCharacters(in: .whitespaces) == name
+            isEntry($0) && names($0, name)
         }) else { return text }
         lines.remove(at: index)
         return lines.joined(separator: "\n")
@@ -71,21 +90,52 @@ public enum ChapterIndex {
     /// is after the matching entry's line, wherever comments sit around it.
     public static func inserting(_ text: String, name: String, afterFolder folder: String) -> String {
         var lines = lines(text)
-        var at: Int?
+        var last: Int?
         if !folder.isEmpty {
             for (index, line) in lines.enumerated() {
                 guard isEntry(line) else { continue }
                 let entry = line.trimmingCharacters(in: .whitespaces)
-                if (entry as NSString).deletingLastPathComponent == folder {
-                    at = index + 1
+                let at = (entry as NSString).deletingLastPathComponent
+                if normalize(at) == normalize(folder) {
+                    last = index + 1
                 }
             }
         }
-        if let at {
-            lines.insert(name, at: at)
+        if let last {
+            lines.insert(name, at: last)
             return lines.joined(separator: "\n")
         }
         return appending(text, name: name)
+    }
+
+    /// `text` with `name`'s active line commented out in place — the off
+    /// state, which keeps the chapter's slot for re-enabling. No-op when
+    /// `name` is not an active line; other comments and blanks untouched.
+    public static func disabling(_ text: String, name: String) -> String {
+        var lines = lines(text)
+        for (index, line) in lines.enumerated() where isEntry(line) {
+            if names(line, name) {
+                lines[index] = "# \(name)"
+                break
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// `text` with `name`'s `# name` comment line reactivated in place.
+    /// No-op when no such comment exists.
+    public static func enabling(_ text: String, name: String) -> String {
+        var lines = lines(text)
+        for (index, line) in lines.enumerated() {
+            let stripped = line.trimmingCharacters(in: .whitespaces)
+            guard stripped.hasPrefix("#") else { continue }
+            let rest = stripped.dropFirst().trimmingCharacters(in: .whitespaces)
+            if normalize(rest) == normalize(name) {
+                lines[index] = name
+                break
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Why `folder` cannot be a chapter folder, mirroring the compiler's
@@ -173,6 +223,278 @@ public enum CompiledSections {
         }
         flush()
         return out.filter { !$0.body.isEmpty || $0.name != nil }
+    }
+}
+
+/// `~/.swe/AGENTS_MD/targets.json`: the per-harness rules, one of
+/// `only`/`except` per chapter. The model writes it through an
+/// InstructionDocument like index.txt; a file that does not parse is
+/// shown as an error and never overwritten.
+public struct ChapterTargets: Equatable, Sendable {
+    /// name -> either "only" or "except" mapped to harness names.
+    public var rules: [String: [String: [String]]]
+
+    public init(rules: [String: [String: [String]]] = [:]) {
+        self.rules = rules
+    }
+
+    public var isEmpty: Bool { rules.isEmpty }
+
+    /// Parse a targets.json body. Throws a one-line problem naming
+    /// targets.json for anything that is not a version-1 shape.
+    public static func parse(_ text: String) throws -> ChapterTargets {
+        let data = Data(text.utf8)
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw NSError(domain: "ChapterTargets", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "targets.json is not valid JSON"])
+        }
+        guard let root = object as? [String: Any],
+              root["version"] as? Int == 1,
+              let chapters = root["chapters"] as? [String: Any] else {
+            throw NSError(domain: "ChapterTargets", code: 1, userInfo: [
+                NSLocalizedDescriptionKey:
+                    "targets.json is not a version-1 rules file"])
+        }
+        var rules: [String: [String: [String]]] = [:]
+        for (chapter, value) in chapters {
+            guard let rule = value as? [String: Any], rule.count == 1,
+                  let (kind, names) = rule.first,
+                  kind == "only" || kind == "except",
+                  let list = names as? [Any],
+                  list.allSatisfy({ $0 is String }) else {
+                throw NSError(domain: "ChapterTargets", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "targets.json has a rule the app cannot edit: \(chapter)"])
+            }
+            // Chapter names normalize like the compiler's (PurePosixPath:
+            // "." and doubled inner slashes collapse, leading slashes and
+            // ".." stay), so "./a.md" is "a.md". Two spellings of one
+            // chapter is a collision, never merged.
+            let name = ChapterIndex.normalize(chapter)
+            if rules[name] != nil {
+                throw NSError(domain: "ChapterTargets", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "targets.json lists \(name) twice"])
+            }
+            rules[name] = [kind: list.map { $0 as! String }]
+        }
+        return ChapterTargets(rules: rules)
+    }
+
+    /// Deterministic JSON: keys sorted, 2-space indent, harness names
+    /// sorted, trailing newline, always the version-1 shape.
+    public func encoded() -> String {
+        var lines = ["{", "  \"version\": 1,", "  \"chapters\": {"]
+        let chapters = rules.keys.sorted()
+        for (index, chapter) in chapters.enumerated() {
+            let (kind, names) = rules[chapter]!.first!
+            let comma = index == chapters.count - 1 ? "" : ","
+            let list = names.sorted().map { "\"\($0)\"" }.joined(separator: ", ")
+            lines.append(
+                "    \(Self.jsonString(chapter)): { \"\(kind)\": [\(list)] }\(comma)")
+        }
+        if chapters.isEmpty {
+            lines[2] = "  \"chapters\": {}"
+        } else {
+            lines.append("  }")
+        }
+        lines.append("}")
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    private static func jsonString(_ string: String) -> String {
+        guard let data = try? JSONEncoder().encode(string),
+              let text = String(data: data, encoding: .utf8) else { return "\"\\\"\"" }
+        return text
+    }
+}
+
+/// What a chapter's toggle does, in the order the writes must run so a
+/// build between them never sees a broader set than either endpoint:
+/// narrowing edits first, then the rule (or vice versa for widening).
+public enum CompileWrite: Equatable, Sendable {
+    case index(String)
+    case targets(String)
+}
+
+/// A chapter's compile state for one filter: on the index (`on`), holding
+/// a commented slot (`off`), or not in the index at all (`unlisted`).
+public enum CompileState: Equatable, Sendable { case on, off, unlisted }
+
+public enum CompileToggle {
+    /// Whether `harness` receives a chapter that is `on` with `rule`
+    /// (`["only": [..]]` or `["except": [..]]`, nil for no rule).
+    public static func receives(rule: [String: [String]]?, harness: String) -> Bool {
+        guard let rule, let (kind, names) = rule.first else { return true }
+        if kind == "only" { return names.contains(harness) }
+        return !names.contains(harness)
+    }
+
+    /// All-harnesses view: a chapter is included iff its index line is on.
+    /// Harness view: included iff on and `receives`.
+    public static func receives(state: CompileState,
+                                rule: [String: [String]]?,
+                                harness: String?) -> Bool {
+        guard state == .on else { return false }
+        guard let harness else { return true }
+        return receives(rule: rule, harness: harness)
+    }
+
+    /// Every member on (receipts all true), none, or a mix.
+    public enum TriState: Equatable, Sendable { case all, none, mixed }
+    public static func triState(_ receipts: [Bool]) -> TriState {
+        if receipts.allSatisfy({ $0 }) { return .all }
+        if receipts.contains(true) { return .mixed }
+        return .none
+    }
+
+    /// The ordered writes for the All-harnesses checkbox: on -> commented
+    /// (the rule stays so re-enabling restores it), off -> on in place,
+    /// unlisted -> inserted after its folder's last entry.
+    public static func all(index text: String, state: CompileState,
+                           name: String, folder: String) -> [CompileWrite] {
+        switch state {
+        case .on: return [.index(ChapterIndex.disabling(text, name: name))]
+        case .off: return [.index(ChapterIndex.enabling(text, name: name))]
+        case .unlisted:
+            return [.index(ChapterIndex.inserting(text, name: name, afterFolder: folder))]
+        }
+    }
+
+    /// The ordered writes for one harness's checkbox. `rules`/`indexText`
+    /// are the current file contents; `state`/`rule` describe the chapter.
+    /// Narrowing writes (disabling a line, adding an `except`, removing an
+    /// `only`) go first so any build between them sees the narrower set;
+    /// a rule write precedes the enable it pairs with because a rule for
+    /// an off chapter is ignored anyway.
+    public static func harness(
+        _ harness: String, want: Bool,
+        index text: String, rules: [String: [String: [String]]],
+        state: CompileState, name: String, folder: String
+    ) throws -> [CompileWrite] {
+        func encoded(_ rules: [String: [String: [String]]]) -> String {
+            ChapterTargets(rules: rules).encoded()
+        }
+        let rule = rules[name]
+        var writes: [CompileWrite] = []
+        if want {
+            switch state {
+            case .unlisted:
+                // Rule first: it is ignored while the line is off/absent.
+                var next = rules
+                next[name] = ["only": [harness]]
+                writes = [.targets(encoded(next)),
+                          .index(ChapterIndex.inserting(
+                              text, name: name, afterFolder: folder))]
+            case .off:
+                var next = rules
+                next[name] = ["only": [harness]]
+                writes = [.targets(encoded(next)),
+                          .index(ChapterIndex.enabling(text, name: name))]
+            case .on:
+                guard let rule, let (kind, names) = rule.first,
+                      !receives(rule: rule, harness: harness) else { return [] }
+                var next = rules
+                if kind == "only" {
+                    next[name] = ["only": (names + [harness]).sorted()]
+                } else {
+                    let left = names.filter { $0 != harness }
+                    next[name] = left.isEmpty ? nil : ["except": left]
+                }
+                writes = [.targets(encoded(next))]
+            }
+        } else {
+            guard state == .on else { return [] }
+            guard receives(rule: rule, harness: harness) else { return [] }
+            if let rule, let (kind, names) = rule.first {
+                var next = rules
+                if kind == "except" {
+                    next[name] = ["except": (names + [harness]).sorted()]
+                    writes = [.targets(encoded(next))]
+                } else {
+                    let left = names.filter { $0 != harness }
+                    if left.isEmpty {
+                        // Narrow first: disable the line, then drop the
+                        // rule. A disable that changes nothing means the
+                        // line was never active — dropping the rule would
+                        // lose the record, so refuse instead.
+                        let disabled = ChapterIndex.disabling(text, name: name)
+                        guard disabled != text else {
+                            throw NSError(domain: "CompileToggle", code: 1, userInfo: [
+                                NSLocalizedDescriptionKey:
+                                    "\(name) has no active index line; edit index.txt by hand"])
+                        }
+                        writes = [.index(disabled)]
+                        next[name] = nil
+                        writes.append(.targets(encoded(next)))
+                    } else {
+                        next[name] = ["only": left]
+                        writes = [.targets(encoded(next))]
+                    }
+                }
+            } else {
+                writes = [.targets(encoded(rules.merging(
+                    [name: ["except": [harness]]]) { _, new in new }))]
+            }
+        }
+        return writes
+    }
+
+    /// One batch of writes for a folder checkbox: apply `all` or
+    /// `harness` per member, folded into evolving index/targets texts so
+    /// the batch is a single write per file. `members` is (name, state,
+    /// rule) for every file under the folder; `on` is whether the click
+    /// means include (any off) or exclude (all on).
+    public static func folder(
+        on: Bool, harness: String?,
+        index text: String, rules: [String: [String: [String]]],
+        members: [(name: String, state: CompileState, rule: [String: [String]]?)]
+    ) throws -> [CompileWrite] {
+        var indexText = text
+        var ruleMap = rules
+        var changed = false
+        for member in members {
+            if let harness {
+                let writes = try self.harness(
+                    harness, want: on, index: indexText, rules: ruleMap,
+                    state: member.state, name: member.name,
+                    folder: (member.name as NSString).deletingLastPathComponent)
+                guard !writes.isEmpty else { continue }
+                changed = true
+                for write in writes {
+                    switch write {
+                    case .index(let t): indexText = t
+                    case .targets(let t): ruleMap = (try? ChapterTargets.parse(t))?.rules ?? ruleMap
+                    }
+                }
+            } else {
+                // All view: `on` means include, so enabling only touches
+                // members not already on; excluding only touches on ones.
+                let needsMove = on ? member.state != .on : member.state == .on
+                guard needsMove else { continue }
+                let write = all(index: indexText, state: member.state,
+                                name: member.name,
+                                folder: (member.name as NSString).deletingLastPathComponent)
+                if case .index(let t) = write.first, t != indexText {
+                    changed = true
+                    indexText = t
+                }
+            }
+        }
+        guard changed else { return [] }
+        // Widening in a harness view writes the rules first (ignored while
+        // the lines are off); narrowing writes the disables first. Every
+        // intermediate state is never broader than either end.
+        let indexWrite: CompileWrite? = indexText != text ? .index(indexText) : nil
+        let targetWrite: CompileWrite? = ruleMap != rules
+            ? .targets(ChapterTargets(rules: ruleMap).encoded()) : nil
+        if on && harness != nil {
+            return [targetWrite, indexWrite].compactMap { $0 }
+        }
+        return [indexWrite, targetWrite].compactMap { $0 }
     }
 }
 
@@ -326,6 +648,12 @@ public final class ChaptersModel {
             output = document
             Task { await document.load() }
         }
+        let targetsPath = check.directory + "/targets.json"
+        if targetsDocument?.url.path != targetsPath {
+            let document = InstructionDocument(url: URL(fileURLWithPath: targetsPath))
+            targetsDocument = document
+            Task { await document.load() }
+        }
         await refreshTree(under: check.directory)
         // The walk above is awaited: a newer load may have finished while
         // it ran. If so, this result is stale and must not move selection.
@@ -452,8 +780,10 @@ public final class ChaptersModel {
     /// to lose; flag the ones holding unsaved edits.
     public func checkDisk() async {
         await indexDocument?.checkDisk()
+        await targetsDocument?.checkDisk()
         for document in documents.values { await document.checkDisk() }
         await output?.checkDisk()
+        for document in outputDocuments.values { await document.checkDisk() }
     }
 
     /// Drag `name` to just before `before` in the index (end when nil),
@@ -551,20 +881,22 @@ public final class ChaptersModel {
         }
         guard created else { return "Couldn't create \(name)." }
         if include {
+            // The file this attempt created goes back out when the index
+            // can't be updated — but only while it still holds exactly
+            // the starter, never anything else.
+            let removeIfStarter = { await offMain {
+                (try? String(contentsOf: url, encoding: .utf8)) == starter
+                    && (try? FileManager.default.removeItem(at: url)) != nil
+            } }
             guard let document = await readyIndex() else {
+                _ = await removeIfStarter()
                 return "index.txt hasn't been read, so it can't be updated."
             }
             document.text = ChapterIndex.inserting(
                 document.text, name: name, afterFolder: folder)
             if await document.save() != .saved {
                 await document.load()
-                // The file this attempt created goes too — but only while
-                // it still holds exactly the starter, never anything else.
-                let removed = await offMain {
-                    (try? String(contentsOf: url, encoding: .utf8)) == starter
-                        && (try? FileManager.default.removeItem(at: url)) != nil
-                }
-                return removed
+                return await removeIfStarter()
                     ? "index.txt changed on disk; try again."
                     : "index.txt changed on disk. The new file was left in place, unlisted; try again."
             }
@@ -639,6 +971,7 @@ public final class ChaptersModel {
             buildError = error.localizedDescription
         }
         await output?.load()
+        for document in outputDocuments.values { await document.load() }
         // The build may have failed on a source problem the last check
         // did not know; a fresh status shows either answer.
         if case .loaded = status { await reload(swe: swe) }
@@ -679,6 +1012,261 @@ public final class ChaptersModel {
         guard let document = indexDocument else { return nil }
         if document.state != .ready { await document.load() }
         return document.state == .ready ? document : nil
+    }
+
+    /// targets.json beside index.txt, edited through a document like the
+    /// index so a disk change still wins. No file means no rules and the
+    /// document is created on the first save.
+    private var targetsDocument: InstructionDocument?
+
+    /// The parsed rules, nil only while a targets.json the app cannot
+    /// read is on disk — `targetsParseProblem` says why, and toggles are
+    /// refused rather than overwriting a file they cannot edit.
+    public var targets: ChapterTargets? {
+        guard let doc = targetsDocument, doc.state == .ready else {
+            return targetsDocument == nil ? ChapterTargets() : nil
+        }
+        if !doc.existsOnDisk { return ChapterTargets() }
+        return try? ChapterTargets.parse(doc.text)
+    }
+
+    /// Why the targets on disk cannot be edited, nil when it parses or
+    /// does not exist.
+    public var targetsParseProblem: String? {
+        guard let doc = targetsDocument, doc.existsOnDisk,
+              doc.state == .ready else { return nil }
+        do {
+            _ = try ChapterTargets.parse(doc.text)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private func readyTargets() async -> InstructionDocument? {
+        guard let document = targetsDocument else { return nil }
+        if document.state != .ready { await document.load() }
+        return document.state == .ready ? document : nil
+    }
+
+    /// Write a toggle's ordered edits — each to its document, in order —
+    /// then rebuild. Returns a problem line, nil on success. The ordered
+    /// writes keep every intermediate file state narrower than the
+    /// result, so a build landing between them is never wrong.
+    public func applyCompile(writes: [CompileWrite], swe: SweClient) async -> String? {
+        // The compiler refuses an index with no active chapters, which
+        // would leave every output stale: refuse before writing.
+        for write in writes {
+            if case .index(let text) = write,
+               ChapterIndex.entries(text).isEmpty {
+                return "AGENTS.md needs at least one chapter; include another first."
+            }
+        }
+        var savedAny = false
+        for write in writes {
+            let document: InstructionDocument?
+            let text: String
+            switch write {
+            case .index(let new):
+                document = await readyIndex()
+                text = new
+            case .targets(let new):
+                document = await readyTargets()
+                text = new
+            }
+            guard let document else { return "The chapter files haven't been read." }
+            document.text = text
+            var failure: String?
+            switch await document.save() {
+            case .saved: savedAny = true
+            case .changedOnDisk: failure = "The chapter files changed on disk; try again."
+            case .failed(let message): failure = message
+            }
+            if let failure {
+                // Reload so the refused text doesn't linger as a dirty
+                // draft; a save that already landed still gets its build.
+                await document.load()
+                if savedAny { await build(swe: swe) }
+                return failure
+            }
+        }
+        await build(swe: swe)
+        return nil
+    }
+
+    /// Two quick toggles must not compute from the same baseline: every
+    /// compile op awaits the one before it, so each reads the previous
+    /// op's saved text instead of overwriting it.
+    private var compileTail: Task<String?, Never>?
+    private func queuedCompile(_ work: @escaping () async -> String?) async -> String? {
+        let prior = compileTail
+        let task = Task { () -> String? in
+            if let prior { _ = await prior.value }
+            return await work()
+        }
+        compileTail = task
+        return await task.value
+    }
+
+    /// Both documents, ready, or the refusal. `needsTargets` is true when
+    /// a rule could be part of the change (any harness-scoped write).
+    private func readyCompile(needsTargets: Bool)
+        async -> (index: InstructionDocument, targets: InstructionDocument)?
+    {
+        guard let index = await readyIndex() else { return nil }
+        guard let targets = await readyTargets() else { return nil }
+        if needsTargets && targets.existsOnDisk
+            && (try? ChapterTargets.parse(targets.text)) == nil { return nil }
+        return (index, targets)
+    }
+
+    /// A chapter's state read from the index text itself — the line is
+    /// active (`.on`), a `# name` comment (`.off`), or absent entirely
+    /// (`.unlisted`). Derived inside the queued op so a stale view state
+    /// can't pick the wrong branch.
+    private static func compileState(of name: String, in index: String)
+        -> CompileState
+    {
+        // Scan every line: an active entry later in the file beats a `#`
+        // comment for the same chapter — the line, not the comment,
+        // is what compiles.
+        var off = false
+        for line in ChapterIndex.lines(index) {
+            let stripped = line.trimmingCharacters(in: .whitespaces)
+            if ChapterIndex.isEntry(line) {
+                if ChapterIndex.normalize(stripped) == ChapterIndex.normalize(name) {
+                    return .on
+                }
+            } else if stripped.hasPrefix("#") {
+                let rest = stripped.dropFirst().trimmingCharacters(in: .whitespaces)
+                if ChapterIndex.normalize(rest) == ChapterIndex.normalize(name) {
+                    off = true
+                }
+            }
+        }
+        return off ? .off : .unlisted
+    }
+
+    /// The All-harnesses checkbox on one chapter.
+    public func setIncluded(name: String, on: Bool,
+                            swe: SweClient) async -> String? {
+        await queuedCompile {
+            guard let docs = await self.readyCompile(needsTargets: false) else {
+                return "The chapter files haven't been read."
+            }
+            // The read state is what matters: when it already matches the
+            // request — an earlier queued op got there first — write
+            // nothing rather than flipping it back.
+            let state = Self.compileState(of: name, in: docs.index.text)
+            if on == (state == .on) { return nil }
+            // Enabling writes the name into index.txt; a name the
+            // compiler can't use would just break the next build.
+            if on, let problem = ChapterIndex.nameProblem(name) { return problem }
+            return await self.applyCompile(writes: CompileToggle.all(
+                index: docs.index.text,
+                state: state,
+                name: name,
+                folder: (name as NSString).deletingLastPathComponent), swe: swe)
+        }
+    }
+
+    /// One harness's checkbox on one chapter.
+    public func setReceipt(name: String, harness: String,
+                           want: Bool, swe: SweClient) async -> String? {
+        await queuedCompile {
+            guard let docs = await self.readyCompile(needsTargets: true) else {
+                return self.targetsParseProblem ?? "The chapter files haven't been read."
+            }
+            let rules = docs.targets.existsOnDisk
+                ? (try? ChapterTargets.parse(docs.targets.text))?.rules ?? [:]
+                : [:]
+            let state = Self.compileState(of: name, in: docs.index.text)
+            // Enabling an off or unlisted chapter writes its name into
+            // index.txt; refuse names the compiler can't use.
+            if want, state != .on,
+               let problem = ChapterIndex.nameProblem(name) { return problem }
+            do {
+                return try await self.applyCompile(writes: CompileToggle.harness(
+                    harness, want: want, index: docs.index.text,
+                    rules: rules, state: state,
+                    name: name,
+                    folder: (name as NSString).deletingLastPathComponent), swe: swe)
+            } catch {
+                return error.localizedDescription
+            }
+        }
+    }
+
+    /// A folder checkbox: one batch over every file under it, members and
+    /// their states derived inside the queue like a single-file toggle.
+    public func setFolder(
+        _ folder: String, on: Bool, harness: String?,
+        swe: SweClient
+    ) async -> String? {
+        await queuedCompile {
+            guard let docs = await self.readyCompile(needsTargets: harness != nil) else {
+                return self.targetsParseProblem ?? "The chapter files haven't been read."
+            }
+            let rules = docs.targets.existsOnDisk
+                ? (try? ChapterTargets.parse(docs.targets.text))?.rules ?? [:]
+                : [:]
+            var members = self.files(under: folder).map {
+                (name: $0,
+                 state: Self.compileState(of: $0, in: docs.index.text),
+                 rule: rules[ChapterIndex.normalize($0)] ?? rules[$0])
+            }
+            // Enabling writes each name into index.txt: files the
+            // compiler can't use are skipped, not enabled, and reported.
+            var skipped: [String] = []
+            if on {
+                members = members.filter { member in
+                    if let problem = ChapterIndex.nameProblem(member.name) {
+                        skipped.append("\(member.name): \(problem)")
+                        return false
+                    }
+                    return true
+                }
+            }
+            do {
+                let problem = try await self.applyCompile(writes: CompileToggle.folder(
+                    on: on, harness: harness, index: docs.index.text,
+                    rules: rules, members: members), swe: swe)
+                if problem == nil, !skipped.isEmpty {
+                    return "Skipped \(skipped.joined(separator: "; "))"
+                }
+                return problem
+            } catch {
+                return error.localizedDescription
+            }
+        }
+    }
+
+    /// Every .md path under `folder` in the current tree.
+    private func files(under folder: String) -> [String] {
+        func collect(_ node: ChapterNode) -> [String] {
+            node.isFolder ? node.children.flatMap(collect) : [node.path]
+        }
+        func find(_ nodes: [ChapterNode]) -> ChapterNode? {
+            for node in nodes {
+                if node.isFolder && node.path == folder { return node }
+                if let deep = find(node.children) { return deep }
+            }
+            return nil
+        }
+        return folder.isEmpty
+            ? tree.flatMap(collect)
+            : find(tree).map(collect) ?? []
+    }
+
+    /// The read-only document for one generated output, kept per path so
+    /// the Compile tab's popup shows the harness's own file when it has one.
+    private var outputDocuments: [String: InstructionDocument] = [:]
+    public func outputDocument(for path: String) -> InstructionDocument {
+        if let doc = outputDocuments[path] { return doc }
+        let doc = InstructionDocument(url: URL(fileURLWithPath: path))
+        outputDocuments[path] = doc
+        Task { await doc.load() }
+        return doc
     }
 
     /// `load` without the loading skeleton: the list refreshes in place.

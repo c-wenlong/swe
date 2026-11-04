@@ -27,14 +27,18 @@ struct AgentsMdPage: View {
             .help("Check links and reread the file (⌘R)")
         } content: {
             HStack {
-                Tabs(options: [(Scope.edit, "Edit"), (Scope.project, "Project")],
+                Tabs(options: [(Scope.edit, "Edit"), (Scope.compile, "Compile"),
+                               (Scope.project, "Project")],
                      selection: $scope, style: .underline)
                 Spacer(minLength: 8)
-                if scope == .edit && app.chapters.chapterMode { ViewCompiledButton() }
+                if scope == .edit && app.chapters.chapterMode {
+                    ViewCompiledButton(onOpenChapter: { _ in scope = .edit })
+                }
             }
             switch scope {
             case .edit: GlobalInstructions()
-            case .compile, .project: ProjectInstructions()
+            case .compile: CompileInstructions(onOpenChapter: { _ in scope = .edit })
+            case .project: ProjectInstructions()
             }
         }
         .task(id: app.swePath) {
@@ -87,6 +91,588 @@ private struct GlobalInstructions: View {
                     FlatInstructions(report: report, document: model.global)
                 }
             }
+        }
+    }
+}
+
+/// The Compile tab: which chapters and which harnesses compile into what,
+/// plus the compiled order. Resolves the same report and check Edit uses.
+private struct CompileInstructions: View {
+    var onOpenChapter: ((String) -> Void)? = nil
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        let model = app.agentsMd
+        let chapters = app.chapters
+        switch model.check {
+        case .idle, .loading:
+            SkeletonRows(rows: 5, shape: .link, label: "Checking links…")
+        case .failed(let message):
+            ErrorCard(message: message)
+        case .loaded(let report):
+            switch chapters.status {
+            case .loaded(let check) where check.indexExists:
+                CompileView(check: check, report: report,
+                            onOpenChapter: onOpenChapter)
+            case .idle, .loading:
+                SkeletonRows(rows: 8, shape: .file, label: "Reading chapters…")
+            default:
+                Strip {
+                    Text("Compilation needs chapters. Convert the flat AGENTS.md on the Edit tab first.")
+                        .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+    }
+}
+
+/// What the filter compiles down to: the Include outline with every
+/// file's checkbox, and the Order list of active chapters with per-harness
+/// chips in All view.
+private struct CompileView: View {
+    var check: InstructionsCheck
+    var report: InitCheck
+    var onOpenChapter: ((String) -> Void)? = nil
+
+    @Environment(AppModel.self) private var app
+    /// nil or "" means the All-harnesses view; otherwise a registry name.
+    @AppStorage("agentsMd.compile.filter") private var filter = ""
+    @State private var error: String?
+
+    /// Every harness name the link report shows, first-seen order.
+    private var harnesses: [String] {
+        var seen: [String] = []
+        for row in report.instructionRows where !seen.contains(row.name) {
+            seen.append(row.name)
+        }
+        return seen
+    }
+
+    /// state/rule lookups for a file's AGENTS_MD-relative path.
+    private func state(for name: String) -> CompileState {
+        if check.chapters.contains(where: { $0.name == name }) { return .on }
+        if let entries = check.entries {
+            return entries.contains { $0.name == name && !$0.enabled } ? .off : .unlisted
+        }
+        return .unlisted
+    }
+
+    private func rule(for name: String) -> [String: [String]]? {
+        guard let chapter = check.chapters.first(where: { $0.name == name }) else { return nil }
+        if let only = chapter.only { return ["only": only] }
+        if let except = chapter.except { return ["except": except] }
+        return nil
+    }
+
+    private var harness: String? { filter.isEmpty ? nil : filter }
+
+    private func receives(_ name: String) -> Bool {
+        CompileToggle.receives(state: state(for: name), rule: rule(for: name),
+                               harness: harness)
+    }
+
+    /// The output this filter ends in, for the View button and summary.
+    private var outputPath: String {
+        if let harness, let output = check.outputs?.first(where: { $0.harness == harness }) {
+            return output.path
+        }
+        return check.output
+    }
+
+    /// Chapter names compiled for this filter's output (from `outputs`
+    /// when the swe sends them, else computed locally).
+    private var count: Int {
+        if let outputs = check.outputs {
+            let output = harness.flatMap { h in outputs.first { $0.harness == h } }
+                ?? outputs.first { $0.harness == nil }
+            if let output { return output.chapters.count }
+        }
+        return check.chapters.filter {
+            harness == nil
+                || CompileToggle.receives(rule: rule(for: $0.name), harness: harness!)
+        }.count
+    }
+
+    var body: some View {
+        let chapters = app.chapters
+        VStack(alignment: .leading, spacing: 12) {
+            filterStrip
+            Text(summary).font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 4)
+            // A harness whose link doesn't reach its file still compiles,
+            // but the file goes nowhere: say so with the same fix the
+            // Edit strip offers.
+            if let harness,
+               let link = report.instructionRows.first(where: { $0.name == harness })?
+                   .instructions,
+               link.state != .linked {
+                HStack(spacing: 8) {
+                    Label("\(HarnessMark(harness).name)'s \(URL(fileURLWithPath: link.path).lastPathComponent) doesn't point at its file yet.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(Theme.caption).foregroundStyle(Theme.dangerText)
+                    Button(app.agentsMd.linking ? "Linking…" : "Link with swe init") {
+                        Task { await app.agentsMd.link(swe: app.swe) }
+                    }
+                    .primaryButton()
+                    .disabled(app.agentsMd.linking)
+                }
+                .padding(.horizontal, 4)
+            }
+            if let error = error ?? chapters.targetsParseProblem ?? chapters.buildError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(Theme.caption).foregroundStyle(Theme.dangerText)
+                    .padding(.horizontal, 4)
+            }
+            HStack(alignment: .top, spacing: 12) {
+                includeRail
+                orderList
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    private var summary: String {
+        if let harness {
+            let name = HarnessMark(harness).name
+            if check.outputs?.contains(where: { $0.harness == harness }) == true {
+                return "\(name) reads \(displayPath(outputPath)) (\(count) chapters)"
+            }
+            return "\(name) reads the shared AGENTS.md (\(count) chapters)"
+        }
+        let own = check.outputs?.filter { $0.harness != nil }.count ?? 0
+        return "Shared \(displayPath(check.output)): \(count) chapters"
+            + (own == 0 ? "" : ". \(own) harness\(own == 1 ? "" : "es") have their own file.")
+    }
+
+    /// The harness links as a filter: All plus one chip per harness, the
+    /// dot kept from the links strip.
+    private var filterStrip: some View {
+        Strip {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("Harnesses").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+                FlowLayout(spacing: 8, lineSpacing: 6) {
+                    chip(nil, title: "All harnesses")
+                    ForEach(harnesses, id: \.self) { name in
+                        let link = report.instructionRows
+                            .first(where: { $0.name == name })?.instructions
+                        chip(name, title: HarnessMark(name).name, link: link,
+                             mark: name)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                ViewCompiledButton(outputPath: outputPath,
+                                   onOpenChapter: onOpenChapter)
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+            }
+        }
+    }
+
+    /// A harness's logo only, falling back to the full mark where a
+    /// harness has no icon — the name text follows separately.
+    private static func markIcon(_ name: String, size: CGFloat) -> some View {
+        let mark = HarnessMark(name)
+        return Group {
+            if let icon = mark.icon {
+                HarnessIcon(harness: icon, size: size)
+            } else {
+                HarnessMarkView(harness: name, size: size)
+            }
+        }
+    }
+
+    private func chip(_ name: String?, title: String,
+                      link: InitCheck.Link? = nil, mark: String? = nil) -> some View {
+        let selected = (name ?? "") == filter
+        return Button { filter = name ?? "" } label: {
+            HStack(spacing: 5) {
+                if let link {
+                    Circle().fill(link.state == .linked ? Theme.success
+                                  : link.state.isBlocked ? Theme.danger
+                                  : link.state.initFixes ? Theme.warning : Theme.textMuted)
+                        .frame(width: Theme.statusDot, height: Theme.statusDot)
+                }
+                if let mark { Self.markIcon(mark, size: 12) }
+                Text(title).font(Theme.bodySmall)
+                    .foregroundStyle(selected ? Theme.textPrimary : Theme.textNav)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(selected ? Theme.navActive : .clear,
+                        in: .rect(cornerRadius: Theme.controlRadius))
+        }
+        .plainButton()
+        .hoverTip(name.map { HarnessMark($0).name } ?? "Every harness",
+                  replacesLabel: false)
+    }
+
+    /// Every file's membership row for this filter, plus the folder the
+    /// members roll up into.
+    private var includeRail: some View {
+        let chapters = app.chapters
+        return Strip {
+            HStack(spacing: 6) {
+                Text("Include").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: 4)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(chapters.tree) { node in
+                        IncludeNode(node: node, depth: 0, check: check,
+                                    harness: harness,
+                                    state: { self.state(for: $0) },
+                                    rule: { self.rule(for: $0) }) { problem in
+                            error = problem
+                        }
+                    }
+                    // Indexed chapters with no row above: missing file or
+                    // a name the outline can't show. All view lets each
+                    // be turned off from here.
+                    if harness == nil {
+                        ForEach(chapters.missing, id: \.self) { name in
+                            MissingRow(name: name,
+                                       absent: chapters.absent.contains(name)) { problem in
+                                error = problem
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(width: 300)
+        .frame(maxHeight: .infinity)
+    }
+
+    /// An Include row for an indexed chapter that has no outline row:
+    /// checked (it is compiled) with "missing"/"hidden" saying why.
+    private struct MissingRow: View {
+        var name: String
+        var absent: Bool
+        var onError: (String?) -> Void
+        @Environment(AppModel.self) private var app
+        @State private var hovering = false
+
+        var body: some View {
+            HStack(spacing: 5) {
+                Color.clear.frame(width: 10)
+                TriBox(tri: .all) {
+                    Task {
+                        onError(await app.chapters.setIncluded(
+                            name: name, on: false, swe: app.swe))
+                    }
+                }
+                Text(name).font(Theme.nav)
+                    .foregroundStyle(Theme.textNav)
+                    .lineLimit(1).truncationMode(.head)
+                Text(absent ? "missing" : "hidden")
+                    .font(Theme.caption)
+                    .foregroundStyle(absent ? Theme.dangerText : Theme.textMuted)
+                Spacer(minLength: 4)
+            }
+            .padding(.leading, 8).padding(.trailing, 8).padding(.vertical, 4)
+            .background(hovering ? Theme.hover : .clear,
+                        in: .rect(cornerRadius: Theme.controlRadius))
+            .onHover { hovering = $0 }
+            .hoverTip(absent ? "Listed in index.txt but the file is gone; uncheck to comment it out"
+                             : "Listed in index.txt but hidden from the outline; uncheck to comment it out",
+                      replacesLabel: false)
+        }
+    }
+
+    /// The fixed-width harness column shared by the matrix header and
+    /// every Order row, so the chips line up vertically.
+    private static let matrixColumn: CGFloat = 30
+
+    /// Active chapters in index order: drag to reorder. In All view a
+    /// matrix of harness chips — header of marks on top, one chip per
+    /// chapter per column — toggles each receipt; in a harness view the
+    /// row's own checkbox does it.
+    private var orderList: some View {
+        let chapters = app.chapters
+        return Strip {
+            HStack(spacing: 6) {
+                Text("Order").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+                Text("\(check.uniqueChapters.count)")
+                    .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                Spacer(minLength: 4)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if harness == nil && !harnesses.isEmpty {
+                        HStack(spacing: 8) {
+                            Spacer(minLength: 0)
+                            ForEach(harnesses, id: \.self) { name in
+                                Button { filter = name } label: {
+                                    Self.markIcon(name, size: 12)
+                                        .frame(width: Self.matrixColumn)
+                                }
+                                .plainButton()
+                                .hoverTip(HarnessMark(name).name, replacesLabel: false)
+                            }
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                    }
+                    ReorderableRows(check.uniqueChapters) { name, before in
+                        Task { await chapters.move(chapter: name, before: before, swe: app.swe) }
+                    } row: { chapter in
+                        OrderRow(chapter: chapter, check: check, harness: harness,
+                                 harnesses: harnesses,
+                                 column: Self.matrixColumn,
+                                 rule: { self.rule(for: $0) }) { problem in
+                            error = problem
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// One outline row for Include: folder with a tri-state checkbox and
+    /// "k/n" count, or a file with a checkbox.
+    private struct IncludeNode: View {
+        var node: ChapterNode
+        var depth: Int
+        var check: InstructionsCheck
+        var harness: String?
+        var state: (String) -> CompileState
+        var rule: (String) -> [String: [String]]?
+        var onError: (String?) -> Void
+
+        @Environment(AppModel.self) private var app
+        @AppStorage private var expanded: Bool
+
+        init(node: ChapterNode, depth: Int, check: InstructionsCheck,
+             harness: String?, state: @escaping (String) -> CompileState,
+             rule: @escaping (String) -> [String: [String]]?,
+             onError: @escaping (String?) -> Void) {
+            self.node = node
+            self.depth = depth
+            self.check = check
+            self.harness = harness
+            self.state = state
+            self.rule = rule
+            self.onError = onError
+            _expanded = AppStorage(wrappedValue: true,
+                                   "agentsMd.compile.\(node.path)")
+        }
+
+        /// Every file path under this node (the node itself for a file).
+        private var files: [String] {
+            node.isFolder ? collect(node) : [node.path]
+        }
+
+        private func collect(_ node: ChapterNode) -> [String] {
+            node.isFolder ? node.children.flatMap(collect) : [node.path]
+        }
+
+        private func receipt(_ name: String) -> Bool {
+            CompileToggle.receives(state: state(name), rule: rule(name),
+                                   harness: harness)
+        }
+
+        private var tri: CompileToggle.TriState {
+            CompileToggle.triState(files.map(receipt))
+        }
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    if node.isFolder {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(Theme.font(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.textMuted)
+                            .frame(width: 10)
+                            .onTapGesture { expanded.toggle() }
+                    } else {
+                        Color.clear.frame(width: 10)
+                    }
+                    TriBox(tri: node.isFolder ? tri
+                           : (receipt(node.path) ? .all : .none)) {
+                        toggle()
+                    }
+                    if node.isFolder {
+                        Image(systemName: "folder").font(Theme.font(size: 12))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    Text(node.name).font(Theme.nav)
+                        .foregroundStyle(node.isFolder ? Theme.textPrimary
+                                         : receipt(node.path) ? Theme.textNav : Theme.textMuted)
+                        .lineLimit(1).truncationMode(.tail)
+                    if node.isFolder {
+                        Text("\(files.filter(receipt).count)/\(files.count)")
+                            .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    }
+                    Spacer(minLength: 4)
+                }
+                .padding(.leading, CGFloat(depth) * 14 + 8)
+                .padding(.trailing, 8).padding(.vertical, 4)
+                .contentShape(.rect)
+                .onTapGesture { toggle() }
+                if node.isFolder && expanded {
+                    ForEach(node.children) { child in
+                        IncludeNode(node: child, depth: depth + 1, check: check,
+                                    harness: harness, state: state, rule: rule,
+                                    onError: onError)
+                    }
+                }
+            }
+        }
+
+        private func toggle() {
+            let on = tri != .all
+            Task {
+                let problem: String?
+                if node.isFolder {
+                    problem = await app.chapters.setFolder(
+                        node.path, on: on, harness: harness, swe: app.swe)
+                } else if let harness {
+                    problem = await app.chapters.setReceipt(
+                        name: node.path, harness: harness,
+                        want: on, swe: app.swe)
+                } else {
+                    problem = await app.chapters.setIncluded(
+                        name: node.path, on: on, swe: app.swe)
+                }
+                onError(problem)
+            }
+        }
+    }
+
+    /// A checkbox that can also show the folder's mixed dash.
+    private struct TriBox: View {
+        var tri: CompileToggle.TriState
+        var toggle: () -> Void
+
+        var body: some View {
+            Button(action: toggle) {
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(tri == .none ? Theme.borderStrong : .clear,
+                                  lineWidth: 1)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(tri == .none ? .clear : Theme.interactive))
+                    .overlay {
+                        if tri == .all {
+                            Image(systemName: "checkmark")
+                                .font(Theme.font(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                        } else if tri == .mixed {
+                            Image(systemName: "minus")
+                                .font(Theme.font(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .frame(width: 14, height: 14)
+            }
+            .plainButton()
+            .accessibilityLabel(tri == .all ? "Included" : tri == .mixed
+                                ? "Partially included" : "Not included")
+        }
+    }
+
+    /// An Order row: position, name, and the per-harness chips (All view)
+    /// or the harness's checkbox (harness view).
+    private struct OrderRow: View {
+        var chapter: InstructionsCheck.Chapter
+        var check: InstructionsCheck
+        var harness: String?
+        var harnesses: [String]
+        var column: CGFloat = 30
+        var rule: (String) -> [String: [String]]?
+        var onError: (String?) -> Void
+
+        @Environment(AppModel.self) private var app
+        @State private var hovering = false
+
+        private var ruleText: String? {
+            guard let rule = rule(chapter.name), let (kind, names) = rule.first else { return nil }
+            return kind == "only" ? "only \(names.joined(separator: " "))"
+                : "not \(names.joined(separator: " "))"
+        }
+
+        private func receives(_ name: String) -> Bool {
+            CompileToggle.receives(state: .on, rule: rule(chapter.name),
+                                   harness: name)
+        }
+
+        var body: some View {
+            let position = check.uniqueChapters.firstIndex(of: chapter).map { $0 + 1 } ?? 0
+            let base = (chapter.name as NSString).lastPathComponent
+            let folder = (chapter.name as NSString).deletingLastPathComponent
+            let greyed = harness.map { !receives($0) } ?? false
+            HStack(spacing: 8) {
+                Text("\(position)").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    .frame(width: 16, alignment: .trailing)
+                Text(base).font(Theme.nav)
+                    .foregroundStyle(greyed ? Theme.textMuted : Theme.textNav)
+                    .lineLimit(1)
+                if !folder.isEmpty {
+                    Text(folder).font(Theme.caption).foregroundStyle(Theme.textMuted)
+                        .lineLimit(1).truncationMode(.head)
+                }
+                if let ruleText, harness == nil {
+                    Text(ruleText).font(Theme.caption).foregroundStyle(Theme.textMuted)
+                }
+                Spacer(minLength: 4)
+                if let harness {
+                    TriBox(tri: receives(harness) ? .all : .none) {
+                        toggleHarness(harness)
+                    }
+                } else {
+                    ForEach(harnesses, id: \.self) { name in
+                        HarnessChip(name: name, gets: receives(name),
+                                    width: column) {
+                            toggleHarness(name)
+                        }
+                    }
+                }
+            }
+            .opacity(greyed ? 0.5 : 1)
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(hovering ? Theme.hover : .clear,
+                        in: .rect(cornerRadius: Theme.controlRadius))
+            .onHover { hovering = $0 }
+            .hoverTip(harness == nil ? "Drag to reorder; click a chip to toggle that harness"
+                      : "Drag to reorder; the checkbox toggles this harness",
+                      replacesLabel: false)
+        }
+
+        private func toggleHarness(_ name: String) {
+            let want = !receives(name)
+            Task {
+                onError(await app.chapters.setReceipt(
+                    name: chapter.name,
+                    harness: name, want: want, swe: app.swe))
+            }
+        }
+    }
+
+    /// One harness chip in an Order matrix cell: the mark at full opacity
+    /// on a subtle background when the harness gets the chapter, faded and
+    /// unbacked when it skips; clicking toggles.
+    private struct HarnessChip: View {
+        var name: String
+        var gets: Bool
+        var width: CGFloat
+        var toggle: () -> Void
+
+        var body: some View {
+            Button(action: toggle) {
+                CompileView.markIcon(name, size: 11)
+                    .foregroundStyle(gets ? Theme.textPrimary : Theme.textMuted)
+                    .padding(.vertical, 2)
+                    .frame(width: width)
+                    .background(
+                        (gets ? Theme.navActive : .clear),
+                        in: .rect(cornerRadius: 4))
+                    .opacity(gets ? 1 : 0.3)
+            }
+            .plainButton()
+            .hoverTip("\(HarnessMark(name).name) \(gets ? "gets" : "skips") this chapter",
+                      replacesLabel: false)
         }
     }
 }
@@ -559,11 +1145,14 @@ private struct NewChapterSheet: View {
 /// The Edit tab's "View AGENTS.md" button: the compiled output's state
 /// as a dot, opening the centre popup.
 private struct ViewCompiledButton: View {
+    /// The output the button opens; nil is the shared AGENTS.md.
+    var outputPath: String? = nil
+    var onOpenChapter: ((String) -> Void)? = nil
+
     @Environment(AppModel.self) private var app
     @State private var showing = false
 
     var body: some View {
-        let chapters = app.chapters
         Button {
             showing = true
         } label: {
@@ -576,7 +1165,7 @@ private struct ViewCompiledButton: View {
         .secondaryButton()
         .hoverTip(stateText, replacesLabel: false)
         .quiverSheet(isPresented: $showing) {
-            CompiledOutputSheet()
+            CompiledOutputSheet(path: outputPath, onOpenChapter: onOpenChapter)
         }
     }
 
@@ -599,18 +1188,35 @@ private struct ViewCompiledButton: View {
 /// The compiled AGENTS.md as a centre popup: Rich by default, a Raw
 /// fallback, one section per source chapter that jumps back to the editor.
 private struct CompiledOutputSheet: View {
+    /// The generated file to show; nil is the check's shared AGENTS.md.
+    var path: String? = nil
+    /// A chapter section header was tapped: the page switches to Edit so
+    /// the selected chapter's editor is showing when the sheet closes.
+    var onOpenChapter: ((String) -> Void)? = nil
+
     @Environment(AppModel.self) private var app
     @Environment(\.dismissSheet) private var dismiss
     @State private var mode = "rich"
+
+    /// The document for `path`, or the shared output the model keeps.
+    private var document: InstructionDocument? {
+        guard let path, case .loaded(let check) = app.chapters.status,
+              path != check.output else { return app.chapters.output }
+        return app.chapters.outputDocument(for: path)
+    }
 
     var body: some View {
         let chapters = app.chapters
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("AGENTS.md").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
-                    if case .loaded(let check) = chapters.status {
-                        Text(displayPath(check.output))
+                    Text(path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "AGENTS.md")
+                        .font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+                    if let shown = path ?? ({
+                        if case .loaded(let check) = chapters.status { return check.output }
+                        return nil
+                    }()) {
+                        Text(displayPath(shown))
                             .font(Theme.font(size: 11, design: .monospaced))
                             .foregroundStyle(Theme.textMuted)
                     }
@@ -626,7 +1232,7 @@ private struct CompiledOutputSheet: View {
                 .secondaryButton().disabled(chapters.building)
                 .hoverTip("Runs swe instructions build", replacesLabel: false)
                 Button("Copy", systemImage: "doc.on.doc") {
-                    if let text = chapters.output?.text { copyToPasteboard(text) }
+                    if let text = document?.text { copyToPasteboard(text) }
                 }
                 .secondaryButton()
                 Button("Close") { dismiss() }
@@ -653,7 +1259,7 @@ private struct CompiledOutputSheet: View {
     }
 
     @ViewBuilder private var content: some View {
-        if let document = app.chapters.output {
+        if let document {
             loadedContent(document)
         } else {
             Text("AGENTS.md hasn't been built yet.")
@@ -689,6 +1295,7 @@ private struct CompiledOutputSheet: View {
                                 if let name = section.name {
                                     Button {
                                         app.chapters.selected = name
+                                        onOpenChapter?(name)
                                         dismiss()
                                     } label: {
                                         Text(name)

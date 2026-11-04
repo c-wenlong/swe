@@ -77,8 +77,18 @@ chapter to edit it in the Raw or Rich editor; every save runs
 in a centre popup (Rich or Raw, build state, Rebuild); its dot follows
 builds made in a terminal. Before `index.txt` exists, the Edit tab edits
 the flat `~/.swe/AGENTS.md` and offers Convert to chapters, which runs
-`swe instructions init`. Reordering and unlisting chapters move to the
-Compile tab, so they are temporarily unavailable in the app.
+`swe instructions init`.
+
+The Compile tab picks what compiles. The harness strip is a filter: All
+shows every chapter's on/off checkbox (on, off, unlisted all in index.txt
+terms) while a harness name shows that harness's own view, with the same
+checkboxes driving only/except rules in `targets.json`. Files and folders
+check in batches, and writes run narrowing-first so a terminal build can
+never see a wider set than either side of the edit. Beside it the Order
+list keeps index.txt order with drag-to-reorder; in All view each row
+carries a chip per harness (bright when it gets the chapter) so one doc
+is unlisted per harness with a click. View AGENTS.md opens the filter's
+own output when it has one.
 
 The web app has no chapter editor: its AGENTS.md page shows the generated
 file read-only, and the iPhone app has no AGENTS.md page. Without the Mac
