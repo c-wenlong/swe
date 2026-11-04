@@ -84,6 +84,14 @@ body.chat-open .panel { display: flex; min-height: 0; overflow: hidden; }
 /* Replies still being written (message.delta): the newest entries, spaced
    like the log, until each final message takes its bubble's place. */
 .chat-streams { display: flex; flex-direction: column; gap: 12px; }
+/* "Show earlier" at the log's top while older entries are folded out of
+   the DOM (#1615). */
+.chat-earlier { display: flex; justify-content: center; }
+.chat-earlier-btn {
+  border: 1px solid var(--border); border-radius: 999px; background: transparent;
+  padding: 4px 12px; font-size: 12px; color: var(--text-secondary); cursor: pointer;
+}
+.chat-earlier-btn:hover { color: var(--text-primary); }
 /* The status a screen reader says a finished reply in (the log itself is
    no live region): present for assistive tech, invisible on screen. */
 .chat-announce {

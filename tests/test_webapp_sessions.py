@@ -563,7 +563,7 @@ globalThis.api = (path) => {
   return new Promise((r) => { answer = r; });
 };
 const card = { kind: "open approval card" }, appended = [];
-const log = { innerHTML: "old history", querySelectorAll: (sel) => (sel.includes("approval") ? [card] : []),
+const log = { innerHTML: "old history", children: [], querySelectorAll: (sel) => (sel.includes("approval") ? [card] : []),
   appendChild: (el) => appended.push(el) };
 document.getElementById = (id) => (id === "chat-log" ? log : null);
 globalThis.setTimeout = () => 1; globalThis.clearTimeout = () => {};
@@ -935,7 +935,7 @@ return div.innerHTML;
           const errors = [];
           console.error = (...a) => errors.push(String(a[0]));
           globalThis.nearBottom = () => true;
-          const log = { scrollTop: 0, scrollHeight: 0, clientHeight: 0, querySelectorAll: () => [] };
+          const log = { scrollTop: 0, scrollHeight: 0, clientHeight: 0, children: [], querySelectorAll: () => [] };
           document.getElementById = (id) => (id === "chat-log" ? log : null);
           globalThis.patchMeta = () => { throw new Error("boom"); };
           globalThis.api = async () => ({ status: 200, data: { messages: [
