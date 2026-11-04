@@ -1231,7 +1231,7 @@ public final class ChaptersModel {
                 let problem = try await self.applyCompile(writes: CompileToggle.folder(
                     on: on, harness: harness, index: docs.index.text,
                     rules: rules, members: members), swe: swe)
-                if !skipped.isEmpty {
+                if problem == nil, !skipped.isEmpty {
                     return "Skipped \(skipped.joined(separator: "; "))"
                 }
                 return problem
