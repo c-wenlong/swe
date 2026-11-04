@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The landing site gets a dedicated install page.** `install/` puts
+  macOS and Linux behind a tab toggle: the Mac side carries the SWE.app
+  DMG download, wired to the latest release like the homepage buttons,
+  and the brew cask; the Linux side has the `install.sh` one-liner plus
+  its `--hub` variant for the web app and phone remote. Install buttons
+  across the site now open the page instead of scrolling to the
+  quickstart, which stays as the on-page summary.
+
 ### Changed
 
 - **The web chat keeps its newest 200 entries in the DOM.** A long

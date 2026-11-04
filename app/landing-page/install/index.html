@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install — swe</title>
+<meta name="description" content="Install swe on macOS or Linux: the Mac app as a DMG, the CLI with one curl command.">
+<meta property="og:title" content="Install swe">
+<meta property="og:description" content="Install swe on macOS or Linux.">
+<meta property="og:image" content="../media/sessions.jpg">
+<link rel="icon" href="../favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="icon" href="../favicon-32.png" type="image/png" sizes="32x32">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script>
+  window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+</script>
+<script defer src="/_vercel/insights/script.js"></script>
+<style>
+:root {
+  --bg: #08090a;
+  --surface: #0f1011;
+  --surface-2: #151617;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --text: #f7f8f8;
+  --text-2: #a1a4a8;
+  --text-3: #6b6f75;
+  --radius: 12px;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+a { color: inherit; }
+code { font-family: var(--mono); font-size: 0.92em; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 0 32px; }
+
+header.top { position: sticky; top: 0; z-index: 20; background: rgba(8, 9, 10, 0.8); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+nav { display: flex; align-items: center; gap: 28px; height: 60px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; text-decoration: none; font-size: 16px; }
+.brand img { width: 26px; height: 26px; border-radius: 6px; }
+nav .links { display: flex; gap: 24px; font-size: 14px; }
+nav .links a, nav .right a.plain { color: var(--text-2); text-decoration: none; }
+nav .links a:hover, nav .right a.plain:hover { color: var(--text); }
+nav .right { margin-left: auto; display: flex; align-items: center; gap: 18px; font-size: 14px; }
+nav .right a.plain { display: inline-flex; align-items: center; gap: 6px; }
+svg.i { width: 16px; height: 16px; flex: none; }
+
+.btn { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 8px; font: 500 14px var(--sans); text-decoration: none; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--text); cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: rgba(255, 255, 255, 0.28); }
+.btn.light { background: var(--text); color: #08090a; border-color: var(--text); }
+.btn.light:hover { background: #fff; }
+.btn.sm { height: 32px; padding: 0 12px; font-size: 13px; }
+
+.page { max-width: 780px; margin: 0 auto; }
+.hero { text-align: center; padding: 72px 0 0; }
+h1 { font-size: 52px; line-height: 1.05; letter-spacing: -0.03em; font-weight: 500; margin: 0 0 16px; }
+.lede { font-size: 18px; color: var(--text-2); max-width: 34em; margin: 0 auto; line-height: 1.55; }
+
+.tabs { display: flex; gap: 4px; margin: 36px auto 24px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; width: max-content; max-width: 100%; background: var(--surface); }
+.tabs button { background: transparent; border: 0; color: var(--text-2); font: 500 13px var(--sans); padding: 7px 22px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+.tabs button[aria-selected="true"] { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+
+.panel > section { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 22px 24px; margin-bottom: 16px; }
+.panel h2 { font-size: 16px; font-weight: 500; margin: 0 0 4px; }
+.panel .why { margin: 0 0 16px; color: var(--text-2); font-size: 14.5px; }
+.panel .fine { margin: 12px 0 0; color: var(--text-3); font-size: 13px; }
+.panel .fine code { color: var(--text-2); }
+.panel ul { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 7px; color: var(--text-2); font-size: 14px; }
+.panel li { display: flex; gap: 10px; align-items: baseline; }
+.panel li::before { content: ""; width: 5px; height: 5px; border-radius: 1.5px; background: var(--text-3); transform: rotate(45deg) translateY(-2px); flex: none; }
+
+.dmg { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.dmg .btn { height: 44px; padding: 0 20px; font-size: 15px; }
+.dmg .osreq { color: var(--text-3); font-size: 13px; }
+
+.or { display: flex; align-items: center; gap: 12px; color: var(--text-3); font-size: 12.5px; margin: 18px 0 14px; text-transform: uppercase; letter-spacing: 0.06em; }
+.or::before, .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+
+.cmd { display: flex; align-items: center; gap: 10px; background: var(--bg); border: 1px solid var(--line-strong); border-radius: 10px; padding: 8px 8px 8px 14px; font: 13.5px var(--mono); }
+.cmd + .cmd { margin-top: 10px; }
+.cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+.cmd code::-webkit-scrollbar { display: none; }
+.cmd .p { color: var(--text-3); user-select: none; }
+.copy { flex: none; background: transparent; color: var(--text-2); border: 1px solid var(--line-strong); border-radius: 6px; font: 12px var(--sans); padding: 4px 10px; cursor: pointer; }
+.copy:hover { color: var(--text); }
+.opt { margin: 14px 0 6px; color: var(--text-2); font-size: 14.5px; }
+
+.after { margin-top: 48px; padding-top: 32px; border-top: 1px solid var(--line); }
+.after h2 { font-size: 22px; letter-spacing: -0.01em; font-weight: 500; margin: 0 0 18px; }
+.after .cmd { max-width: 460px; }
+.after p { color: var(--text-2); font-size: 14.5px; margin: 0 0 10px; }
+.after a { color: var(--text); }
+
+footer { border-top: 1px solid var(--line); margin-top: 88px; padding: 28px 0 44px; color: var(--text-3); font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px 24px; }
+footer .right { margin-left: auto; display: flex; gap: 22px; }
+footer a { color: var(--text-2); text-decoration: none; }
+footer a:hover { color: var(--text); }
+
+@media (max-width: 640px) {
+  .wrap { padding: 0 16px; }
+  nav { gap: 16px; }
+  nav .links { display: none; }
+  .hero { padding-top: 48px; }
+  h1 { font-size: 36px; }
+  .lede { font-size: 16px; }
+  .panel > section { padding: 18px; }
+  footer .right { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="gh" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
+  <symbol id="apple" viewBox="0 0 24 24"><path fill="currentColor" d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></symbol>
+  <symbol id="dl" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0l-5-5m5 5l5-5M4 21h16"/></symbol>
+</svg>
+
+<header class="top">
+  <div class="wrap">
+    <nav>
+      <a class="brand" href="../"><img src="../logo-rounded.svg" alt="">swe</a>
+      <div class="links">
+        <a href="../overview/">Docs</a>
+        <a href="../cli/">CLI reference</a>
+        <a href="../changelog/">Changelog</a>
+      </div>
+      <div class="right">
+        <a class="plain" href="https://github.com/c-wenlong/swe"><svg class="i"><use href="#gh"/></svg>GitHub</a>
+        <a class="btn light sm" href="./" aria-current="page"><span>Install</span></a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap page">
+
+<div class="hero">
+  <h1>Install swe.</h1>
+  <p class="lede">One download on a Mac, one command on Linux. The core CLI is stdlib-only Python; nothing else gets installed.</p>
+</div>
+
+<div class="tabs" role="tablist" aria-label="Operating system">
+  <button role="tab" id="tab-macos" aria-controls="panel-macos" aria-selected="true" tabindex="0" data-os="macos">macOS</button>
+  <button role="tab" id="tab-linux" aria-controls="panel-linux" aria-selected="false" tabindex="-1" data-os="linux">Linux</button>
+</div>
+
+<div class="panel" id="panel-macos" role="tabpanel" aria-labelledby="tab-macos">
+  <section>
+    <h2>SWE.app</h2>
+    <p class="why">The full home base: sessions, usage, limits, menu bar and widgets, with its own copy of <code>swe</code> bundled.</p>
+    <div class="dmg">
+      <a class="btn light" href="https://github.com/c-wenlong/swe/releases/latest" data-dmg="Download for Mac"><svg class="i"><use href="#dl"/></svg><span>Download for Mac</span></a>
+      <span class="osreq" id="dmg-note">Needs macOS 26 or later.</span>
+    </div>
+    <div class="or">or</div>
+    <div class="cmd"><code><span class="p">$ </span>brew install --cask c-wenlong/swe/swe</code><button class="copy" type="button" data-copy="brew install --cask c-wenlong/swe/swe">Copy</button></div>
+  </section>
+  <section>
+    <h2>Just the CLI</h2>
+    <p class="why">The <code>swe</code> command on its own, no app.</p>
+    <div class="cmd"><code><span class="p">$ </span>brew install c-wenlong/swe/swe</code><button class="copy" type="button" data-copy="brew install c-wenlong/swe/swe">Copy</button></div>
+    <p class="fine">Needs Python 3.11+. <a href="../overview/#nix">Nix</a> and <a href="../overview/">pipx</a> work too.</p>
+  </section>
+</div>
+
+<div class="panel" id="panel-linux" role="tabpanel" aria-labelledby="tab-linux" hidden>
+  <section>
+    <h2>Install script</h2>
+    <p class="why">Installs the latest released <code>swe</code>: the wheel is verified against the release's <code>SHA256SUMS</code>, then installed through <code>uv</code>, or into a venv under <code>~/.local/share/swe</code> when uv is missing. No sudo, no shell rc edits.</p>
+    <div class="cmd"><code><span class="p">$ </span>curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh">Copy</button></div>
+    <p class="opt">Also serve the web app and phone remote from the machine (<code>swe remote setup --apply</code>):</p>
+    <div class="cmd"><code><span class="p">$ </span>curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh -s -- --hub</code><button class="copy" type="button" data-copy="curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh -s -- --hub">Copy</button></div>
+    <ul>
+      <li>No Python 3.11 (Ubuntu 22.04)? The script installs uv first and brings its own interpreter.</li>
+      <li>Pin a version with <code>--version=vX.Y.Z</code>, or install a local wheel with <code>--wheel=PATH</code>.</li>
+      <li>Upgrade by running it again; remove it with <code>uv tool uninstall swe</code>.</li>
+    </ul>
+  </section>
+  <section>
+    <h2>Other ways</h2>
+    <p class="why">With pipx already installed:</p>
+    <div class="cmd"><code><span class="p">$ </span>pipx install git+https://github.com/c-wenlong/swe.git</code><button class="copy" type="button" data-copy="pipx install git+https://github.com/c-wenlong/swe.git">Copy</button></div>
+    <p class="fine">One-off with Nix: <code>nix run github:c-wenlong/swe -- --help</code>. The flake goes on your inputs list to keep it; see <a href="../overview/#nix">the docs</a>.</p>
+  </section>
+</div>
+
+<div class="after">
+  <h2>Then</h2>
+  <p>Setup finds your agents, providers, MCP servers and skills.</p>
+  <div class="cmd"><code><span class="p">$ </span>swe setup</code><button class="copy" type="button" data-copy="swe setup">Copy</button></div>
+  <p class="opt">Then pick up where you left off, in any agent: <code>swe session -i</code>. More in <a href="../overview/">the docs</a>.</p>
+</div>
+
+<footer>
+  <span>swe is MIT licensed.</span>
+  <div class="right">
+    <a href="../overview/">Docs</a>
+    <a href="../changelog/">Changelog</a>
+    <a href="../contributing/">Contributing</a>
+    <a href="https://github.com/c-wenlong/swe">GitHub</a>
+  </div>
+</footer>
+
+</main>
+
+<script>
+(function () {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll(".tabs button"));
+  var panels = {
+    macos: document.getElementById("panel-macos"),
+    linux: document.getElementById("panel-linux")
+  };
+  function select(tab) {
+    tabs.forEach(function (t) {
+      var on = t === tab;
+      t.setAttribute("aria-selected", String(on));
+      t.tabIndex = on ? 0 : -1;
+      panels[t.getAttribute("data-os")].hidden = !on;
+    });
+  }
+  tabs.forEach(function (tab, i) {
+    tab.addEventListener("click", function () { select(tab); });
+    tab.addEventListener("keydown", function (e) {
+      var next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+      if (next === undefined) return;
+      e.preventDefault();
+      var t = tabs[(next + tabs.length) % tabs.length];
+      t.focus();
+      select(t);
+    });
+  });
+
+  // #linux deep-links and Linux user agents open on the Linux tab.
+  var hash = location.hash.replace("#", "");
+  var want = panels[hash] ? hash
+    : (/linux/i.test(navigator.userAgent) ? "linux" : "macos");
+  if (want !== "macos") select(tabs.filter(function (t) {
+    return t.getAttribute("data-os") === want;
+  })[0]);
+
+  // The download button points at the latest release's DMG once one is
+  // published; until then it links the release page.
+  if (window.fetch) {
+    fetch("https://api.github.com/repos/c-wenlong/swe/releases/latest")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (rel) {
+        var dmg = rel && (rel.assets || []).filter(function (a) { return /\.dmg$/i.test(a.name); })[0];
+        if (!dmg) return;
+        var ver = String(rel.tag_name || "").replace(/[^\w.\-]/g, "");
+        document.querySelectorAll("[data-dmg]").forEach(function (a) {
+          a.href = dmg.browser_download_url;
+          a.querySelector("use").setAttribute("href", "#apple");
+          a.querySelector("span").textContent = a.getAttribute("data-dmg") + " " + ver;
+        });
+        var note = document.getElementById("dmg-note");
+        if (note) note.textContent = "SWE " + ver + ". Needs macOS 26 or later.";
+      })
+      .catch(function () {});
+  }
+
+  document.querySelectorAll(".copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (!navigator.clipboard) return;
+      navigator.clipboard.writeText(btn.getAttribute("data-copy")).then(function () {
+        btn.textContent = "Copied";
+        setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+      }, function () {});
+    });
+  });
+
+  // Vercel Web Analytics: page views count themselves; clicks go in as
+  // custom events, one name per kind of control.
+  document.addEventListener("click", function (e) {
+    var el = e.target.closest("a, button");
+    if (!el) return;
+    var name, data = {};
+    if (el.hasAttribute("data-dmg")) {
+      name = "Install"; data.dmg = /\.dmg$/i.test(el.href);
+    } else if (el.classList.contains("copy")) {
+      name = "Copy command"; data.command = el.getAttribute("data-copy");
+    } else if (el.hasAttribute("data-os")) {
+      name = "OS tab"; data.os = el.getAttribute("data-os");
+    } else if (el.tagName === "A") {
+      name = "Link"; data.href = el.getAttribute("href");
+    } else {
+      return;
+    }
+    window.va("event", { name: name, data: data });
+  });
+})();
+</script>
+</body>
+</html>
