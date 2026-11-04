@@ -1192,6 +1192,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frame while the window is resized.
   Closes [#1557](https://github.com/c-wenlong/swe/issues/1557).
 
+- **The web chat reads its one session row, not the whole catalog.**
+  The chat read `GET /v1/sessions` (every row, read-state and machines)
+  to find its own row on open, on resync, at every turn's end (up to
+  three times, 6 s apart) and on every return to the tab. The hub now
+  answers `GET /v1/sessions?key=<key>` with that row and its machine:
+  0.4 ms and under 1 KB against 34 ms and 1.6 MB for a 2,000-row
+  catalog. A return to the tab reads once, unless a turn's re-reads
+  are still running.
+  Closes [#1556](https://github.com/c-wenlong/swe/issues/1556).
+
+- **Three small rendering costs in the Mac app are gone.** GitHub's
+  octicons parsed their SVG path data on every layout; each glyph now
+  parses once. An open Calendar hover card polled the pointer every
+  50 ms; it polls every 100 ms, so a card closes at most 300 ms after
+  the pointer leaves instead of 250. A sheet's shadow was worked out from its whole content on each
+  frame of the open animation; it now comes from one rounded shape
+  behind the card. Closes
+  [#1545](https://github.com/c-wenlong/swe/issues/1545).
+
+- **The Mac app's background polls slow down while nobody can see
+  them.** The GitHub inbox poll ran `swe gh inbox` every minute for the
+  app's whole life. It now keeps the minute only while the main window
+  is on screen, polls every 3 minutes behind it while GitHub banners are
+  on, and every 15 minutes with banners off. The window coming back
+  wakes it at once. The Repositories and repo pages, the Inbox's hub
+  cards, Remote pairing requests and the remote setup sheet skip their
+  `swe` runs while the window is minimised, hidden or covered. A hub
+  that doesn't answer is retried after 1, 2, 4 and then 5 minutes,
+  where before it was every minute. The accounts timer reads the cached
+  login `PATH` rather than starting `zsh -il` (the whole rc chain) every
+  5 minutes. Closes [#1541](https://github.com/c-wenlong/swe/issues/1541).
+
 - **The hub reads `harness.json` once per launch-field refresh and
   finds tmux once.** Every 10 s catalog tick read the registry twice
   per launchable harness to list its launch providers (about 1.1 ms
@@ -1220,6 +1252,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose channel died mid-reply were bounded in
   [#1532](https://github.com/c-wenlong/swe/issues/1532). Closes
   [#1533](https://github.com/c-wenlong/swe/issues/1533).
+- **`swe`'s search indexer stops resolving every transcript's path.**
+  Listing the transcripts called `realpath` on each one, a stat per
+  folder in its path, every pass. The walk now resolves its root once
+  and only resolves files that are symlinks, with the same paths and
+  order as before: 87 to 66 ms to list 1,238 transcripts here. A Devin
+  session still decodes its whole chain when it grows, as the Mac app's
+  indexer does; FEATURES.md notes that both writers owe that change.
+  Closes [#1538](https://github.com/c-wenlong/swe/issues/1538).
 - **Live reply text costs the hub linear work, not quadratic.** Every
   100 ms flush of a streamed reply re-cleaned the whole message so far:
   a 100 KB reply took 3.3 s of cleaning, now 58 ms. Each message keeps

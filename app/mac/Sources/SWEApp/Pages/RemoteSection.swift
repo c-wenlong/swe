@@ -58,7 +58,7 @@ struct RemoteSection: View {
         .task(id: app.swePath) {
             let pending = PairRequestsModel(swe: app.swe)
             requests = pending
-            await CommandActivity.background { await pending.poll() }
+            await CommandActivity.background { await pending.poll(onScreen: { [app] in app.mainWindowOnScreen }) }
         }
         // The first-run wizard's "Set up now" lands here once it closes.
         .onChange(of: app.pendingRemoteSetup, initial: true) { _, pending in

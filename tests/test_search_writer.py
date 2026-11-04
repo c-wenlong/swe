@@ -680,5 +680,74 @@ class HubLoopTests(_Home):
         self.assertEqual(len(search_index.search(self.home, "hub indexed")), 1)
 
 
+def _walk_before_1538(root, suffix=".jsonl"):
+    """The ``os.walk`` + per-file ``realpath`` walk ``_walk`` replaced."""
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames
+                             if not d.startswith(".") and d != "subagents")
+        for name in sorted(filenames):
+            if name.endswith(suffix) and not name.startswith("."):
+                found.append(os.path.realpath(os.path.join(dirpath, name)))
+    return found
+
+
+class WalkStatsTest(unittest.TestCase):
+    """#1538: ``_walk`` and ``_files_in`` resolved every file with
+    ``realpath`` (an lstat per path component). The paths are the index's
+    keys, shared with the Swift writer, so they must not change."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        real = self.tmp / "real"
+        (real / "proj" / "deep").mkdir(parents=True)
+        (real / "proj" / "subagents").mkdir()
+        (real / ".hidden").mkdir()
+        elsewhere = self.tmp / "elsewhere"
+        (elsewhere / "linked-dir").mkdir(parents=True)
+        for rel in ("a.jsonl", "proj/b.jsonl", "proj/deep/c.jsonl",
+                    "proj/subagents/s.jsonl", ".hidden/h.jsonl", "proj/.x.jsonl",
+                    "proj/notes.txt"):
+            (real / rel).write_text("{}\n")
+        (elsewhere / "target.jsonl").write_text("{}\n")
+        (elsewhere / "linked-dir" / "d.jsonl").write_text("{}\n")
+        (real / "proj" / "link.jsonl").symlink_to(elsewhere / "target.jsonl")
+        (real / "proj" / "dirlink").symlink_to(elsewhere / "linked-dir")
+        (real / "proj" / "broken.jsonl").symlink_to(self.tmp / "missing.jsonl")
+        # The walk starts at a symlink to the tree, as ~/.claude can be.
+        self.root = self.tmp / "root-link"
+        self.root.symlink_to(real)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp)
+
+    def test_walk_finds_the_same_paths_with_far_fewer_resolves(self):
+        expected = _walk_before_1538(self.root)
+        real_realpath = os.path.realpath
+        with mock.patch("swe.sessions.search_writer.os.path.realpath",
+                        side_effect=real_realpath) as realpath:
+            found = writer._walk(self.root)
+        self.assertEqual(found, expected)
+        self.assertIn(os.path.join(real_realpath(self.tmp), "elsewhere", "target.jsonl"), found)
+        # The root, plus the two symlinked files; never the plain ones.
+        self.assertEqual(realpath.call_count, 3)
+
+    def test_a_missing_root_walks_nothing(self):
+        self.assertEqual(writer._walk(self.tmp / "nope"), [])
+
+    def test_files_in_resolves_only_symlinks(self):
+        directory = self.root / "proj"
+        expected = [os.path.realpath(directory / name)
+                    for name in sorted(os.listdir(directory))
+                    if not name.startswith(".") and (directory / name).is_file()]
+        real_realpath = os.path.realpath
+        with mock.patch("swe.sessions.search_writer.os.path.realpath",
+                        side_effect=real_realpath) as realpath:
+            found = writer._files_in(directory)
+        self.assertEqual(found, expected)
+        self.assertEqual(realpath.call_count, 2)  # the directory and link.jsonl
+
+
 if __name__ == "__main__":
     unittest.main()

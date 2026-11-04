@@ -429,6 +429,25 @@ class TestChatContract(unittest.TestCase):
         self.assertEqual(resolved[0]["data"], {"request_id": "r1", "decision": "always"})
         fake.control.assert_called_once()
 
+    def test_one_row_by_key(self):
+        """#1556: ``?key=`` answers that row alone, in the list's shape,
+        with only its machine and when the catalog was last rebuilt."""
+        from swe.remote import catalog as catalog_mod
+        whole = json.loads(self.srv.request("GET", "/v1/sessions", headers=self.hdr)[1])
+        row = next(r for r in whole["sessions"] if r["key"] == self.key)
+        catalog_mod.upsert_machine(self.srv.state.home, {"id": "elsewhere", "name": "Other"})
+        if row.get("machine_id"):
+            catalog_mod.upsert_machine(self.srv.state.home, {"id": row["machine_id"], "name": "Here"})
+        status, data = self.srv.request("GET", "/v1/sessions?key=claude%3As1", headers=self.hdr)
+        self.assertEqual(status, 200)
+        one = json.loads(data)
+        self.assertEqual(one["sessions"], [row])
+        self.assertEqual([m["id"] for m in one["machines"]], [row["machine_id"]] if row.get("machine_id") else [])
+        self.assertIn("server_time", one)
+        status, data = self.srv.request("GET", "/v1/sessions?key=claude%3Anope", headers=self.hdr)
+        self.assertEqual((status, json.loads(data)["error"]["code"]), (404, "unknown_session"))
+        self.assertEqual(self.srv.request("GET", "/v1/sessions?key=claude%3As1")[0], 401)
+
     def test_every_route_wants_the_device_credential(self):
         for method, action, body in (("GET", "messages", None), ("GET", "events?last=0", None),
                                      ("POST", "message", {"text": "x"}), ("POST", "approval", {}),
@@ -540,7 +559,7 @@ return { fetches, hiddenFetches, delays: timers.map((t) => t.ms) };
 let answer; const asked = [];
 globalThis.api = (path) => {
   asked.push(path);
-  if (path === "/v1/sessions") return Promise.resolve({ status: 200, data: { sessions: [] } });
+  if (path.startsWith("/v1/sessions?")) return Promise.resolve({ status: 200, data: { sessions: [] } });
   return new Promise((r) => { answer = r; });
 };
 const card = { kind: "open approval card" }, appended = [];
@@ -578,7 +597,7 @@ return { during, heldWhileReading, held: T.chat.held, seq: T.chat.seq, log: log.
         self.assertEqual(out["seq"], 3)
         self.assertEqual((out["log"], out["kept"]), ("", 1))
         self.assertEqual(out["queued"], ["session.status:1", "approval.requested:1", "message.appended:4"])
-        self.assertEqual(out["asked"][-1], "/v1/sessions")
+        self.assertEqual(out["asked"][-1], "/v1/sessions?key=k")
 
     def test_a_failed_refetch_keeps_the_history(self):
         out = self.run_js(self.RESYNC.replace("ANSWER", "{ status: 0, data: null }"))
@@ -1804,20 +1823,20 @@ class TestSessionModelShown(unittest.TestCase):
             const model = reads < 3 ? "claude-sonnet-4-5" : "claude-opus-4-5";
             return { status: 200, data: { sessions: [{ key: "s1", model }] } };
           };
-          out.shown = await T.refreshModel();
+          out.shown = await T.refreshModel(true);
           out.reads = reads; out.waits = waits.slice();
           // A model that really didn't change reads once per wait, then stops.
           reads = 0; waits.length = 0;
           globalThis.api = async () => { reads++; return { status: 200, data: { sessions: [{ key: "s1", model: "claude-opus-4-5" }] } }; };
-          out.same = await T.refreshModel();
+          out.same = await T.refreshModel(true);
           out.sameReads = reads; out.sameWaits = waits.slice();
           // A newer turn end takes over from a read still waiting.
           reads = 0;
           const timers = [];
           globalThis.setTimeout = (f) => { timers.push(f); return 0; };
-          const first = T.refreshModel();
+          const first = T.refreshModel(true);
           await new Promise((r) => setImmediate(r));
-          const second = T.refreshModel();
+          const second = T.refreshModel(true);
           await new Promise((r) => setImmediate(r));
           out.readsBeforeWake = reads;
           globalThis.setTimeout = (f) => { f(); return 0; };
@@ -1833,6 +1852,72 @@ class TestSessionModelShown(unittest.TestCase):
         # stops (superseded) and the second goes on through its two retries.
         self.assertEqual(out["readsBeforeWake"], 2)
         self.assertEqual(out["readsAfterWake"], 4)
+
+    def test_a_tab_return_reads_this_one_row_once(self):
+        """#1556: a tab coming back with no turn's retries running reads
+        once, and every read asks for this one row, never the catalog."""
+        out = self.run_js("""
+          const T = SessionChat._test;
+          const out = {};
+          globalThis.setTimeout = (f) => { f(); return 0; };
+          T.chat.key = "s 1"; T.chat.gen = 3;
+          T.chat.row = { harness: "claude", model: "claude-opus-4-5" };
+          const asked = [];
+          globalThis.api = async (path) => {
+            asked.push(path);
+            return { status: 200, data: { sessions: [{ key: "s 1", model: "claude-opus-4-5" }], machines: [] } };
+          };
+          out.same = await T.refreshModel(true);
+          out.afterTurn = asked.length;
+          asked.length = 0;
+          await T.refreshModel();
+          out.tabReturn = asked.length;
+          out.path = asked[0];
+          return out;""", with_sessions=False)
+        self.assertEqual(out["same"], "claude-opus-4-5")
+        self.assertEqual(out["afterTurn"], 3)
+        self.assertEqual(out["tabReturn"], 1)
+        self.assertEqual(out["path"], "/v1/sessions?key=s%201")
+
+    def test_a_tab_return_keeps_the_turns_retries(self):
+        """A tab coming back while a turn's retries run takes them over
+        instead of ending them with one read."""
+        out = self.run_js("""
+          const T = SessionChat._test;
+          const out = {};
+          T.chat.key = "s1"; T.chat.gen = 3;
+          T.chat.row = { harness: "claude", model: "m-old" };
+          let reads = 0, remote = true, model = "m-old", newFrom = Infinity;
+          globalThis.api = async () => {
+            reads++;
+            if (reads >= newFrom) model = "m-new";
+            return { status: 200, data: { sessions: [{ key: "s1", model, remote }], machines: [] } };
+          };
+          globalThis.setTimeout = (f) => { f(); return 0; };
+          await T.refreshModel(true);
+          out.remoteReads = reads;
+          // A turn ends; the tab comes back while its first retry waits.
+          remote = false; reads = 0;
+          const timers = [];
+          globalThis.setTimeout = (f) => { timers.push(f); return 0; };
+          const turn = T.refreshModel(true);
+          await new Promise((r) => setImmediate(r));
+          // The tab's own read (the 2nd) is still stale; the catalog
+          // catches up by the 3rd.
+          newFrom = 3;
+          globalThis.setTimeout = (f) => { f(); return 0; };
+          const back = T.refreshModel();
+          timers.splice(0).forEach((f) => f());
+          await Promise.all([turn, back]);
+          out.shown = T.chat.row.model;
+          // Back with no turn pending: one read.
+          model = "m-new"; reads = 0;
+          await T.refreshModel();
+          out.plainReads = reads;
+          return out;""", with_sessions=False)
+        self.assertEqual(out["remoteReads"], 3, "an unchanged model reads through every wait")
+        self.assertEqual(out["shown"], "m-new")
+        self.assertEqual(out["plainReads"], 1)
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
