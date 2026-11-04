@@ -37,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unlisting chapters move to the upcoming Compile tab, so they are
   temporarily unavailable in the app; edit index.txt by hand meanwhile.
 
+- **The Compile tab chooses what every harness compiles.** The AGENTS.md
+  page's new Compile tab turns the harness strip into a filter: All shows
+  every chapter and folder's include checkbox (on, off, and unlisted
+  index.txt states), and picking a harness toggles its only/except rules
+  in targets.json. The Order list drags index.txt order back and, in All
+  view, shows a chip per harness per chapter for one-click per-harness
+  receipt. View AGENTS.md opens the filtered output's own file.
+
 ### Changed
 
 - **The web chat keeps its newest 200 entries in the DOM.** A long

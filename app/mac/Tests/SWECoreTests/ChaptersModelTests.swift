@@ -292,6 +292,224 @@ import Testing
         #expect(await model.createFolder("../x", swe: SweClient(runner: runner)) != nil)
     }
 
+    // MARK: - compile toggles
+
+    @Test func disablingAndEnablingEditOnlyTheirLine() {
+        let text = "# top\na.md\n# b.md\n\n# tail\n"
+        #expect(ChapterIndex.disabling(text, name: "a.md")
+                == "# top\n# a.md\n# b.md\n\n# tail\n")
+        #expect(ChapterIndex.disabling(text, name: "gone.md") == text)
+        #expect(ChapterIndex.enabling(text, name: "b.md")
+                == "# top\na.md\nb.md\n\n# tail\n")
+        #expect(ChapterIndex.enabling(text, name: "gone.md") == text)
+    }
+
+    @Test func targetsParseAndDeterministicEncode() throws {
+        let parsed = try ChapterTargets.parse("""
+            {"version":1,"chapters":{"b.md":{"except":["z","a"]},
+            "a.md":{"only":["claude"]}}}
+            """)
+        let text = parsed.encoded()
+        #expect(text.hasPrefix("{\n  \"version\": 1,\n  \"chapters\": {\n"))
+        #expect(text.hasSuffix("}\n"))
+        let a = text.range(of: "\"a.md\"")!.lowerBound
+        let b = text.range(of: "\"b.md\"")!.lowerBound
+        #expect(a < b)  // chapters sorted
+        #expect(text.contains("\"except\": [\"a\", \"z\"]"))  // names sorted
+        #expect(ChapterTargets().encoded()
+                == "{\n  \"version\": 1,\n  \"chapters\": {}\n}\n")
+        #expect(throws: (any Error).self) {
+            try ChapterTargets.parse("not json")
+        }
+        #expect(throws: (any Error).self) {
+            try ChapterTargets.parse(#"{"version":2,"chapters":{}}"#)
+        }
+        #expect(throws: (any Error).self) {
+            try ChapterTargets.parse(
+                #"{"version":1,"chapters":{"a.md":{"only":["x"],"except":["y"]}}}"#)
+        }
+    }
+
+    @Test func allToggleDisablesEnablesAndInserts() {
+        let text = "a.md\n"
+        if case .index(let next) = CompileToggle.all(
+            index: text, state: .on, name: "a.md", folder: "").first {
+            #expect(next == "# a.md\n")
+        } else { Issue.record("expected an index write") }
+        if case .index(let next) = CompileToggle.all(
+            index: "# a.md\n", state: .off, name: "a.md", folder: "").first {
+            #expect(next == "a.md\n")
+        } else { Issue.record("expected an index write") }
+        if case .index(let next) = CompileToggle.all(
+            index: text, state: .unlisted, name: "eng/x.md", folder: "eng").first {
+            #expect(next == "a.md\neng/x.md\n")
+        } else { Issue.record("expected an index write") }
+    }
+
+    @Test func harnessToggleAddsAndRemovesReceipt() {
+        // on with no rule -> except [h] narrows (rule write only)
+        var writes = CompileToggle.harness(
+            "claude", want: false, index: "a.md\n", rules: [:],
+            state: .on, name: "a.md", folder: "")
+        if case .targets(let t) = writes.first {
+            #expect(t.contains(#""a.md": { "except": ["claude"] }"#))
+        } else { Issue.record("expected a targets write") }
+        // off + want -> only [h] written first, then the enable
+        writes = CompileToggle.harness(
+            "claude", want: true, index: "# a.md\n", rules: [:],
+            state: .off, name: "a.md", folder: "")
+        #expect(writes.count == 2)
+        if case .targets(let t) = writes[0] {
+            #expect(t.contains(#""a.md": { "only": ["claude"] }"#))
+        } else { Issue.record("rule write must come first") }
+        if case .index(let t) = writes[1] { #expect(t == "a.md\n") }
+        else { Issue.record("enable after the rule") }
+        // unlisted + want -> only [h] then an insert
+        writes = CompileToggle.harness(
+            "codex", want: true, index: "a.md\n", rules: [:],
+            state: .unlisted, name: "x.md", folder: "")
+        if case .index(let t) = writes[1] { #expect(t == "a.md\nx.md\n") }
+        else { Issue.record("insert after the rule") }
+        // on + only -> removing the last name disables the line first
+        writes = CompileToggle.harness(
+            "claude", want: false, index: "a.md\n",
+            rules: ["a.md": ["only": ["claude"]]],
+            state: .on, name: "a.md", folder: "")
+        #expect(writes.count == 2)
+        if case .index(let t) = writes[0] { #expect(t == "# a.md\n") }
+        else { Issue.record("disable precedes the rule drop") }
+        if case .targets(let t) = writes[1] {
+            #expect(!t.contains("\"a.md\""))
+        } else { Issue.record("rule dropped after") }
+        // on + only -> adding a name widens the rule
+        writes = CompileToggle.harness(
+            "codex", want: true, index: "a.md\n",
+            rules: ["a.md": ["only": ["claude"]]],
+            state: .on, name: "a.md", folder: "")
+        if case .targets(let t) = writes[0] {
+            #expect(t.contains(#""only": ["claude", "codex"]"#))
+        } else { Issue.record("only widens") }
+        // on + except -> removing the harness drops an emptied rule
+        writes = CompileToggle.harness(
+            "codex", want: true, index: "a.md\n",
+            rules: ["a.md": ["except": ["codex"]]],
+            state: .on, name: "a.md", folder: "")
+        if case .targets(let t) = writes[0] {
+            #expect(!t.contains("\"a.md\""))
+        } else { Issue.record("emptied except is dropped") }
+        // already-received want and already-skipped exclusion are no-ops
+        #expect(CompileToggle.harness(
+            "claude", want: true, index: "a.md\n", rules: [:],
+            state: .on, name: "a.md", folder: "") == [])
+        #expect(CompileToggle.harness(
+            "claude", want: false, index: "a.md\n",
+            rules: ["a.md": ["except": ["claude"]]],
+            state: .on, name: "a.md", folder: "") == [])
+    }
+
+    @Test func folderToggleBatchesEveryFile() {
+        // Any off -> all on; all on -> all off.
+        let members: [(String, CompileState, [String: [String]]?)] = [
+            ("a.md", .off, nil),
+            ("b.md", .on, nil),
+            ("c.md", .unlisted, nil),
+        ]
+        let onWrites = CompileToggle.folder(
+            on: true, harness: nil, index: "# a.md\nb.md\n",
+            rules: [:], members: members)
+        if case .index(let t) = onWrites.first {
+            #expect(t == "a.md\nb.md\nc.md\n")
+        } else { Issue.record("folder on writes the index once") }
+        let offWrites = CompileToggle.folder(
+            on: false, harness: nil, index: "a.md\nb.md\nc.md\n",
+            rules: [:], members: [
+                ("a.md", .on, nil), ("b.md", .on, nil), ("c.md", .on, nil)])
+        if case .index(let t) = offWrites.first {
+            #expect(t == "# a.md\n# b.md\n# c.md\n")
+        } else { Issue.record("folder off writes the index once") }
+        // Harness filter: one index write plus one targets write.
+        let hWrites = CompileToggle.folder(
+            on: false, harness: "claude", index: "a.md\n", rules: [:],
+            members: [("a.md", .on, nil)])
+        #expect(hWrites.count == 1)
+        if case .targets(let t) = hWrites[0] {
+            #expect(t.contains(#""a.md": { "except": ["claude"] }"#))
+        } else { Issue.record("folder harness write") }
+    }
+
+    @Test func folderHarnessWriteOrderNarrowsFirst() {
+        // Narrowing batch: index disables land before the rule writes.
+        let off = CompileToggle.folder(
+            on: false, harness: "claude", index: "a.md\n",
+            rules: ["a.md": ["only": ["claude"]]],
+            members: [("a.md", .on, ["only": ["claude"]])])
+        #expect(off.count == 2)
+        if case .index = off[0], case .targets = off[1] {} else {
+            Issue.record("narrowing must write index before targets")
+        }
+        // Widening batch: the rule lands before the enables.
+        let on = CompileToggle.folder(
+            on: true, harness: "claude", index: "# a.md\n", rules: [:],
+            members: [("a.md", .off, nil)])
+        #expect(on.count == 2)
+        if case .targets = on[0], case .index = on[1] {} else {
+            Issue.record("widening must write targets before index")
+        }
+    }
+
+    @Test func aToggleNeverWritesOverAnUnreadIndex() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        // Right after load, the index doc may still be loading: a toggle
+        // must wait for it rather than write over unread text.
+        let model = try await model(dir, runner: runner)
+        let problem = await model.setIncluded(
+            name: "a.md", state: .on, on: false,
+            swe: SweClient(runner: runner))
+        let text = try String(contentsOf: dir.path("index.txt"), encoding: .utf8)
+        if problem == nil {
+            #expect(text.contains("# a.md"))
+            #expect(text.contains("b.md"))  // the rest survived
+        } else {
+            #expect(text == "# in order\na.md\nb.md\n")  // refused, never clobbered
+        }
+    }
+
+    @Test func aToggleHitByADiskChangeReloadsAndReports() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        // index.txt changed on disk after the doc loaded; checkDisk flags
+        // it, and the save is refused rather than overwriting.
+        try "outside.md\n".write(to: dir.path("index.txt"),
+                               atomically: true, encoding: .utf8)
+        await model.checkDisk()
+        let problem = await model.setIncluded(
+            name: "a.md", state: .on, on: false,
+            swe: SweClient(runner: runner))
+        #expect(problem == "The chapter files changed on disk; try again.")
+        // The refused edit is dropped, not left dirty on the document.
+        let text = try String(contentsOf: dir.path("index.txt"), encoding: .utf8)
+        #expect(text == "outside.md\n")
+    }
+
+    @Test func receivesCoversStateAndRules() {
+        #expect(CompileToggle.receives(state: .on, rule: nil, harness: nil))
+        #expect(!CompileToggle.receives(state: .off, rule: nil, harness: nil))
+        #expect(!CompileToggle.receives(state: .unlisted, rule: nil, harness: nil))
+        #expect(CompileToggle.receives(
+            state: .on, rule: ["only": ["claude"]], harness: "claude"))
+        #expect(!CompileToggle.receives(
+            state: .on, rule: ["only": ["claude"]], harness: "codex"))
+        #expect(!CompileToggle.receives(
+            state: .on, rule: ["except": ["claude"]], harness: "claude"))
+        #expect(CompileToggle.receives(
+            state: .on, rule: ["except": ["claude"]], harness: "codex"))
+        #expect(CompileToggle.triState([true, true]) == .all)
+        #expect(CompileToggle.triState([true, false]) == .mixed)
+        #expect(CompileToggle.triState([false, false]) == .none)
+    }
+
     @Test func aReloadKeepsAnUnlistedFileSelected() async throws {
         let dir = try TempDir()
         try dir.write("README.md", "# Notes\n")
