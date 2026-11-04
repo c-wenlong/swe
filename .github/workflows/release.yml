@@ -1,7 +1,8 @@
 # Release pipeline.
 #
 # Builds an sdist and a wheel from a `v*` tag, checks the metadata renders,
-# and attaches both files to the matching GitHub release.  The `macos-app`
+# and attaches both files plus a `SHA256SUMS` for them and the Linux
+# `scripts/install.sh` one-liner to the matching GitHub release.  The `macos-app`
 # job builds SWE.app on a macOS 26 runner, signs and notarizes it when
 # the secrets below are configured, and attaches the DMG plus a Sparkle
 # `appcast.xml` the same way.  `bump-homebrew-tap` then points the
@@ -464,11 +465,28 @@ jobs:
       attached: ${{ steps.upload.outputs.attached }}
 
     steps:
+      - name: Check out the install script
+        # Sparse on purpose: the release only needs scripts/install.sh so
+        # `.../releases/latest/download/install.sh` stays a live link.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          sparse-checkout: scripts/install.sh
+          sparse-checkout-cone-mode: false
+
       - name: Download the distributions
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dist
           path: dist/
+
+      - name: Write SHA256SUMS for the distributions
+        # Run inside dist/ so each line carries a bare filename, which is
+        # what `sha256sum -c` and install.sh's checksum check expect.
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Download the macOS app artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -485,7 +503,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          # dist/ holds the sdist + wheel; macos-app/ holds the DMG and
+          # dist/ holds the sdist, wheel and SHA256SUMS; scripts/install.sh
+          # is the Linux one-liner; macos-app/ holds the DMG and
           # appcast.xml, or just an UNSIGNED notice when the signing
           # secrets are not configured.  The glob picks up real assets only.
           shopt -s nullglob
@@ -497,7 +516,7 @@ jobs:
           if [ "${#versioned[@]}" -eq 1 ]; then
             cp "${versioned[0]}" macos-app/SWE.dmg
           fi
-          assets=(dist/* macos-app/*.dmg macos-app/appcast*.xml)
+          assets=(dist/* scripts/install.sh macos-app/*.dmg macos-app/appcast*.xml)
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
             echo "Attached ${assets[*]} to release $RELEASE_TAG"

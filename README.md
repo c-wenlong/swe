@@ -94,9 +94,10 @@ extra that adds a real dependency, and you opt into it.
 > pipx install git+https://github.com/c-wenlong/swe.git@v0.2.9
 > ```
 >
-> Check with `python3 --version`. Ubuntu 22.04 LTS ships 3.10, so it needs the
-> pin or a newer interpreter. Debian 12 (3.11), Ubuntu 24.04 (3.12) and current
-> Fedora and Homebrew are all fine as they are.
+> Check with `python3 --version`. Ubuntu 22.04 LTS ships 3.10, so use the
+> Linux installer below (it brings its own interpreter through uv) or the
+> pin. Debian 12 (3.11), Ubuntu 24.04 (3.12) and current Fedora and Homebrew
+> are all fine as they are.
 
 ### Homebrew (macOS)
 
@@ -113,6 +114,25 @@ Installed it as `swe` before the rename? The `swe` cask stays frozen at
 the last Quiver build. `app/mac/script/install-app.sh` moves an existing
 install to SWE.app itself; by brew, `brew uninstall --cask
 c-wenlong/quiver/quiver` first, then the `swe` cask.
+
+### Linux
+
+```bash
+curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh
+# or, to also set up the web app and phone remote:
+curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh -s -- --hub
+```
+
+The script downloads the released wheel (verified against the release's
+`SHA256SUMS`) and installs it with `uv` when available, otherwise into a
+venv under `~/.local/share/swe` with a `swe` symlink in `~/.local/bin`;
+when neither works (e.g. Ubuntu 22.04 with no Python 3.11) it installs uv
+for you first. No sudo, nothing added to your shell rc.
+
+Upgrade by running it again. To uninstall: `swe remote serve --uninstall`
+first if you installed the hub, then `uv tool uninstall swe` (or, for the
+venv install, remove `~/.local/share/swe` and the `~/.local/bin/swe`
+symlink).
 
 ### pipx
 
