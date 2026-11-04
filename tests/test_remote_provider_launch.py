@@ -186,6 +186,18 @@ class TestMachineRow(unittest.TestCase):
                          {"openai": "OpenAI", "groq": "Groq"})
         _assert_no_secret(self, fields)
 
+    def test_reads_the_registry_once_for_every_harness(self):
+        # #1531: capability() and configured() each re-read harness.json
+        # per harness when they weren't handed the registry.
+        home = temp_dir(self)
+        _write_keys(home)
+        launchable = [{"name": "opencode"}, {"name": "claude"},
+                      {"name": "codex"}]
+        with patch("swe.harness.registry.load_registry_readonly",
+                   return_value={}) as load:
+            catalog_mod.provider_fields(launchable, home)
+        self.assertEqual(load.call_count, 1)
+
     def test_unreadable_keys_file_offers_nothing(self):
         home = temp_dir(self)
         provider_keys_file_for(home).mkdir(parents=True)

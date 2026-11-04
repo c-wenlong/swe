@@ -744,17 +744,13 @@ def _read_devin(session: Session, max_nodes: int | None = None) -> NormalizedTra
     can hold hundreds of MB of streamed copies) is never loaded whole.
     The live tailer uses it; reports read everything.
     """
-    path = Path(os.path.expanduser("~/.local/share/devin/cli/sessions.db"))
+    path = Path(os.path.expanduser(DEVIN_DB))
     conn = _open_ro(path)
     if conn is None:
         return _unreadable(session, "Devin store not found", [path])
     transcript = _new(session, [path])
-    call_names: dict[str, str] = {}
     try:
-        head_row = conn.execute(
-            "SELECT main_chain_id FROM sessions WHERE id = ?", (session.session_id,),
-        ).fetchone()
-        head = head_row[0] if head_row else None
+        head = _devin_head(conn, session.session_id)
         if max_nodes is not None:
             # A margin of older nodes resolves tool-call names for results
             # near the window's start; their own messages are not kept.
@@ -765,35 +761,8 @@ def _read_devin(session: Session, max_nodes: int | None = None) -> NormalizedTra
         else:
             ordered = _devin_chain(conn, session.session_id, head)
             context = 0
-        for index, raw in enumerate(ordered):
-            keep = index >= context
-            try:
-                record = json.loads(raw)
-            except (TypeError, json.JSONDecodeError, RecursionError):
-                continue
-            if not isinstance(record, dict):
-                continue
-            role = _role(record.get("role"))
-            if role == "tool":
-                label = call_names.get(str(record.get("tool_call_id") or ""), "tool result")
-                msg = _tool_message(label, output=record.get("content")) if keep else None
-                if msg:
-                    transcript.messages.append(msg)
-                continue
-            if role not in {"human", "assistant"}:
-                continue
-            msg = _message(role, record.get("content")) if keep else None
-            if msg:
-                transcript.messages.append(msg)
-            for call in record.get("tool_calls") or []:
-                if not isinstance(call, dict):
-                    continue
-                name = call.get("name")
-                if call.get("id") and name:
-                    call_names[str(call["id"])] = str(name)
-                msg = _tool_message(name, call.get("arguments")) if keep else None
-                if msg:
-                    transcript.messages.append(msg)
+        transcript.messages = _devin_messages(
+            [_devin_parts(raw) for raw in ordered], context)
     except sqlite3.Error as exc:
         return _unreadable(session, f"SQLite schema error: {exc}", [path])
     finally:
@@ -801,9 +770,98 @@ def _read_devin(session: Session, max_nodes: int | None = None) -> NormalizedTra
     return transcript
 
 
+DEVIN_DB = "~/.local/share/devin/cli/sessions.db"
+
 # Extra chain nodes a bounded Devin read walks only to learn tool-call
 # names (a result names the call it answers, which sits just before it).
 _DEVIN_NAME_MARGIN = 64
+
+
+class _DevinTurn:
+    """A human or assistant node: its message and its tool calls as
+    ``(call id or "", name, message)``."""
+
+    __slots__ = ("message", "calls")
+
+    def __init__(self, message, calls) -> None:
+        self.message = message
+        self.calls = calls
+
+
+class _DevinResult:
+    """A ``tool`` node. Its label is the name of the call it answers,
+    known only from the nodes before it, so the message is built for a
+    label and rebuilt only if that label changes."""
+
+    __slots__ = ("call_id", "content", "_label", "_message")
+
+    def __init__(self, call_id: str, content: Any) -> None:
+        self.call_id = call_id
+        self.content = content
+        self._label: str | None = None
+        self._message: NormalizedMessage | None = None
+
+    def message(self, label: str) -> NormalizedMessage | None:
+        if label != self._label:
+            self._message = _tool_message(label, output=self.content)
+            self._label = label
+        return self._message
+
+
+def _devin_parts(raw: Any) -> "_DevinTurn | _DevinResult | None":
+    """One ``chat_message`` decoded once; None for rows that show nothing
+    (system rows, malformed JSON)."""
+    try:
+        record = json.loads(raw)
+    except (TypeError, json.JSONDecodeError, RecursionError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    role = _role(record.get("role"))
+    if role == "tool":
+        return _DevinResult(str(record.get("tool_call_id") or ""), record.get("content"))
+    if role not in {"human", "assistant"}:
+        return None
+    calls = []
+    for call in record.get("tool_calls") or []:
+        if not isinstance(call, dict):
+            continue
+        name = call.get("name")
+        call_id = str(call["id"]) if call.get("id") and name else ""
+        calls.append((call_id, str(name or ""), _tool_message(name, call.get("arguments"))))
+    return _DevinTurn(_message(role, record.get("content")), calls)
+
+
+def _devin_messages(parts: list, context: int) -> list[NormalizedMessage]:
+    """The messages of decoded chain nodes, oldest first. The first
+    ``context`` nodes only teach tool-call names."""
+    call_names: dict[str, str] = {}
+    out: list[NormalizedMessage] = []
+    for index, part in enumerate(parts):
+        keep = index >= context
+        if isinstance(part, _DevinResult):
+            if keep:
+                msg = part.message(call_names.get(part.call_id, "tool result"))
+                if msg:
+                    out.append(msg)
+            continue
+        if part is None:
+            continue
+        if keep and part.message:
+            out.append(part.message)
+        for call_id, name, msg in part.calls:
+            if call_id:
+                call_names[call_id] = name
+            if keep and msg:
+                out.append(msg)
+    return out
+
+
+def _devin_head(conn: sqlite3.Connection, session_id: str) -> int | None:
+    row = conn.execute(
+        "SELECT main_chain_id FROM sessions WHERE id = ?", (session_id,),
+    ).fetchone()
+    return row[0] if row else None
 
 
 def _devin_chain(conn: sqlite3.Connection, session_id: str, head: int | None) -> list[str]:
@@ -829,11 +887,9 @@ def _devin_chain(conn: sqlite3.Connection, session_id: str, head: int | None) ->
     return ordered
 
 
-def _devin_chain_tail(
-    conn: sqlite3.Connection, session_id: str, head: int | None, max_nodes: int
-) -> list[str]:
-    """The newest ``max_nodes`` nodes of the main chain, oldest first,
-    walked parent by parent through the (session_id, node_id) index."""
+def _devin_start(conn: sqlite3.Connection, session_id: str, head: int | None) -> int | None:
+    """The node a chain walk starts at: the head when its row exists,
+    else the newest node."""
     row = conn.execute(
         "SELECT node_id FROM message_nodes WHERE session_id = ? AND node_id = ?",
         (session_id, head),
@@ -842,10 +898,28 @@ def _devin_chain_tail(
         row = conn.execute(
             "SELECT MAX(node_id) FROM message_nodes WHERE session_id = ?", (session_id,),
         ).fetchone()
-    cursor = row[0] if row else None
-    ordered: list[str] = []
+    return row[0] if row else None
+
+
+def _devin_walk(
+    conn: sqlite3.Connection,
+    session_id: str,
+    cursor: int | None,
+    max_nodes: int,
+    known: dict[int, int] | None = None,
+) -> tuple[list[tuple[int, int | None, str]], int | None]:
+    """Walk parents from ``cursor``, one indexed row at a time.
+
+    Returns the nodes read as ``(node_id, parent_id, chat_message)``,
+    newest first, and where the walk stopped: a node in ``known`` (not
+    read), or None when the chain ended, looped, or ``max_nodes`` were
+    read."""
+    known = known or {}
+    nodes: list[tuple[int, int | None, str]] = []
     seen: set[int] = set()
-    while cursor is not None and cursor not in seen and len(ordered) < max_nodes:
+    while cursor is not None and cursor not in seen and len(nodes) < max_nodes:
+        if cursor in known:
+            return nodes, cursor
         seen.add(cursor)
         node = conn.execute(
             "SELECT parent_node_id, chat_message FROM message_nodes "
@@ -854,10 +928,180 @@ def _devin_chain_tail(
         ).fetchone()
         if node is None:
             break
-        ordered.append(node[1])
+        nodes.append((cursor, node[0], node[1]))
         cursor = node[0]
-    ordered.reverse()
-    return ordered
+    return nodes, None
+
+
+def _devin_chain_tail(
+    conn: sqlite3.Connection, session_id: str, head: int | None, max_nodes: int
+) -> list[str]:
+    """The newest ``max_nodes`` nodes of the main chain, oldest first,
+    walked parent by parent through the (session_id, node_id) index."""
+    nodes, _stop = _devin_walk(
+        conn, session_id, _devin_start(conn, session_id, head), max_nodes)
+    return [raw for _n, _p, raw in reversed(nodes)]
+
+
+# A DevinChain reads the whole window again at least this often while
+# its session keeps changing, so anything the step-by-step read can't
+# see (a row edited in place, a deleted node) lasts at most this long.
+DEVIN_FULL_READ_S = 60.0
+
+
+class DevinChain:
+    """A bounded Devin read kept between polls, for the live tailer.
+
+    ``read_transcript_tail`` walks up to ``max_nodes`` chain nodes, one
+    point query and one ``json.loads`` each: 100 to 500 ms for a long
+    session on a 9.8 GB store, every second the session streams (#1522).
+    This keeps the window's decoded nodes and, on the next read, fetches
+    only what changed since:
+
+    - Rows written since the last read (``row_id`` above the last one
+      seen). Devin writes with ``INSERT OR REPLACE``, so a rewritten
+      node comes back under a new row_id: a kept node among them is read
+      again. One whose parent changed sends the read back to a full walk.
+    - The walk from the head stops at the first kept node; the kept
+      chain is cut there and the new nodes go on top. A switched chain
+      head (``main_chain_id`` moved to another branch) meets the kept
+      chain at the fork, so it splices the same way.
+
+    A walk that meets nothing kept within the window, a missing parent,
+    a store error, or DEVIN_FULL_READ_S since the last full walk all
+    read the window whole, as ``read_transcript_tail`` does. Messages
+    come out exactly as that read would build them.
+    """
+
+    def __init__(self, full_every_s: float | None = None,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self._full_every_s = full_every_s
+        self._clock = clock
+        # (node_id, parent_id, decoded parts), oldest first.
+        self._nodes: list[tuple[int, int | None, Any]] = []
+        self._index: dict[int, int] = {}
+        self._last_row = 0
+        self._full_at = float("-inf")
+        self.used_at = float("-inf")
+        # (st_dev, st_ino) of the file the kept nodes came from.
+        self._ident: tuple | None = None
+        # How the last read went, for tests and benchmarks: "full" or
+        # "step", and how many chain nodes it fetched.
+        self.last_read = ("", 0)
+
+    def reset(self) -> None:
+        self._nodes = []
+        self._index = {}
+        self._last_row = 0
+        self._full_at = float("-inf")
+
+    def read(self, session: Session, max_nodes: int) -> NormalizedTranscript:
+        path = Path(os.path.expanduser(DEVIN_DB))
+        conn = _open_ro(path)
+        if conn is None:
+            self.reset()
+            return _unreadable(session, "Devin store not found", [path])
+        transcript = _new(session, [path])
+        sid = session.session_id
+        limit = max_nodes + _DEVIN_NAME_MARGIN
+        now = self._clock()
+        self.used_at = now
+        try:
+            st = os.stat(path)
+            ident = (st.st_dev, st.st_ino)
+        except OSError:
+            ident = None
+        if ident != self._ident:
+            # Another file (replaced, restored): nothing kept applies.
+            self.reset()
+            self._ident = ident
+        every = DEVIN_FULL_READ_S if self._full_every_s is None else self._full_every_s
+        try:
+            # Read before the walk: a row landing mid-walk sits above it
+            # and is fetched next time.
+            newest = conn.execute(
+                "SELECT MAX(row_id) FROM message_nodes WHERE session_id = ?", (sid,),
+            ).fetchone()
+            last_row = (newest[0] if newest else None) or 0
+            head = _devin_head(conn, sid)
+            if last_row < self._last_row:
+                # Rows went away under the watermark (a rewind, a restore
+                # in place): what is kept can't be trusted.
+                self.reset()
+            if not (self._nodes and now - self._full_at < every
+                    and self._step(conn, sid, head, limit)):
+                self._full(conn, sid, head, limit)
+                self._full_at = now
+            self._last_row = last_row
+            parts = [part for _n, _p, part in self._nodes]
+            transcript.messages = _deduplicate(
+                _devin_messages(parts, max(0, len(parts) - max_nodes)))
+        except sqlite3.Error as exc:
+            self.reset()
+            return _unreadable(session, f"SQLite schema error: {exc}", [path])
+        finally:
+            conn.close()
+        return transcript
+
+    def _keep(self, nodes: list[tuple[int, int | None, Any]]) -> None:
+        self._nodes = nodes
+        self._index = {node_id: i for i, (node_id, _p, _x) in enumerate(nodes)}
+
+    def _full(self, conn: sqlite3.Connection, sid: str, head: int | None,
+              limit: int) -> None:
+        walked, _stop = _devin_walk(conn, sid, _devin_start(conn, sid, head), limit)
+        self._keep([(n, p, _devin_parts(raw)) for n, p, raw in reversed(walked)])
+        self.last_read = ("full", len(walked))
+
+    def _step(self, conn: sqlite3.Connection, sid: str, head: int | None,
+              limit: int) -> bool:
+        """Bring the kept window up to date; False when only a full walk
+        can (the caller does one)."""
+        rewritten: list[int] = []
+        for node_id, parent_id in conn.execute(
+            "SELECT node_id, parent_node_id FROM message_nodes "
+            "WHERE session_id = ? AND row_id > ?",
+            (sid, self._last_row),
+        ):
+            at = self._index.get(node_id)
+            if at is None:
+                continue
+            if self._nodes[at][1] != parent_id:
+                return False
+            rewritten.append(node_id)
+        walked, met = _devin_walk(
+            conn, sid, _devin_start(conn, sid, head), limit, self._index)
+        if met is None:
+            return False
+        kept = self._nodes[: self._index[met] + 1]
+        fresh = [(n, p, _devin_parts(raw)) for n, p, raw in reversed(walked)]
+        nodes = (kept + fresh)[-limit:]
+        index = {node_id: i for i, (node_id, _p, _x) in enumerate(nodes)}
+        fetched = len(walked)
+        for node_id in rewritten:
+            at = index.get(node_id)
+            if at is None or at >= len(nodes) - len(fresh):
+                continue  # dropped from the chain, or just read
+            row = conn.execute(
+                "SELECT parent_node_id, chat_message FROM message_nodes "
+                "WHERE session_id = ? AND node_id = ?",
+                (sid, node_id),
+            ).fetchone()
+            if row is None or row[0] != nodes[at][1]:
+                return False
+            nodes[at] = (node_id, row[0], _devin_parts(row[1]))
+            fetched += 1
+        if len(nodes) < limit and nodes and nodes[0][1] is not None:
+            # The head moved back down the chain (or to a shorter
+            # branch): older nodes the window had trimmed belong in it
+            # again, as a full walk would read them.
+            older, _stop = _devin_walk(
+                conn, sid, nodes[0][1], limit - len(nodes), index)
+            nodes = [(n, p, _devin_parts(raw)) for n, p, raw in reversed(older)] + nodes
+            fetched += len(older)
+        self._keep(nodes)
+        self.last_read = ("step", fetched)
+        return True
 
 
 # Readers that can stop at the newest rows, keyed by tool. The rest keep
@@ -870,17 +1114,24 @@ _TAIL_READERS: dict[str, Callable[[Session, int], NormalizedTranscript]] = {
 }
 
 
-def read_transcript_tail(session: Session, max_messages: int) -> NormalizedTranscript:
+def read_transcript_tail(
+    session: Session, max_messages: int, chain: "DevinChain | None" = None,
+) -> NormalizedTranscript:
     """``read_transcript`` bounded to roughly the newest ``max_messages``
     where the store allows it (Devin, Copilot, Crush); a full read
-    elsewhere."""
+    elsewhere. ``chain`` (Devin only) keeps the window between calls, so
+    a repeat read fetches only what changed; see ``DevinChain``."""
     reader = _TAIL_READERS.get(session.tool_name)
     if reader is not None:
         try:
+            if chain is not None and session.tool_name == "devin":
+                return chain.read(session, max_messages)
             transcript = reader(session, max_messages)
             transcript.messages = _deduplicate(transcript.messages)
             return transcript
         except Exception as exc:
+            if chain is not None:
+                chain.reset()
             return _unreadable(session, f"{type(exc).__name__}: {exc}")
     return read_transcript(session)
 
