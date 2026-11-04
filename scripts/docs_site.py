@@ -247,7 +247,7 @@ def _nav() -> str:
       </div>
       <div class="right">
         <a class="plain" href="https://github.com/c-wenlong/swe"><svg class="i"><use href="#gh"/></svg>GitHub</a>
-        <a class="btn light sm" href="../#install"><span>Install</span></a>
+        <a class="btn light sm" href="../install/"><span>Install</span></a>
       </div>
     </nav>
   </div>
