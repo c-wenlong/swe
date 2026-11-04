@@ -249,13 +249,17 @@ private struct SheetCard: View {
         entry.content
             .environment(\.dismissSheet, DismissSheetAction(action: entry.dismiss))
             .environment(\.sheetDismissRequest, request)
-            .background(Theme.dialog)
             .clipShape(.rect(cornerRadius: Theme.dialogRadius))
             .overlay(RoundedRectangle(cornerRadius: Theme.dialogRadius)
                 .strokeBorder(Theme.border, lineWidth: 1))
             .contentShape(.rect(cornerRadius: Theme.dialogRadius))
+            // The surface and its shadow are one shape behind the card:
+            // a shadow on the whole card was worked out from every pixel
+            // of its content, again on each frame of the open animation.
+            .background(RoundedRectangle(cornerRadius: Theme.dialogRadius)
+                .fill(Theme.dialog)
+                .shadow(color: Theme.dialogShadow, radius: 30, y: 20))
             .background(SheetKeyBridge(modal: entry.modal, slot: request, onEscape: requestDismiss))
-            .shadow(color: Theme.dialogShadow, radius: 30, y: 20)
             .scaleEffect(settled || reduceMotion ? 1 : 0.98)
             .accessibilityAddTraits(.isModal)
     }

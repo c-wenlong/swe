@@ -1180,6 +1180,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Three small rendering costs in the Mac app are gone.** GitHub's
+  octicons parsed their SVG path data on every layout; each glyph now
+  parses once. An open Calendar hover card polled the pointer every
+  50 ms; it polls every 100 ms, so a card closes at most 300 ms after
+  the pointer leaves instead of 250. A sheet's shadow was worked out from its whole content on each
+  frame of the open animation; it now comes from one rounded shape
+  behind the card. Closes
+  [#1545](https://github.com/c-wenlong/swe/issues/1545).
+
 - **The Mac app's background polls slow down while nobody can see
   them.** The GitHub inbox poll ran `swe gh inbox` every minute for the
   app's whole life. It now keeps the minute only while the main window
