@@ -1127,6 +1127,10 @@ public final class ChaptersModel {
     private static func compileState(of name: String, in index: String)
         -> CompileState
     {
+        // Scan every line: an active entry later in the file beats a `#`
+        // comment for the same chapter — the line, not the comment,
+        // is what compiles.
+        var off = false
         for line in ChapterIndex.lines(index) {
             let stripped = line.trimmingCharacters(in: .whitespaces)
             if ChapterIndex.isEntry(line) {
@@ -1136,11 +1140,11 @@ public final class ChaptersModel {
             } else if stripped.hasPrefix("#") {
                 let rest = stripped.dropFirst().trimmingCharacters(in: .whitespaces)
                 if ChapterIndex.normalize(rest) == ChapterIndex.normalize(name) {
-                    return .off
+                    off = true
                 }
             }
         }
-        return .unlisted
+        return off ? .off : .unlisted
     }
 
     /// The All-harnesses checkbox on one chapter.
@@ -1150,9 +1154,14 @@ public final class ChaptersModel {
             guard let docs = await self.readyCompile(needsTargets: false) else {
                 return "The chapter files haven't been read."
             }
+            // The read state is what matters: when it already matches the
+            // request — an earlier queued op got there first — write
+            // nothing rather than flipping it back.
+            let state = Self.compileState(of: name, in: docs.index.text)
+            if on == (state == .on) { return nil }
             return await self.applyCompile(writes: CompileToggle.all(
                 index: docs.index.text,
-                state: Self.compileState(of: name, in: docs.index.text),
+                state: state,
                 name: name,
                 folder: (name as NSString).deletingLastPathComponent), swe: swe)
         }

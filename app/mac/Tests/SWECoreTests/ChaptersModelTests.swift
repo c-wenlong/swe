@@ -573,6 +573,54 @@ import Testing
                          encoding: .utf8) == "a.md\n")
     }
 
+    @Test func anActiveLineBeatsACommentForTheSameChapter() async throws {
+        // "# a.md" above an active "a.md" reads as .on; unchecking
+        // comments only the active line and no duplicates appear.
+        #expect(ChapterIndex.disabling("# a.md\na.md\n", name: "a.md")
+                == "# a.md\n# a.md\n")
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url), check(dir.url)])
+        try dir.write("a.md", "# A\n")
+        try dir.write("b.md", "# B\n")
+        try dir.write("index.txt", "# a.md\na.md\nb.md\n")
+        let model = ChaptersModel()
+        await model.load(swe: SweClient(runner: runner))
+        let problem = await model.setIncluded(
+            name: "a.md", on: false, swe: SweClient(runner: runner))
+        #expect(problem == nil)
+        let text = try String(contentsOf: dir.path("index.txt"), encoding: .utf8)
+        #expect(text == "# a.md\n# a.md\nb.md\n")
+    }
+
+    @Test func setIncludedOnAnAlreadyOnChapterWritesNothing() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        let problem = await model.setIncluded(
+            name: "a.md", on: true, swe: SweClient(runner: runner))
+        #expect(problem == nil)
+        let text = try String(contentsOf: dir.path("index.txt"), encoding: .utf8)
+        #expect(text == "# in order\na.md\nb.md\n")
+    }
+
+    @Test func setIncludedOffOnUnlistedOrOffIsANoOp() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        // Unlisted: turning it "off" writes nothing.
+        #expect(await model.setIncluded(
+            name: "gone.md", on: false, swe: SweClient(runner: runner)) == nil)
+        // Off: same — the index must not get a second `# off.md` line.
+        try "# in order\na.md\n# off.md\n".write(
+            to: dir.path("index.txt"), atomically: true, encoding: .utf8)
+        try dir.write("off.md", "# Off\n")
+        await model.checkDisk()
+        #expect(await model.setIncluded(
+            name: "off.md", on: false, swe: SweClient(runner: runner)) == nil)
+        let text = try String(contentsOf: dir.path("index.txt"), encoding: .utf8)
+        #expect(text == "# in order\na.md\n# off.md\n")
+    }
+
     @Test func aToggleHitByADiskChangeReloadsAndReports() async throws {
         let dir = try TempDir()
         let runner = Runner([check(dir.url)])
