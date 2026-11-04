@@ -111,8 +111,30 @@ footer a:hover { color: var(--text); }
 <p>The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>,
 and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a>[Unreleased]</h2>
+<h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
+<ul>
+<li><strong>The Compile tab chooses what every harness compiles.</strong> The AGENTS.md
+page's new Compile tab turns the harness strip into a filter: All shows
+every chapter and folder's include checkbox (on, off, and unlisted
+index.txt states), and picking a harness toggles its only/except rules
+in targets.json. The Order list drags index.txt order back and, in All
+view, shows a chip per harness per chapter for one-click per-harness
+receipt. View AGENTS.md opens the filtered output's own file.</li>
+</ul>
+<h2 id="122---2026-11-04"><a class="anchor" href="#122---2026-11-04"></a>[1.2.2] - 2026-11-04</h2>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
+<li><p><strong>A one-line installer for Linux.</strong> <code>curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh</code>
+downloads the released wheel (verified against the release's new
+<code>SHA256SUMS</code> asset) and installs it with <code>uv</code> when it can, into a venv
+under <code>~/.local/share/swe</code> when it can't, and bootstraps <code>uv</code> when
+neither Python 3.11 nor <code>uv</code> is around, which covers Ubuntu 22.04's
+Python 3.10. Passing <code>--hub</code> runs <code>swe remote setup --apply</code> so the web
+app and phone remote come up in the same step. No sudo, nothing written
+to shell rc files. Releases now attach the script and <code>SHA256SUMS</code>, and
+CI runs the installer end to end in <code>ubuntu:22.04</code> and
+<code>python:3.12-slim</code> containers.</p>
+</li>
 <li><p><strong>Instruction chapters can be pinned to harnesses.</strong> An optional
 <code>~/.swe/AGENTS_MD/targets.json</code> maps a chapter to <code>only</code> or <code>except</code>
 lists of harness names, and a chapter can be switched off by commenting
@@ -131,7 +153,7 @@ across the site now open the page instead of scrolling to the
 quickstart, which stays as the on-page summary.</p>
 </li>
 </ul>
-<h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
+<h3 id="changed-1"><a class="anchor" href="#changed-1"></a>Changed</h3>
 <ul>
 <li><p><strong>The AGENTS.md page edits chapters as an outline.</strong> The Mac app's
 chapter rail is now the <code>~/.swe/AGENTS_MD</code> folder as an indented tree —
@@ -142,17 +164,6 @@ renders it as Markdown and jumps to a chapter on click. Reordering and
 unlisting chapters move to the upcoming Compile tab, so they are
 temporarily unavailable in the app; edit index.txt by hand meanwhile.</p>
 </li>
-<li><p><strong>The Compile tab chooses what every harness compiles.</strong> The AGENTS.md
-page's new Compile tab turns the harness strip into a filter: All shows
-every chapter and folder's include checkbox (on, off, and unlisted
-index.txt states), and picking a harness toggles its only/except rules
-in targets.json. The Order list drags index.txt order back and, in All
-view, shows a chip per harness per chapter for one-click per-harness
-receipt. View AGENTS.md opens the filtered output's own file.</p>
-</li>
-</ul>
-<h3 id="changed-1"><a class="anchor" href="#changed-1"></a>Changed</h3>
-<ul>
 <li><p><strong>The web chat keeps its newest 200 entries in the DOM.</strong> A long
 transcript, or a chat left open for hours, kept every entry it ever
 drew, so layout, style recalculation and memory grew with it. Older
