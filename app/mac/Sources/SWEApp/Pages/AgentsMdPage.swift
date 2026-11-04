@@ -5,10 +5,11 @@ import SwiftUI
 /// The shared `~/.swe/AGENTS.md`, where swe has linked it, and the
 /// instruction files of one project folder.
 struct AgentsMdPage: View {
-    enum Scope: Hashable { case global, project }
+    // Edit, then Project: the Compile tab joins between them later.
+    enum Scope: Hashable { case edit, compile, project }
 
     @Environment(AppModel.self) private var app
-    @State private var scope: Scope = .global
+    @State private var scope: Scope = .edit
 
     var body: some View {
         let model = app.agentsMd
@@ -25,10 +26,15 @@ struct AgentsMdPage: View {
             .keyboardShortcut("r", modifiers: .command)
             .help("Check links and reread the file (⌘R)")
         } content: {
-            Tabs(options: [(Scope.global, "Global"), (Scope.project, "Project")], selection: $scope, style: .underline)
+            HStack {
+                Tabs(options: [(Scope.edit, "Edit"), (Scope.project, "Project")],
+                     selection: $scope, style: .underline)
+                Spacer(minLength: 8)
+                if scope == .edit && app.chapters.chapterMode { ViewCompiledButton() }
+            }
             switch scope {
-            case .global: GlobalInstructions()
-            case .project: ProjectInstructions()
+            case .edit: GlobalInstructions()
+            case .compile, .project: ProjectInstructions()
             }
         }
         .task(id: app.swePath) {
@@ -135,239 +141,598 @@ private struct FlatInstructions: View {
     }
 }
 
-/// Chapter mode: the ordered sources of the generated AGENTS.md. The rail
-/// edits index.txt (order, add, remove); the editor edits the selected
-/// chapter; the strip previews and rebuilds the output.
+/// Chapter mode: the indented AGENTS_MD outline beside the selected
+/// chapter's editor. The rail only navigates and creates — what compiles
+/// into AGENTS.md is the Compile page's job.
 private struct ChaptersEditor: View {
     @Environment(AppModel.self) private var app
     var check: InstructionsCheck
-    @State private var adding = false
-    @State private var newName = ""
-    @State private var addError: String?
+    @State private var creating: NewChapterSheet.Initial?
 
     var body: some View {
         let chapters = app.chapters
         HStack(alignment: .top, spacing: 12) {
             rail
             VStack(alignment: .leading, spacing: 12) {
-                if let name = chapters.selected,
-                   let chapter = check.uniqueChapters.first(where: { $0.name == name }) {
-                    let position = check.uniqueChapters.firstIndex(where: { $0.name == name })! + 1
+                if let name = chapters.selected {
+                    let chapter = InstructionsCheck.Chapter(
+                        name: name, path: check.directory + "/" + name,
+                        exists: true)
                     if let document = chapters.document(for: chapter) {
                         InstructionEditor(
                             document: document,
-                            title: chapter.name,
-                            subtitle: "Chapter \(position) of \(check.uniqueChapters.count)") {
+                            title: name,
+                            subtitle: subtitle(for: name)) {
                             Task { await chapters.build(swe: app.swe) }
                         }
-                        .id(chapter.name)
+                        .id(name)
                     } else {
-                        Card(title: chapter.name, subtitle: "The path leaves AGENTS_MD") {
+                        Card(title: name, subtitle: "The path leaves AGENTS_MD") {
                             EmptyView()
                         } content: {
-                            Text("index.txt lists a chapter outside its folder. Fix or remove the entry there.")
+                            Text("This file sits outside the chapter folder. Fix or remove it in Finder.")
                                 .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
                         }
                     }
                 } else {
-                    Card(title: "No chapters", subtitle: "index.txt lists none yet") {
+                    Card(title: "No chapters", subtitle: "AGENTS_MD has no .md files yet") {
                         EmptyView()
                     } content: {
-                        Text("Add a chapter to start the shared instruction file.")
+                        Text("Create a chapter to start the shared instruction file.")
                             .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
                     }
                 }
-                OutputStrip(check: check)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .alert("New chapter", isPresented: $adding) {
-            TextField("name or folder/name (.md added)", text: $newName)
-            Button("Cancel", role: .cancel) { newName = "" }
-            Button("Add") {
-                Task {
-                    if let problem = await chapters.addChapter(named: newName, swe: app.swe) {
-                        addError = problem
-                    } else {
-                        newName = ""
-                        addError = nil
-                    }
-                }
-            }
-        } message: {
-            Text("A .md file under ~/.swe/AGENTS_MD, added at the end of index.txt.")
+        .frame(maxHeight: .infinity)
+        .quiverSheet(item: $creating) { initial in
+            NewChapterSheet(initial: initial)
         }
     }
 
-    /// The ordered chapter list: drag to reorder (rewrites index.txt),
-    /// select to edit, remove to unlist without deleting the file.
+    /// "Chapter N of M in AGENTS.md", or why this file isn't compiled.
+    private func subtitle(for name: String) -> String {
+        let active = check.chapters.map(\.name)
+        if let index = active.firstIndex(of: name) {
+            return "Chapter \(index + 1) of \(active.count) in AGENTS.md"
+        }
+        return "Not in AGENTS.md"
+    }
+
+    /// The AGENTS_MD outline: folders first, files after, each level
+    /// alphabetical. Select a file to edit it.
     private var rail: some View {
         let chapters = app.chapters
         return Strip {
             HStack(spacing: 6) {
                 Text("Chapters").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
-                Text("\(check.uniqueChapters.count)").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                Text("\(fileCount(chapters.tree))").font(Theme.caption).foregroundStyle(Theme.textMuted)
                 Spacer(minLength: 4)
-            }
-            if let addError {
-                Text(addError).font(Theme.caption).foregroundStyle(Theme.dangerText)
-                    .fixedSize(horizontal: false, vertical: true)
+                Menu {
+                    Button("New chapter…") {
+                        creating = NewChapterSheet.Initial(mode: .chapter, folder: "")
+                    }
+                    Button("New folder…") {
+                        creating = NewChapterSheet.Initial(mode: .folder, folder: "")
+                    }
+                } label: {
+                    Image(systemName: "plus").font(Theme.font(size: 12))
+                        .foregroundStyle(Theme.textMuted)
+                        .frame(width: 22, height: 22).contentShape(.rect)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 22)
+                .hoverTip("New chapter or folder", replacesLabel: false)
             }
             ScrollView {
-                ReorderableRows(check.uniqueChapters) { name, before in
-                    Task { await chapters.move(chapter: name, before: before, swe: app.swe) }
-                } row: { chapter in
-                    ChapterRow(chapter: chapter, chapters: chapters)
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(chapters.tree) { node in
+                        OutlineNode(node: node, depth: 0, compiled: check.compiledNames) { folder in
+                            creating = NewChapterSheet.Initial(mode: .chapter, folder: folder)
+                        }
+                    }
+                    // Dirty drafts whose files vanished: their text is
+                    // still in the editor, so the row stays selectable.
+                    ForEach(chapters.ghosts, id: \.self) { name in
+                        GhostRow(name: name)
+                    }
+                    ForEach(chapters.missing, id: \.self) { name in
+                        GhostRow(name: name, missing: true, absent: chapters.absent.contains(name))
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxHeight: 330)
-            .fixedSize(horizontal: false, vertical: true)
-            // The footer add, like the repos rail's "Add repository".
-            Button { adding = true } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "plus").font(Theme.font(size: 12))
-                    Text("Add chapter").font(Theme.nav)
-                    Spacer(minLength: 0)
-                }
-                .foregroundStyle(Theme.textMuted)
-                .padding(.horizontal, 8)
-                .frame(height: Theme.navRowHeight)
-                .contentShape(.rect)
-            }
-            .plainButton(cornerRadius: Theme.controlRadius)
-            .hoverTip("Add a chapter at the end of index.txt", replacesLabel: false)
-            .padding(.top, 4)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 236)
+        .frame(width: 260)
+        .frame(maxHeight: .infinity)
     }
 
-    /// A rail row: the basename is the identity and never truncates, so
-    /// the folder drops to a muted line under it rather than squeezing it.
-    private struct ChapterRow: View {
-        var chapter: InstructionsCheck.Chapter
-        var chapters: ChaptersModel
+    /// A rail row for a dirty draft whose file is gone: the unsaved text
+    /// stays reachable so Save/Revert keep working.
+    private struct GhostRow: View {
+        var name: String
+        /// Listed in index.txt but not in the outline, rather than a
+        /// deleted draft; `absent` when its file isn't on disk at all.
+        var missing = false
+        var absent = false
         @Environment(AppModel.self) private var app
         @State private var hovering = false
 
-        private var base: String { (chapter.name as NSString).lastPathComponent }
-        private var folder: String { (chapter.name as NSString).deletingLastPathComponent }
-
         var body: some View {
-            let selected = chapters.selected == chapter.name
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text(base)
-                        .font(Theme.nav)
-                        .lineLimit(1).truncationMode(.tail)
-                    if chapters.isDirty(chapter.name) {
-                        Circle().fill(Theme.warning)
-                            .frame(width: Theme.statusDot, height: Theme.statusDot)
-                    }
-                    Spacer(minLength: 4)
-                    if !chapter.exists {
-                        Text("missing").font(Theme.caption).foregroundStyle(Theme.dangerText)
-                    } else if hovering {
-                        Button {
-                            Task { await chapters.remove(chapter: chapter.name, swe: app.swe) }
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(Theme.font(size: 10, weight: .semibold))
-                                .foregroundStyle(Theme.textMuted)
-                                .frame(width: 20, height: 20)
-                                .contentShape(.rect)
-                        }
-                        .plainButton(cornerRadius: Theme.controlRadius)
-                        .hoverTip("Remove from index.txt; the file stays on disk", replacesLabel: false)
-                    }
+            let chapters = app.chapters
+            let selected = chapters.selected == name
+            HStack(spacing: 6) {
+                Text(missing ? name : (name as NSString).lastPathComponent)
+                    .font(Theme.nav)
+                    .lineLimit(1).truncationMode(.head)
+                    .foregroundStyle(selected ? Theme.textPrimary : Theme.textMuted)
+                if !missing {
+                    Circle().fill(Theme.warning)
+                        .frame(width: Theme.statusDot, height: Theme.statusDot)
                 }
-                if !folder.isEmpty {
-                    Text(folder)
-                        .font(Theme.caption).foregroundStyle(Theme.textMuted)
-                        .lineLimit(1).truncationMode(.head)
-                }
+                Text(!missing ? "deleted" : absent ? "missing" : "hidden").font(Theme.caption)
+                    .foregroundStyle(missing && absent ? Theme.dangerText : Theme.textMuted)
+                Spacer(minLength: 4)
             }
-            .foregroundStyle(selected ? Theme.textPrimary : Theme.textNav)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .padding(.leading, 23)
+            .padding(.trailing, 8).padding(.vertical, 5)
             .background(selected ? Theme.navActive : hovering ? Theme.hover : .clear,
                         in: .rect(cornerRadius: Theme.controlRadius))
             .contentShape(.rect)
-            .onTapGesture { chapters.selected = chapter.name }
+            .onTapGesture { chapters.selected = name }
             .onHover { hovering = $0 }
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-            .accessibilityAction(.default) { chapters.selected = chapter.name }
-            .accessibilityHint("Drag to reorder")
-            .contextMenu {
-                Button("Remove from index") {
-                    Task { await chapters.remove(chapter: chapter.name, swe: app.swe) }
+            .hoverTip(!missing ? "The file is gone but the unsaved text is still here; Save writes it back"
+                      : absent ? "index.txt lists this chapter but the file is gone; Save creates it"
+                      : "A listed chapter the outline skips (a hidden name or a linked folder)",
+                      replacesLabel: false)
+        }
+    }
+
+    private func fileCount(_ nodes: [ChapterNode]) -> Int {
+        nodes.reduce(0) { $0 + ($1.isFolder ? fileCount($1.children) : 1) }
+    }
+
+    /// One outline row: a disclosure folder or a selectable file.
+    private struct OutlineNode: View {
+        var node: ChapterNode
+        var depth: Int
+        var compiled: Set<String>
+        var onNewChapter: (String) -> Void
+
+        @Environment(AppModel.self) private var app
+        @State private var hovering = false
+        @AppStorage private var expanded: Bool
+
+        init(node: ChapterNode, depth: Int, compiled: Set<String>,
+             onNewChapter: @escaping (String) -> Void) {
+            self.node = node
+            self.depth = depth
+            self.compiled = compiled
+            self.onNewChapter = onNewChapter
+            // Expanded by default; each folder's state is its own key.
+            _expanded = AppStorage(wrappedValue: true,
+                                   "agentsMd.outline.\(node.path)")
+        }
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                if node.isFolder { folderRow } else { fileRow }
+                if node.isFolder && expanded {
+                    ForEach(node.children) { child in
+                        OutlineNode(node: child, depth: depth + 1,
+                                    compiled: compiled, onNewChapter: onNewChapter)
+                    }
                 }
             }
+        }
+
+        private var folderRow: some View {
+            HStack(spacing: 5) {
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .font(Theme.font(size: 9, weight: .semibold))
+                    .foregroundStyle(Theme.textMuted)
+                    .frame(width: 10)
+                Image(systemName: "folder")
+                    .font(Theme.font(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+                Text(node.name).font(Theme.nav).foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1).truncationMode(.tail)
+                Text("\(node.fileCount)").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                Spacer(minLength: 4)
+                if hovering {
+                    Button { onNewChapter(node.path) } label: {
+                        Image(systemName: "plus")
+                            .font(Theme.font(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.textMuted)
+                            .frame(width: 18, height: 18).contentShape(.rect)
+                    }
+                    .plainButton(cornerRadius: Theme.controlRadius)
+                    .hoverTip("New chapter here", replacesLabel: false)
+                }
+            }
+            .padding(.leading, CGFloat(depth) * 14 + 8)
+            .padding(.trailing, 8).padding(.vertical, 4)
+            .background(hovering ? Theme.hover : .clear,
+                        in: .rect(cornerRadius: Theme.controlRadius))
+            .contentShape(.rect)
+            .onTapGesture { expanded.toggle() }
+            .onHover { hovering = $0 }
+            .contextMenu {
+                Button("New chapter here…") { onNewChapter(node.path) }
+                Divider()
+                Button("Reveal in Finder") {
+                    reveal(node)
+                }
+            }
+        }
+
+        private var fileRow: some View {
+            let chapters = app.chapters
+            let selected = chapters.selected == node.path
+            let isCompiled = compiled.contains(node.path)
+            return HStack(spacing: 6) {
+                Text(node.name)
+                    .font(Theme.nav)
+                    .lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(isCompiled
+                        ? (selected ? Theme.textPrimary : Theme.textNav)
+                        : Theme.textMuted)
+                if chapters.isDirty(node.path) {
+                    Circle().fill(Theme.warning)
+                        .frame(width: Theme.statusDot, height: Theme.statusDot)
+                }
+                Spacer(minLength: 4)
+            }
+            .padding(.leading, CGFloat(depth) * 14 + 23)
+            .padding(.trailing, 8).padding(.vertical, 5)
+            .background(selected ? Theme.navActive : hovering ? Theme.hover : .clear,
+                        in: .rect(cornerRadius: Theme.controlRadius))
+            .contentShape(.rect)
+            .onTapGesture { chapters.selected = node.path }
+            .onHover { hovering = $0 }
+            .hoverTip(isCompiled ? node.path
+                      : "Not in AGENTS.md. Include it on the Compile page",
+                      replacesLabel: false)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction(.default) { chapters.selected = node.path }
+            .contextMenu {
+                Button("Reveal in Finder") { reveal(node) }
+                Button("Copy path") {
+                    copyToPasteboard(absolutePath(node))
+                }
+            }
+        }
+
+        private func absolutePath(_ node: ChapterNode) -> String {
+            guard case .loaded(let check) = app.chapters.status else { return node.path }
+            return check.directory + "/" + node.path
+        }
+
+        private func reveal(_ node: ChapterNode) {
+            NSWorkspace.shared.selectFile(
+                absolutePath(node), inFileViewerRootedAtPath: "")
         }
     }
 }
 
-/// The generated AGENTS.md: build state, a Rebuild for edits made outside
-/// the app, and a read-only preview of what the harnesses get.
-private struct OutputStrip: View {
+/// The New chapter / New folder popup: both fields always, the file field
+/// deciding which thing is made.
+private struct NewChapterSheet: View {
+    /// How the sheet was opened; a folder path prefills the Folder field.
+    struct Initial: Identifiable {
+        enum Mode { case chapter, folder }
+        var mode: Mode
+        var folder: String
+        var id: String { "\(mode)-\(folder)" }
+    }
+
+    var initial: Initial
     @Environment(AppModel.self) private var app
-    var check: InstructionsCheck
-    @State private var showOutput = false
+    @Environment(\.dismissSheet) private var dismiss
+    @State private var folder: String
+    @State private var file = ""
+    @State private var include = true
+    @State private var working = false
+    @State private var error: String?
+
+    init(initial: Initial) {
+        self.initial = initial
+        _folder = State(initialValue: initial.folder)
+    }
+
+    private var folderProblem: String? {
+        ChapterIndex.folderProblem(folder.trimmingCharacters(in: .whitespaces))
+    }
+
+    private var fileName: String {
+        var name = file.trimmingCharacters(in: .whitespaces)
+        if !name.isEmpty && !name.lowercased().hasSuffix(".md") { name += ".md" }
+        return name
+    }
+
+    private var fileProblem: String? {
+        if fileName.isEmpty { return nil }  // folder-only create
+        if fileName.contains("/") { return "The file is a name, not a path." }
+        return ChapterIndex.nameProblem(
+            folder.isEmpty ? fileName : folder + "/" + fileName)
+    }
+
+    private var fullPath: String {
+        let rel = [folder.trimmingCharacters(in: .whitespaces), fileName]
+            .filter { !$0.isEmpty }.joined(separator: "/")
+        return rel.isEmpty ? "" : "~/.swe/AGENTS_MD/\(rel)"
+    }
+
+    private var canSubmit: Bool {
+        folderProblem == nil && fileProblem == nil
+            && !(folder.trimmingCharacters(in: .whitespaces).isEmpty && fileName.isEmpty)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(initial.mode == .folder ? "New folder" : "New chapter")
+                .font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+            Text("Folders group the chapters so you and agents can navigate without reading everything.")
+                .font(Theme.caption).foregroundStyle(Theme.textSecondary)
+            FormField("Folder") {
+                HStack(spacing: 6) {
+                    TextField("engineering/review, or empty for top level", text: $folder)
+                        .sweField(monospaced: true)
+                    Menu {
+                        Button("Top level") { folder = "" }
+                        if !app.chapters.folders.filter({ !$0.isEmpty }).isEmpty {
+                            Divider()
+                            ForEach(app.chapters.folders.filter { !$0.isEmpty }, id: \.self) { existing in
+                                Button(existing) { folder = existing }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(Theme.font(size: 10))
+                            .foregroundStyle(Theme.textMuted)
+                            .frame(width: 22, height: 22).contentShape(.rect)
+                    }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22)
+                }
+            }
+            if initial.mode == .chapter {
+                FormField("File") {
+                    TextField("name (.md added)", text: $file)
+                        .sweField(monospaced: true)
+                }
+            }
+            // Only a chapter goes in the index; a folder alone does not.
+            if !fileName.isEmpty {
+                Toggle("Include in AGENTS.md", isOn: $include)
+                    .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
+                    .toggleStyle(.checkbox)
+            }
+            if let problem = folderProblem ?? fileProblem {
+                Text(problem).font(Theme.caption).foregroundStyle(Theme.dangerText)
+            } else if !fullPath.isEmpty {
+                Text(fullPath).font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            if let error {
+                Text(error).font(Theme.caption).foregroundStyle(Theme.dangerText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .secondaryButton().keyboardShortcut(.cancelAction)
+                Button(working ? "Creating…" : submitTitle) { submit() }
+                    .primaryButton().keyboardShortcut(.defaultAction)
+                    .disabled(working || !canSubmit)
+            }
+        }
+        .sheetScaffold(width: 480)
+    }
+
+    private var submitTitle: String {
+        fileName.isEmpty ? "Create folder" : "Create chapter"
+    }
+
+    private func submit() {
+        working = true
+        error = nil
+        let folder = self.folder.trimmingCharacters(in: .whitespaces)
+        let file = fileName
+        Task {
+            let problem: String?
+            if file.isEmpty {
+                problem = await app.chapters.createFolder(folder, swe: app.swe)
+            } else {
+                problem = await app.chapters.createChapter(
+                    folder: folder, file: file, include: include, swe: app.swe)
+            }
+            working = false
+            if let problem { error = problem } else { dismiss() }
+        }
+    }
+}
+
+/// The Edit tab's "View AGENTS.md" button: the compiled output's state
+/// as a dot, opening the centre popup.
+private struct ViewCompiledButton: View {
+    @Environment(AppModel.self) private var app
+    @State private var showing = false
 
     var body: some View {
         let chapters = app.chapters
-        return VStack(alignment: .leading, spacing: 12) {
-            Strip {
-                HStack(spacing: 10) {
-                    Text("Generated AGENTS.md").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
-                    stateLabel
-                    Spacer(minLength: 8)
-                    if let note = chapters.buildNote {
-                        Text(note).font(Theme.caption).foregroundStyle(Theme.textMuted)
-                    }
-                    if chapters.building { ProgressView().controlSize(.small) }
-                    Button(chapters.building ? "Building…" : "Rebuild", systemImage: "arrow.clockwise") {
-                        Task { await chapters.build(swe: app.swe) }
-                    }
-                    .secondaryButton()
-                    .disabled(chapters.building)
-                    .hoverTip("Runs swe instructions build", replacesLabel: false)
-                    Button(showOutput ? "Hide" : "Preview", systemImage: showOutput ? "chevron.up" : "chevron.down") {
-                        withAnimation { showOutput.toggle() }
-                    }
-                    .iconButton()
-                }
-                if let error = check.error {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(Theme.caption).foregroundStyle(Theme.dangerText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let error = chapters.buildError {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(Theme.caption).foregroundStyle(Theme.dangerText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        Button {
+            showing = true
+        } label: {
+            HStack(spacing: 6) {
+                Circle().fill(stateColor)
+                    .frame(width: Theme.statusDot, height: Theme.statusDot)
+                Text("View AGENTS.md").font(Theme.bodySmall)
             }
-            if showOutput, let document = chapters.output {
-                InstructionEditor(document: document, title: displayPath(document.url),
-                                  subtitle: "Built from the chapters — read-only",
-                                  readOnly: true)
-                    .frame(height: 220)
+        }
+        .secondaryButton()
+        .hoverTip(stateText, replacesLabel: false)
+        .quiverSheet(isPresented: $showing) {
+            CompiledOutputSheet()
+        }
+    }
+
+    private var stateColor: Color {
+        guard case .loaded(let check) = app.chapters.status else { return Theme.textMuted }
+        if check.error != nil { return Theme.danger }
+        if check.stale == true || !check.outputExists { return Theme.warning }
+        return Theme.success
+    }
+
+    private var stateText: String {
+        guard case .loaded(let check) = app.chapters.status else { return "Checking…" }
+        if let error = check.error { return "Source problem: \(error)" }
+        if check.stale == true { return "Stale: the sources changed since the last build" }
+        if !check.outputExists { return "Not built yet" }
+        return "Current"
+    }
+}
+
+/// The compiled AGENTS.md as a centre popup: Rich by default, a Raw
+/// fallback, one section per source chapter that jumps back to the editor.
+private struct CompiledOutputSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismissSheet) private var dismiss
+    @State private var mode = "rich"
+
+    var body: some View {
+        let chapters = app.chapters
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("AGENTS.md").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+                    if case .loaded(let check) = chapters.status {
+                        Text(displayPath(check.output))
+                            .font(Theme.font(size: 11, design: .monospaced))
+                            .foregroundStyle(Theme.textMuted)
+                    }
+                }
+                stateLabel
+                Spacer(minLength: 8)
+                Tabs(options: [("rich", "Rich"), ("raw", "Raw")], selection: $mode,
+                     style: .segmented)
+                if chapters.building { ProgressView().controlSize(.small) }
+                Button(chapters.building ? "Building…" : "Rebuild", systemImage: "arrow.clockwise") {
+                    Task { await chapters.build(swe: app.swe) }
+                }
+                .secondaryButton().disabled(chapters.building)
+                .hoverTip("Runs swe instructions build", replacesLabel: false)
+                Button("Copy", systemImage: "doc.on.doc") {
+                    if let text = chapters.output?.text { copyToPasteboard(text) }
+                }
+                .secondaryButton()
+                Button("Close") { dismiss() }
+                    .secondaryButton().keyboardShortcut(.cancelAction)
+            }
+            if case .loaded(let check) = chapters.status, let error = check.error {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(Theme.caption).foregroundStyle(Theme.dangerText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let error = chapters.buildError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(Theme.caption).foregroundStyle(Theme.dangerText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let note = chapters.buildNote {
+                Text(note).font(Theme.caption).foregroundStyle(Theme.textMuted)
+            }
+            content
+        }
+        .padding(20)
+        .frame(width: 760, height: 620)
+        .sheetScaffold(width: 760, padding: 0)
+    }
+
+    @ViewBuilder private var content: some View {
+        if let document = app.chapters.output {
+            loadedContent(document)
+        } else {
+            Text("AGENTS.md hasn't been built yet.")
+                .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
+        }
+    }
+
+    @ViewBuilder private func loadedContent(
+        _ document: InstructionDocument
+    ) -> some View {
+        switch document.state {
+        case .loading:
+            SkeletonLines(rows: 12, framed: false)
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(Theme.dangerText)
+        case .ready:
+            if mode == "raw" {
+                ScrollView {
+                    Text(document.text)
+                        .font(Theme.font(size: 12, design: .monospaced))
+                        .foregroundStyle(Theme.textPrimary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(4)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        ForEach(sections(of: document.text), id: \.name) { section in
+                            VStack(alignment: .leading, spacing: 6) {
+                                if let name = section.name {
+                                    Button {
+                                        app.chapters.selected = name
+                                        dismiss()
+                                    } label: {
+                                        Text(name)
+                                            .font(Theme.caption)
+                                            .foregroundStyle(Theme.link)
+                                    }
+                                    .plainButton()
+                                    .hoverTip("Open this chapter in the editor",
+                                              replacesLabel: false)
+                                }
+                                MarkdownBody(body: section.body)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(4)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
 
-    @ViewBuilder private var stateLabel: some View {
-        if check.error != nil {
-            Label("Source problem", systemImage: "exclamationmark.triangle")
-                .font(Theme.caption).foregroundStyle(Theme.dangerText)
-        } else if check.stale == true || !check.outputExists {
-            Label(check.outputExists ? "Stale" : "Not built", systemImage: "exclamationmark.circle")
-                .font(Theme.caption).foregroundStyle(Theme.warningText)
-        } else {
-            Label("Current", systemImage: "checkmark.circle")
-                .font(Theme.caption).foregroundStyle(Theme.success)
+    private var stateLabel: some View {
+        Group {
+            if case .loaded(let check) = app.chapters.status {
+                if check.error != nil {
+                    Label("Source problem", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(Theme.dangerText)
+                } else if check.stale == true || !check.outputExists {
+                    Label(check.outputExists ? "Stale" : "Not built",
+                          systemImage: "exclamationmark.circle")
+                        .foregroundStyle(Theme.warningText)
+                } else {
+                    Label("Current", systemImage: "checkmark.circle")
+                        .foregroundStyle(Theme.success)
+                }
+            }
         }
+        .font(Theme.caption)
+    }
+
+    /// The generated text split on its Source markers via SWECore.
+    private func sections(of text: String) -> [CompiledSection] {
+        CompiledSections.split(text)
     }
 }
 

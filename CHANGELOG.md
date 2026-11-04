@@ -28,6 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The AGENTS.md page edits chapters as an outline.** The Mac app's
+  chapter rail is now the `~/.swe/AGENTS_MD` folder as an indented tree —
+  folders group chapters and files not in index.txt read muted — with a
+  proper New chapter/New folder sheet instead of the alert. The compiled
+  AGENTS.md moved behind a View AGENTS.md button into a centre popup that
+  renders it as Markdown and jumps to a chapter on click. Reordering and
+  unlisting chapters move to the upcoming Compile tab, so they are
+  temporarily unavailable in the app; edit index.txt by hand meanwhile.
+
+### Changed
+
 - **The web chat keeps its newest 200 entries in the DOM.** A long
   transcript, or a chat left open for hours, kept every entry it ever
   drew, so layout, style recalculation and memory grew with it. Older

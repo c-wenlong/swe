@@ -196,6 +196,240 @@ import Testing
         #expect(try dir.read("index.txt").contains("real.md"))
     }
 
+    // MARK: - the outline tree and create sheet paths
+
+    @Test func treeNestsFoldersFirstAlphabeticallyWithEmptyFolders() {
+        let tree = ChapterTree.build(
+            files: ["engineering/review.md", "zeta.md", "alpha.md",
+                    "engineering/api/limits.md"],
+            folders: ["engineering", "engineering/api", "harnesses", "empty"])
+        #expect(tree.map(\.path) == ["empty", "engineering", "harnesses",
+                                     "alpha.md", "zeta.md"])
+        let engineering = tree[1]
+        #expect(engineering.isFolder && engineering.fileCount == 2)
+        #expect(engineering.children.map(\.path)
+                == ["engineering/api", "engineering/review.md"])
+        #expect(engineering.children[0].children.map(\.path)
+                == ["engineering/api/limits.md"])
+        #expect(tree[0].fileCount == 0)
+    }
+
+    @Test func treeSortsCaseInsensitively() {
+        let tree = ChapterTree.build(files: ["Beta.md", "alpha.md", "Gamma.md"],
+                                     folders: [])
+        #expect(tree.map(\.name) == ["alpha.md", "Beta.md", "Gamma.md"])
+    }
+
+    @Test func insertingGroupsUnderTheFoldersLastEntry() {
+        let text = "# top\na.md\neng/one.md\n\neng/two.md\nb.md\n"
+        #expect(ChapterIndex.inserting(text, name: "eng/new.md", afterFolder: "eng")
+                == "# top\na.md\neng/one.md\n\neng/two.md\neng/new.md\nb.md\n")
+        // No entry in the folder falls back to the end.
+        #expect(ChapterIndex.inserting(text, name: "x/new.md", afterFolder: "x")
+                == text + "x/new.md\n")
+        // Top level is the end too, newline added when missing.
+        #expect(ChapterIndex.inserting("a.md", name: "b.md", afterFolder: "")
+                == "a.md\nb.md\n")
+    }
+
+    @Test func folderProblemMirrorsThePathRules() {
+        #expect(ChapterIndex.folderProblem("") == nil)
+        #expect(ChapterIndex.folderProblem("eng/review") == nil)
+        #expect(ChapterIndex.folderProblem("../x") != nil)
+        #expect(ChapterIndex.folderProblem("/abs") != nil)
+        #expect(ChapterIndex.folderProblem("#c") != nil)
+        #expect(ChapterIndex.folderProblem(".hidden") != nil)
+        #expect(ChapterIndex.folderProblem("a-->b") != nil)
+    }
+
+    @Test func createChapterIntoANestedFolderCreatesParentsAndInserts() async throws {
+        let dir = try TempDir()
+        try FileManager.default.createDirectory(
+            at: dir.url.appending(path: "eng"), withIntermediateDirectories: true)
+        try dir.write("eng/one.md", "# One\n")
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        let problem = await model.createChapter(
+            folder: "eng/api", file: "limits", include: true,
+            swe: SweClient(runner: runner))
+        #expect(problem == nil)
+        #expect(try dir.read("eng/api/limits.md") == "# Limits\n")
+        #expect(try dir.read("index.txt")
+                == "# in order\na.md\nb.md\neng/api/limits.md\n")
+        #expect(model.selected == "eng/api/limits.md")
+        #expect(model.folders.contains("eng/api"))
+    }
+
+    @Test func createChapterUnlistedCreatesTheFileOnly() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        let problem = await model.createChapter(
+            folder: "", file: "scratch", include: false,
+            swe: SweClient(runner: runner))
+        #expect(problem == nil)
+        #expect(try dir.read("index.txt") == "# in order\na.md\nb.md\n")
+        #expect(runner.builds == 0)
+    }
+
+    @Test func createChapterRefusesAnExistingFile() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        try dir.write("real.md", "# Handwritten\n")
+        #expect(await model.createChapter(
+            folder: "", file: "real", include: true,
+            swe: SweClient(runner: runner)) != nil)
+        #expect(try dir.read("real.md") == "# Handwritten\n")
+    }
+
+    @Test func createFolderMakesParentsAndRefreshesTheTree() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        #expect(await model.createFolder("eng/api", swe: SweClient(runner: runner)) == nil)
+        #expect(model.folders.contains("eng/api"))
+        #expect(await model.createFolder("../x", swe: SweClient(runner: runner)) != nil)
+    }
+
+    @Test func aReloadKeepsAnUnlistedFileSelected() async throws {
+        let dir = try TempDir()
+        try dir.write("README.md", "# Notes\n")
+        let runner = Runner([check(dir.url), check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        model.selected = "README.md"
+        await model.load(swe: SweClient(runner: runner))
+        // README.md is a tree file, so a reload does not bounce the user
+        // back to chapter 1.
+        #expect(model.selected == "README.md")
+        // A file that vanished does fall back to the first chapter.
+        model.selected = "gone.md"
+        await model.load(swe: SweClient(runner: runner))
+        #expect(model.selected == "a.md")
+    }
+
+    @Test func checkDecodesEntriesAndOutputsWhenPresent() throws {
+        let json = #"""
+            {"directory":"/x","index":"/x/index.txt","output":"/x/AGENTS.md",
+            "index_exists":true,"output_exists":true,"output_generated":true,
+            "chapters":[{"name":"one.md","path":"/x/one.md","exists":true,
+            "only":["claude"],"except":null}],
+            "targets":"/x/targets.json","targets_exists":true,
+            "entries":[{"name":"one.md","enabled":true},
+            {"name":"off.md","enabled":false}],
+            "outputs":[{"harness":null,"path":"/x/AGENTS.md","exists":true,
+            "chapters":["one.md"]},{"harness":"claude",
+            "path":"/x/AGENTS.claude.md","exists":true,"chapters":["one.md"]}],
+            "error":null,"stale":false}
+            """#.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let check = try decoder.decode(InstructionsCheck.self, from: json)
+        #expect(check.chapters[0].only == ["claude"])
+        #expect(check.compiledNames == ["one.md"])
+        #expect(check.outputs?.map(\.harness) == [nil, "claude"])
+        // An older swe without the new keys still decodes and falls back.
+        let old = #"""
+            {"directory":"/x","index":"/x/index.txt","output":"/x/AGENTS.md",
+            "index_exists":true,"output_exists":true,"output_generated":true,
+            "chapters":[{"name":"one.md","path":"/x/one.md","exists":true}],
+            "error":null,"stale":false}
+            """#.data(using: .utf8)!
+        let older = try decoder.decode(InstructionsCheck.self, from: old)
+        #expect(older.compiledNames == ["one.md"])
+        #expect(older.outputs == nil && older.entries == nil)
+    }
+
+    @Test func compiledSectionsSplitTrimsMarkerAndStripsCompilerLines() {
+        let text = """
+            <!-- Generated by swe instructions build. Edit the chapters. -->
+            <!-- Target: claude -->
+            <!-- Source: AGENTS_MD/one.md -->
+            # One
+            <!-- Source: AGENTS_MD/dir/two.md -->
+            # Two
+            """
+        let sections = CompiledSections.split(text)
+        #expect(sections.compactMap(\.name) == ["one.md", "dir/two.md"])
+        #expect(sections.allSatisfy { $0.name != nil })
+        #expect(sections[0].body.contains("# One"))
+        #expect(!sections.contains { $0.body.contains("Generated by") })
+        #expect(sections.compactMap(\.name).allSatisfy { !$0.hasSuffix(" ") })
+    }
+
+    @Test func refreshSkipsOutsideAndLoopedDirectorySymlinks() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url), check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        // A symlink out of AGENTS_MD: never descended into.
+        try FileManager.default.createSymbolicLink(
+            at: dir.url.appending(path: "outside-link"),
+            withDestinationURL: URL(fileURLWithPath: "/tmp"))
+        // A loop back to the root: never followed.
+        try FileManager.default.createSymbolicLink(
+            at: dir.url.appending(path: "loop"),
+            withDestinationURL: dir.url)
+        // An alias of a real folder: the real path keeps its files.
+        let real = dir.url.appending(path: "real")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        try "# R\n".write(to: real.appending(path: "r.md"), atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: dir.url.appending(path: "alias"), withDestinationURL: real)
+        await model.load(swe: SweClient(runner: runner))
+        let paths = model.folders + allFilePaths(model.tree)
+        #expect(!paths.contains { $0.hasPrefix("outside-link") })
+        #expect(!paths.contains { $0 == "loop" || $0.hasPrefix("loop/") })
+        #expect(paths.contains("real/r.md"))
+        #expect(!paths.contains { $0.hasPrefix("alias") })
+    }
+
+    private func allFilePaths(_ nodes: [ChapterNode]) -> [String] {
+        nodes.flatMap { $0.isFolder ? [$0.path] + allFilePaths($0.children) : [$0.path] }
+    }
+
+    @Test func aDirtyDraftOfADeletedFileStaysSelectedAsAGhost() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url), check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        model.selected = "a.md"
+        let chapter = InstructionsCheck.Chapter(
+            name: "a.md", path: dir.path("a.md").path, exists: true)
+        let document = try #require(model.document(for: chapter))
+        await document.load()
+        document.text = "# Unsaved draft\n"
+        try FileManager.default.removeItem(at: dir.path("a.md"))
+        await model.load(swe: SweClient(runner: runner))
+        #expect(model.selected == "a.md")
+        #expect(model.ghosts == ["a.md"])
+        #expect(model.document(for: chapter)?.isDirty == true)
+    }
+
+    @Test func createChapterCleansItsFileWhenTheIndexSaveFails() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        // Break index.txt's save by turning it into a directory.
+        try FileManager.default.removeItem(at: dir.path("index.txt"))
+        try FileManager.default.createDirectory(
+            at: dir.path("index.txt"), withIntermediateDirectories: false)
+        let problem = await model.createChapter(
+            folder: "", file: "retry-me", include: true,
+            swe: SweClient(runner: runner))
+        #expect(problem != nil)
+        #expect(!FileManager.default.fileExists(atPath: dir.path("retry-me.md").path))
+    }
+
+    @Test func leadingDotsAreRejectedEverywhere() async throws {
+        #expect(ChapterIndex.folderProblem(".hidden") != nil)
+        #expect(ChapterIndex.folderProblem("eng/.secret") != nil)
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        #expect(await model.createChapter(
+            folder: "", file: ".hidden", include: true,
+            swe: SweClient(runner: runner)) != nil)
+    }
+
     @Test func uniqueChaptersDedupsADoubleListing() {
         let chapters = [
             InstructionsCheck.Chapter(name: "a.md", path: "/x/a.md", exists: true),
