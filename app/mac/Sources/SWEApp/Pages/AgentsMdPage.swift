@@ -1134,8 +1134,10 @@ private struct NewChapterSheet: View {
         switch row {
         case .folder(let path):
             // Writing the field is a pick, not typing: it must not
-            // reopen this list through the text-change path.
-            suppressOpen = true
+            // reopen this list through the text-change path. A pick of
+            // what is already typed fires no onChange, so leave the
+            // flag off or it would swallow the next real keystroke.
+            if folder != path { suppressOpen = true }
             folder = path
             openField = nil
             if initial.mode == .chapter {

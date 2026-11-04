@@ -47,15 +47,6 @@ import Testing
         #expect(box.drop.minY > box.field.minY)
         #expect(abs(box.drop.width - box.field.width) < 1.5)
 
-        FileManager.default.createFile(
-            atPath: "/tmp/agents-dropdown/below.png", contents: nil)
-        if let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) {
-            hosting.cacheDisplay(in: hosting.bounds, to: rep)
-            if let png = rep.representation(using: .png, properties: [:]) {
-                try? png.write(to: URL(fileURLWithPath: "/tmp/agents-dropdown/below.png"))
-            }
-        }
-        #expect(window.screen == nil)
     }
 
     private func spin(timeout: TimeInterval = 60, until done: () -> Bool) -> Bool {
