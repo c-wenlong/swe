@@ -200,7 +200,7 @@ class TestScrollbackCap(ChatScript):
     def test_a_failed_send_folds_like_any_entry(self):
         out = self.run_js("""
             for (const ev of transcript(20)) T.appendEvent(ev, false);
-            const bubble = el('div'); bubble.className = 'msg user failed'; bubble.dataset.clientId = 'c9';
+            const bubble = document.createElement('div'); bubble.className = 'msg user failed'; bubble.dataset.clientId = 'c9';
             log.appendChild(bubble);
             for (const ev of transcript(400)) { ev.seq += 20; T.appendEvent(ev, false); }
             T.scrollBottom();
@@ -208,6 +208,32 @@ class TestScrollbackCap(ChatScript):
             T.commandResult({ op: 'message', client_id: 'c9', cancelled: true });
             return { folded, entries: entries().length, gone: !T.chat.earlier.includes(bubble) };""")
         self.assertEqual(out, {"folded": True, "entries": 200, "gone": True})
+
+    def test_a_removed_send_that_was_all_the_folded_history_takes_the_button(self):
+        out = self.run_js("""
+            const bubble = document.createElement('div'); bubble.className = 'msg user failed'; bubble.dataset.clientId = 'c9';
+            log.appendChild(bubble);
+            for (const ev of transcript(200)) T.appendEvent(ev, false);
+            T.scrollBottom();
+            const folded = T.chat.earlier.length;
+            T.commandResult({ op: 'message', client_id: 'c9', cancelled: true });
+            return { folded, stub: !!document.getElementById('chat-earlier') };""")
+        self.assertEqual(out, {"folded": 1, "stub": False})
+
+    def test_a_resync_keeps_a_folded_failed_send(self):
+        out = self.run_js("""
+            const bubble = document.createElement('div'); bubble.className = 'msg user failed'; bubble.dataset.clientId = 'c9';
+            log.appendChild(bubble);
+            for (const ev of transcript(300)) T.appendEvent(ev, false);
+            T.scrollBottom();
+            const folded = T.chat.earlier.includes(bubble);
+            globalThis.api = async () => ({ status: 200, data: { messages: transcript(300) } });
+            T.chat.held = [];
+            await T.resync(300);
+            T.chat.keep = 1e9;
+            while (T.chat.earlier.length) T.showEarlier();
+            return { folded, kept: log.children.includes(bubble) };""")
+        self.assertEqual(out, {"folded": True, "kept": True})
 
     def test_an_approval_restored_into_folded_history_lands_in_order(self):
         out = self.run_js("""

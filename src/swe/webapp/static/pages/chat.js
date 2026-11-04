@@ -2441,6 +2441,7 @@ const SessionChat = (() => {
         if (gone) gone.remove();
         // A failed send may have folded out of the log (trimLog).
         chat.earlier = chat.earlier.filter((b) => b.dataset.clientId !== d.client_id);
+        paintEarlier(log);
       } else if (entry) {
         appendOptimistic(entry.text, d.client_id);
       }
@@ -3034,7 +3035,9 @@ const SessionChat = (() => {
       // So do sends the transcript doesn't show yet (still sending, sent
       // and waiting for their echo, or failed): their result, or a
       // failed POST, still lands on the bubble.
-      const sends = [...log.querySelectorAll(".msg.user[data-client-id]")];
+      // A failed one may have folded out of the log (trimLog).
+      const sends = [...chat.earlier.filter((b) => b.matches(".msg.user[data-client-id]")),
+        ...log.querySelectorAll(".msg.user[data-client-id]")];
       // User messages the log already showed as delivered (drawn from
       // the transcript, or a settled bubble) each claim their own echo
       // first, so a send repeated within seconds isn't taken for the one
@@ -4934,7 +4937,7 @@ const SessionChat = (() => {
       isPage, patchPageFiles, pageFiles, relativePath, pageTargets, previewUrl, previewKind,
       pageDocument, previewDocument, previewFrameAttrs, previewMessage, PREVIEW_CSP, linkUrls, linkHost, linkPath, linkCardsHtml,
       barSub, refreshModel, railDay, railGroups, slashToken, commandInsert, sourceLabel, filterCommands, insertCommand, menuKey,
-      cmds, cmdLists, warmCommands, loadCommands, resetMenus, chat, LOG_KEEP, trimLog, showEarlier, revealSeq, appendEvent, scrollBottom,
+      cmds, cmdLists, warmCommands, loadCommands, resetMenus, chat, LOG_KEEP, trimLog, showEarlier, revealSeq, appendEvent, scrollBottom, resync,
       ATTACH, fileExt, attachProblem, formatBytes, uploadError, uploads, addFiles, removeUpload,
       messageBody, send, updateOwnership, restoreUploads, failBubble,
       mentionToken, insertMention, splitPath, filesError, files, FILES, searchFiles, trackMenus, menu,
