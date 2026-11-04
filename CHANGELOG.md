@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The New chapter suggestions drop below their field and wait for typing.** The floating list now hangs 4pt under the focused field (the earlier overlay drew it upward over the field), opens only after a 250ms pause on a non-empty field or on Down Arrow, and an empty field shows no list at all.
+
 - **The New chapter sheet no longer resizes as it suggests.** Its
   folder/file autocomplete now floats under the focused field instead of
   pushing the card taller, capped to the room between the field and the
