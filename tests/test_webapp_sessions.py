@@ -1622,6 +1622,44 @@ class TestTranscriptSearchBox(unittest.TestCase):
         """, self.ANSWER)
         self.assertEqual(out, {"left": "", "asked": 2, "hits": ["k2"]})
 
+    def test_each_rows_search_text_is_built_once(self):
+        """#1557: the lower-cased details are built once per row, not per
+        keystroke; a title written in place builds them again."""
+        out = self.run_js("""
+            let lowered = 0;
+            const lower = String.prototype.toLowerCase;
+            String.prototype.toLowerCase = function () { lowered++; return lower.call(this); };
+            const run = (q) => { sessionsPage.query = q; lowered = 0; const k = filteredSessions().kept.map((r) => r.key); return [k, lowered]; };
+            const first = run("export"), second = run("expo"), third = run("dark");
+            sessionsPage.data.sessions[2].title = "Export again";
+            const renamed = run("export");
+            String.prototype.toLowerCase = lower;
+            return { first, second, third, renamed };
+        """, self.ANSWER)
+        self.assertEqual(out["first"], [["k1"], 4])   # the query, then each row once
+        self.assertEqual(out["second"], [["k1"], 1])  # the query only
+        self.assertEqual(out["third"], [["k2"], 1])
+        self.assertEqual(out["renamed"], [["k1", "k3"], 2])
+
+    def test_typing_redraws_the_list_once_it_pauses(self):
+        out = self.run_js("""
+            const timers = [];
+            globalThis.setTimeout = (f, ms) => { timers.push({ f, ms }); return timers.length; };
+            globalThis.clearTimeout = (id) => { if (timers[id - 1]) timers[id - 1].f = null; };
+            let paints = 0;
+            repaintKeepingFocus = () => { paints++; };
+            const box = { value: "" };
+            document.getElementById = (id) => id === "session-search" ? box : null;
+            document.querySelectorAll = () => [];
+            bindSessionControls();
+            for (const v of ["d", "da", "dar"]) { box.value = v; box.oninput(); }
+            const before = paints;
+            const paintTimers = timers.filter((t) => t.ms === SEARCH_PAINT_MS);
+            paintTimers.forEach((t) => t.f && t.f());
+            return { before, after: paints, query: sessionsPage.query, live: paintTimers.filter((t) => t.f).length };
+        """, self.ANSWER)
+        self.assertEqual(out, {"before": 0, "after": 1, "query": "dar", "live": 1})
+
     def test_one_character_never_asks_the_hub(self):
         out = self.run_js(self.type_query("q") + "return asked;", self.ANSWER)
         self.assertEqual(out, [])

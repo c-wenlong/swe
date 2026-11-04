@@ -364,9 +364,26 @@ function showPairCode(req) {
   pairCodeEl("pair-retry").hidden = true;
 }
 
+/* Every 2 s until approved, denied or expired. A hidden tab asks nothing
+ * (#1554). One listener, there for the whole poll, asks at once whenever
+ * the tab is shown, so an approval made on another device lands as soon
+ * as you come back, without waiting for the next tick. */
 function pairRequestPoll(requestId, secret, gen, rgen) {
+  let timer = null, asking = false;
+  const done = () => {
+    clearTimeout(timer);
+    document.removeEventListener("visibilitychange", shown);
+  };
+  const shown = () => {
+    if (gen !== pairGen) return done();
+    if (!document.hidden && !asking) { clearTimeout(timer); tick(); }
+  };
   const tick = async () => {
-    if (gen !== pairGen) return;
+    timer = null;
+    if (gen !== pairGen) return done();
+    // Hidden: no next tick; showing the tab asks (shown).
+    if (document.hidden) return;
+    asking = true;
     let status = 0, data = null;
     try {
       const resp = await fetch(
@@ -374,19 +391,22 @@ function pairRequestPoll(requestId, secret, gen, rgen) {
       status = resp.status;
       try { data = await resp.json(); } catch { /* empty body */ }
     } catch { /* transient — poll again */ }
-    if (gen !== pairGen) return;
+    asking = false;
+    if (gen !== pairGen) return done();
     if (data && data.status === "approved" && data.credential) {
+      done();
       pairStore(data);
       if (rgen !== routeGen) return;
       history.replaceState(null, "", "#/overview");
       route();
       return;
     }
-    if (data && data.status === "denied") return pairRequestFailed("Pairing was denied.");
-    if (status === 404) return pairRequestFailed("Request expired.");
-    setTimeout(tick, 2000);
+    if (data && data.status === "denied") { done(); return pairRequestFailed("Pairing was denied."); }
+    if (status === 404) { done(); return pairRequestFailed("Request expired."); }
+    timer = setTimeout(tick, 2000);
   };
-  setTimeout(tick, 2000);
+  document.addEventListener("visibilitychange", shown);
+  timer = setTimeout(tick, 2000);
 }
 
 function pairRequestFailed(msg) {
@@ -857,10 +877,17 @@ if (typeof window.matchMedia === "function") {
     if (nav) revealActiveTab(nav);
   });
 }
+// A drag fires resize many times a frame: the charts redraw once per
+// frame at most (#1557).
+let overviewResizeFrame = 0;
 window.addEventListener("resize", () => {
-  if (!overview.data || !document.getElementById("marbles")) return;
-  drawMarbles();
-  drawHeatmap();
+  if (overviewResizeFrame) return;
+  overviewResizeFrame = requestAnimationFrame(() => {
+    overviewResizeFrame = 0;
+    if (!overview.data || !document.getElementById("marbles")) return;
+    drawMarbles();
+    drawHeatmap();
+  });
 });
 // After every script, page plugins included, has run.
 document.addEventListener("DOMContentLoaded", route);

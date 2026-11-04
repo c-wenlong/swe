@@ -551,6 +551,60 @@ process.stdout.write(JSON.stringify(nav.scrollLeft));
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestPairPollWhileHidden(unittest.TestCase):
+    """#1554: "Pair with Tailscale" asks for the owner's answer every 2 s,
+    but a hidden tab asks nothing; showing it asks at once."""
+
+    PRELUDE = r"""
+let pairGen = 1, routeGen = 0, failed = null, answer = "pending";
+// Live timers by id; a cleared one is gone.
+const timers = new Map(); let nextId = 0;
+globalThis.setTimeout = (fn) => { timers.set(++nextId, fn); return nextId; };
+globalThis.clearTimeout = (id) => { timers.delete(id); };
+const fire = async () => { const [[id, fn]] = timers; timers.delete(id); await fn(); };
+const listeners = new Set(), asked = [];
+globalThis.document = { hidden: false,
+  addEventListener: (t, f) => listeners.add(f), removeEventListener: (t, f) => listeners.delete(f) };
+const visibility = async (hidden) => { document.hidden = hidden; for (const f of [...listeners]) f(); await settle(); };
+globalThis.fetch = async (url) => { asked.push(url); return { status: 200, json: async () => ({ status: answer, credential: "c" }) }; };
+const pairRequestFailed = (m) => { failed = m; };
+const pairStore = () => {}; const route = () => {};
+globalThis.history = { replaceState() {} };
+const settle = () => new Promise((r) => setImmediate(r));
+"""
+
+    def run_js(self, body):
+        src = app_js_function("pairRequestPoll") + self.PRELUDE + "(async () => {" + body + "})();"
+        done = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def test_a_hidden_tab_waits_for_the_tab_to_show(self):
+        out = self.run_js("""
+  pairRequestPoll("r1", "s", 1, 0);
+  await fire(); const first = asked.length;
+  document.hidden = true;
+  await fire(); const hidden = [asked.length - first, timers.size];
+  await visibility(true);                 // still hidden: asks nothing
+  const stillHidden = asked.length - first;
+  await visibility(false);
+  process.stdout.write(JSON.stringify({ first, hidden, stillHidden, shown: asked.length - first,
+    listeners: listeners.size, next: timers.size }));""")
+        self.assertEqual(out, {"first": 1, "hidden": [0, 0], "stillHidden": 0, "shown": 1, "listeners": 1, "next": 1})
+
+    def test_showing_the_tab_before_the_tick_asks_at_once(self):
+        """Hidden and shown again inside one 2 s wait: the return asks
+        now, and the waiting tick is dropped rather than asking twice."""
+        out = self.run_js("""
+  pairRequestPoll("r1", "s", 1, 0);
+  await visibility(true); await visibility(false);
+  const shown = [asked.length, timers.size];
+  answer = "approved"; await fire();
+  process.stdout.write(JSON.stringify({ shown, asked: asked.length, listeners: listeners.size, timers: timers.size }));""")
+        self.assertEqual(out, {"shown": [1, 1], "asked": 2, "listeners": 0, "timers": 0})
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
 class TestOverviewMachines(unittest.TestCase):
     """Overview's machine filter (#525): the Machines card and header."""
 

@@ -25,6 +25,8 @@ const STATUS_BADGE = { active: "Active", approval: "Approval", error: "Error", i
 const SEARCH_DEBOUNCE_MS = 250;
 const SEARCH_MIN_CHARS = 2;
 const SEARCH_LIMIT = 200;
+// The list redraws this long after the last keystroke in the search box.
+const SEARCH_PAINT_MS = 80;
 
 const sessionsPage = {
   data: null, gen: 0,
@@ -36,7 +38,7 @@ const sessionsPage = {
   // /v1/search for `search.query`: key -> { snippet, marked }, whether the
   // hub has an index, and "pending" / "error" while it has no answer.
   search: { query: "", hits: new Map(), indexed: null, state: "" },
-  searchTimer: null, searchSeq: 0,
+  searchTimer: null, searchSeq: 0, searchPaint: null,
   // Where the list was scrolled when a chat opened, restored on the way back.
   scrollY: null,
   // Keys with a control write in flight (their action button reads
@@ -187,6 +189,20 @@ function searchNote(kept) {
   return `<p class="caption search-note">${text}</p>`;
 }
 
+/* A row's search text, lower-cased once rather than on every keystroke
+ * (#1557). Kept per row object, so a reload builds it again; the title
+ * is the one searched field written in place (pin, rename), so an entry
+ * built from another title is built again. */
+const sessionHaystacks = new WeakMap();
+function sessionHaystack(r) {
+  const hit = sessionHaystacks.get(r);
+  if (hit && hit.title === r.title) return hit.text;
+  const text = [r.title, r.cwd, r.project, r.id, r.agent, r.location, r.machine,
+    ...(r.usage ? r.usage.models.map((m) => m.model) : [])].join(" ").toLowerCase();
+  sessionHaystacks.set(r, { title: r.title, text });
+  return text;
+}
+
 /* The rows the filters keep, and how many of them are accidental. */
 function filteredSessions() {
   const s = sessionsPage;
@@ -203,11 +219,7 @@ function filteredSessions() {
     if (machine && r.machine_id !== machine) continue;
     if (s.project && r.project_key !== s.project) continue;
     if (s.model && !(r.usage && r.usage.models.some((m) => m.model === s.model))) continue;
-    if (q) {
-      const hay = [r.title, r.cwd, r.project, r.id, r.agent, r.location, r.machine,
-        ...(r.usage ? r.usage.models.map((m) => m.model) : [])].join(" ").toLowerCase();
-      if (!hay.includes(q) && !transcriptHit(r.key)) continue;
-    }
+    if (q && !sessionHaystack(r).includes(q) && !transcriptHit(r.key)) continue;
     if (r.trivial && !r.pinned && !s.showTrivial) { trivial++; continue; }
     kept.push(r);
   }
@@ -615,10 +627,16 @@ function bindSessionControls() {
   const s = sessionsPage;
   const search = document.getElementById("session-search");
   if (search) {
+    // The list redraws once typing pauses, not on every keystroke (#1557).
     search.oninput = () => {
       s.query = search.value;
       scheduleTranscriptSearch();
-      repaintKeepingFocus();
+      clearTimeout(s.searchPaint);
+      s.searchPaint = setTimeout(() => {
+        s.searchPaint = null;
+        // Left the list (a chat opened, another page) meanwhile.
+        if (s.data && document.getElementById("session-search")) repaintKeepingFocus();
+      }, SEARCH_PAINT_MS);
     };
   }
   for (const [id, key] of [["filter-tool", "tool"], ["filter-window", "window"],

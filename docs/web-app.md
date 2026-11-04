@@ -84,7 +84,7 @@ already do, through satellites; that is a later step.
    app's daily rows, and usage joins only for sessions on the hub machine
    (a satellite's rows list without tokens). Sessions only in an SWE
    account profile's home, and Devin cloud sessions, are not listed yet.
-   The search box filters each row's details in the browser and, after a
+   The search box filters each row's details in the browser (the list redraws 80 ms after typing pauses) and, after a
    250 ms pause, asks `/v1/search` for what was said: a session whose
    transcript matches stays in the list with the matching snippet under
    it. That needs a search index on the hub (the Mac app's, or

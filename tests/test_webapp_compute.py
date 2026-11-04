@@ -867,5 +867,142 @@ class TestSettingsSheetLeavesWithThePage(unittest.TestCase):
                           "left": 0, "age": 3 * 3600})
 
 
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestPatchInPlace(unittest.TestCase):
+    """#1557: each 3 s sample patches the page's parts in place. Under node
+    with a small DOM of element and text nodes (the browser's template
+    parse is stood in for by building the new tree by hand)."""
+
+    DOM = r"""
+let made = 0;
+function node(type, name, value) {
+  made++;
+  const n = { nodeType: type, nodeName: name, namespaceURI: type === 1 ? "html" : null, nodeValue: value ?? null,
+    childNodes: [], attrs: new Map(), parent: null };
+  Object.defineProperty(n, "firstChild", { get: () => n.childNodes[0] || null });
+  Object.defineProperty(n, "nextSibling", { get: () => {
+    const p = n.parent; if (!p) return null; return p.childNodes[p.childNodes.indexOf(n) + 1] || null; } });
+  Object.defineProperty(n, "attributes", { get: () => [...n.attrs].map(([name, value]) => ({ name, value })) });
+  n.getAttribute = (k) => (n.attrs.has(k) ? n.attrs.get(k) : null);
+  n.hasAttribute = (k) => n.attrs.has(k);
+  n.setAttribute = (k, v) => { n.attrs.set(k, String(v)); };
+  n.removeAttribute = (k) => { n.attrs.delete(k); };
+  n.removeChild = (c) => { n.childNodes.splice(n.childNodes.indexOf(c), 1); c.parent = null; return c; };
+  n.insertBefore = (c, ref) => {
+    if (c.parent) c.parent.removeChild(c);
+    const i = ref ? n.childNodes.indexOf(ref) : -1;
+    n.childNodes.splice(i < 0 ? n.childNodes.length : i, 0, c);
+    c.parent = n;
+    return c;
+  };
+  return n;
+}
+// h("div", { class: "x" }, "text", h(...)): an element with attributes and children.
+function h(name, attrs, ...kids) {
+  const e = node(1, name.toUpperCase());
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  for (const k of kids) e.insertBefore(typeof k === "string" ? node(3, "#text", k) : k, null);
+  return e;
+}
+const shape = (n) => n.nodeType === 3 ? n.nodeValue
+  : [n.nodeName, Object.fromEntries(n.attrs), ...n.childNodes.map(shape)];
+"""
+
+    def run_js(self, body):
+        script = Path(__file__).resolve().parents[1] / "src/swe/webapp/static/pages/compute.js"
+        prelude = "globalThis.localStorage = { getItem: () => null };\nfunction registerPage() {}\n" + self.DOM
+        done = subprocess.run(["node", "-e", prelude + script.read_text(encoding="utf-8") + "\n"
+                               + "process.stdout.write(JSON.stringify((() => {" + body + "})()));\n"],
+                              capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def test_a_new_sample_writes_only_what_changed(self):
+        out = self.run_js("""
+            const row = () => h("div", { class: "row" }, h("span", { class: "num" }, "1.2 GB"), h("button", { "data-x": "a" }, "Kill"));
+            const el = h("div", {}, row(), h("p", {}, "2 processes"));
+            const [firstRow, para] = el.childNodes;
+            const btn = firstRow.childNodes[1];
+            const next = h("div", {}, h("div", { class: "row hot" }, h("span", { class: "num" }, "1.4 GB"), h("button", { "data-x": "a" }, "Kill")),
+              h("p", {}, "3 processes"), h("p", {}, "new"));
+            made = 0;
+            computeMorphChildren(el, next);
+            return { shape: shape(el), keptRow: el.childNodes[0] === firstRow, keptButton: el.childNodes[0].childNodes[1] === btn,
+                     keptPara: el.childNodes[1] === para, made };""")
+        self.assertEqual(out["shape"], ["DIV", {},
+                                        ["DIV", {"class": "row hot"}, ["SPAN", {"class": "num"}, "1.4 GB"], ["BUTTON", {"data-x": "a"}, "Kill"]],
+                                        ["P", {}, "3 processes"], ["P", {}, "new"]])
+        self.assertTrue(out["keptRow"] and out["keptButton"] and out["keptPara"])
+        self.assertEqual(out["made"], 0, "no node is created to patch a sample")
+
+    def test_other_kinds_controls_and_extras_are_replaced_or_dropped(self):
+        out = self.run_js("""
+            const owned = h("div", { id: "compute-chart" }, h("svg", {}, "drawn"));
+            owned.computeHtml = "<svg>drawn</svg>";
+            const input = h("input", { value: "1" });
+            const el = h("div", {}, input, owned, h("p", {}, "x"), h("span", {}, "gone"));
+            computeMorphChildren(el, h("div", {}, h("input", { value: "2" }), h("div", { id: "compute-chart", class: "c" }),
+              h("div", {}, "x")));
+            return { shape: shape(el), inputReplaced: el.childNodes[0] !== input, ownedKept: el.childNodes[1] === owned };""")
+        self.assertEqual(out["shape"], ["DIV", {}, ["INPUT", {"value": "2"}],
+                                        ["DIV", {"id": "compute-chart", "class": "c"}, ["SVG", {}, "drawn"]],
+                                        ["DIV", {}, "x"]])
+        self.assertTrue(out["inputReplaced"])
+        self.assertTrue(out["ownedKept"], "the chart box keeps what it drew; drawComputeChart patches it")
+
+    def test_a_chart_box_reused_as_something_else_is_patched(self):
+        """Switching to Temperature puts the legend where the drawn chart
+        was: that node forgets its chart, hover handlers included, and
+        takes the legend's children."""
+        out = self.run_js("""
+            const chart = h("div", { id: "compute-chart", class: "compute-chart" }, h("svg", {}, "drawn"));
+            chart.computeHtml = "<svg>drawn</svg>";
+            chart.onmousemove = () => {}; chart.onmouseleave = () => {};
+            const el = h("div", {}, chart);
+            computeMorphChildren(el, h("div", {}, h("div", { class: "legend" }, h("button", {}, "CPU")),
+              h("div", { id: "compute-chart", class: "compute-chart" })));
+            const legend = el.childNodes[0];
+            return { shape: shape(el), reused: legend === chart, owned: legend.computeHtml !== undefined,
+                     handlers: [legend.onmousemove, legend.onmouseleave] };""")
+        self.assertEqual(out["shape"], ["DIV", {}, ["DIV", {"class": "legend"}, ["BUTTON", {}, "CPU"]],
+                                        ["DIV", {"id": "compute-chart", "class": "compute-chart"}]])
+        self.assertTrue(out["reused"])
+        self.assertFalse(out["owned"])
+        self.assertEqual(out["handlers"], [None, None])
+
+    def test_focus_follows_the_control_not_the_node(self):
+        """A focused button patched into the next harness's button gives
+        focus back to the control it was, or drops it when that left."""
+        out = self.run_js("""
+            const btn = (id) => { const b = h("button", { "data-collapse": id }); b.focus = () => { document.activeElement = b; };
+              b.blur = () => { document.activeElement = null; }; b.hasAttribute = (k) => b.attrs.has(k); return b; };
+            const a = btn("claude"), b = btn("codex");
+            const body = { contains: (n) => n === a || n === b,
+              querySelector: (sel) => [a, b].find((n) => sel === `[data-collapse="${n.getAttribute("data-collapse")}"]`) || null };
+            globalThis.CSS = { escape: (s) => s };
+            globalThis.document = { activeElement: a };
+            const key = computeFocusKey(body);
+            // claude's card left: its focused button now reads codex, and b is gone.
+            a.setAttribute("data-collapse", "codex"); b.setAttribute("data-collapse", "gemini");
+            computeRefocus(body, key);
+            const dropped = document.activeElement;
+            // Still there under another node: that node gets focus.
+            document.activeElement = a; a.setAttribute("data-collapse", "x"); b.setAttribute("data-collapse", "claude");
+            computeRefocus(body, key);
+            return { key, dropped, moved: document.activeElement === b };""")
+        self.assertEqual(out["key"], '[data-collapse="claude"]')
+        self.assertIsNone(out["dropped"])
+        self.assertTrue(out["moved"])
+
+    def test_an_unchanged_part_is_skipped(self):
+        out = self.run_js("""
+            let parsed = 0;
+            globalThis.document = { createElement: () => ({ set innerHTML(v) { parsed++; this.content = h("div", {}, v); } }) };
+            const el = h("div", {});
+            computePatch(el, "same"); computePatch(el, "same"); computePatch(el, "other");
+            return { parsed, shape: shape(el) };""")
+        self.assertEqual(out, {"parsed": 2, "shape": ["DIV", {}, "other"]})
+
+
 if __name__ == "__main__":
     unittest.main()
