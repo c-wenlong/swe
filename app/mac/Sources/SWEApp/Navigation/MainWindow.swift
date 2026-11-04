@@ -117,6 +117,9 @@ struct MainWindow: View {
         }
         .background(Theme.wash)
         .ignoresSafeArea(.container, edges: .top)
+        // Polls that only matter to someone looking (the GitHub inbox,
+        // repo boards, pairing) slow down or skip while this is false.
+        .onScreenChange { model.mainWindowOnScreen = $0 }
         // Modal: a setup you can't click away from mid-way. Its own
         // buttons finish or skip it.
         .quiverSheet(isPresented: Binding(

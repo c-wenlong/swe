@@ -1180,6 +1180,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The Mac app's background polls slow down while nobody can see
+  them.** The GitHub inbox poll ran `swe gh inbox` every minute for the
+  app's whole life. It now keeps the minute only while the main window
+  is on screen, polls every 3 minutes behind it while GitHub banners are
+  on, and every 15 minutes with banners off. The window coming back
+  wakes it at once. The Repositories and repo pages, the Inbox's hub
+  cards, Remote pairing requests and the remote setup sheet skip their
+  `swe` runs while the window is minimised, hidden or covered. A hub
+  that doesn't answer is retried after 1, 2, 4 and then 5 minutes,
+  where before it was every minute. The accounts timer reads the cached
+  login `PATH` rather than starting `zsh -il` (the whole rc chain) every
+  5 minutes. Closes [#1541](https://github.com/c-wenlong/swe/issues/1541).
+
 - **The hub reads `harness.json` once per launch-field refresh and
   finds tmux once.** Every 10 s catalog tick read the registry twice
   per launchable harness to list its launch providers (about 1.1 ms

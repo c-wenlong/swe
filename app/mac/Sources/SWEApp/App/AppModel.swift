@@ -471,6 +471,13 @@ final class AppModel {
     /// open — and turns new notifications into banners plus board
     /// invalidations. Assigned in init, where `~/.swe` is known.
     let githubNotify: GitHubNotifier
+
+    /// Whether the main window can be seen: open, not minimised, not
+    /// hidden with the app and not fully covered. Polls that only serve
+    /// someone looking follow it.
+    var mainWindowOnScreen = false {
+        didSet { githubNotify.windowVisible = mainWindowOnScreen }
+    }
     /// Banners provider incidents from the Service status poll, which it
     /// also drives. Assigned in init, where `~/.quiver` is known.
     let serviceNotify: ServiceStatusNotifier

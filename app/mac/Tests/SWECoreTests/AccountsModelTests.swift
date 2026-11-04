@@ -135,6 +135,40 @@ final class FakeRunningInstances: RunningInstances {
                   UsageWindow(label: "7d", usedPercent: 50, resetsAt: nil)],
         fetchedAt: Date(timeIntervalSince1970: 1_791_700_000), isStale: false)
 
+    @Test func theTimersPassReadsTheCachedLoginPath() async throws {
+        // keepFresh runs every five minutes for the app's life: it must
+        // not start a login shell (the user's whole rc chain) each time.
+        let fresh = CountGate(), cached = CountGate()
+        let model = AccountsModel(store: store, usage: usage, launcher: launcher,
+                                  terminal: { .terminal },
+                                  loginPath: { [bin] in await fresh.bump(); return bin!.path },
+                                  cachedLoginPath: { [bin] in await cached.bump(); return bin!.path },
+                                  running: running)
+        let timer = Task { await model.keepFresh(every: .seconds(3600)) }
+        #expect(await cached.reach(1))
+        timer.cancel()
+        #expect(await fresh.count == 0)
+        // Refresh still looks again, so a CLI installed since launch shows.
+        await model.load(force: false)
+        #expect(await fresh.count == 1)
+    }
+
+    @Test func aCLIRefreshFoundStaysFoundOnTheTimer() async throws {
+        // The launch-time PATH lacks the bin folder; a fresh read (Refresh)
+        // has it. The timer's next pass must keep what Refresh found.
+        let model = AccountsModel(store: store, usage: usage, launcher: launcher,
+                                  terminal: { .terminal },
+                                  loginPath: { [bin] in bin!.path },
+                                  cachedLoginPath: { "/nowhere" },
+                                  running: running)
+        await model.load(force: false, freshPath: false)
+        #expect(model.cliOnPath[.claude] == false)
+        await model.load(force: false)
+        #expect(model.cliOnPath[.claude] == true)
+        await model.load(force: false, freshPath: false)
+        #expect(model.cliOnPath[.claude] == true)
+    }
+
     @Test func defaultsComeFirstThenAddedAccountsEachWithTheirUsage() async throws {
         let work = try store.add(vendor: .codex, name: "Work")
         usage.byHome[root.appending(path: ".claude").path] = reading
