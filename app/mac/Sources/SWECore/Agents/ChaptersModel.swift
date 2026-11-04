@@ -138,6 +138,27 @@ public enum ChapterIndex {
         return lines.joined(separator: "\n")
     }
 
+    /// The full check createChapter runs: the folder must pass
+    /// `folderProblem`, then the file's name must pass `nameProblem`, be
+    /// a name rather than a path, and not start with "." — the two file
+    /// rules `nameProblem` does not cover. nil means it can be created.
+    public static func newChapterProblem(folder: String,
+                                         file rawFile: String) -> String? {
+        if let problem = folderProblem(folder) { return problem }
+        var file = rawFile.trimmingCharacters(in: .whitespaces)
+        if file.contains("/") { return "The file is a name, not a path; pick its folder above." }
+        if file.hasPrefix(".") { return "A leading . hides it from the outline." }
+        if !file.isEmpty && !file.lowercased().hasSuffix(".md") { file += ".md" }
+        return nameProblem(folder.isEmpty ? file : folder + "/" + file)
+    }
+
+    /// The same for a folder alone: a path `folderProblem` accepts and
+    /// non-empty.
+    public static func newFolderProblem(_ path: String) -> String? {
+        if path.isEmpty { return "Name the folder." }
+        return folderProblem(path)
+    }
+
     /// Why `folder` cannot be a chapter folder, mirroring the compiler's
     /// path rules without the .md suffix: relative, inside AGENTS_MD, one
     /// line, and no characters index.txt or the compiler would read as
@@ -858,13 +879,12 @@ public final class ChaptersModel {
     @discardableResult
     public func createChapter(folder: String, file rawFile: String, include: Bool,
                               swe: SweClient) async -> String? {
-        if let problem = ChapterIndex.folderProblem(folder) { return problem }
         var file = rawFile.trimmingCharacters(in: .whitespaces)
-        if file.contains("/") { return "The file is a name, not a path; pick its folder above." }
-        if file.hasPrefix(".") { return "A leading . hides it from the outline." }
         if !file.isEmpty && !file.lowercased().hasSuffix(".md") { file += ".md" }
         let name = folder.isEmpty ? file : folder + "/" + file
-        if let problem = ChapterIndex.nameProblem(name) { return problem }
+        if let problem = ChapterIndex.newChapterProblem(folder: folder, file: rawFile) {
+            return problem
+        }
         guard case .loaded(let check) = status else { return "The chapters aren't loaded yet." }
         if check.entries?.contains(where: { $0.name == name }) == true
             || check.chapters.contains(where: { $0.name == name }) {
@@ -1306,7 +1326,7 @@ public enum ChapterSuggest {
     /// Folder rows for the Folder field: everything on an empty query,
     /// ranked matches otherwise, capped at 8 plus the create row.
     public static func folders(_ query: String,
-                               in folders: [String]) -> [Row] {
+                               in folders: [String], files: [String]) -> [Row] {
         let known = folders.filter { !$0.isEmpty }
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else {
@@ -1320,11 +1340,20 @@ public enum ChapterSuggest {
                     : $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
             }
         var rows = ranked.prefix(8).map(Row.folder)
-        if !known.contains(where: { $0.lowercased() == q.lowercased() }),
-           ChapterIndex.folderProblem(q) == nil {
+        if !taken(q, in: folders, files: files),
+           ChapterIndex.newFolderProblem(q) == nil {
             rows.append(.create(q))
         }
         return rows
+    }
+
+    /// `path` names something that already exists — a folder or a file —
+    /// so a "New ..." row would collide with it.
+    private static func taken(_ path: String, in folders: [String],
+                              files: [String]) -> Bool {
+        let lower = path.lowercased()
+        return folders.contains { $0.lowercased() == lower }
+            || files.contains { $0.lowercased() == lower }
     }
 
     /// File rows for the File field: the folder's direct children on an
@@ -1332,7 +1361,7 @@ public enum ChapterSuggest {
     /// folder-rank order across every file. A trailing ".md" on the query
     /// is optional. `.create` carries `folder/name.md`.
     public static func files(_ query: String, folder: String,
-                             in files: [String]) -> [Row] {
+                             in files: [String], folders: [String]) -> [Row] {
         var q = query.trimmingCharacters(in: .whitespaces)
         if q.lowercased().hasSuffix(".md") { q = String(q.dropLast(3)) }
         let folderPrefix = folder.isEmpty ? "" : folder + "/"
@@ -1366,9 +1395,10 @@ public enum ChapterSuggest {
         var rows = ranked.prefix(8).map(Row.file)
         let name = q + ".md"
         let path = folderPrefix + name
-        if !q.contains("/"),
-           !files.contains(where: { $0.lowercased() == path.lowercased() }),
-           ChapterIndex.nameProblem(path) == nil {
+        // No create row for a taken path or a name createChapter would
+        // refuse — including a bad Folder, since it is part of the path.
+        if !taken(path, in: folders, files: files),
+           ChapterIndex.newChapterProblem(folder: folder, file: q) == nil {
             rows.append(.create(path))
         }
         return rows

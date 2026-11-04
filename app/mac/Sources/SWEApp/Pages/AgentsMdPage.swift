@@ -1056,9 +1056,8 @@ private struct NewChapterSheet: View {
 
     private var fileProblem: String? {
         if fileName.isEmpty { return nil }  // folder-only create
-        if fileName.contains("/") { return "The file is a name, not a path." }
-        return ChapterIndex.nameProblem(
-            folder.isEmpty ? fileName : folder + "/" + fileName)
+        return ChapterIndex.newChapterProblem(
+            folder: folder.trimmingCharacters(in: .whitespaces), file: file)
     }
 
     private var fullPath: String {
@@ -1077,11 +1076,12 @@ private struct NewChapterSheet: View {
     private var rows: [ChapterSuggest.Row] {
         switch activeField {
         case .folder:
-            return ChapterSuggest.folders(folder, in: app.chapters.folders)
+            return ChapterSuggest.folders(
+                folder, in: app.chapters.folders, files: app.chapters.files)
         case .file:
             return ChapterSuggest.files(
                 file, folder: folder.trimmingCharacters(in: .whitespaces),
-                in: app.chapters.files)
+                in: app.chapters.files, folders: app.chapters.folders)
         case nil: return []
         }
     }
@@ -1153,7 +1153,7 @@ private struct NewChapterSheet: View {
                         .onKeyPress(.downArrow, phases: .down) { _ in move(1); return .handled }
                         .onKeyPress(.return, phases: .down) { _ in pickHighlighted() }
                         .onKeyPress(.escape, phases: .down) { _ in escape() }
-                    if activeField == .folder {
+                    if listOpen && activeField == .folder {
                         SuggestList(rows: rows, highlight: highlight,
                                     folderField: true) { pick($0) }
                     }
@@ -1169,7 +1169,7 @@ private struct NewChapterSheet: View {
                             .onKeyPress(.downArrow, phases: .down) { _ in move(1); return .handled }
                             .onKeyPress(.return, phases: .down) { _ in pickHighlighted() }
                             .onKeyPress(.escape, phases: .down) { _ in escape() }
-                        if activeField == .file {
+                        if listOpen && activeField == .file {
                             SuggestList(rows: rows, highlight: highlight,
                                         folderField: false) { pick($0) }
                         }
@@ -1245,14 +1245,16 @@ private struct NewChapterSheet: View {
 
         var body: some View {
             if !rows.isEmpty {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(rows.enumerated()), id: \.element) { index, row in
-                            rowView(row, highlighted: index == highlight)
-                                .contentShape(.rect)
-                                .onTapGesture { pick(row) }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(rows.enumerated()), id: \.element) { index, row in
+                                rowView(row, highlighted: index == highlight)
+                                    .id(index)
+                            }
                         }
                     }
+                    .onChange(of: highlight) { proxy.scrollTo(highlight) }
                 }
                 .frame(maxHeight: 6 * 28)
                 .background(Theme.card, in: .rect(cornerRadius: Theme.controlRadius))
@@ -1266,37 +1268,47 @@ private struct NewChapterSheet: View {
             let icon: String
             let label: String
             var hint: String?
+            var accessibility: String
             switch row {
             case .folder(let path):
                 icon = "folder"
                 label = path.isEmpty ? "Top level" : path
+                accessibility = "Folder \(path.isEmpty ? "top level" : path)"
             case .file(let path):
                 icon = "doc.text"
                 label = path
                 hint = "Open"
+                accessibility = "Chapter \(path), open"
             case .create(let path):
                 icon = "plus"
                 label = folderField ? "New folder \"\(path)\""
                     : "New chapter \"\(path)\""
                 hint = "↵ to add"
+                accessibility = label
             }
-            return HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(Theme.font(size: 11))
-                    .foregroundStyle(Theme.textMuted)
-                    .frame(width: 14)
-                Text(label)
-                    .font(Theme.font(size: 12, design: .monospaced))
-                    .foregroundStyle(Theme.textNav)
-                    .lineLimit(1).truncationMode(.head)
-                Spacer(minLength: 4)
-                if let hint {
-                    Text(hint).font(Theme.caption).foregroundStyle(Theme.textMuted)
+            return Button { pick(row) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: icon)
+                        .font(Theme.font(size: 11))
+                        .foregroundStyle(Theme.textMuted)
+                        .frame(width: 14)
+                    Text(label)
+                        .font(Theme.font(size: 12, design: .monospaced))
+                        .foregroundStyle(Theme.textNav)
+                        .lineLimit(1).truncationMode(.head)
+                    Spacer(minLength: 4)
+                    if let hint {
+                        Text(hint).font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    }
                 }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(highlighted ? Theme.navActive : .clear,
+                            in: .rect(cornerRadius: Theme.controlRadius))
+                .contentShape(.rect)
             }
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(highlighted ? Theme.navActive : .clear,
-                        in: .rect(cornerRadius: Theme.controlRadius))
+            .buttonStyle(.plain)
+            .accessibilityLabel(accessibility)
+            .accessibilityAddTraits(highlighted ? .isSelected : [])
         }
     }
 

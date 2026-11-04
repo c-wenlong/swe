@@ -653,22 +653,22 @@ import Testing
 
     @Test func emptyFolderQueryListsTopLevelAndEveryFolder() {
         let rows = ChapterSuggest.folders(
-            "", in: ["", "eng/review", "eng", "harnesses"])
+            "", in: ["", "eng/review", "eng", "harnesses"], files: [])
         #expect(rows == [.folder(""), .folder("eng"), .folder("eng/review"),
                          .folder("harnesses")])
     }
 
     @Test func emptyFileQueryListsTheFoldersDirectChildren() {
         let files = ["a.md", "eng/x.md", "eng/deep/y.md", "other.md"]
-        #expect(ChapterSuggest.files("", folder: "eng", in: files)
+        #expect(ChapterSuggest.files("", folder: "eng", in: files, folders: [])
                 == [.file("eng/x.md")])
-        #expect(ChapterSuggest.files("", folder: "", in: files)
+        #expect(ChapterSuggest.files("", folder: "", in: files, folders: [])
                 == [.file("a.md"), .file("other.md")])
     }
 
     @Test func folderRankingIsExactPrefixComponentThenContains() {
         let folders = ["xeng", "eng/review", "eng", "review/eng"]
-        let rows = ChapterSuggest.folders("eng", in: folders)
+        let rows = ChapterSuggest.folders("eng", in: folders, files: [])
         #expect(rows.prefix(4).map {
             if case .folder(let p) = $0 { return p }; return "?"
         } == ["eng", "eng/review", "review/eng", "xeng"])
@@ -679,43 +679,43 @@ import Testing
     }
 
     @Test func folderSuggestionsIgnoreCase() {
-        #expect(ChapterSuggest.folders("ENG", in: ["eng/review"]) ==
+        #expect(ChapterSuggest.folders("ENG", in: ["eng/review"], files: []) ==
                 [.folder("eng/review"), .create("ENG")])
         // Existing folder under a different case blocks the create row.
-        let rows = ChapterSuggest.folders("ENG", in: ["Eng"])
+        let rows = ChapterSuggest.folders("ENG", in: ["Eng"], files: [])
         #expect(rows == [.folder("Eng")])
     }
 
     @Test func fileQueriesIgnoreATrailingMdSuffix() {
         let files = ["eng/x.md"]
-        #expect(ChapterSuggest.files("x", folder: "eng", in: files) ==
+        #expect(ChapterSuggest.files("x", folder: "eng", in: files, folders: []) ==
                 [.file("eng/x.md")])
         // "x.md" matches the same file and offers no duplicate create.
-        #expect(ChapterSuggest.files("x.md", folder: "eng", in: files)
+        #expect(ChapterSuggest.files("x.md", folder: "eng", in: files, folders: [])
                 == [.file("eng/x.md")])
     }
 
     @Test func createRowsVanishWhenTheNameIsTakenOrInvalid() {
         // Path exists, case-insensitively.
-        #expect(ChapterSuggest.files("NEW", folder: "eng", in: ["eng/new.md"]) ==
+        #expect(ChapterSuggest.files("NEW", folder: "eng", in: ["eng/new.md"], folders: []) ==
                 [.file("eng/new.md")])
         // Invalid names never get a create row.
-        let rows = ChapterSuggest.files("../x", folder: "", in: [])
+        let rows = ChapterSuggest.files("../x", folder: "", in: [], folders: [])
         #expect(rows == [])
         // A hidden component is rejected the same way.
-        #expect(ChapterSuggest.folders(".secret", in: []).filter {
+        #expect(ChapterSuggest.folders(".secret", in: [], files: []).filter {
             if case .create = $0 { return true }; return false
         } == [])
     }
 
     @Test func aNewNestedFolderGetsACreateRow() {
-        #expect(ChapterSuggest.folders("a/b", in: []) ==
+        #expect(ChapterSuggest.folders("a/b", in: [], files: []) ==
                 [.create("a/b")])
     }
 
     @Test func suggestionsCapAtEight() {
         let folders = ["eng"] + (0..<20).map { "eng\($0)" }
-        let rows = ChapterSuggest.folders("eng", in: folders)
+        let rows = ChapterSuggest.folders("eng", in: folders, files: [])
         #expect(rows.count == 8)
         #expect(rows.allSatisfy {
             if case .folder = $0 { return true }; return false
@@ -724,7 +724,7 @@ import Testing
 
     @Test func fileRowsRankTheCurrentFoldersChildrenFirst() {
         let files = ["other/eng.md", "eng/eng.md", "eng/a.md"]
-        let rows = ChapterSuggest.files("eng", folder: "eng", in: files)
+        let rows = ChapterSuggest.files("eng", folder: "eng", in: files, folders: [])
         #expect(rows.prefix(2).map {
             if case .file(let p) = $0 { return p }; return "?"
         } == ["eng/eng.md", "other/eng.md"])
@@ -734,15 +734,35 @@ import Testing
         let files = ["x/style-guide.md", "x/style.md", "y/style.md",
                      "y/style-guide.md"]
         // In the same folder an exact basename beats a longer prefix.
-        #expect(ChapterSuggest.files("style", folder: "x", in: files)
+        #expect(ChapterSuggest.files("style", folder: "x", in: files, folders: [])
             .prefix(2).map {
                 if case .file(let p) = $0 { return p }; return "?"
             } == ["x/style.md", "x/style-guide.md"])
         // The folder's children still rank first across folders.
-        #expect(ChapterSuggest.files("style", folder: "x", in: files)
+        #expect(ChapterSuggest.files("style", folder: "x", in: files, folders: [])
             .prefix(3).map {
                 if case .file(let p) = $0 { return p }; return "?"
             } == ["x/style.md", "x/style-guide.md", "y/style.md"])
+    }
+
+    @Test func createRowsRequireCreatableNames() {
+        // A leading dot hides a name from the outline: no create row.
+        #expect(ChapterSuggest.files(".secret", folder: "", in: [], folders: [])
+                .filter { if case .create = $0 { return true }; return false } == [])
+        #expect(ChapterSuggest.folders(".hidden", in: [], files: [])
+                .filter { if case .create = $0 { return true }; return false } == [])
+        // An invalid folder blocks the file create row too.
+        #expect(ChapterSuggest.files("x", folder: ".bad", in: [], folders: [])
+                .filter { if case .create = $0 { return true }; return false } == [])
+        // A taken path never gets a "New" row, whichever list owns it.
+        #expect(ChapterSuggest.folders("rules.md", in: [], files: ["rules.md"])
+                .filter { if case .create = $0 { return true }; return false } == [])
+        #expect(ChapterSuggest.files("notes.md", folder: "", in: [],
+                                     folders: ["", "notes.md"])
+                .filter { if case .create = $0 { return true }; return false } == [])
+        // The shared validator and createChapter reject the same names.
+        #expect(ChapterIndex.newChapterProblem(folder: "", file: ".hidden") != nil)
+        #expect(ChapterIndex.newChapterProblem(folder: "eng", file: "ok") == nil)
     }
 
     @Test func aToggleHitByADiskChangeReloadsAndReports() async throws {
