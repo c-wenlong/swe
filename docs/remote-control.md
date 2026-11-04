@@ -266,12 +266,24 @@ until the next catalog refresh (every 10 s) flipped the row to active.
 
 The hot window costs little because only woken sessions get it. A JSONL
 poll that finds the file the same size is one `stat`, and an opencode
-poll is a few queries on per-session indexes. Snapshot stores (Devin,
-Gemini, Cline, ...) re-read the whole window whenever their change token
+poll is a few queries on per-session indexes. Snapshot stores (Gemini,
+Cline, ...) re-read the whole window whenever their change token
 moves, which is the cost behind [#515](https://github.com/c-wenlong/swe/issues/515), so
 `SnapshotSource.hot_poll_s` caps them at the active cadence: they get the
 immediate wake but never poll faster than an active session already
 does.
+
+Devin reads only what changed (`reports/transcripts.py::DevinChain`,
+[#1522](https://github.com/c-wenlong/swe/issues/1522)). Its source keeps
+the window's decoded chain nodes; a moved token fetches the rows written
+since the last read (a rewrite comes back under a new `row_id`), walks
+from the head until it meets a kept node, and cuts the kept chain there,
+so a switched `main_chain_id` splices at the fork. A walk that meets
+nothing kept, a rewritten node with a new parent, or 60 s since the last
+whole read (`DEVIN_FULL_READ_S`) reads the window whole, which also
+bounds anything the step read cannot see, such as a row edited in place.
+A session unchanged for five minutes (`DEVIN_CHAIN_KEEP_S`) lets its
+kept nodes go.
 
 Status between catalog refreshes: a session that is hot, or whose
 source moved since its last probe, has its status re-probed by the tail
@@ -405,7 +417,16 @@ transcript to replace the bubble.
 Text is redacted over the whole message so far, not per chunk; the
 unfinished word, a line that looks like a credential, and an open
 private-key block wait for more text, and a message whose sent text a
-later redaction would rewrite stops streaming. The hub publishes deltas
+later redaction would rewrite stops streaming. Each message keeps its
+cleaned text up to a line break that no redaction or escape can reach
+across (no open OSC escape or key block, and no secret's name in the
+last few words before it) and re-cleans only the text after it, so a
+long reply costs linear work; the `done` flush cleans the whole text.
+Past 8 KB of text with no such break, each flush waits proportionally
+longer, which keeps that case linear too. A message with no new text
+for 15 minutes stops streaming and frees its text; its empty entry,
+which keeps a late chunk from streaming without what came before it,
+goes after a day. The hub publishes deltas
 to the session's SSE subscribers only (not `/v1/events`) and never
 journals them; the transcript's `message.appended` stays the record. A
 satellite coalesces its own deltas and posts them best-effort on a

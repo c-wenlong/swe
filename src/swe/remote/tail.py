@@ -163,6 +163,10 @@ SNAPSHOT_RECHECK_S = 60.0
 # A bounded read (Devin) returns this many newest chain nodes, so a poll
 # sees a sliding window; more than a poll interval ever adds.
 SNAPSHOT_WINDOW = 1000
+# A Devin source keeps its window's decoded nodes between reads
+# (``reports.transcripts.DevinChain``), about 1 MB for a long session;
+# one whose session has not changed for this long lets them go.
+DEVIN_CHAIN_KEEP_S = 300.0
 # A snapshot read that found no source files (a store not written yet,
 # or gone) leaves nothing to stat for a change token, and an unreadable
 # read leaves no token to keep. Either way the next attempt
@@ -1282,6 +1286,9 @@ class SnapshotSource:
         # Set by start_near_end: the first poll emits only the newest
         # BACKFILL_MESSAGES instead of the whole history.
         self._backfill_cap: int | None = None
+        # Devin: the window kept between reads, so a changed session
+        # costs the new nodes, not the whole window (#1522).
+        self._chain = _tr.DevinChain() if session.tool_name == "devin" else None
 
     def state(self) -> dict:
         return {"source": "snapshot", "fps": self._fps}
@@ -1295,9 +1302,13 @@ class SnapshotSource:
         self._fps = [str(f) for f in fps]
         return True
 
+    def _read(self):
+        return _tr.read_transcript_tail(
+            self.session, SNAPSHOT_WINDOW, chain=self._chain)
+
     def skip_to_end(self) -> None:
         try:
-            tr = _tr.read_transcript_tail(self.session, SNAPSHOT_WINDOW)
+            tr = self._read()
         except Exception:
             return
         self._fps = [self._fp(m) for m in tr.messages]
@@ -1345,13 +1356,16 @@ class SnapshotSource:
         exact = self.session.tool_name == "devin"
         if (token is not None and token == self._token
                 and (exact or now - self._token_at < SNAPSHOT_RECHECK_S)):
+            if self._chain is not None \
+                    and now - self._token_at >= DEVIN_CHAIN_KEEP_S:
+                self._chain.reset()
             return []
         if not exact and now < self._miss_until:
             # The last read found no files, or a store that couldn't be
             # read (a SQLite store that isn't there still lists its path).
             return []
         try:
-            tr = _tr.read_transcript_tail(self.session, SNAPSHOT_WINDOW)
+            tr = self._read()
         except Exception:
             tr = None
         self._sources = list(getattr(tr, "source_paths", None) or [])
@@ -2070,6 +2084,7 @@ class TailManager:
         retired with ``approval.resolved``, so a phone's card for it
         doesn't wait forever on a session that's gone."""
         self.last_append.pop(key, None)
+        self._limit_seen.pop(key, None)
         outstanding = self._approval_outstanding.pop(key, None)
         if outstanding is not None:
             supervise.set_pending_approval(key, None)

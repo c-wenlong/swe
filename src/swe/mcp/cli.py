@@ -892,6 +892,23 @@ def probe_server_health(name: str, cfg: dict) -> tuple[str, str | None]:
     return "unknown", "no command or url"
 
 
+# Health checks run side by side: an HTTP server's HEAD probe can take its
+# whole five-second timeout, and `swe mcp status` waited on each in turn.
+_HEALTH_PROBE_WORKERS = 8
+
+
+def _probe_all(probe, servers: list[tuple[str, dict]]) -> list:
+    """``probe(name, cfg)`` for each server, on a small thread pool, the
+    results in the order given (#1537)."""
+    if len(servers) < 2:
+        return [probe(name, cfg) for name, cfg in servers]
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=min(_HEALTH_PROBE_WORKERS,
+                                            len(servers))) as pool:
+        return list(pool.map(lambda pair: probe(*pair), servers))
+
+
 def check_server_health(name: str, cfg: dict) -> str:
     state, detail = probe_server_health(name, cfg)
     if state == "ok":
@@ -1082,10 +1099,12 @@ def cmd_status(args):
         all_servers.update(servers.keys())
 
     if json_view:
+        inventory = list(server_inventory(tool_data, include_hub=target is None))
+        probes = _probe_all(probe_server_health,
+                            [(row["name"], cfg) for row, cfg in inventory])
         rows = []
-        for row, first_cfg in server_inventory(tool_data, include_hub=target is None):
-            row["health"], row["detail"] = probe_server_health(
-                row["name"], first_cfg)
+        for (row, _cfg), (state, detail) in zip(inventory, probes):
+            row["health"], row["detail"] = state, detail
             rows.append(row)
         return emit({"harnesses": list(tool_data), "servers": rows})
 
@@ -1121,13 +1140,11 @@ def cmd_status(args):
     # we can include HEALTH in column-widths math. Since the union
     # ``all_servers`` guarantees every server exists in at least one
     # tool's servers dict, ``first_cfg`` is always present.
-    health_strings: list[str] = []
-    for server in sorted_servers:
-        first_cfg = next(
-            tool_data[t][server] for t in tool_names
-            if server in tool_data[t]
-        )
-        health_strings.append(check_server_health(server, first_cfg))
+    health_strings = _probe_all(check_server_health, [
+        (server, next(tool_data[t][server] for t in tool_names
+                      if server in tool_data[t]))
+        for server in sorted_servers
+    ])
     health_width = max(
         len("HEALTH"),
         max((visible_len(h) for h in health_strings), default=0),

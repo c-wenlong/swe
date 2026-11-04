@@ -6,6 +6,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 from swe.harness.catalog import EXCLUDE_BASENAMES, EXTRA_BIN_DIRS, HARNESS_CATALOG
 from swe.harness.registry import load_registry, resolve, save_registry
@@ -107,18 +108,48 @@ def _command_candidates(name: str, command: str) -> list[str]:
     return ordered
 
 
+class _Listing(NamedTuple):
+    names: tuple[str, ...]
+    # Casefolded: macOS volumes are usually case-insensitive, so a file
+    # named in another case still opens.
+    folded: frozenset[str]
+
+
+def _dir_listings(path_dirs: list[Path]) -> dict[Path, _Listing | None]:
+    """Each PATH directory's entry names, listed once per discovery pass
+    and shared by the catalog and PATH scans (#1537), or ``None`` for one
+    that cannot be listed."""
+    listings: dict[Path, _Listing | None] = {}
+    for directory in path_dirs:
+        try:
+            names = tuple(os.listdir(directory))
+        except OSError:
+            listings[directory] = None
+            continue
+        listings[directory] = _Listing(names, frozenset(n.casefold() for n in names))
+    return listings
+
+
 def _resolve_executable(
     name: str,
     command: str,
     path_env: str | None,
     path_dirs: list[Path],
+    listings: dict[Path, _Listing | None] | None = None,
 ) -> tuple[str | None, str | None]:
+    """The first candidate ``which`` finds, else the first executable in
+    ``path_dirs``. ``listings`` (``_dir_listings``) skips the per-file
+    probes for names a directory does not hold: most catalog harnesses
+    are absent, and each used to cost a stat in every PATH directory."""
     for candidate in _command_candidates(name, command):
         path = shutil.which(candidate, path=path_env)
         if path:
             return path, command
     for directory in path_dirs:
+        listing = listings.get(directory) if listings is not None else None
         for candidate in _command_candidates(name, command):
+            if listing is not None and candidate.casefold() not in listing.folded:
+                continue
             entry = directory / candidate
             try:
                 if entry.is_file() and os.access(entry, os.X_OK):
@@ -132,15 +163,19 @@ def _catalog_findings(
     registry: dict,
     path_env: str | None,
     home: Path,
+    listings: dict[Path, _Listing | None] | None = None,
 ) -> list[HarnessFinding]:
     findings: list[HarnessFinding] = []
     registered_names = set(registry)
     reg_by_command = _registered_commands(registry)
-    path_dirs = _path_dirs(path_env, home)
+    path_dirs = _path_dirs(path_env, home) if listings is None else list(listings)
+    if listings is None:
+        listings = _dir_listings(path_dirs)
 
     for name, meta in HARNESS_CATALOG.items():
         command = meta["command"]
-        path, resolved_command = _resolve_executable(name, command, path_env, path_dirs)
+        path, resolved_command = _resolve_executable(
+            name, command, path_env, path_dirs, listings)
         in_registry = name in registered_names
         if path and resolved_command:
             if in_registry:
@@ -189,6 +224,7 @@ def _path_scan_findings(
     path_env: str | None,
     home: Path,
     existing: list[HarnessFinding],
+    listings: dict[Path, _Listing | None] | None = None,
 ) -> list[HarnessFinding]:
     known_commands = {f.command for f in existing}
     known_names = {f.name for f in existing}
@@ -197,20 +233,14 @@ def _path_scan_findings(
     catalog_names = set(HARNESS_CATALOG)
     extra: list[HarnessFinding] = []
 
-    for directory in _path_dirs(path_env, home):
-        try:
-            entries = list(directory.iterdir())
-        except OSError:
+    if listings is None:
+        listings = _dir_listings(_path_dirs(path_env, home))
+    for directory, listing in listings.items():
+        if listing is None:
             continue
-        for entry in entries:
-            try:
-                if not entry.is_file():
-                    continue
-                if not os.access(entry, os.X_OK):
-                    continue
-            except OSError:
-                continue
-            basename = entry.name
+        for basename in listing.names:
+            # Name checks first: they rule out nearly every entry without
+            # the two stats an executable check costs.
             if basename in EXCLUDE_BASENAMES:
                 continue
             if (
@@ -221,6 +251,14 @@ def _path_scan_findings(
             ):
                 continue
             if basename not in _UNCATALOGUED_BINARIES and not _PATH_CODE_SUFFIX_RE.match(basename):
+                continue
+            entry = directory / basename
+            try:
+                if not entry.is_file():
+                    continue
+                if not os.access(entry, os.X_OK):
+                    continue
+            except OSError:
                 continue
             if basename in reg_by_command:
                 status = "registered"
@@ -377,8 +415,10 @@ def discover_harnesses(
     """Scan PATH and catalog for AI coding CLI harnesses."""
     home = home or Path.home()
     registry = load_registry()
-    findings = _catalog_findings(registry, path_env, home)
-    findings.extend(_path_scan_findings(registry, path_env, home, findings))
+    # Each PATH directory is listed once for both scans (#1537).
+    listings = _dir_listings(_path_dirs(path_env, home))
+    findings = _catalog_findings(registry, path_env, home, listings)
+    findings.extend(_path_scan_findings(registry, path_env, home, findings, listings))
     findings.extend(_home_scan_findings(registry, home, findings))
 
     if not include_registered:

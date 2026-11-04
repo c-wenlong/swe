@@ -1149,7 +1149,7 @@ final class SilentHubStub: URLProtocol, @unchecked Sendable {
     static let started = CountGate()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() { Task { await Self.started.bump() } }
+    override func startLoading() { Task { await SilentHubStub.started.bump() } }
     override func stopLoading() {}
 }
 
