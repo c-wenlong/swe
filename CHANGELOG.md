@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-04
+
 ### Added
 
 - **A one-line installer for Linux.** `curl -fsSL
@@ -48,8 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   renders it as Markdown and jumps to a chapter on click. Reordering and
   unlisting chapters move to the upcoming Compile tab, so they are
   temporarily unavailable in the app; edit index.txt by hand meanwhile.
-
-### Changed
 
 - **The web chat keeps its newest 200 entries in the DOM.** A long
   transcript, or a chat left open for hours, kept every entry it ever
