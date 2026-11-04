@@ -205,12 +205,13 @@ public final class RemoteSetupModel {
     /// calling task is cancelled (the sheet's `.task` ends when it closes).
     /// A tick that falls while `--apply` runs is skipped, and one after
     /// an apply that finished the job doesn't look again.
-    public func watch() async {
+    public func watch(onScreen: @escaping @MainActor () -> Bool = { true }) async {
         await load()
         while !Task.isCancelled && !isReady {
             do { try await sleep(interval) } catch { return }
             if Task.isCancelled || isReady { return }
-            await load()
+            // Behind other windows the sheet waits without running swe.
+            if onScreen() { await load() }
         }
     }
 

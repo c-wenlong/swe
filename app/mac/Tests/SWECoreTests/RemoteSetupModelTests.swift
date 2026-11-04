@@ -317,6 +317,27 @@ final class Ticker: @unchecked Sendable {
         #expect(ticker.sleeps == 2)
     }
 
+    @Test func behindOtherWindowsTheSheetWaitsWithoutRunningSwe() async throws {
+        let ticker = Ticker()
+        let runner = SetupScriptRunner([.now(try reply("swe-remote-setup-todo")),
+                                     .now(try reply("swe-remote-setup-ready"))])
+        let setup = model(runner, ticker: ticker)
+        final class Flag: @unchecked Sendable { var on = false }
+        let shown = Flag()
+        let watching = Task { await setup.watch(onScreen: { shown.on }) }
+        defer { watching.cancel() }
+        // The first look always runs; hidden ticks skip theirs.
+        try #require(await ticker.untilSleeping(1))
+        ticker.tick()
+        try #require(await ticker.untilSleeping(2))
+        #expect(runner.calls.count == 1)
+        shown.on = true
+        ticker.tick()
+        await watching.value
+        #expect(runner.calls.count == 2)
+        #expect(setup.isReady)
+    }
+
     @Test func closingTheSheetStopsThePoll() async throws {
         let ticker = Ticker()
         let runner = SetupScriptRunner([.now(try reply("swe-remote-setup-todo"))])
