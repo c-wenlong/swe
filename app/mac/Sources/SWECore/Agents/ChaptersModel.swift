@@ -339,7 +339,7 @@ public final class ChaptersModel {
             .map(\.key).sorted()
         // An indexed chapter with no file keeps a row too, so it can be
         // opened and saved back into existence rather than fixed by hand.
-        missing = check.chapters.map(\.name).filter {
+        missing = check.chapters.filter { !$0.exists }.map(\.name).filter {
             !files.contains($0) && !ghosts.contains($0)
                 && Self.inside($0, under: check.directory) != nil
         }
