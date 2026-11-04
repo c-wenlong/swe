@@ -239,7 +239,7 @@ private struct ChaptersEditor: View {
                         GhostRow(name: name)
                     }
                     ForEach(chapters.missing, id: \.self) { name in
-                        GhostRow(name: name, missing: true)
+                        GhostRow(name: name, missing: true, absent: chapters.absent.contains(name))
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -254,8 +254,10 @@ private struct ChaptersEditor: View {
     /// stays reachable so Save/Revert keep working.
     private struct GhostRow: View {
         var name: String
-        /// Listed in index.txt with no file, rather than a deleted draft.
+        /// Listed in index.txt but not in the outline, rather than a
+        /// deleted draft; `absent` when its file isn't on disk at all.
         var missing = false
+        var absent = false
         @Environment(AppModel.self) private var app
         @State private var hovering = false
 
@@ -271,8 +273,8 @@ private struct ChaptersEditor: View {
                     Circle().fill(Theme.warning)
                         .frame(width: Theme.statusDot, height: Theme.statusDot)
                 }
-                Text(missing ? "missing" : "deleted").font(Theme.caption)
-                    .foregroundStyle(missing ? Theme.dangerText : Theme.textMuted)
+                Text(!missing ? "deleted" : absent ? "missing" : "hidden").font(Theme.caption)
+                    .foregroundStyle(missing && absent ? Theme.dangerText : Theme.textMuted)
                 Spacer(minLength: 4)
             }
             .padding(.leading, 23)
@@ -282,8 +284,9 @@ private struct ChaptersEditor: View {
             .contentShape(.rect)
             .onTapGesture { chapters.selected = name }
             .onHover { hovering = $0 }
-            .hoverTip(missing ? "index.txt lists this chapter but the file is gone; Save creates it"
-                      : "The file is gone but the unsaved text is still here; Save writes it back",
+            .hoverTip(!missing ? "The file is gone but the unsaved text is still here; Save writes it back"
+                      : absent ? "index.txt lists this chapter but the file is gone; Save creates it"
+                      : "A listed chapter the outline skips (a hidden name or a linked folder)",
                       replacesLabel: false)
         }
     }

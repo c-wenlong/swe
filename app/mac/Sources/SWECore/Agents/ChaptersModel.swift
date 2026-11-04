@@ -267,9 +267,11 @@ public final class ChaptersModel {
     /// Dirty drafts whose files are gone: the rail shows a "deleted" row
     /// for each so its unsaved text stays reachable.
     public private(set) var ghosts: [String] = []
-    /// Chapters index.txt lists whose files are not on disk, in index
-    /// order: the rail shows a "missing" row for each.
+    /// Indexed chapters the outline has no row for, in index order: the
+    /// rail shows a row for each, labelled "missing" when in `absent`.
     public private(set) var missing: [String] = []
+    /// The `missing` names whose file is not on disk at all.
+    public private(set) var absent: Set<String> = []
     /// Every folder path in `tree`, top level first as "" — for the New
     /// chapter sheet's folder menu.
     public private(set) var folders: [String] = []
@@ -339,10 +341,13 @@ public final class ChaptersModel {
             .map(\.key).sorted()
         // An indexed chapter with no file keeps a row too, so it can be
         // opened and saved back into existence rather than fixed by hand.
-        missing = check.chapters.filter { !$0.exists }.map(\.name).filter {
-            !files.contains($0) && !ghosts.contains($0)
-                && Self.inside($0, under: check.directory) != nil
+        // So does one the outline skips (a hidden name, a linked folder).
+        let unshown = check.uniqueChapters.filter {
+            !files.contains($0.name) && !ghosts.contains($0.name)
+                && Self.inside($0.name, under: check.directory) != nil
         }
+        missing = unshown.map(\.name)
+        absent = Set(unshown.filter { !$0.exists }.map(\.name))
         if selected.map({ !files.contains($0) && !ghosts.contains($0) && !missing.contains($0) }) ?? true {
             selected = check.chapters.first?.name
                 ?? treeFilesInOrder.first
