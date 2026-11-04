@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The web chat keeps its newest 200 entries in the DOM.** A long
+  transcript, or a chat left open for hours, kept every entry it ever
+  drew, so layout, style recalculation and memory grew with it. Older
+  entries now leave the page for a "Show earlier" button at the top of
+  the log, which puts them back 200 at a time, still in order and with
+  their tool cards intact. On a 2,000-message transcript the log holds
+  982 element nodes instead of 9,800. The fold runs only when the log
+  is scrolled to its end, so a reader up in the history loses nothing
+  above them; a send still waiting and an unanswered approval never
+  fold. `SessionChat.revealSeq(seq)` expands the history down to one
+  message before it scrolls there. Browser find-in-page sees only the
+  drawn entries. Closes [#1615](https://github.com/c-wenlong/swe/issues/1615).
+
 ## [1.2.1] - 2026-11-04
 
 ### Fixed

@@ -36,6 +36,9 @@ const SessionChat = (() => {
     // whether a batch is landing (flushPending).
     streamsStale: false, paintHeld: false,
     toolCards: new Map(), // call_id -> tool card
+    // The scrollback cap (#1615): the oldest entries the log no longer
+    // holds, oldest first, and how many entries it keeps drawn.
+    earlier: [], keep: 0,
     // While set, the stream is replaying events the backfill already
     // showed, looking for one waiting approval (restoreApproval).
     history: null,
@@ -638,7 +641,128 @@ const SessionChat = (() => {
 
   function scrollBottom() {
     const log = $("chat-log");
-    if (log) log.scrollTop = log.scrollHeight;
+    if (!log) return;
+    // At the bottom, entries folded off the top are out of sight; the
+    // history "Show earlier" brought back folds again here too.
+    chat.keep = LOG_KEEP;
+    trimLog(log);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  /* ------------------------------------------------------ scrollback cap */
+  /* A long transcript, or a chat left open for hours, kept every entry it
+   * ever drew in the DOM, so layout, style and memory grew with it
+   * (#1615). The log keeps its newest LOG_KEEP entries (a tool run counts
+   * once); older ones leave the DOM for chat.earlier, nodes and all, so a
+   * tool result still lands on its folded card, and "Show earlier" puts
+   * them back EARLIER_STEP at a time. The fold runs only when the log is
+   * scrolled to its end (scrollBottom): a reader up in the history never
+   * has entries taken from above them. A send still waiting and an
+   * unanswered approval never fold: the views that settle them look
+   * for them in the log. */
+  const LOG_KEEP = 200, EARLIER_STEP = 200;
+  chat.keep = LOG_KEEP;
+
+  /* The log's children that are entries: not the loading note, the
+   * "Show earlier" stub or the streaming bubbles' box. */
+  function isEntry(el) {
+    return el !== chat.streamBox && el.id !== "chat-loading" && el.id !== "chat-earlier";
+  }
+
+  function foldable(el) {
+    if (!isEntry(el)) return false;
+    const c = el.classList;
+    if (c.contains("approval") && !c.contains("resolved")) return false;
+    return !(c.contains("user") && el.dataset.clientId);
+  }
+
+  function entryCount(log) {
+    let n = log.children.length;
+    if (chat.streamBox && chat.streamBox.parentNode === log) n -= 1;
+    if ($("chat-loading")) n -= 1;
+    if ($("chat-earlier")) n -= 1;
+    return n;
+  }
+
+  /* Folds the oldest entries past chat.keep out of the log. */
+  function trimLog(log) {
+    let extra = entryCount(log) - chat.keep;
+    if (extra <= 0) return;
+    const fold = [];
+    for (const c of log.children) {
+      if (extra <= 0) break;
+      if (foldable(c)) { fold.push(c); extra -= 1; }
+    }
+    // Put back later, an entry plays no arrival again.
+    for (const c of fold) { c.remove(); c.classList.remove("arrive"); }
+    chat.earlier.push(...fold);
+    paintEarlier(log);
+  }
+
+  /* The stub at the log's top while entries are folded. */
+  function paintEarlier(log) {
+    let stub = $("chat-earlier");
+    const n = chat.earlier.length;
+    if (!n) { if (stub) stub.remove(); return; }
+    if (!stub) {
+      stub = document.createElement("div");
+      stub.id = "chat-earlier";
+      stub.className = "chat-earlier";
+      stub.innerHTML = '<button type="button" class="chat-earlier-btn"></button>';
+      stub.querySelector(".chat-earlier-btn").onclick = () => showEarlier();
+      log.prepend(stub);
+    }
+    const step = Math.min(n, EARLIER_STEP);
+    stub.querySelector(".chat-earlier-btn").textContent = step === n
+      ? `Show ${n} earlier ${n === 1 ? "entry" : "entries"}`
+      : `Show ${step} earlier entries (${n} hidden)`;
+  }
+
+  /* Puts the newest `n` folded entries back above the oldest drawn one,
+   * which stays where it was on screen. Returns the entries put back. */
+  function showEarlier(n = EARLIER_STEP) {
+    const log = $("chat-log");
+    const stub = $("chat-earlier");
+    if (!log || !stub || !chat.earlier.length) return [];
+    const back = chat.earlier.splice(Math.max(0, chat.earlier.length - n));
+    chat.keep = Math.max(chat.keep, entryCount(log) + back.length);
+    const ref = stub.nextElementSibling;
+    const y = ref ? ref.getBoundingClientRect().top : 0;
+    stub.after(...back);
+    for (const el of back) {
+      if (el.matches("details.tool[data-pages]")) paintPreviewButton(el);
+      for (const card of el.querySelectorAll("details.tool[data-pages]")) paintPreviewButton(card);
+    }
+    paintEarlier(log);
+    if (ref) log.scrollTop += ref.getBoundingClientRect().top - y;
+    return back;
+  }
+
+  /* Where the entry with journal seq `seq` is among `list`: { top, el },
+   * `top` being the run that holds a tool folded into one, or null. */
+  function findSeq(list, seq) {
+    for (const top of list) {
+      if (Number(top.dataset.seq || 0) === seq) return { top, el: top };
+      if (top.classList.contains("tool-run")) {
+        for (const el of top.querySelector(".tool-run-items").children) {
+          if (Number(el.dataset.seq || 0) === seq) return { top, el };
+        }
+      }
+    }
+    return null;
+  }
+
+  /* Scroll-to-message: brings back the folded history down to the entry
+   * with journal seq `seq` first, then scrolls it into view. Returns the
+   * entry, or null when the log never drew it. */
+  function revealSeq(seq) {
+    const log = $("chat-log");
+    if (!log) return null;
+    const folded = findSeq(chat.earlier, seq);
+    if (folded) showEarlier(chat.earlier.length - chat.earlier.indexOf(folded.top));
+    const hit = findSeq(log.children, seq);
+    if (hit) hit.el.scrollIntoView({ block: "center" });
+    return hit ? hit.el : null;
   }
 
   /* The log's entries go above the streaming bubbles, which stay the
@@ -2891,9 +3015,11 @@ const SessionChat = (() => {
       // the transcript, or a settled bubble) each claim their own echo
       // first, so a send repeated within seconds isn't taken for the one
       // before it.
-      const shown = [...log.querySelectorAll(".msg.user[data-text]")]
+      const shown = [...chat.earlier.filter((b) => b.matches(".msg.user[data-text]")),
+        ...log.querySelectorAll(".msg.user[data-text]")]
         .filter((b) => !b.dataset.clientId).map((b) => b.dataset.text);
       log.innerHTML = "";
+      chat.earlier = [];
       chat.streamBox = null;
       chat.toolCards.clear();
       const messages = data.messages || [];
@@ -3237,6 +3363,8 @@ const SessionChat = (() => {
     // reconnect before that would replay what the backfill is drawing.
     chat.opened = false;
     chat.toolCards.clear();
+    chat.earlier = [];
+    chat.keep = LOG_KEEP;
     chat.confirmAttach = false;
     chat.attaching = false;
     chat.stopping = false;
@@ -3290,6 +3418,7 @@ const SessionChat = (() => {
     chat.key = null;
     chat.row = null;
     chat.toolCards.clear();
+    chat.earlier = [];
     resetMenus();
     resetUploads();
     resetTray();
@@ -4771,7 +4900,7 @@ const SessionChat = (() => {
   });
 
   return {
-    open, close, keyFromHash, applyMeta,
+    open, close, keyFromHash, applyMeta, revealSeq,
     get key() { return chat.key; },
     // Pure helpers, for tests.
     _test: { md, mdBlocks, cells, separatorAlignments, listItem, heading, imageLine,
@@ -4781,7 +4910,7 @@ const SessionChat = (() => {
       isPage, patchPageFiles, pageFiles, relativePath, pageTargets, previewUrl, previewKind,
       pageDocument, previewDocument, previewFrameAttrs, previewMessage, PREVIEW_CSP, linkUrls, linkHost, linkPath, linkCardsHtml,
       barSub, refreshModel, railDay, railGroups, slashToken, commandInsert, sourceLabel, filterCommands, insertCommand, menuKey,
-      cmds, cmdLists, warmCommands, loadCommands, resetMenus, chat,
+      cmds, cmdLists, warmCommands, loadCommands, resetMenus, chat, LOG_KEEP, trimLog, showEarlier, revealSeq, appendEvent, scrollBottom,
       ATTACH, fileExt, attachProblem, formatBytes, uploadError, uploads, addFiles, removeUpload,
       messageBody, send, updateOwnership, restoreUploads, failBubble,
       mentionToken, insertMention, splitPath, filesError, files, FILES, searchFiles, trackMenus, menu,
