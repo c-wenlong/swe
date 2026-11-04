@@ -111,6 +111,16 @@ footer a:hover { color: var(--text); }
 <p>The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>,
 and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a>[Unreleased]</h2>
+<h2 id="121---2026-11-04"><a class="anchor" href="#121---2026-11-04"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v1.2.1">1.2.1</a> - 2026-11-04</h2>
+<h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
+<ul>
+<li><strong>The tag build's Swift test step compiles again.</strong> <code>SilentHubStub</code>'s
+<code>await Self.started.bump()</code> inside a <code>Task</code> tripped a region-isolation
+checker bug in the macos-26 runner's Swift 6.3.3 (&quot;pattern that the
+region-based isolation checker does not understand how to check&quot;); the
+test now names the class. V1.2.0 never got its DMG, so this ships as a
+patch.</li>
+</ul>
 <h2 id="120---2026-11-04"><a class="anchor" href="#120---2026-11-04"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v1.2.0">1.2.0</a> - 2026-11-04</h2>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
@@ -1809,7 +1819,7 @@ a pull to refresh) and asks for pending requests every 10 s. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1553">#1553</a>.</p>
 </li>
 </ul>
-<h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
+<h3 id="fixed-1"><a class="anchor" href="#fixed-1"></a>Fixed</h3>
 <ul>
 <li><p><strong><code>build_ios.sh</code> reaches a real iPhone and a named signing team.</strong>
 The device picker took the first paired iOS device <code>devicectl</code>
@@ -2376,7 +2386,7 @@ devices keep working on the approval route unchanged.</p>
 </li>
 </ul>
 <h2 id="111---2026-10-26"><a class="anchor" href="#111---2026-10-26"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v1.1.1">1.1.1</a> - 2026-10-26</h2>
-<h3 id="fixed-1"><a class="anchor" href="#fixed-1"></a>Fixed</h3>
+<h3 id="fixed-2"><a class="anchor" href="#fixed-2"></a>Fixed</h3>
 <ul>
 <li><p><strong>&quot;Clear search data&quot; could hang the app.</strong> With the session-index
 switch still on, the clear ran its rebuild inside the same flight it
@@ -3014,7 +3024,7 @@ it, with a hairline once they do. Collapsed, the button sits over the
 icon column as before.</p>
 </li>
 </ul>
-<h3 id="fixed-2"><a class="anchor" href="#fixed-2"></a>Fixed</h3>
+<h3 id="fixed-3"><a class="anchor" href="#fixed-3"></a>Fixed</h3>
 <ul>
 <li><p><strong>MCP sync no longer writes remote servers into Claude Desktop.</strong> Its
 config file launches local servers only (a remote one is added in
@@ -3681,7 +3691,7 @@ panel.</p>
 General as its Display and Updates cards, and GitHub and Remote share one
 Integrations page under Advanced. The list goes from 12 items to 9.</li>
 </ul>
-<h3 id="fixed-3"><a class="anchor" href="#fixed-3"></a>Fixed</h3>
+<h3 id="fixed-4"><a class="anchor" href="#fixed-4"></a>Fixed</h3>
 <ul>
 <li><p><strong>OpenCode 2.x sessions show up again.</strong> OpenCode 2.x writes new
 sessions only to <code>session_v2</code> and their turns only to
@@ -4010,7 +4020,7 @@ setup preview under <code>data.harness</code> / <code>data.mcp</code> / <code>da
 <code>--json --apply</code> invocation prints one document instead of two.</p>
 </li>
 </ul>
-<h3 id="fixed-4"><a class="anchor" href="#fixed-4"></a>Fixed</h3>
+<h3 id="fixed-5"><a class="anchor" href="#fixed-5"></a>Fixed</h3>
 <ul>
 <li><p><strong><code>swe list --usage --json</code> served an hour-old limit reading instead of
 a fresh one.</strong> Piped output gave each provider's fetch a 2 second cap,
@@ -4285,7 +4295,7 @@ harness.json&quot;) instead, so archiving a harness stops init from touching
 its config. A path already linked stays linked — init never unlinks —
 and <code>.linkignore</code> still wins when both apply.</li>
 </ul>
-<h3 id="fixed-5"><a class="anchor" href="#fixed-5"></a>Fixed</h3>
+<h3 id="fixed-6"><a class="anchor" href="#fixed-6"></a>Fixed</h3>
 <ul>
 <li><strong><code>swe list</code> columns no longer drift when a field's content outgrows
 its declared width.</strong> <code>preformatted</code> cells are now padded to the
@@ -4504,7 +4514,7 @@ every column after it.</li>
 rather than the right. Paths in a listing tend to share a long prefix,
 and cutting the tail made whole runs of rows look identical.</li>
 </ul>
-<h3 id="fixed-6"><a class="anchor" href="#fixed-6"></a>Fixed</h3>
+<h3 id="fixed-7"><a class="anchor" href="#fixed-7"></a>Fixed</h3>
 <ul>
 <li><p><code>swe session use &lt;n&gt;</code> resumes a Cursor session again. It treated
 Cursor as limited-resume and launched a bare <code>cursor-agent</code> in the
@@ -4629,7 +4639,7 @@ already documents <code>swe harness star</code>.</li>
 notes (parked under <code>.archive/</code>, gitignored) cleaned out of the repo.</li>
 </ul>
 <h2 id="029---2026-08-20"><a class="anchor" href="#029---2026-08-20"></a>[0.2.9] - 2026-08-20</h2>
-<h3 id="fixed-7"><a class="anchor" href="#fixed-7"></a>Fixed</h3>
+<h3 id="fixed-8"><a class="anchor" href="#fixed-8"></a>Fixed</h3>
 <ul>
 <li><strong>v0.2.8 could not start on Python 3.10 or 3.11.</strong> <code>swe find</code>'s summary line
 used a nested f-string with implicit concatenation inside a replacement
@@ -5214,7 +5224,7 @@ new files in one shot.</li>
 <li><code>swe list --refresh</code> now also invalidates the rate limits cache (in
 addition to the session cache).</li>
 </ul>
-<h3 id="fixed-8"><a class="anchor" href="#fixed-8"></a>Fixed</h3>
+<h3 id="fixed-9"><a class="anchor" href="#fixed-9"></a>Fixed</h3>
 <ul>
 <li><p><strong><code>mcp.json</code>'s <code>updated</code> timestamp never changed.</strong> It used <code>setdefault</code>, so
 only the first write was ever stamped; the file claimed to be hours older

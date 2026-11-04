@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-04
+
+### Fixed
+
+- **The tag build's Swift test step compiles again.** `SilentHubStub`'s
+  `await Self.started.bump()` inside a `Task` tripped a region-isolation
+  checker bug in the macos-26 runner's Swift 6.3.3 ("pattern that the
+  region-based isolation checker does not understand how to check"); the
+  test now names the class. V1.2.0 never got its DMG, so this ships as a
+  patch.
+
 ## [1.2.0] - 2026-11-04
 
 ### Added
@@ -5168,6 +5179,7 @@ service / model layering, tests with an 84% coverage floor).
 - Stdlib-only core; optional FastMCP server extra for session history MCP tool
 - Test suite (15 unit tests) with isolated `$HOME` fixtures
 
+[1.2.1]: https://github.com/c-wenlong/swe/releases/tag/v1.2.1
 [1.2.0]: https://github.com/c-wenlong/swe/releases/tag/v1.2.0
 [1.1.1]: https://github.com/c-wenlong/swe/releases/tag/v1.1.1
 [1.1.0]: https://github.com/c-wenlong/swe/releases/tag/v1.1.0
