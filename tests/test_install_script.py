@@ -35,14 +35,27 @@ class InstallScriptCase(unittest.TestCase):
 
     shells = [s for s in ("sh", "dash") if shutil.which(s)]
 
+    # External commands the installer and the stubs call.  Everything the
+    # script needs must be reachable from the test's PATH so the suite
+    # passes in build sandboxes without /usr/bin or /bin on it (the Nix
+    # check, which gates releases).  Tools we stub never go in this list.
+    TOOLS = ("mktemp", "cp", "rm", "mkdir", "ln", "chmod", "cat", "awk",
+             "env", "dirname", "sh", "dash", "sha256sum", "shasum")
+
     def setUp(self):
         self.home = temp_dir(self)
         self.stub_dir = temp_dir(self) / "stubbin"
         self.stub_dir.mkdir()
+        self.tools_dir = temp_dir(self) / "toolsbin"
+        self.tools_dir.mkdir()
+        for name in self.TOOLS:
+            found = shutil.which(name)
+            if found:
+                (self.tools_dir / name).symlink_to(found)
         self.log = temp_dir(self) / "stub.log"
         self.env = {
             "HOME": str(self.home),
-            "PATH": f"{self.stub_dir}:/usr/bin:/bin",
+            "PATH": f"{self.stub_dir}:{self.tools_dir}",
             "STUB_LOG": str(self.log),
             "STUB_LATEST_URL": LATEST_URL,
             "STUB_UNAME": "Linux",
@@ -51,6 +64,7 @@ class InstallScriptCase(unittest.TestCase):
             "STUB_SETUP_RC": "0",
             "STUB_PIP_OK": "1",
             "STUB_ASTRAL_OK": "1",
+            "STUB_ACTIVE_UNITS": "",
             # Keep XDG vars unset so the defaults below are what the
             # assertions check.
         }
@@ -68,6 +82,7 @@ class InstallScriptCase(unittest.TestCase):
             _write(temp_dir(self) / "swe-stub", self._swe_body()))
         self.env["STUB_UV_FILE"] = str(
             _write(temp_dir(self) / "uv-stub", self._uv_body()))
+        self.assertNotIn("/usr/bin", self.env["PATH"].split(":"))
 
     def _curl_stub(self) -> str:
         # Logs argv, then answers the three URL shapes the installer
@@ -152,6 +167,20 @@ EOF
 fi
 """
 
+    def _systemctl_body(self) -> str:
+        # `systemctl --user is-active --quiet UNIT` succeeds only for
+        # units named in STUB_ACTIVE_UNITS; everything else exits 0.
+        return """\
+echo "systemctl $*" >> "$STUB_LOG"
+if [ "$2" = "is-active" ]; then
+    case " $STUB_ACTIVE_UNITS " in
+        *" $4 "*) exit 0 ;;
+    esac
+    exit 1
+fi
+exit 0
+"""
+
     def _swe_body(self) -> str:
         return """\
 echo "swe[$0] $*" >> "$STUB_LOG"
@@ -228,6 +257,11 @@ class TestUvPath(InstallScriptCase):
         self.assertIn("SHA256SUMS", r.stderr + r.stdout)
         self.assertTrue(any(l.startswith("uv tool install") for l in self.log_lines()))
 
+    def test_no_systemctl_no_restart(self):
+        r = self.run_installer()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("restarted", r.stdout)
+
     def test_bin_dir_not_on_path_prints_export_hint(self):
         self.env["STUB_UV_BIN_DIR"] = str(self.home / ".local" / "bin")
         r = self.run_installer()
@@ -237,15 +271,54 @@ class TestUvPath(InstallScriptCase):
 
 
 class TestVenvPath(InstallScriptCase):
+    def _data_dir(self) -> Path:
+        return self.home / ".local" / "share" / "swe"
+
+    def _venvs(self) -> list[Path]:
+        return list(self._data_dir().glob("venv-*"))
+
+    def _plant_old_install(self) -> Path:
+        old = self._data_dir() / "venv-old"
+        (old / "bin").mkdir(parents=True)
+        shutil.copy(self.env["STUB_SWE_FILE"], old / "bin" / "swe")
+        (old / "bin" / "swe").chmod(0o755)
+        bin_dir = self.home / ".local" / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "swe").symlink_to(old / "bin" / "swe")
+        return old
+
     def test_venv_install_creates_symlink(self):
         r = self.run_installer()
         self.assertEqual(r.returncode, 0, r.stderr)
-        venv = self.home / ".local" / "share" / "swe" / "venv"
-        self.assertTrue((venv / "bin" / "swe").exists())
+        venvs = self._venvs()
+        self.assertEqual(len(venvs), 1)
+        self.assertTrue((venvs[0] / "bin" / "swe").exists())
         link = self.home / ".local" / "bin" / "swe"
         self.assertTrue(link.is_symlink())
-        self.assertEqual(os.readlink(link), str(venv / "bin" / "swe"))
+        self.assertEqual(os.readlink(link), str(venvs[0] / "bin" / "swe"))
         self.assertTrue(any(l.startswith("pip install") for l in self.log_lines()))
+
+    def test_venv_upgrade_replaces_old_install(self):
+        old = self._plant_old_install()
+        r = self.run_installer()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        venvs = self._venvs()
+        self.assertEqual(len(venvs), 1)
+        self.assertNotEqual(venvs[0], old)
+        self.assertEqual(os.readlink(self.home / ".local" / "bin" / "swe"),
+                         str(venvs[0] / "bin" / "swe"))
+        self.assertFalse(old.exists())
+
+    def test_failed_upgrade_keeps_old_install(self):
+        old = self._plant_old_install()
+        self.env["STUB_PIP_OK"] = "0"
+        self.env["STUB_ASTRAL_OK"] = "0"
+        r = self.run_installer()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self._venvs(), [old])
+        self.assertTrue((old / "bin" / "swe").exists())
+        self.assertEqual(os.readlink(self.home / ".local" / "bin" / "swe"),
+                         str(old / "bin" / "swe"))
 
     def test_python_310_bootstraps_uv(self):
         self.env["STUB_PYTHON_OK"] = "0"
@@ -276,6 +349,29 @@ class TestVenvPath(InstallScriptCase):
         r = self.run_installer()
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("could not install uv from astral.sh", r.stderr)
+
+
+class TestSystemdRestart(InstallScriptCase):
+    def setUp(self):
+        super().setUp()
+        _write(self.stub_dir / "uv", Path(self.env["STUB_UV_FILE"]).read_text().split("\n", 1)[1])
+        _write(self.stub_dir / "systemctl", self._systemctl_body())
+
+    def test_active_hub_unit_is_restarted(self):
+        self.env["STUB_ACTIVE_UNITS"] = "quiver-remote-hub.service"
+        r = self.run_installer()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("restarted quiver-remote-hub.service", r.stdout)
+        self.assertTrue(any("restart quiver-remote-hub.service" in l
+                            for l in self.log_lines()))
+        self.assertFalse(any("restart quiver-remote-agent.service" in l
+                             for l in self.log_lines()))
+
+    def test_no_active_units_no_restart(self):
+        r = self.run_installer()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(any("restart" in l for l in self.log_lines()
+                             if l.startswith("systemctl")))
 
 
 class TestWheelFlag(InstallScriptCase):

@@ -89,21 +89,43 @@ try_venv() {
     # $1: wheel path.  Returns 0 when the venv install worked.
     command -v python3 >/dev/null 2>&1 || return 1
     python3 -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 11) else 1)' </dev/null || return 1
-    venv_dir="${XDG_DATA_HOME:-$HOME/.local/share}/swe/venv"
-    rm -rf "$venv_dir"
-    if ! python3 -m venv "$venv_dir" </dev/null 2>/dev/null; then
+    data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/swe"
+    mkdir -p "$data_dir"
+    # Venvs are not relocatable (shebangs hold absolute paths), so the new
+    # one builds in its final location under venv-*; a failure removes
+    # only that new dir and leaves the running install untouched.
+    new_venv="$(mktemp -d "$data_dir/venv-XXXXXX")"
+    if ! python3 -m venv "$new_venv" </dev/null 2>/dev/null \
+        || ! "$new_venv/bin/pip" install --upgrade "$1" </dev/null; then
         # e.g. Debian/Ubuntu without the python3-venv package: remove only
-        # the directory this run tried to create, then fall through to uv.
-        rm -rf "$venv_dir"
-        return 1
-    fi
-    if ! "$venv_dir/bin/pip" install --upgrade "$1" </dev/null; then
-        rm -rf "$venv_dir"
+        # the directory this run created, then fall through to uv.
+        rm -rf "$new_venv"
         return 1
     fi
     BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
     mkdir -p "$BIN_DIR"
-    ln -sf "$venv_dir/bin/swe" "$BIN_DIR/swe"
+    ln -sf "$new_venv/bin/swe" "$BIN_DIR/swe"
+    for old in "$data_dir"/venv-*; do
+        [ -d "$old" ] || continue
+        [ "$old" = "$new_venv" ] || rm -rf "$old"
+    done
+    return 0
+}
+
+# A rerun over a machine that already serves the hub leaves the old code
+# running.  Restart the user units that are active; a unit that will not
+# restart warns but does not fail the install.
+restart_remote_units() {
+    command -v systemctl >/dev/null 2>&1 || return 0
+    for unit in quiver-remote-hub.service quiver-remote-agent.service; do
+        if systemctl --user is-active --quiet "$unit" </dev/null 2>/dev/null; then
+            if systemctl --user restart "$unit" </dev/null; then
+                say "restarted $unit"
+            else
+                err "warning: could not restart $unit"
+            fi
+        fi
+    done
     return 0
 }
 
@@ -185,6 +207,7 @@ main() {
     fi
 
     note_existing_swe
+    restart_remote_units
 
     say "installed: $("$BIN_DIR/swe" --version </dev/null 2>&1 || echo "swe at $BIN_DIR/swe")"
     path_hint
