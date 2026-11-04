@@ -1738,6 +1738,45 @@ class TestAttachModeGates(unittest.TestCase):
             supervise.approval_fingerprint(p3))
 
 
+class TestTmuxBin(unittest.TestCase):
+    """tmux's path is looked up once, not per tmux call (#1531)."""
+
+    def setUp(self):
+        supervise._TMUX_BIN = None
+        self.addCleanup(setattr, supervise, "_TMUX_BIN", None)
+
+    def test_a_hit_is_kept_while_path_and_file_stay(self):
+        with patch.object(supervise.shutil, "which",
+                          return_value="/bin/sh") as which, \
+                patch.dict(os.environ, {"PATH": "/bin"}):
+            for _ in range(5):
+                self.assertEqual(supervise.tmux_bin(), "/bin/sh")
+            self.assertEqual(which.call_count, 1)
+            os.environ["PATH"] = "/usr/bin:/bin"
+            supervise.tmux_bin()
+            self.assertEqual(which.call_count, 2)
+
+    def test_a_vanished_binary_is_looked_up_again(self):
+        with patch.object(supervise.shutil, "which",
+                          side_effect=["/nonexistent/tmux", None]) as which:
+            self.assertEqual(supervise.tmux_bin(), "/nonexistent/tmux")
+            self.assertIsNone(supervise.tmux_bin())
+        self.assertEqual(which.call_count, 2)
+
+    def test_a_path_that_became_a_directory_is_looked_up_again(self):
+        with patch.object(supervise.shutil, "which",
+                          side_effect=["/bin", "/bin/sh"]) as which:
+            self.assertEqual(supervise.tmux_bin(), "/bin")
+            self.assertEqual(supervise.tmux_bin(), "/bin/sh")
+        self.assertEqual(which.call_count, 2)
+
+    def test_a_miss_is_never_kept(self):
+        with patch.object(supervise.shutil, "which",
+                          side_effect=[None, "/bin/sh"]):
+            self.assertIsNone(supervise.tmux_bin())
+            self.assertEqual(supervise.tmux_bin(), "/bin/sh")
+
+
 class TestPaneLocks(unittest.TestCase):
     def test_a_pane_lock_is_shared_while_held_and_then_dropped(self):
         # #1533: one entry per tmux pane name ever written to, forever.
