@@ -657,9 +657,10 @@ const SessionChat = (() => {
    * tool result still lands on its folded card, and "Show earlier" puts
    * them back EARLIER_STEP at a time. The fold runs only when the log is
    * scrolled to its end (scrollBottom): a reader up in the history never
-   * has entries taken from above them. A send still waiting and an
-   * unanswered approval never fold (the views that settle them look for
-   * them in the log), and the fold stops at one: chat.earlier is always
+   * has entries taken from above them. A send still waiting (a failed
+   * one waits for nothing) and an unanswered approval never fold (the
+   * views that settle them look for them in the log), and the fold
+   * stops at one: chat.earlier is always
    * the run of entries just above the oldest drawn one, so putting it
    * back keeps every entry's place. */
   const LOG_KEEP = 200, EARLIER_STEP = 200;
@@ -675,7 +676,8 @@ const SessionChat = (() => {
     if (!isEntry(el)) return false;
     const c = el.classList;
     if (c.contains("approval") && !c.contains("resolved")) return false;
-    return !(c.contains("user") && el.dataset.clientId);
+    // A failed send waits for nothing: no echo or result settles it.
+    return !(c.contains("user") && el.dataset.clientId && !c.contains("failed"));
   }
 
   function entryCount(log) {
@@ -2437,6 +2439,8 @@ const SessionChat = (() => {
         settled = true;
         const gone = log.querySelector(`.msg.user[data-client-id="${CSS.escape(d.client_id)}"]`);
         if (gone) gone.remove();
+        // A failed send may have folded out of the log (trimLog).
+        chat.earlier = chat.earlier.filter((b) => b.dataset.clientId !== d.client_id);
       } else if (entry) {
         appendOptimistic(entry.text, d.client_id);
       }

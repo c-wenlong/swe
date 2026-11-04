@@ -197,6 +197,18 @@ class TestScrollbackCap(ChatScript):
         self.assertEqual(out["entries"], 451)
         self.assertTrue(out["ordered"])
 
+    def test_a_failed_send_folds_like_any_entry(self):
+        out = self.run_js("""
+            for (const ev of transcript(20)) T.appendEvent(ev, false);
+            const bubble = el('div'); bubble.className = 'msg user failed'; bubble.dataset.clientId = 'c9';
+            log.appendChild(bubble);
+            for (const ev of transcript(400)) { ev.seq += 20; T.appendEvent(ev, false); }
+            T.scrollBottom();
+            const folded = T.chat.earlier.includes(bubble);
+            T.commandResult({ op: 'message', client_id: 'c9', cancelled: true });
+            return { folded, entries: entries().length, gone: !T.chat.earlier.includes(bubble) };""")
+        self.assertEqual(out, {"folded": True, "entries": 200, "gone": True})
+
     def test_an_approval_restored_into_folded_history_lands_in_order(self):
         out = self.run_js("""
             for (const ev of transcript(400)) { ev.seq *= 2; T.appendEvent(ev, false); }
