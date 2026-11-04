@@ -30,7 +30,6 @@ SIDEBAR = {"overview": 159, "plugins": 607, "skills": 641, "agents": 675, "mcp":
 REFRESH = (1221, 87)  # a page's header Refresh button
 PLUGINS_MARKETPLACE = (1208, 335)  # expands the hub's marketplace on Explore
 SETTINGS_FILES = (289, 473)  # Settings > Files
-HUB_SYNC_REFRESH = (1198, 792)  # the Hub sync card's refresh, under Files
 
 
 def view(page):
@@ -49,15 +48,14 @@ STEPS = {
     4: [view("plugins"), ("pause", 1.5), click(PLUGINS_MARKETPLACE), ("pause", 2), ("run", 0)],
     5: [view("mcp"), ("pause", 2), ("run", 0)],
     6: [view("hooks"), ("pause", 2), ("run", 0)],
-    # The AGENTS.md page reads the strip again only when it is opened, so
-    # after the build it is left and opened again.
-    7: [("run", 0), view("agents"), ("pause", 3), ("run", 1), view("skills"), ("pause", 0.6),
-        view("agents"), ("pause", 2)],
+    # The AGENTS.md page and the Hub sync card follow ~/.swe while they are
+    # on screen: the build and the sync show without a click.
+    7: [("run", 0), view("agents"), ("pause", 3), ("run", 1), ("pause", 2)],
     8: [("run", 0), ("run", 1)],
     9: [("run", 0), ("run", 1), view("hooks"), ("pause", 1), click(REFRESH), ("pause", 2),
         ("run", 2)],
     10: [view("settings"), ("pause", 1), click(SETTINGS_FILES), ("pause", 2), ("run", 0),
-         click(HUB_SYNC_REFRESH), ("pause", 2), ("run", 1), ("run", 2), click(HUB_SYNC_REFRESH)],
+         ("pause", 2), ("run", 1), ("run", 2)],
 }
 
 

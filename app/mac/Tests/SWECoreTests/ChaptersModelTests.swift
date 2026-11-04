@@ -365,14 +365,22 @@ import Testing
         try FileManager.default.createSymbolicLink(
             at: dir.url.appending(path: "outside-link"),
             withDestinationURL: URL(fileURLWithPath: "/tmp"))
-        // A loop back to the root: walked once, not forever.
+        // A loop back to the root: never followed.
         try FileManager.default.createSymbolicLink(
             at: dir.url.appending(path: "loop"),
             withDestinationURL: dir.url)
+        // An alias of a real folder: the real path keeps its files.
+        let real = dir.url.appending(path: "real")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        try "# R\n".write(to: real.appending(path: "r.md"), atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: dir.url.appending(path: "alias"), withDestinationURL: real)
         await model.load(swe: SweClient(runner: runner))
         let paths = model.folders + allFilePaths(model.tree)
         #expect(!paths.contains { $0.hasPrefix("outside-link") })
-        #expect(paths.filter { $0.hasPrefix("loop/") }.isEmpty)
+        #expect(!paths.contains { $0 == "loop" || $0.hasPrefix("loop/") })
+        #expect(paths.contains("real/r.md"))
+        #expect(!paths.contains { $0.hasPrefix("alias") })
     }
 
     private func allFilePaths(_ nodes: [ChapterNode]) -> [String] {

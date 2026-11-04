@@ -362,9 +362,6 @@ public final class ChaptersModel {
             var files: [String] = []
             var folders: [String] = []
             var stack: [(url: URL, rel: String)] = [(URL(fileURLWithPath: root), "")]
-            // Resolved directories already walked: a symlinked loop back
-            // to an ancestor is followed once, not forever.
-            var visited: Set<String> = []
             while let (url, rel) = stack.popLast() {
                 guard let entries = try? FileManager.default.contentsOfDirectory(
                     at: url, includingPropertiesForKeys: nil,
@@ -376,14 +373,14 @@ public final class ChaptersModel {
                     guard FileManager.default.fileExists(
                         atPath: entry.path, isDirectory: &isDirectory) else { continue }
                     if isDirectory.boolValue {
-                        // Confinement is checked before descending: a
-                        // directory symlink out of AGENTS_MD is never
-                        // followed at all.
-                        guard let resolved = Self.inside(path, under: root) else { continue }
-                        if visited.insert(resolved.path).inserted {
-                            folders.append(path)
-                            stack.append((entry, path))
-                        }
+                        // Directory links are never followed: real folders
+                        // can't loop, and a link would show a folder's
+                        // files under a second name or reach outside.
+                        let isLink = (try? entry.resourceValues(forKeys: [.isSymbolicLinkKey]))?
+                            .isSymbolicLink ?? true
+                        guard !isLink, Self.inside(path, under: root) != nil else { continue }
+                        folders.append(path)
+                        stack.append((entry, path))
                     } else if name.lowercased().hasSuffix(".md"),
                               name != "index.txt", name != "targets.json" {
                         files.append(path)
