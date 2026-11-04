@@ -186,6 +186,38 @@ REMEDIES: dict[str, dict[str, dict]] = {
         "Droid", "droid", "Run `droid` and sign in when it asks"),
     "freebuff": _login_rows(
         "Freebuff", "freebuff login", "Run `freebuff login`"),
+    # Muse has no login command: swe reads the muse.ai session Dia holds.
+    "muse": {
+        SIGNED_OUT: {
+            "kind": "relogin",
+            "title": "Sign in to Muse on the web",
+            "summary": "No signed-in muse.ai session found in Dia",
+            "steps": [
+                "Open muse.ai in Dia and sign in — SWE reads Muse's "
+                "usage through that session's cookie.",
+            ],
+            "url": "https://muse.ai/",
+        },
+        AUTH_REQUIRED: {
+            "kind": "relogin",
+            "title": "Sign in to Muse on the web again",
+            "summary": "The muse.ai session in Dia is stale",
+            "steps": [
+                "Open muse.ai in Dia and sign in again, then refresh.",
+            ],
+            "url": "https://muse.ai/",
+        },
+        PERMISSION_REQUIRED: {
+            "kind": "grant-permission",
+            "title": "Let SWE read Dia's cookies",
+            "summary": "Keychain is blocking the \"Dia Safe Storage\" "
+                       "password",
+            "steps": [
+                "Refresh, and click Allow when macOS asks to let SWE "
+                "read the \"Dia Safe Storage\" keychain item.",
+            ],
+        },
+    },
     _DEFAULT: {
         SIGNED_OUT: {
             "kind": "relogin",

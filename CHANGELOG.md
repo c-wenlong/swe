@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`swe list` shows Muse's weekly quota.** Meta's Muse app
+  (`com.meta.endo`) keeps its session tokens in a private keychain group
+  nothing else can read, so the new `muse` rate-limit fetcher borrows the
+  logged-in Dia browser instead: it decrypts the `hatch_sess` cookie from
+  Dia's Chromium cookie stores with the "Dia Safe Storage" keychain item,
+  reads the short-lived ABRA bearer token every `muse.ai` page embeds, and
+  calls `hatch-api.meta.ai/hatch/subscription` for the tier, percent used
+  and weekly reset. Register Muse as a harness (`swe add muse muse`) and
+  star it to add it to the polled set; the first run prompts once for the
+  Safe Storage item.
+
 ## [1.2.1] - 2026-11-04
 
 ### Fixed

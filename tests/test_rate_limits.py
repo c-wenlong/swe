@@ -1,5 +1,6 @@
 import base64
 import copy
+import hashlib
 import json
 import sqlite3
 import subprocess
@@ -6225,9 +6226,257 @@ class NoReadingReasonTest(unittest.TestCase):
 
     def test_every_builtin_fetcher_has_a_probe(self):
         self.assertEqual(set(self.builtin), {"codex", "copilot", "claude", "droid",
-                                             "freebuff", "cursor", "devin"})
+                                             "freebuff", "cursor", "devin", "muse"})
         for name, fetcher in self.builtin.items():
             self.assertIs(self.rl._SIGNED_IN[name][0], fetcher, name)
+
+
+class MuseFetcherTest(unittest.TestCase):
+    """The Muse fetcher: Dia's hatch_sess → muse.ai's ABRA token → usage."""
+
+    _KEY = bytes(range(16))
+    _HOST = ".muse.ai"
+    _VALUE = "8a60c8de-5369-40aa-8454-589601bf699a.v1%3Aopaque"
+
+    def setUp(self):
+        from swe.harness import rate_limits
+        self.rl = rate_limits
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+
+    def _needs_libcrypto(self):
+        if self.rl._load_libcrypto() is None:
+            self.skipTest("no libcrypto to decrypt with")
+
+    def _encrypt(self, data: bytes) -> bytes:
+        """AES-128-CBC-encrypt ``data`` under ``_KEY`` — the mirror of the
+        module's decrypt helper, for building cookie rows."""
+        import ctypes
+        lib = self.rl._load_libcrypto()
+        ctx = lib.EVP_CIPHER_CTX_new()
+        try:
+            self.assertEqual(lib.EVP_CipherInit_ex(
+                ctx, lib.EVP_aes_128_cbc(), None, self._KEY, b" " * 16, 1), 1)
+            out = ctypes.create_string_buffer(len(data) + 16)
+            outl = ctypes.c_int(0)
+            self.assertEqual(lib.EVP_CipherUpdate(
+                ctx, out, ctypes.byref(outl), data, len(data)), 1)
+            fin = ctypes.create_string_buffer(32)
+            finl = ctypes.c_int(0)
+            self.assertEqual(lib.EVP_CipherFinal_ex(
+                ctx, fin, ctypes.byref(finl)), 1)
+            return out.raw[:outl.value] + fin.raw[:finl.value]
+        finally:
+            lib.EVP_CIPHER_CTX_free(ctx)
+
+    def _cookie_blob(self, value: bytes, tagged: bool = True) -> bytes:
+        """A ``v10`` Chromium cookie blob for ``value``; ``tagged`` adds the
+        post-Chrome-80 SHA256(host) prefix the decrypted plaintext leads with."""
+        plain = (hashlib.sha256(self._HOST.encode()).digest() + value
+                 if tagged else value)
+        return b"v10" + self._encrypt(plain)
+
+    def _cookies_db(self, blob: bytes, expires: float) -> str:
+        """Write one Dia-shaped Cookies db under the temp dir; return the
+        glob pattern matching it."""
+        db = self.tmp / "Profile 1" / "Cookies"
+        db.parent.mkdir(parents=True, exist_ok=True)
+        con = sqlite3.connect(db)
+        con.execute("CREATE TABLE cookies (host_key TEXT, name TEXT, "
+                    "expires_utc INTEGER, encrypted_value BLOB)")
+        con.execute("INSERT INTO cookies VALUES (?,?,?,?)",
+                    (self._HOST, "hatch_sess", expires,
+                     sqlite3.Binary(blob)))
+        con.commit()
+        con.close()
+        return str(self.tmp / "*" / "Cookies")
+
+    def _reply(self, **usage_over) -> dict:
+        usage = {"state": "METERED", "percent_used": 46,
+                 "resets_at": 1794044303, "quota_status": "SUFFICIENT"}
+        usage.update(usage_over)
+        return {"tier": {"tier_id": "hatch_free", "name": "Muse Free",
+                         "is_paid": False},
+                "usage": usage, "subscription_type": "FREE"}
+
+    def _future_chrome(self, days: float = 30) -> float:
+        return (time.time() + 11644473600 + days * 86400) * 1_000_000
+
+    # -- the subscription reply ------------------------------------------
+
+    def test_parse_muse_subscription(self):
+        info = self.rl._parse_muse_subscription(self._reply())
+        self.assertEqual(info.tool_name, "muse")
+        self.assertEqual(info.used_percent, 46)
+        self.assertFalse(info.limit_reached)
+        self.assertEqual(info.reset_at, 1794044303.0)
+        self.assertEqual(info.plan_type, "Muse Free")
+        self.assertEqual(info.window_seconds, 7 * 24 * 3600)
+        self.assertEqual(info.window, "7d")
+
+    def test_parse_quota_status_marks_the_limit(self):
+        for status in ("EXHAUSTED", "DEPLETED", "LIMIT_REACHED"):
+            info = self.rl._parse_muse_subscription(
+                self._reply(quota_status=status, percent_used=40))
+            self.assertTrue(info.limit_reached, status)
+
+    def test_parse_full_marks_the_limit(self):
+        info = self.rl._parse_muse_subscription(
+            self._reply(percent_used=100))
+        self.assertTrue(info.limit_reached)
+
+    def test_parse_needs_a_usable_percent(self):
+        for usage in (None, {}, {"percent_used": "x"},
+                      {"percent_used": -3}, {"percent_used": float("nan")}):
+            self.assertIsNone(self.rl._parse_muse_subscription(
+                {"tier": {"name": "Muse Free"}, "usage": usage}), usage)
+        self.assertIsNone(self.rl._parse_muse_subscription({"usage": {}}))
+        self.assertIsNone(self.rl._parse_muse_subscription({}))
+
+    def test_parse_without_a_tier_names_no_plan(self):
+        info = self.rl._parse_muse_subscription(
+            {"usage": {"percent_used": 10, "resets_at": 1}})
+        self.assertEqual(info.plan_type, "—")
+
+    # -- the cookie decrypt ----------------------------------------------
+
+    def test_chromium_cookie_value_round_trip(self):
+        self._needs_libcrypto()
+        blob = self._cookie_blob(self._VALUE.encode())
+        self.assertEqual(
+            self.rl._chromium_cookie_value(blob, self._HOST, self._KEY),
+            self._VALUE)
+
+    def test_chromium_cookie_value_without_the_host_tag(self):
+        self._needs_libcrypto()
+        blob = b"v10" + self._encrypt(self._VALUE.encode())
+        self.assertEqual(
+            self.rl._chromium_cookie_value(blob, self._HOST, self._KEY),
+            self._VALUE)
+
+    def test_chromium_cookie_value_rejects_malformed_blobs(self):
+        for blob in (b"", b"v11" + b"x" * 16, b"v10" + b"odd", b"v10", None):
+            self.assertIsNone(
+                self.rl._chromium_cookie_value(blob, self._HOST, self._KEY))
+
+    # -- the session cookie store ----------------------------------------
+
+    def test_session_cookies_decrypts_each_row(self):
+        self._needs_libcrypto()
+        pattern = self._cookies_db(
+            self._cookie_blob(self._VALUE.encode()),
+            self._future_chrome())
+        with patch.object(self.rl, "_CHROMIUM_COOKIE_SOURCES",
+                          (("Dia Safe Storage", pattern,
+                            lambda: self._KEY),)):
+            self.assertEqual(self.rl._muse_session_cookies(),
+                             [self._VALUE])
+
+    def test_session_cookies_never_reads_keychain_without_rows(self):
+        reader = MagicMock(return_value=self._KEY)
+        with patch.object(self.rl, "_CHROMIUM_COOKIE_SOURCES",
+                          (("Dia Safe Storage",
+                            str(self.tmp / "*" / "Cookies"), reader),)):
+            self.assertEqual(self.rl._muse_session_cookies(), [])
+        reader.assert_not_called()
+
+    def test_session_cookies_skipped_when_keychain_refuses(self):
+        self._needs_libcrypto()
+        pattern = self._cookies_db(
+            self._cookie_blob(self._VALUE.encode()),
+            self._future_chrome())
+        reader = MagicMock(return_value=None)
+        with patch.object(self.rl, "_CHROMIUM_COOKIE_SOURCES",
+                          (("Dia Safe Storage", pattern, reader),)):
+            self.assertEqual(self.rl._muse_session_cookies(), [])
+        reader.assert_called_once()
+
+    def test_signed_in_needs_an_unexpired_cookie(self):
+        fresh = [(lambda: self._KEY, self._HOST,
+                  self._future_chrome(), b"blob")]
+        stale = [(lambda: self._KEY, self._HOST,
+                  (time.time() + 11644473600 - 60) * 1_000_000, b"blob")]
+        with patch.object(self.rl, "_muse_cookie_rows", return_value=fresh):
+            self.assertTrue(self.rl._muse_signed_in())
+        with patch.object(self.rl, "_muse_cookie_rows", return_value=stale):
+            self.assertFalse(self.rl._muse_signed_in())
+        with patch.object(self.rl, "_muse_cookie_rows", return_value=[]):
+            self.assertFalse(self.rl._muse_signed_in())
+
+    # -- the page token ---------------------------------------------------
+
+    def test_access_token_scraped_from_the_page(self):
+        page = ('{\\"viewerId\\":\\"945903428597120\\",'
+                '\\"accessToken\\":\\"ABRAtoken123_456-XYZ\\",'
+                '\\"isAuthenticated\\":true}')
+        with patch.object(self.rl, "_fetch_text", return_value=page):
+            self.assertEqual(self.rl._muse_access_token("cookie"),
+                             "ABRAtoken123_456-XYZ")
+        plain = '{"accessToken":"ABRAplain_9"}'
+        with patch.object(self.rl, "_fetch_text", return_value=plain):
+            self.assertEqual(self.rl._muse_access_token("cookie"),
+                             "ABRAplain_9")
+
+    def test_access_token_absent_for_a_signed_out_page(self):
+        for body in ("<html>no token here</html>", "", None):
+            with patch.object(self.rl, "_fetch_text", return_value=body):
+                self.assertIsNone(self.rl._muse_access_token("cookie"))
+
+    # -- the whole chain ---------------------------------------------------
+
+    def test_fetch_muse_chain(self):
+        with patch.object(self.rl, "_muse_session_cookies",
+                          return_value=["c1"]), \
+             patch.object(self.rl, "_muse_access_token",
+                          return_value="ABRAx"), \
+             patch.object(self.rl, "_fetch_json",
+                          return_value=self._reply()) as fj:
+            info = self.rl._fetch_muse()
+        self.assertIsNotNone(info)
+        self.assertEqual(info.used_percent, 46)
+        req = fj.call_args[0][0]
+        self.assertEqual(req.full_url, self.rl._MUSE_SUBSCRIPTION_URL)
+        self.assertEqual(req.get_header("Authorization"), "Bearer ABRAx")
+
+    def test_fetch_muse_falls_through_to_the_next_cookie(self):
+        tokens = {"bad": None, "good": "ABRAx"}
+        with patch.object(self.rl, "_muse_session_cookies",
+                          return_value=["bad", "good"]), \
+             patch.object(self.rl, "_muse_access_token",
+                          side_effect=lambda c: tokens[c]), \
+             patch.object(self.rl, "_fetch_json",
+                          return_value=self._reply()):
+            info = self.rl._fetch_muse()
+        self.assertIsNotNone(info)
+
+    def test_fetch_muse_empty_without_cookies(self):
+        with patch.object(self.rl, "_muse_session_cookies", return_value=[]):
+            self.assertIsNone(self.rl._fetch_muse())
+
+    def test_fetch_muse_empty_on_a_bad_reply(self):
+        for reply in (None, {}, {"usage": {}}):
+            with patch.object(self.rl, "_muse_session_cookies",
+                              return_value=["c1"]), \
+                 patch.object(self.rl, "_muse_access_token",
+                              return_value="ABRAx"), \
+                 patch.object(self.rl, "_fetch_json", return_value=reply):
+                self.assertIsNone(self.rl._fetch_muse())
+
+    # -- the diagnosis ----------------------------------------------------
+
+    def test_diagnose_muse(self):
+        with patch.object(self.rl, "_muse_signed_in", return_value=False):
+            self.assertEqual(self.rl._diagnose_muse(), remedies.SIGNED_OUT)
+        with patch.object(self.rl, "_muse_signed_in", return_value=True), \
+             patch.object(self.rl, "_dia_safe_storage_key",
+                          return_value=None):
+            self.assertEqual(self.rl._diagnose_muse(),
+                             remedies.PERMISSION_REQUIRED)
+        with patch.object(self.rl, "_muse_signed_in", return_value=True), \
+             patch.object(self.rl, "_dia_safe_storage_key",
+                          return_value=self._KEY):
+            self.assertEqual(self.rl._diagnose_muse(), remedies.OK)
 
 
 if __name__ == "__main__":
