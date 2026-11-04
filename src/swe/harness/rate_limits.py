@@ -11,6 +11,8 @@ Currently supported:
   - Claude      (api.anthropic.com/api/oauth/usage, OAuth from Claude Code creds)
   - Droid       (api.factory.ai/api/billing/limits, FACTORY_API_KEY / keychain)
   - Freebuff    (codebuff.com free-session status, local Freebuff auth token)
+  - Muse        (hatch-api.meta.ai/hatch/subscription, ABRA bearer minted
+                 by muse.ai for the hatch_sess cookie held in Dia)
 
 These interfaces are internal/undocumented — they work today because the
 official CLIs use them and they happen to be queryable. They can change
@@ -22,10 +24,12 @@ from __future__ import annotations
 
 import base64
 import datetime
+import glob
 import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import sqlite3
 import ssl
@@ -346,13 +350,13 @@ def _warn_untrusted_ca() -> None:
     print(c("dim", "  or: python3 -m pip install certifi"), file=sys.stderr)
 
 
-def _fetch_json(
+def _fetch_bytes(
     req: urllib.request.Request,
     timeout: int = 5,
     on_401: Callable | None = None,
     on_http_error: Callable[[int, float | None], None] | None = None,
-) -> dict | None:
-    """Fetch JSON from a URL, retrying once with a bundled CA store.
+) -> bytes | None:
+    """The response body, retrying once with a bundled CA store.
 
     Python from python.org on macOS ships without system CA certificates
     until the user runs "Install Certificates.command", so ``urlopen``
@@ -413,23 +417,20 @@ def _fetch_json(
 
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            return resp.read()
     except urllib.error.HTTPError as exc:
         handle_http_error(exc)
         return None
     except urllib.error.URLError as exc:
-        # SSL cert verification failure — retry with unverified context
+        # SSL cert verification failure — retry with a bundled CA store
         if not isinstance(exc.reason, ssl.SSLError):
             _note_json_failure("network")
             return None
     except ssl.SSLError:
         pass  # fall through to retry
     except (ValueError, RecursionError, OSError, TimeoutError):
-        # ValueError covers both parse failures: a non-UTF-8 body dies in
-        # decode() as UnicodeDecodeError, a non-JSON body in json.loads()
-        # as JSONDecodeError. RecursionError is a deeply nested but valid
-        # body. All three mean the reply could not be read, same as a
-        # network failure — not a traceback at the caller.
+        # A reply that could not be read counts as a network failure at
+        # the caller, not a traceback.
         _note_json_failure("network")
         return None
 
@@ -443,17 +444,53 @@ def _fetch_json(
         return None
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            return resp.read()
     except urllib.error.HTTPError as exc:
         handle_http_error(exc)
         return None
     except (urllib.error.URLError, ValueError, RecursionError, OSError,
             TimeoutError, ssl.SSLError):
-        # Same body-parse coverage as the first attempt: decode()
-        # (UnicodeDecodeError) and json.loads() (JSONDecodeError, a
-        # ValueError) must not escape as tracebacks.
         _note_json_failure("network")
         return None
+
+
+def _fetch_json(
+    req: urllib.request.Request,
+    timeout: int = 5,
+    on_401: Callable | None = None,
+    on_http_error: Callable[[int, float | None], None] | None = None,
+) -> dict | None:
+    """Fetch JSON from a URL, retrying once with a bundled CA store.
+
+    Python from python.org on macOS ships without system CA certificates
+    until the user runs "Install Certificates.command", so ``urlopen``
+    fails with ``SSL: CERTIFICATE_VERIFY_FAILED`` on a healthy connection.
+
+    The transport (SSL fallback, error-kind notes and the diagnostic
+    callbacks) lives in ``_fetch_bytes``; this adds the body parse. A
+    non-UTF-8 body dies in ``decode()`` as ``UnicodeDecodeError``, a
+    non-JSON body in ``json.loads()`` as ``JSONDecodeError`` — both
+    ``ValueError`` — and a deeply nested but valid body can raise
+    ``RecursionError``. All of them read as a network failure at the
+    caller rather than a traceback.
+    """
+    body = _fetch_bytes(req, timeout, on_401, on_http_error)
+    if body is None:
+        return None
+    try:
+        return json.loads(body.decode("utf-8"))
+    except (ValueError, RecursionError):
+        _note_json_failure("network")
+        return None
+
+
+def _fetch_text(req: urllib.request.Request, timeout: int = 5) -> str | None:
+    """Fetch a text body (an HTML or RSC page) with ``_fetch_json``'s
+    transport: the same SSL fallback and the same failure notes."""
+    body = _fetch_bytes(req, timeout)
+    if body is None:
+        return None
+    return body.decode("utf-8", "replace")
 
 
 # ---------------------------------------------------------------------------
@@ -2101,25 +2138,35 @@ def _cursor_safe_storage_ciphertext(value) -> bytes | None:
 
 
 def _cursor_safe_storage_key() -> bytes | None:
-    """The editor's safeStorage AES key, from the macOS keychain.
+    """The editor's safeStorage AES key, from the macOS keychain."""
+    global _cursor_safe_storage_key_cache
+    if _cursor_safe_storage_key_cache is not None:
+        return _cursor_safe_storage_key_cache
+    key = _safe_storage_key(
+        _CURSOR_SAFE_STORAGE_SERVICE,
+        _cursor_safe_storage_backoff_file(), "cursor_safe_storage.lock")
+    if key is not None:
+        _cursor_safe_storage_key_cache = key
+    return key
+
+
+def _safe_storage_key(service: str, backoff, lock_name: str) -> bytes | None:
+    """A Chromium Safe Storage AES key, from the macOS keychain.
 
     Absent off macOS, when the item is missing, when the read times out
     or is refused, and for a while after any read that may have shown the
     access dialog (see ``_CURSOR_SAFE_STORAGE_BACKOFF``). The app reads
-    several Cursor accounts at once, each in its own ``swe``, so the read
-    runs under a lock shared by every process: only one of them can put
-    the dialog up, and the others find its backoff once they get in.
+    several accounts' worth of secrets at once, each in its own ``swe``,
+    so the read runs under a lock shared by every process: only one of
+    them can put the dialog up, and the others find its backoff once they
+    get in.
     """
-    global _cursor_safe_storage_key_cache
-    if _cursor_safe_storage_key_cache is not None:
-        return _cursor_safe_storage_key_cache
     if not _is_macos() or not shutil.which("security"):
         return None
-    backoff = _cursor_safe_storage_backoff_file()
     import fcntl
     try:
         backoff.parent.mkdir(parents=True, exist_ok=True)
-        lock = open(backoff.with_name("cursor_safe_storage.lock"), "a")
+        lock = open(backoff.with_name(lock_name), "a")
     except OSError:
         return None
     with lock:
@@ -2134,14 +2181,11 @@ def _cursor_safe_storage_key() -> bytes | None:
                 time.sleep(0.05)
             except OSError:
                 return None
-        key = _read_cursor_safe_storage_key(backoff)
-    if key is not None:
-        _cursor_safe_storage_key_cache = key
-    return key
+        return _read_safe_storage_key(service, backoff)
 
 
-def _read_cursor_safe_storage_key(backoff) -> bytes | None:
-    """``_cursor_safe_storage_key``'s keychain read, run under its lock."""
+def _read_safe_storage_key(service: str, backoff) -> bytes | None:
+    """``_safe_storage_key``'s keychain read, run under its lock."""
     try:
         if time.time() - os.path.getmtime(backoff) < _CURSOR_SAFE_STORAGE_BACKOFF:
             return None
@@ -2150,7 +2194,7 @@ def _read_cursor_safe_storage_key(backoff) -> bytes | None:
     try:
         result = subprocess.run(
             ["security", "find-generic-password", "-w",
-             "-s", _CURSOR_SAFE_STORAGE_SERVICE],
+             "-s", service],
             capture_output=True,
             text=True,
             timeout=_CURSOR_SAFE_STORAGE_TIMEOUT,
@@ -3184,6 +3228,272 @@ def _register_devin() -> None:
              diagnose=_diagnose_devin_credentials)
 
 
+# ---------------------------------------------------------------------------
+# Muse fetcher
+# ---------------------------------------------------------------------------
+#
+# Meta's Muse app (agent.meta.ai; bundle com.meta.endo, "Hatch") keeps its
+# session tokens in a private keychain access group only Meta-signed code
+# may read — nothing swe can ask for. The same account does sign in on
+# the web though: a browser holding muse.ai's ``hatch_sess`` cookie gets a
+# page-level ``accessToken`` (an "ABRA" bearer) embedded in the site's
+# server-rendered payload, and hatch-api.meta.ai answers
+# /hatch/subscription for it — the same card the app's own settings page
+# shows.
+#
+# So the fetch is cookie → page → bearer:
+#   hatch_sess out of Dia's Cookies db (Chromium ``v10`` OSCrypt — the
+#       scheme _safe_storage_key already unlocks; decrypted cookies lead
+#       with a 32-byte SHA256 of their host since Chrome ~80)
+#   → GET https://muse.ai/settings as that cookie → scrape the ABRA token
+#   → GET https://hatch-api.meta.ai/hatch/subscription with it as Bearer.
+#
+# Dia is the one cookie source today (it is macOS-only anyway); another
+# Chromium browser is another row in _CHROMIUM_COOKIE_SOURCES.
+
+_MUSE_SESSION_COOKIE = "hatch_sess"
+_MUSE_COOKIE_HOST_SUFFIX = "muse.ai"
+# Any authed route renders the token-bearing payload; settings is the one
+# the app's own links point at.
+_MUSE_PAGE_URL = "https://muse.ai/settings"
+_MUSE_SUBSCRIPTION_URL = "https://hatch-api.meta.ai/hatch/subscription"
+# The RSC payload embeds \"accessToken\":\"ABRA…\"; the quotes may or may
+# not be escaped depending on the serialisation layer it lands in.
+_MUSE_ACCESS_TOKEN_RE = re.compile(r'accessToken(?:\\"|")+:(?:\\"|")+(ABRA[\w-]+)')
+
+# Chrome's expiry clock: microseconds since 1601-01-01 (its epoch offset
+# from unix seconds).
+_CHROME_EPOCH_OFFSET_S = 11644473600
+
+_DIA_SAFE_STORAGE_SERVICE = "Dia Safe Storage"
+
+# Derived Dia Safe Storage key, once read in this process (same pattern as
+# _cursor_safe_storage_key_cache: fetch, usage events and diagnosis share
+# the one keychain read).
+_dia_safe_storage_key_cache: bytes | None = None
+
+# Set when a fetched muse.ai page rendered without the embedded bearer —
+# the stored cookie was refused server-side, so the fix is signing back
+# in, not retrying. Read by ``_diagnose_muse``.
+_muse_stale_session = False
+
+
+def _dia_safe_storage_backoff_file():
+    return RATE_LIMITS_CACHE_FILE.with_name("dia_safe_storage_backoff")
+
+
+def _dia_safe_storage_key() -> bytes | None:
+    """Dia's Safe Storage AES key — see ``_safe_storage_key``."""
+    global _dia_safe_storage_key_cache
+    if _dia_safe_storage_key_cache is not None:
+        return _dia_safe_storage_key_cache
+    key = _safe_storage_key(
+        _DIA_SAFE_STORAGE_SERVICE,
+        _dia_safe_storage_backoff_file(), "dia_safe_storage.lock")
+    if key is not None:
+        _dia_safe_storage_key_cache = key
+    return key
+
+
+# (Safe Storage keychain service, Cookies db glob, key reader) per
+# Chromium browser. Dia is the only source today; another browser is
+# another row here plus its ``_dia_safe_storage_key`` twin.
+_CHROMIUM_COOKIE_SOURCES: tuple[
+    tuple[str, str, Callable[[], bytes | None]], ...] = (
+        ("Dia Safe Storage",
+         "~/Library/Application Support/Dia/User Data/*/Cookies",
+         _dia_safe_storage_key),
+    )
+
+
+def _muse_cookie_rows() -> list[tuple[Callable, str, float, bytes]]:
+    """(key_reader, host, expires_utc, encrypted_value) for every
+    hatch_sess cookie a known Chromium profile holds. Never touches the
+    keychain — the values stay encrypted here."""
+    rows = []
+    for _service, pattern, key_reader in _CHROMIUM_COOKIE_SOURCES:
+        for db in glob.glob(os.path.expanduser(pattern)):
+            try:
+                con = sqlite3.connect(f"file:{db}?mode=ro", uri=True,
+                                      timeout=1)
+                try:
+                    found = con.execute(
+                        "SELECT host_key, expires_utc, encrypted_value "
+                        "FROM cookies WHERE name=? AND host_key LIKE ?",
+                        (_MUSE_SESSION_COOKIE,
+                         f"%{_MUSE_COOKIE_HOST_SUFFIX}"),
+                    ).fetchall()
+                finally:
+                    con.close()
+            except sqlite3.Error:
+                continue
+            rows.extend((key_reader, host, expires, encrypted)
+                        for host, expires, encrypted in found)
+    return rows
+
+
+def _muse_signed_in() -> bool:
+    """Any browser profile holds an unexpired hatch_sess cookie."""
+    now_chrome = (time.time() + _CHROME_EPOCH_OFFSET_S) * 1_000_000
+    return any(expires > now_chrome
+               for _key, _host, expires, _enc in _muse_cookie_rows())
+
+
+def _chromium_cookie_value(encrypted: bytes, host: str,
+                           key: bytes) -> str | None:
+    """The plaintext of a ``v10`` Chromium cookie row, or None.
+
+    The blob is ``v10`` then AES-128-CBC blocks under the browser's Safe
+    Storage key — same OSCrypt shape as Cursor's safeStorage entries.
+    Since Chrome ~80 the plaintext leads with a 32-byte SHA256 of the
+    cookie's host (the browser's own store/display boundary); older rows
+    hold the value directly.
+    """
+    if not isinstance(encrypted, (bytes, bytearray, memoryview)):
+        return None
+    blob = bytes(encrypted)
+    body = blob[3:]
+    if blob[:3] != b"v10" or not body or len(body) % 16:
+        return None
+    plain = _aes_128_cbc_decrypt(key, b" " * 16, body)
+    if plain is None:
+        return None
+    if len(plain) > 32 and \
+            plain[:32] == hashlib.sha256(host.encode()).digest():
+        plain = plain[32:]
+    try:
+        return plain.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _muse_session_cookies() -> list[str]:
+    """Decrypted hatch_sess values, freshest expiry first.
+
+    Empty when no profile holds the cookie or its Safe Storage key could
+    not be read (the keychain dialog unanswered or refused)."""
+    keys: dict[Callable, bytes | None] = {}
+    candidates: list[tuple[float, str]] = []
+    for key_reader, host, expires, encrypted in _muse_cookie_rows():
+        if key_reader not in keys:
+            keys[key_reader] = key_reader()
+        key = keys[key_reader]
+        if key is None:
+            continue
+        value = _chromium_cookie_value(encrypted, host, key)
+        if value:
+            candidates.append((expires, value))
+    candidates.sort(reverse=True)
+    return [value for _expires, value in candidates]
+
+
+def _muse_access_token(cookie: str) -> str | None:
+    """The page-minted ABRA bearer for a hatch_sess value, or None when
+    the session is not accepted (the page renders without one)."""
+    request = urllib.request.Request(
+        _MUSE_PAGE_URL,
+        headers={
+            "Cookie": f"{_MUSE_SESSION_COOKIE}={cookie}",
+            "Accept": "text/html",
+            "User-Agent": f"swe/{__version__}",
+        },
+    )
+    body = _fetch_text(request)
+    if not body:
+        return None
+    match = _MUSE_ACCESS_TOKEN_RE.search(body)
+    if match:
+        return match.group(1)
+    global _muse_stale_session
+    _muse_stale_session = True
+    return None
+
+
+def _parse_muse_subscription(data: dict) -> RateLimitInfo | None:
+    """Normalise the /hatch/subscription reply: one weekly window, a tier
+    name and a quota_status flag the app itself reads."""
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    try:
+        used = float(usage.get("percent_used"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(used) or used < 0:
+        return None
+    reset_raw = usage.get("resets_at")
+    reset_at = 0.0
+    if isinstance(reset_raw, (int, float)) and not isinstance(reset_raw, bool):
+        try:
+            reset_at = float(reset_raw)
+        except (TypeError, ValueError, OverflowError):
+            pass
+    if not math.isfinite(reset_at):
+        reset_at = 0.0
+    quota_status = str(usage.get("quota_status") or "").upper()
+    tier = data.get("tier")
+    name = tier.get("name") if isinstance(tier, dict) else None
+    plan = name if isinstance(name, str) and name.strip() else "—"
+    return RateLimitInfo(
+        tool_name="muse",
+        used_percent=int(round(min(100.0, used))),
+        limit_reached=used >= 100 or quota_status in (
+            "EXHAUSTED", "DEPLETED", "LIMIT_REACHED"),
+        reset_at=reset_at,
+        plan_type=plan,
+        # The card is a single weekly window ("Weekly limit resets on …"),
+        # so the compact `7d` label the window field carries fits.
+        window_seconds=7 * 24 * 3600,
+        window="7d",
+    )
+
+
+def _fetch_muse() -> RateLimitInfo | None:
+    """Muse's weekly allowance, through the browser session the app shares."""
+    global _muse_stale_session
+    _muse_stale_session = False
+    for cookie in _muse_session_cookies():
+        token = _muse_access_token(cookie)
+        if token is None:
+            continue
+        request = urllib.request.Request(
+            _MUSE_SUBSCRIPTION_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+                "User-Agent": f"swe/{__version__}",
+            },
+        )
+        data = _fetch_json(request)
+        if isinstance(data, dict):
+            info = _parse_muse_subscription(data)
+            if info is not None:
+                return info
+    return None
+
+
+def _diagnose_muse() -> str | None:
+    """Why an empty Muse fetch is empty: no session cookie, a keychain
+    refusal, or a healthy credential whose fetch failed."""
+    if not _muse_signed_in():
+        return remedies.SIGNED_OUT
+    if _dia_safe_storage_key() is None:
+        return remedies.PERMISSION_REQUIRED
+    if _muse_stale_session:
+        return remedies.AUTH_REQUIRED
+    return remedies.OK
+
+
+def _register_muse() -> None:
+    """Register the Muse quota fetcher."""
+
+    def fetch() -> RateLimitInfo | None:
+        return _fetch_muse()
+
+    register("muse", fetch, signed_in=_muse_signed_in,
+             diagnose=_diagnose_muse)
+
+
 # Tools whose fetchers list every quota window in ``RateLimitInfo.windows``.
 _MULTI_WINDOW_TOOLS = frozenset({"devin", "cursor"})
 
@@ -3196,6 +3506,7 @@ _register_droid()
 _register_freebuff()
 _register_cursor()
 _register_devin()
+_register_muse()
 
 
 # ---------------------------------------------------------------------------
@@ -3552,6 +3863,17 @@ def get_all_rate_limits(
                 if name not in result:
                     issues[name] = status
         return result
+
+    # An explicit refresh is also the recovery path for a refused or
+    # unanswered keychain prompt: the Safe Storage backoff would otherwise
+    # hold the access dialog off for hours after the user clicked Allow.
+    if refresh_failed or not use_cache:
+        for backoff in (_cursor_safe_storage_backoff_file(),
+                        _dia_safe_storage_backoff_file()):
+            try:
+                backoff.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     requested = None if tool_names is None else set(tool_names)
     fetchers = [
