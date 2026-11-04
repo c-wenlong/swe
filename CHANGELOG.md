@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-04
+
 ### Added
 
 - **The Mac app's chat renders the agent's Markdown tables.** The chat
@@ -5166,6 +5168,7 @@ service / model layering, tests with an 84% coverage floor).
 - Stdlib-only core; optional FastMCP server extra for session history MCP tool
 - Test suite (15 unit tests) with isolated `$HOME` fixtures
 
+[1.2.0]: https://github.com/c-wenlong/swe/releases/tag/v1.2.0
 [1.1.1]: https://github.com/c-wenlong/swe/releases/tag/v1.1.1
 [1.1.0]: https://github.com/c-wenlong/swe/releases/tag/v1.1.0
 [1.0.0]: https://github.com/c-wenlong/swe/releases/tag/v1.0.0
