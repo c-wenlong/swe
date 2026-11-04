@@ -1,0 +1,32 @@
+name: Homebrew tap token check
+
+# Checks that HOMEBREW_TAP_TOKEN can push to c-wenlong/homebrew-swe
+# without a release. `git push --dry-run` asks GitHub for the push
+# endpoint, which answers 403 without write access, and sends nothing.
+# Run it by hand after creating or editing the token:
+#   gh workflow run tap-token-check.yml
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dry-run a push to the tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::error::HOMEBREW_TAP_TOKEN is not set."
+            exit 1
+          fi
+          tap="$RUNNER_TEMP/homebrew-swe"
+          git clone --depth 1 \
+            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/c-wenlong/homebrew-swe.git" "$tap"
+          cd "$tap"
+          git push --dry-run origin HEAD:main
+          echo "HOMEBREW_TAP_TOKEN can push to c-wenlong/homebrew-swe."
