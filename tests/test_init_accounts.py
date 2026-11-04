@@ -130,6 +130,40 @@ class SwitchedOnTest(unittest.TestCase):
         self.assertEqual(os.readlink(_acct(home) / "CLAUDE.md"),
                          str(agents_file(home)))
 
+    def test_a_repointed_account_link_updates_its_record(self):
+        # The record holds the source swe gave the link; a build that
+        # repoints it must update the record or a later sync-off would
+        # keep the link as "not ours anymore".
+        home = _home(self)
+        directory = home / ".swe" / "AGENTS_MD"
+        directory.mkdir(parents=True)
+        (directory / "one.md").write_text("# Claude only\n")
+        (directory / "rest.md").write_text("# Everyone\n")
+        (directory / "index.txt").write_text("one.md\nrest.md\n")
+        (directory / "targets.json").write_text(json.dumps(
+            {"version": 1, "chapters": {"one.md": {"only": ["claude"]}}}))
+        from swe.instructions.compiler import build
+
+        build(home)
+        own = home / ".swe" / "AGENTS.claude.md"
+        _profiles(home, WORK)
+        _flags(home, instructions=True)
+        _sync(home)
+        link = _acct(home) / "CLAUDE.md"
+        self.assertEqual(os.readlink(link), str(own))
+
+        (directory / "targets.json").write_text(
+            json.dumps({"version": 1, "chapters": {}}))
+        build(home)
+        record = {e["path"]: e for e in accounts.load_manifest(home)}
+        self.assertEqual(record[str(link)]["source"], str(agents_file(home)))
+        # Sync off now removes the link cleanly, since it still matches
+        # the recorded source.
+        _flags(home, instructions=False)
+        rows, _ = _sync(home)
+        self.assertEqual(set(rows.values()), {"unlinked"})
+        self.assertFalse(os.path.lexists(link))
+
     def test_hooks_link_per_script_and_skip_disabled_ones(self):
         home = _home(self)
         _profiles(home, WORK)

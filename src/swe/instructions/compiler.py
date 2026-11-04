@@ -136,6 +136,7 @@ def _snapshot(
         name = line.strip()
         if not name or name.startswith("#"):
             continue
+        name = _targets.normalized(name)
         relative = Path(name)
         if (relative.is_absolute() or relative.suffix.lower() != ".md"
                 or any(character in name for character in ("\x00", "\r", "\n"))
@@ -255,6 +256,14 @@ def _build(
                     raise InstructionError(
                         f"{output.path} changed while its chapters were being "
                         "created; not overwriting it")
+                if output.harness is not None and previous is not None \
+                        and GENERATED_MARKER.encode() \
+                            not in previous.split(b"\n", 1)[0]:
+                    # Never overwrite a per-harness file swe did not write;
+                    # AGENTS.md itself may hold user content to compile over.
+                    raise InstructionError(
+                        f"{output.path} exists and wasn't written by swe; "
+                        "move it away")
                 differs = previous is None or (
                     hashlib.sha256(previous).digest()
                     != hashlib.sha256(output.data).digest())
@@ -314,18 +323,45 @@ class BuildResult:
     stale: list[str]
 
 
-def _remove_stale(stale: list[Path]) -> tuple[list[str], list[str]]:
-    """Delete retired generated outputs; markerless files stay. (removed, notes)"""
+def _remove_stale(
+    stale: list[Path], in_use: set[Path],
+) -> tuple[list[str], list[str]]:
+    """Delete retired generated outputs; markerless files stay. (removed, notes)
+
+    ``in_use`` holds the parent-resolved first-hop targets every known link
+    still points at: a stale output one of them names is left in place —
+    deleting it would strand a link the relink pass could not move.
+    """
     removed, notes = [], []
     for path in stale:
         if not _targets.generated(path):
             continue  # replaced by a real file between snapshot and now
+        key = path.parent.resolve() / path.name
+        if key in in_use:
+            notes.append(f"left {path}: a link still points at it")
+            continue
         try:
             path.unlink()
             removed.append(str(path))
         except OSError as exc:
             notes.append(f"could not remove stale output {path}: {exc}")
     return removed, notes
+
+
+def expected_output_paths(home: Path | None = None) -> list[Path]:
+    """Every output a build would write, for the watcher's change polling.
+
+    Forgiving like the survey: an unreadable or invalid setup still yields
+    the shared output so its deletion is noticed.
+    """
+    outputs = [agents_file_for(home)]
+    resolved = _targets.resolve(
+        _targets.load(home), _targets.active_names(home))
+    outputs += [
+        harness_agents_file_for(home, harness)
+        for harness in resolved if harness is not None
+    ]
+    return outputs
 
 
 def build_run(
@@ -348,14 +384,22 @@ def build_run(
         with _locked(home):
             changed, rows, stale = _build(home, check=False, expected=expected)
             from swe.instructions import links
-            relinked, notes = links.relink(
+            result = links.relink(
                 home, {row["harness"]: Path(row["path"]) for row in rows})
-            removed, removal_notes = _remove_stale(stale)
+            notes = list(result.notes)
+            if result.complete:
+                removed, removal_notes = _remove_stale(stale, result.in_use)
+            else:
+                removed, removal_notes = [], [
+                    f"left {len(stale)} stale output(s) untouched: "
+                    "the link pass did not finish"]
+            notes += removal_notes
             return BuildResult(
-                changed=changed or bool(relinked) or bool(removed),
+                changed=changed or bool(result.relinked) or bool(removed),
                 outputs=rows,
-                relinked=[(str(link), str(target)) for link, target in relinked],
-                removed=removed, notes=notes + removal_notes, stale=[])
+                relinked=[(str(link), str(target))
+                          for link, target in result.relinked],
+                removed=removed, notes=notes, stale=[])
     except (OSError, RuntimeError) as exc:
         raise InstructionError(f"Cannot compile instructions: {exc}") from exc
 
@@ -387,7 +431,7 @@ def chapter_names(home: Path | None = None) -> list[str]:
         text = index.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         return []
-    return [line.strip() for line in text.splitlines()
+    return [_targets.normalized(line.strip()) for line in text.splitlines()
             if line.strip() and not line.strip().startswith("#")]
 
 

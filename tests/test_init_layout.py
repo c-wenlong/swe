@@ -190,6 +190,18 @@ class InspectTest(unittest.TestCase):
             codex = next(s for s in instructions if s.label == "codex")
             self.assertEqual(codex.source, shared)
 
+    def test_skipped_but_installed_keeps_its_canonical_source(self):
+        # cline's instruction file lives in ~/.agents, which nothing made;
+        # its evidence (~/.cline) still marks it installed, so plan returns
+        # "create" — with the canonical source carried over for _apply.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".cline").mkdir()
+            instructions, _ = plan(home)
+            cline = next(s for s in instructions if s.label == "cline")
+            self.assertEqual(cline.state, "create")
+            self.assertEqual(cline.source, agents_file(home))
+
 
 class CmdInitTest(unittest.TestCase):
     def _run(self, home: Path, args):

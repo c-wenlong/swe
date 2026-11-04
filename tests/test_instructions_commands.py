@@ -226,9 +226,13 @@ class InstructionsCommandsTest(unittest.TestCase):
 
     def test_watch_reports_failure_recovery_and_interrupt(self):
         def fake_watch(*, on_result, on_error):
+            from swe.instructions.compiler import BuildResult
+
             on_error(ValueError("missing chapter"))
-            on_result(True)
-            on_result(False)
+            on_result(BuildResult(changed=True, outputs=[], relinked=[],
+                                  removed=[], notes=["a note"], stale=[]))
+            on_result(BuildResult(changed=False, outputs=[], relinked=[],
+                                  removed=[], notes=[], stale=[]))
             raise KeyboardInterrupt
 
         with patch("swe.instructions.commands.watcher.watch", side_effect=fake_watch):

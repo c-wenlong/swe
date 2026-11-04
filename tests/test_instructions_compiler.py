@@ -505,10 +505,64 @@ class HarnessTargetsTest(unittest.TestCase):
         (self.home / ".claude").mkdir()
         link = self.home / ".claude" / "CLAUDE.md"
         link.symlink_to(self.output)
+        build(self.home)
+        # Retire the rule, then break .linkignore: the stale output must
+        # survive too, since a link the pass never saw may point at it.
+        self.write_targets({})
         (self.home / ".swe" / ".linkignore").mkdir()  # a directory: unreadable
         result = build_run(self.home)
+        claude = harness_agents_file_for(self.home, "claude")
         self.assertTrue(result.notes)
-        self.assertEqual(link.resolve(), self.output.resolve())
+        self.assertTrue(claude.exists())
+        # The link kept its hop: a pass that never ran must not move it,
+        # and the stale output it points at must not be deleted either.
+        self.assertEqual(link.resolve(), claude.resolve())
+        # A readable .linkignore again: still no repoint (the row is
+        # ignored), but the stale file is now a known untouched target.
+        (self.home / ".swe" / ".linkignore").rmdir()
+        (self.home / ".swe" / ".linkignore").write_text(".claude\n")
+        result = build_run(self.home)
+        self.assertTrue(claude.exists())
+
+    def test_markerless_per_harness_destination_is_never_overwritten(self):
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        own = harness_agents_file_for(self.home, "claude")
+        own.write_text("user content\n")
+        self.output.write_text("last good")
+        with self.assertRaisesRegex(InstructionError, "wasn't written by swe"):
+            build(self.home)
+        self.assertEqual(own.read_text(), "user content\n")
+        self.assertEqual(self.output.read_text(), "last good")
+
+    def test_chapter_names_are_normalized(self):
+        self.index.write_text("./one.md\nparts/two.md\n")
+        build(self.home)
+        self.assertIn("AGENTS_MD/one.md -->", self.output.read_text())
+        # Two targets.json keys normalizing to one chapter is an error.
+        self.targets.write_text(
+            '{"version": 1, "chapters": {"one.md": {"only": ["claude"]},'
+            ' "./one.md": {"except": ["codex"]}}}')
+        with self.assertRaisesRegex(InstructionError, "same chapter"):
+            build(self.home)
+
+    def test_expected_outputs_cover_per_harness_files(self):
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        paths = compiler.expected_output_paths(self.home)
+        self.assertIn(harness_agents_file_for(self.home, "claude"), paths)
+        self.assertIn(self.output, paths)
+
+    def test_markerless_lookalike_is_never_taken_over(self):
+        # A user-made link to a markerless AGENTS.work.md is not swe's:
+        # it keeps its target even when its harness gets an output.
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        lookalike = self.home / ".swe" / "AGENTS.work.md"
+        lookalike.write_text("user file\n")
+        (self.home / ".claude").mkdir()
+        link = self.home / ".claude" / "CLAUDE.md"
+        link.symlink_to(lookalike)
+        build(self.home)
+        self.assertEqual(os.readlink(link), str(lookalike))
+        self.assertEqual(lookalike.read_text(), "user file\n")
 
     def test_survey_reports_entries_outputs_and_chapter_rules(self):
         self.index.write_text("one.md\n# off.md\nparts/two.md\n# note.txt\n")

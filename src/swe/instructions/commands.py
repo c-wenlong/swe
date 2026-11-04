@@ -42,9 +42,13 @@ def cmd_instructions(args) -> int:
         except ValueError:
             return path
 
-    def report(changed: bool) -> None:
+    def report(result) -> None:
+        # A BuildResult from watch, or the bool ``built`` init reports.
+        changed = result.changed if hasattr(result, "changed") else result
         action = "Built" if changed else "Unchanged:"
         print(f"{action} ~/.swe/AGENTS.md", flush=True)
+        for note in getattr(result, "notes", ()):
+            print(f"Note: {note}", file=sys.stderr, flush=True)
 
     def report_error(exc: Exception) -> None:
         print(f"Instructions: {exc}", file=sys.stderr, flush=True)
@@ -100,4 +104,6 @@ def cmd_instructions(args) -> int:
             print(f"Relinked {display(link)} -> {display(target)}", flush=True)
         for path in built.removed:
             print(f"Removed {display(path)}", flush=True)
+        for note in built.notes:
+            print(f"Note: {note}", file=sys.stderr, flush=True)
     return 0

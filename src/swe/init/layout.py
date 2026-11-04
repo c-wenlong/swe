@@ -944,7 +944,7 @@ def plan(
             if status.state == "skipped" and installed:
                 # Evidence says the harness is here; only the directory is
                 # missing, and init creates that anyway.
-                status = LinkStatus(label, home / rel, "create", "")
+                status = LinkStatus(label, home / rel, "create", "", canonical)
             archived_override(status, archived)
             instructions.append(status)
     skills = []
