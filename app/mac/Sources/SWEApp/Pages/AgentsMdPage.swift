@@ -1242,6 +1242,7 @@ private struct NewChapterSheet: View {
                 }
             }
         }
+        .sheetScaffold(width: 480)
         // A click on empty card space closes the floating list; rows,
         // fields and buttons still get their own clicks since they sit
         // above the background.
@@ -1249,7 +1250,6 @@ private struct NewChapterSheet: View {
             Color.clear.contentShape(.rect)
                 .onTapGesture { if listOpen { listDismissed = true } }
         }
-        .sheetScaffold(width: 480)
         .coordinateSpace(.named("newChapterSheet"))
         .onGeometryChange(for: CGFloat.self) { $0.size.height }
             action: { cardHeight = $0 }
