@@ -795,28 +795,23 @@ private struct ChaptersEditor: View {
                 Text("Chapters").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
                 Text("\(fileCount(chapters.tree))").font(Theme.caption).foregroundStyle(Theme.textMuted)
                 Spacer(minLength: 4)
-                Menu {
-                    Button("New chapter…") {
-                        creating = NewChapterSheet.Initial(mode: .chapter, folder: "")
-                    }
-                    Button("New folder…") {
-                        creating = NewChapterSheet.Initial(mode: .folder, folder: "")
-                    }
+                // One click opens the sheet; a tip on the button used to
+                // eat the first click while it dismissed.
+                Button {
+                    creating = NewChapterSheet.Initial(folder: "")
                 } label: {
                     Image(systemName: "plus").font(Theme.font(size: 12))
                         .foregroundStyle(Theme.textMuted)
                         .frame(width: 22, height: 22).contentShape(.rect)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .frame(width: 22)
-                .hoverTip("New chapter or folder", replacesLabel: false)
+                .plainButton()
+                .accessibilityLabel("New chapter")
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(chapters.tree) { node in
                         OutlineNode(node: node, depth: 0, compiled: check.compiledNames) { folder in
-                            creating = NewChapterSheet.Initial(mode: .chapter, folder: folder)
+                            creating = NewChapterSheet.Initial(folder: folder)
                         }
                     }
                     // Dirty drafts whose files vanished: their text is
@@ -1009,11 +1004,11 @@ private struct ChaptersEditor: View {
 /// deciding which thing is made.
 private struct NewChapterSheet: View {
     /// How the sheet was opened; a folder path prefills the Folder field.
+    /// The sheet itself creates folders too: leave File empty and the
+    /// submit button reads "Create folder".
     struct Initial: Identifiable {
-        enum Mode { case chapter, folder }
-        var mode: Mode
         var folder: String
-        var id: String { "\(mode)-\(folder)" }
+        var id = UUID()
     }
 
     var initial: Initial
@@ -1149,10 +1144,8 @@ private struct NewChapterSheet: View {
             if folder != path { suppressOpen = true }
             folder = path
             openField = nil
-            if initial.mode == .chapter {
-                focus = .file
-                activeField = .file
-            }
+            focus = .file
+            activeField = .file
         case .file(let path):
             // Same select path the rail's file rows use; the sheet only
             // opens from Edit, which already has the editor up.
@@ -1160,7 +1153,7 @@ private struct NewChapterSheet: View {
             dismiss()
         case .create(let path):
             openField = nil
-            if activeField == .folder && initial.mode == .chapter {
+            if activeField == .folder {
                 focus = .file  // keep the typed folder, move on to the name
                 activeField = .file
             } else {
@@ -1173,7 +1166,7 @@ private struct NewChapterSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(initial.mode == .folder ? "New folder" : "New chapter")
+            Text("New chapter")
                 .font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
             Text("Folders group the chapters so you and agents can navigate without reading everything.")
                 .font(Theme.caption).foregroundStyle(Theme.textSecondary)
@@ -1197,8 +1190,7 @@ private struct NewChapterSheet: View {
                     }
             }
             .zIndex(listOpen && activeField == .folder ? 1 : 0)
-            if initial.mode == .chapter {
-                FormField("File") {
+            FormField("File") {
                     TextField("name (.md added)", text: $file)
                         .sweField(monospaced: true)
                         .focused($focus, equals: .file)
@@ -1216,15 +1208,12 @@ private struct NewChapterSheet: View {
                         }
                 }
                 .zIndex(listOpen && activeField == .file ? 1 : 0)
-            }
             // Only a chapter goes in the index; a folder alone does not.
-            // Always visible in chapter mode so the card keeps its height.
-            if initial.mode == .chapter {
-                Toggle("Include in AGENTS.md", isOn: $include)
-                    .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
-                    .toggleStyle(.checkbox)
-                    .disabled(fileName.isEmpty)
-            }
+            // Always visible so the card keeps its height.
+            Toggle("Include in AGENTS.md", isOn: $include)
+                .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
+                .toggleStyle(.checkbox)
+                .disabled(fileName.isEmpty)
             // One line tall whether it carries a problem, a path preview,
             // or only the placeholder.
             Text(folderProblem ?? fileProblem
@@ -1268,8 +1257,7 @@ private struct NewChapterSheet: View {
         .onAppear {
             // A prefilled folder (from a rail "+" click) starts the user
             // on File; otherwise on Folder.
-            let field: Field = initial.mode == .chapter && !initial.folder.isEmpty
-                ? .file : .folder
+            let field: Field = initial.folder.isEmpty ? .folder : .file
             focus = field
             activeField = field
         }
