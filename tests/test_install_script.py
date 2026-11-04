@@ -40,7 +40,8 @@ class InstallScriptCase(unittest.TestCase):
     # passes in build sandboxes without /usr/bin or /bin on it (the Nix
     # check, which gates releases).  Tools we stub never go in this list.
     TOOLS = ("mktemp", "cp", "rm", "mkdir", "ln", "chmod", "cat", "awk",
-             "env", "dirname", "sh", "dash", "sha256sum", "shasum")
+             "env", "dirname", "readlink", "sh", "dash",
+             "sha256sum", "shasum")
 
     def setUp(self):
         self.home = temp_dir(self)
@@ -308,6 +309,19 @@ class TestVenvPath(InstallScriptCase):
         self.assertEqual(os.readlink(self.home / ".local" / "bin" / "swe"),
                          str(venvs[0] / "bin" / "swe"))
         self.assertFalse(old.exists())
+
+    def test_upgrade_leaves_unrelated_venv_dirs(self):
+        old = self._plant_old_install()
+        other = self._data_dir() / "venv-other"
+        (other / "bin").mkdir(parents=True)
+        r = self.run_installer()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(old.exists())
+        self.assertTrue(other.exists())
+        target = Path(os.readlink(self.home / ".local" / "bin" / "swe"))
+        new_venv = target.parent.parent
+        self.assertTrue(new_venv.name.startswith("venv-"))
+        self.assertNotIn(new_venv, (old, other))
 
     def test_failed_upgrade_keeps_old_install(self):
         old = self._plant_old_install()

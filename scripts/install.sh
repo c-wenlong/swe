@@ -104,11 +104,19 @@ try_venv() {
     fi
     BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
     mkdir -p "$BIN_DIR"
+    # Remove only the venv the symlink pointed at: two installers running
+    # at once at worst leak one venv-* dir, they never break each other's
+    # fresh install.
+    prev="$(readlink "$BIN_DIR/swe" 2>/dev/null || true)"
+    prev_venv="${prev%/bin/swe}"
     ln -sf "$new_venv/bin/swe" "$BIN_DIR/swe"
-    for old in "$data_dir"/venv-*; do
-        [ -d "$old" ] || continue
-        [ "$old" = "$new_venv" ] || rm -rf "$old"
-    done
+    case "$prev_venv" in
+        "$data_dir"/venv-*)
+            if [ "$prev_venv" != "$new_venv" ] && [ -d "$prev_venv" ]; then
+                rm -rf "$prev_venv"
+            fi
+            ;;
+    esac
     return 0
 }
 
