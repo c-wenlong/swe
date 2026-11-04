@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Muse shows Meta's logo.** The `muse` harness id is aliased to the
+  bundled `meta` mark (`harness-meta-color.svg`) on the Mac, iPhone and
+  web apps, so its limit card carries Meta's logo and brand colour
+  instead of a text chip.
+
 - **`swe list` shows Muse's weekly quota.** Meta's Muse app
   (`com.meta.endo`) keeps its session tokens in a private keychain group
   nothing else can read, so the new `muse` rate-limit fetcher borrows the

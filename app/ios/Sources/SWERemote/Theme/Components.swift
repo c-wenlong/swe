@@ -522,7 +522,8 @@ struct HarnessIcon: View {
     /// Other names the same harness goes by (as in SWECore's HarnessIcons).
     static let aliases = ["claude-code": "claude", "claude-desktop": "claude", "github-copilot": "copilot",
                           "factory": "droid", "qwen": "qwen-code", "mistral": "mistral-vibe",
-                          "codebuff": "freebuff", "command-code": "commandcode", "grok-bot": "grok"]
+                          "codebuff": "freebuff", "command-code": "commandcode", "grok-bot": "grok",
+                          "muse": "meta"]
 
     static func assetName(_ harness: String?) -> String? {
         guard let h = harness?.lowercased(), !h.isEmpty else { return nil }

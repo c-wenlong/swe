@@ -86,7 +86,7 @@ const Fmt = (() => {
     + "temporal travisci twilio upstash v0 vercel warp windsurf writer xiaomimimo yi zai").split(" "));
   // HarnessIcons.aliases: other names the same harness goes by.
   const ALIASES = { "claude-code": "claude", "github-copilot": "copilot", factory: "droid", qwen: "qwen-code",
-    mistral: "mistral-vibe", codebuff: "freebuff", "command-code": "commandcode" };
+    mistral: "mistral-vibe", codebuff: "freebuff", "command-code": "commandcode", muse: "meta" };
   function logoFile(id) {
     const key = ALIASES[String(id).toLowerCase()] || String(id).toLowerCase();
     if (COLOR_LOGOS.has(key)) return `harness-${key}-color.svg`;
