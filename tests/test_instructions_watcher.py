@@ -40,7 +40,11 @@ class WatcherTests(unittest.TestCase):
         with patch.object(watcher.time, "sleep", side_effect=sleep), \
                 patch.object(watcher.time, "monotonic", side_effect=lambda: now):
             with self.assertRaises(KeyboardInterrupt):
-                watcher.watch(self.home, on_result=results, on_error=errors)
+                watcher.watch(
+                    self.home,
+                    on_result=(lambda r: results(r.changed))
+                    if results else None,
+                    on_error=errors)
 
     def test_initial_build_and_no_work_when_unchanged(self):
         results = []
@@ -148,7 +152,7 @@ class WatcherTests(unittest.TestCase):
         self.assertIn("first", self.output.read_text())
 
     def test_repeat_failures_retry_on_delay_without_spam_and_success_clears_retry(self):
-        original = watcher.build
+        original = watcher.build_run
         attempts = []
 
         def fail_then_recover(home):
@@ -158,14 +162,14 @@ class WatcherTests(unittest.TestCase):
             return original(home)
 
         results, errors = [], []
-        with patch.object(watcher, "build", side_effect=fail_then_recover):
+        with patch.object(watcher, "build_run", side_effect=fail_then_recover):
             self.run_watch([None] * 40, results=results.append, errors=errors.append)
         self.assertEqual(attempts, [0.0, 5.0, 10.0, 15.0])
         self.assertEqual(results, [True])
         self.assertEqual(len(errors), 1)
 
     def test_retry_due_during_edits_waits_for_debounce(self):
-        original = watcher.build
+        original = watcher.build_run
         attempts = []
 
         def fail_once(home):
@@ -174,7 +178,7 @@ class WatcherTests(unittest.TestCase):
                 raise watcher.InstructionError("disk full")
             return original(home)
 
-        with patch.object(watcher, "build", side_effect=fail_once):
+        with patch.object(watcher, "build_run", side_effect=fail_once):
             self.run_watch([
                 *([None] * 8),
                 lambda: self.chapter.write_text("second"),

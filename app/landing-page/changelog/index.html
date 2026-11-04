@@ -113,13 +113,23 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a>[Unreleased]</h2>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
-<li><strong>The landing site gets a dedicated install page.</strong> <code>install/</code> puts
+<li><p><strong>Instruction chapters can be pinned to harnesses.</strong> An optional
+<code>~/.swe/AGENTS_MD/targets.json</code> maps a chapter to <code>only</code> or <code>except</code>
+lists of harness names, and a chapter can be switched off by commenting
+its index.txt line out. <code>swe instructions build</code> compiles a differing
+harness's chapters into <code>~/.swe/AGENTS.&lt;name&gt;.md</code>, repoints swe's
+instruction symlinks (extra account homes included) and prunes retired
+outputs; <code>check</code> and the <code>--json</code> surveys report the per-harness state,
+and <code>swe init</code> links to a harness's own output once it exists.</p>
+</li>
+<li><p><strong>The landing site gets a dedicated install page.</strong> <code>install/</code> puts
 macOS and Linux behind a tab toggle: the Mac side carries the SWE.app
 DMG download, wired to the latest release like the homepage buttons,
 and the brew cask; the Linux side has the <code>install.sh</code> one-liner plus
 its <code>--hub</code> variant for the web app and phone remote. Install buttons
 across the site now open the page instead of scrolling to the
-quickstart, which stays as the on-page summary.</li>
+quickstart, which stays as the on-page summary.</p>
+</li>
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>

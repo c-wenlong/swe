@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Instruction chapters can be pinned to harnesses.** An optional
+  `~/.swe/AGENTS_MD/targets.json` maps a chapter to `only` or `except`
+  lists of harness names, and a chapter can be switched off by commenting
+  its index.txt line out. `swe instructions build` compiles a differing
+  harness's chapters into `~/.swe/AGENTS.<name>.md`, repoints swe's
+  instruction symlinks (extra account homes included) and prunes retired
+  outputs; `check` and the `--json` surveys report the per-harness state,
+  and `swe init` links to a harness's own output once it exists.
+
 - **The landing site gets a dedicated install page.** `install/` puts
   macOS and Linux behind a tab toggle: the Mac side carries the SWE.app
   DMG download, wired to the latest release like the homepage buttons,
