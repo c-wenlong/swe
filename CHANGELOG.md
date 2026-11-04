@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-04
+
+### Fixed
+
+- **The tag build's Swift test step compiles again.** `SilentHubStub`'s
+  `await Self.started.bump()` inside a `Task` tripped a region-isolation
+  checker bug in the macos-26 runner's Swift 6.3.3 ("pattern that the
+  region-based isolation checker does not understand how to check"); the
+  test now names the class. V1.2.0 never got its DMG, so this ships as a
+  patch.
+
+## [1.2.0] - 2026-11-04
+
 ### Added
 
 - **The Mac app's chat renders the agent's Markdown tables.** The chat
@@ -1180,6 +1193,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   login `PATH` rather than starting `zsh -il` (the whole rc chain) every
   5 minutes. Closes [#1541](https://github.com/c-wenlong/swe/issues/1541).
 
+- **The hub reads `harness.json` once per launch-field refresh and
+  finds tmux once.** Every 10 s catalog tick read the registry twice
+  per launchable harness to list its launch providers (about 1.1 ms
+  of 2 ms with ten harnesses); it now reads it once. Every tmux call
+  walked `PATH` for the tmux binary (21 us); the path is now kept
+  while `PATH` is unchanged and the file is still executable (5 us). A
+  missing tmux is looked up again each time, so one installed later is
+  found. Closes [#1531](https://github.com/c-wenlong/swe/issues/1531).
 - **A streaming Devin session costs the hub its new rows, not its
   whole window.** Each time a tailed Devin session changed, the hub
   re-read up to 1,064 chain nodes with one query and one JSON parse each:
@@ -5171,6 +5192,8 @@ service / model layering, tests with an 84% coverage floor).
 - Stdlib-only core; optional FastMCP server extra for session history MCP tool
 - Test suite (15 unit tests) with isolated `$HOME` fixtures
 
+[1.2.1]: https://github.com/c-wenlong/swe/releases/tag/v1.2.1
+[1.2.0]: https://github.com/c-wenlong/swe/releases/tag/v1.2.0
 [1.1.1]: https://github.com/c-wenlong/swe/releases/tag/v1.1.1
 [1.1.0]: https://github.com/c-wenlong/swe/releases/tag/v1.1.0
 [1.0.0]: https://github.com/c-wenlong/swe/releases/tag/v1.0.0
