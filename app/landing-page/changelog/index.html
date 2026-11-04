@@ -1859,6 +1859,18 @@ it now loads devices once (and again after an approval, a removal or
 a pull to refresh) and asks for pending requests every 10 s. Closes
 <a href="https://github.com/c-wenlong/swe/issues/1553">#1553</a>.</p>
 </li>
+<li><p><strong>The iPhone composer keeps picked files on disk, not in memory.</strong> A
+file from Files was read whole into memory (up to 20 MB, or 200 MB
+for an image to convert), a photo from Photos loaded as one <code>Data</code>,
+and a failed upload kept those bytes for Retry. Picks now go into a
+spool folder in the app's temporary directory: files are copied disk
+to disk, photos arrive from Photos as a file and their JPEG is made
+from it through ImageIO, and every upload streams its body from the
+file. A failed upload keeps only the file; it goes once the hub has
+it or the chip is removed or sent, and what a crash left behind is
+swept at the next launch. Closes
+<a href="https://github.com/c-wenlong/swe/issues/1551">#1551</a>.</p>
+</li>
 </ul>
 <h3 id="fixed-1"><a class="anchor" href="#fixed-1"></a>Fixed</h3>
 <ul>

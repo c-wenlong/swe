@@ -130,12 +130,19 @@ private struct Refused: Error {}
 @MainActor
 final class ComposerAttachmentsTests: XCTestCase {
     private var uploads: [(String, Int)] = []
+    /// The files uploads streamed from.
+    private var sentFrom: [URL] = []
     private var failNext = false
 
     private func model(gate: Gate? = nil) -> ComposerAttachments {
         let files = ComposerAttachments()
-        files.upload = { [weak self] name, data, progress in
-            await MainActor.run { self?.uploads.append((name, data.count)) }
+        files.upload = { [weak self] name, file, progress in
+            // The body streams from the spooled copy; read it as the hub would.
+            let data = (try? Data(contentsOf: file)) ?? Data()
+            await MainActor.run {
+                self?.uploads.append((name, data.count))
+                self?.sentFrom.append(file)
+            }
             progress(0.5)
             await gate?.wait()
             let fail = await MainActor.run { () -> Bool in
@@ -274,7 +281,7 @@ final class ComposerAttachmentsTests: XCTestCase {
         let handle = try FileHandle(forWritingTo: big)
         try handle.truncate(atOffset: UInt64(AttachmentRules.maxBytes + 1))
         try handle.close()
-        XCTAssertNil(ComposerAttachments.read(big, name: "dump.log").data)
+        XCTAssertNil(ComposerAttachments.spool(big, name: "dump.log").file, "over the cap: not even copied")
 
         let files = model()
         await files.addFile(at: big)?.value
@@ -355,6 +362,117 @@ final class ComposerAttachmentsTests: XCTestCase {
         await first?.value
         await second?.value
         XCTAssertEqual(files.refs.count, 2)
+    }
+
+    private func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: url.path) }
+
+    /// The file a load made, read from the test.
+    private final class Made: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _url: URL?
+        var url: URL? { lock.withLock { _url } }
+        func set(_ url: URL) { lock.withLock { _url = url } }
+    }
+
+    func testAPickedFileUploadsFromASpoolCopyThatGoesOnceSent() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("pick-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let picked = dir.appendingPathComponent("notes.md")
+        try Data("# notes".utf8).write(to: picked)
+
+        let files = model()
+        await files.addFile(at: picked)?.value
+        XCTAssertEqual(files.refs, ["1730000000-a1b2c3-notes.md"])
+        XCTAssertEqual(uploads.first?.1, 7)
+        let sent = try XCTUnwrap(sentFrom.first)
+        XCTAssertEqual(sent.deletingLastPathComponent().standardizedFileURL,
+                       AttachmentSpool.folder.standardizedFileURL, "streamed from the spool, not read into memory")
+        XCTAssertFalse(exists(sent), "the copy goes once the hub has it")
+        XCTAssertTrue(exists(picked), "the picked original is left alone")
+    }
+
+    func testAFailedUploadKeepsItsFileForRetryAndRemoveDeletesIt() async throws {
+        let files = model()
+        failNext = true
+        await files.addFile(name: "a.txt", data: Data("a".utf8))?.value
+        let kept = try XCTUnwrap(sentFrom.last)
+        XCTAssertTrue(exists(kept), "Retry needs the bytes: they wait on disk, not in memory")
+        await files.retry(files.items[0].id)?.value
+        XCTAssertEqual(sentFrom.last, kept, "the retry sends the same file")
+        XCTAssertFalse(exists(kept))
+
+        failNext = true
+        await files.addFile(name: "b.txt", data: Data("b".utf8))?.value
+        let failed = try XCTUnwrap(sentFrom.last)
+        XCTAssertTrue(exists(failed))
+        files.remove(files.items[1].id)
+        XCTAssertFalse(exists(failed), "dropping the chip deletes its file")
+
+        failNext = true
+        await files.addFile(name: "c.txt", data: Data("c".utf8))?.value
+        let cleared = try XCTUnwrap(sentFrom.last)
+        files.clear()
+        XCTAssertFalse(exists(cleared), "a send or clear deletes the kept files")
+    }
+
+    func testAPhotoFromPhotosConvertsFromItsFile() async throws {
+        let files = model()
+        var convertedFrom: URL?
+        files.convertFile = { url in
+            convertedFrom = url
+            return Data("jpeg".utf8)
+        }
+        let original = try AttachmentSpool.write(Data("original pixels".utf8))
+        await files.addPhoto(file: { original })?.value
+        XCTAssertEqual(convertedFrom, original)
+        XCTAssertFalse(exists(original), "the original copy goes once the JPEG is made")
+        XCTAssertEqual(uploads.first?.0, "photo-1.jpg")
+        XCTAssertEqual(uploads.first?.1, 4)
+        XCTAssertEqual(files.refs.count, 1)
+    }
+
+    func testARemovedPickNeverLeavesItsFileBehind() async throws {
+        let gate = Gate()
+        let files = model()
+        let made = Made()
+        let task = files.addPhoto(file: {
+            // Photos copies the original into the spool as the load runs.
+            let original = try AttachmentSpool.write(Data("pixels".utf8))
+            made.set(original)
+            await gate.wait()
+            return original
+        })
+        // Let the load start, then send the message.
+        while made.url == nil { await Task.yield() }
+        files.clear()
+        gate.open()
+        await task?.value
+        let original = try XCTUnwrap(made.url)
+        XCTAssertFalse(exists(original), "a pick that lands after a clear deletes its copy")
+        XCTAssertTrue(uploads.isEmpty)
+    }
+
+    func testOpeningAnotherChatNeverSweepsALiveRetryFile() throws {
+        // The launch's sweep has run (the first composer does it).
+        AttachmentSpool.sweepLeftovers()
+        // A file kept for Retry, copied from an original last changed
+        // long ago, so its date says nothing about how live it is.
+        let kept = try AttachmentSpool.write(Data("pdf".utf8))
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-30 * 24 * 3600)],
+                                              ofItemAtPath: kept.path)
+        _ = ComposerAttachments()
+        AttachmentSpool.sweepLeftovers()
+        XCTAssertTrue(exists(kept), "only an earlier run's files are swept, once per launch")
+        AttachmentSpool.remove(kept)
+    }
+
+    func testClearingTheSpoolEmptiesIt() throws {
+        let a = try AttachmentSpool.write(Data("a".utf8))
+        let b = try AttachmentSpool.copy(a)
+        AttachmentSpool.clear()
+        XCTAssertFalse(exists(a))
+        XCTAssertFalse(exists(b))
     }
 
     func testClearEmptiesTheComposer() {
