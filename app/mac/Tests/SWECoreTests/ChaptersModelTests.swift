@@ -649,6 +649,102 @@ import Testing
         #expect(text.contains("a.md"))
     }
 
+    // MARK: - New chapter sheet suggestions
+
+    @Test func emptyFolderQueryListsTopLevelAndEveryFolder() {
+        let rows = ChapterSuggest.folders(
+            "", in: ["", "eng/review", "eng", "harnesses"])
+        #expect(rows == [.folder(""), .folder("eng"), .folder("eng/review"),
+                         .folder("harnesses")])
+    }
+
+    @Test func emptyFileQueryListsTheFoldersDirectChildren() {
+        let files = ["a.md", "eng/x.md", "eng/deep/y.md", "other.md"]
+        #expect(ChapterSuggest.files("", folder: "eng", in: files)
+                == [.file("eng/x.md")])
+        #expect(ChapterSuggest.files("", folder: "", in: files)
+                == [.file("a.md"), .file("other.md")])
+    }
+
+    @Test func folderRankingIsExactPrefixComponentThenContains() {
+        let folders = ["xeng", "eng/review", "eng", "review/eng"]
+        let rows = ChapterSuggest.folders("eng", in: folders)
+        #expect(rows.prefix(4).map {
+            if case .folder(let p) = $0 { return p }; return "?"
+        } == ["eng", "eng/review", "review/eng", "xeng"])
+        // Exact match is occupied: no create row.
+        #expect(!rows.contains {
+            if case .create = $0 { return true }; return false
+        })
+    }
+
+    @Test func folderSuggestionsIgnoreCase() {
+        #expect(ChapterSuggest.folders("ENG", in: ["eng/review"]) ==
+                [.folder("eng/review"), .create("ENG")])
+        // Existing folder under a different case blocks the create row.
+        let rows = ChapterSuggest.folders("ENG", in: ["Eng"])
+        #expect(rows == [.folder("Eng")])
+    }
+
+    @Test func fileQueriesIgnoreATrailingMdSuffix() {
+        let files = ["eng/x.md"]
+        #expect(ChapterSuggest.files("x", folder: "eng", in: files) ==
+                [.file("eng/x.md")])
+        // "x.md" matches the same file and offers no duplicate create.
+        #expect(ChapterSuggest.files("x.md", folder: "eng", in: files)
+                == [.file("eng/x.md")])
+    }
+
+    @Test func createRowsVanishWhenTheNameIsTakenOrInvalid() {
+        // Path exists, case-insensitively.
+        #expect(ChapterSuggest.files("NEW", folder: "eng", in: ["eng/new.md"]) ==
+                [.file("eng/new.md")])
+        // Invalid names never get a create row.
+        let rows = ChapterSuggest.files("../x", folder: "", in: [])
+        #expect(rows == [])
+        // A hidden component is rejected the same way.
+        #expect(ChapterSuggest.folders(".secret", in: []).filter {
+            if case .create = $0 { return true }; return false
+        } == [])
+    }
+
+    @Test func aNewNestedFolderGetsACreateRow() {
+        #expect(ChapterSuggest.folders("a/b", in: []) ==
+                [.create("a/b")])
+    }
+
+    @Test func suggestionsCapAtEight() {
+        let folders = ["eng"] + (0..<20).map { "eng\($0)" }
+        let rows = ChapterSuggest.folders("eng", in: folders)
+        #expect(rows.count == 8)
+        #expect(rows.allSatisfy {
+            if case .folder = $0 { return true }; return false
+        })
+    }
+
+    @Test func fileRowsRankTheCurrentFoldersChildrenFirst() {
+        let files = ["other/eng.md", "eng/eng.md", "eng/a.md"]
+        let rows = ChapterSuggest.files("eng", folder: "eng", in: files)
+        #expect(rows.prefix(2).map {
+            if case .file(let p) = $0 { return p }; return "?"
+        } == ["eng/eng.md", "other/eng.md"])
+    }
+
+    @Test func fileRankingUsesTheBasenameNotThePath() {
+        let files = ["x/style-guide.md", "x/style.md", "y/style.md",
+                     "y/style-guide.md"]
+        // In the same folder an exact basename beats a longer prefix.
+        #expect(ChapterSuggest.files("style", folder: "x", in: files)
+            .prefix(2).map {
+                if case .file(let p) = $0 { return p }; return "?"
+            } == ["x/style.md", "x/style-guide.md"])
+        // The folder's children still rank first across folders.
+        #expect(ChapterSuggest.files("style", folder: "x", in: files)
+            .prefix(3).map {
+                if case .file(let p) = $0 { return p }; return "?"
+            } == ["x/style.md", "x/style-guide.md", "y/style.md"])
+    }
+
     @Test func aToggleHitByADiskChangeReloadsAndReports() async throws {
         let dir = try TempDir()
         let runner = Runner([check(dir.url)])
