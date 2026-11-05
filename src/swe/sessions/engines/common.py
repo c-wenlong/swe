@@ -7,6 +7,7 @@ import os
 import re
 import sqlite3
 from datetime import datetime
+from collections.abc import Iterable, Iterator
 from typing import Any
 from urllib.parse import quote, unquote, urlparse
 
@@ -89,6 +90,38 @@ def expand_path(path: str) -> str:
     if path == "~" or path.startswith("~/") or path.startswith("~\\"):
         return os.path.expanduser(path)
     return path
+
+
+def decoded_lines(raw_lines: Iterable[bytes]) -> Iterator[str]:
+    """Each line of a binary file object as text, bad UTF-8 replaced.
+
+    A file opened in text mode raises ``UnicodeDecodeError`` mid-iteration
+    on one invalid byte, losing that line and every one after it. Decoding
+    line by line confines the damage to the line that holds the byte.
+    """
+    for raw in raw_lines:
+        yield raw.decode("utf-8", errors="replace")
+
+
+def read_tail_lines(path: str, tail_bytes: int) -> tuple[list[str], bool]:
+    """The whole lines in the last ``tail_bytes`` of ``path``, and whether
+    that window covers the file.
+
+    A window that starts mid-file opens inside a record, so its first line
+    is dropped as a partial. The read starts one byte before the window:
+    when that byte is the newline ending the previous record, the dropped
+    "partial" is empty and the window's first record is kept. ``OSError``
+    propagates.
+    """
+    size = os.path.getsize(path)
+    start = max(0, size - tail_bytes)
+    with open(path, "rb") as fh:
+        fh.seek(start - 1 if start > 0 else 0)
+        chunk = fh.read().decode("utf-8", errors="ignore")
+    lines = chunk.split("\n")
+    if start > 0:
+        lines = lines[1:]
+    return lines, start == 0
 
 
 def sqlite_uri(path, mode: str = "ro") -> str:
