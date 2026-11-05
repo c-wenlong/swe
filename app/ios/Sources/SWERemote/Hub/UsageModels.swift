@@ -111,7 +111,9 @@ struct LimitWindow: Decodable, Hashable {
     /// When a carried-over figure was read.
     let asOf: Double?
 
-    var label: String { UsageFormat.windowLabel(window, seconds: windowSeconds) }
+    func label(harness: String) -> String {
+        UsageFormat.windowLabel(window, seconds: windowSeconds, harness: harness)
+    }
 }
 
 /// Cursor's usage billed beyond the plan.

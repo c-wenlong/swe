@@ -85,7 +85,7 @@ private struct MenuBarSection: View {
 
     private var limitOptions: [(value: String?, title: String)] {
         [(nil, "Tightest of all")] + app.limits.readings.map { reading in
-            (Optional(reading.id), reading.window.isEmpty ? reading.title : "\(reading.title) \(UsageFormat.window(reading.window))")
+            (Optional(reading.id), reading.window.isEmpty ? reading.title : "\(reading.title) \(UsageFormat.window(reading.harness, reading.window))")
         }
     }
 
@@ -427,7 +427,7 @@ struct SourceSettingsRow: View {
             if !row.windows.isEmpty {
                 FlowLayout(spacing: 6, lineSpacing: 6) {
                     ForEach(row.windows, id: \.self) { window in
-                        WindowChip(title: UsageFormat.window(window),
+                        WindowChip(title: UsageFormat.window(row.harness, window),
                                    isOn: Binding(get: { showsWindow(window) },
                                                  set: { setWindowShown(window, $0) }))
                     }

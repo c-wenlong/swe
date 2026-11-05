@@ -80,7 +80,7 @@ final class StatusItemController: NSObject {
         }
         let percent = limit.percent
         button.image = LimitRing.image(fraction: limit.usedPercent / 100, critical: percent >= 90)
-        let window = limit.window.isEmpty ? "" : " \(UsageFormat.window(limit.window))"
+        let window = limit.window.isEmpty ? "" : " \(UsageFormat.window(limit.harness, limit.window))"
         button.toolTip = "\(limit.title)\(window) at \(percent)%"
         // VoiceOver hears the same figures the item shows.
         let shown = text.isEmpty ? "" : ". Showing \(text)"
@@ -699,7 +699,7 @@ private struct PanelOtherRow: View {
                         app.popup.shows(window: $0.window, source: row.id, harness: row.name,
                                         allWindows: row.limit.allWindows.map(\.window))
                     }, id: \.window) { window in
-                PanelLimitRow(label: window.window.isEmpty ? "Usage" : UsageFormat.window(window.window),
+                PanelLimitRow(label: window.window.isEmpty ? "Usage" : UsageFormat.window(row.name, window.window),
                               percent: Double(window.usedPercent), resetsAt: window.resetAt,
                               unavailable: window.unavailable, asOf: window.asOf)
             }

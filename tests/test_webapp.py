@@ -522,6 +522,62 @@ class TestShellWord(unittest.TestCase):
         self.assertEqual(self.word(""), "''")
 
 
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestResetIn(unittest.TestCase):
+    """Fmt.resetIn: "in 12m", "in 4h 28m", "in 6d 13h" — two units, so a
+    day-plus reset still shows the hours. The day count floors: 1d 30m
+    reads "in 1d", never a decimal."""
+
+    def reset_in(self, seconds):
+        src = (FORMAT_JS.read_text(encoding="utf-8")
+               + "\nprocess.stdout.write(JSON.stringify(Fmt.resetIn(Date.now() / 1000 + "
+               + json.dumps(seconds) + ")));\n")
+        done = subprocess.run(["node", "-e", src], capture_output=True,
+                              text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def test_two_units_at_every_scale(self):
+        self.assertEqual(self.reset_in(12 * 60), "in 12m")
+        self.assertEqual(self.reset_in(20), "in 1m")
+        self.assertEqual(self.reset_in(4 * 3600 + 28 * 60), "in 4h 28m")
+        self.assertEqual(self.reset_in(3 * 3600), "in 3h")
+        self.assertEqual(self.reset_in(30 * 3600), "in 1d 6h")
+        self.assertEqual(self.reset_in(6 * 86400 + 13 * 3600 + 20), "in 6d 13h")
+
+    def test_zero_spare_hours_drops_the_second_unit(self):
+        self.assertEqual(self.reset_in(25 * 86400), "in 25d")
+        self.assertEqual(self.reset_in(86400 + 30 * 60), "in 1d")
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestWindowLabel(unittest.TestCase):
+    """Fmt.windowLabel: Cursor's buckets read "Cursor models" and
+    "Other models"; another harness's lookalike keys keep the generic
+    names."""
+
+    def label(self, harness, window):
+        src = (FORMAT_JS.read_text(encoding="utf-8")
+               + "\nprocess.stdout.write(JSON.stringify(Fmt.windowLabel("
+               + json.dumps(harness) + ", " + json.dumps(window) + ")));\n")
+        done = subprocess.run(["node", "-e", src], capture_output=True,
+                              text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def test_cursor_buckets(self):
+        self.assertEqual(self.label("cursor", "included"), "Cursor models")
+        self.assertEqual(self.label("cursor", "api"), "Other models")
+        self.assertEqual(self.label("cursor", "auto"), "Auto")
+        self.assertEqual(self.label("cursor", "grok_bot"), "Grok Bot")
+
+    def test_other_harnesses_keep_the_generic_names(self):
+        self.assertEqual(self.label("claude", "included"), "Included")
+        self.assertEqual(self.label("claude", "api"), "API")
+        self.assertEqual(self.label("devin", "5h"), "5h")
+        self.assertEqual(self.label("devin", None), "Usage")
+
+
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
 class TestRevealActiveTab(unittest.TestCase):

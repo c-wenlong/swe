@@ -121,22 +121,22 @@ final class UsageDecodingTests: XCTestCase {
         let rows = try XCTUnwrap(UsageFixtures.decode(UsageFixtures.usage, as: UsageResponse.self).harnesses)
         let codex = try XCTUnwrap(rows[1].rateLimit?.displayWindows)
         XCTAssertEqual(codex.count, 1)
-        XCTAssertEqual(codex[0].label, "Weekly")
+        XCTAssertEqual(codex[0].label(harness: "codex"), "Weekly")
         XCTAssertEqual(codex[0].usedPercent, 30)
-        XCTAssertEqual(rows[0].rateLimit?.displayWindows.map(\.label), ["Weekly"])
+        XCTAssertEqual(rows[0].rateLimit?.displayWindows.map { $0.label(harness: "claude") }, ["Weekly"])
     }
 
     func testMultiWindowAndExtras() throws {
         let rows = try XCTUnwrap(UsageFixtures.decode(UsageFixtures.usage, as: UsageResponse.self).harnesses)
         let devin = try XCTUnwrap(rows[4].rateLimit)
-        XCTAssertEqual(devin.displayWindows.map(\.label), ["Daily", "Weekly"])
+        XCTAssertEqual(devin.displayWindows.map { $0.label(harness: "devin") }, ["Daily", "Weekly"])
         XCTAssertEqual(devin.extraUsageUsd, 100)
         XCTAssertEqual(LimitCard.extraLines(devin), ["$100 extra usage left"])
         let cursor = try XCTUnwrap(rows[3].rateLimit)
         XCTAssertEqual(cursor.onDemand?.state, "unlimited")
         XCTAssertEqual(cursor.displayWindows[1].unavailable, true)
         XCTAssertEqual(cursor.displayWindows[1].asOf, 1_799_990_000)
-        XCTAssertEqual(cursor.displayWindows.map(\.label), ["Included", "Grok bot"])
+        XCTAssertEqual(cursor.displayWindows.map { $0.label(harness: "cursor") }, ["Cursor models", "Grok bot"])
         XCTAssertEqual(LimitCard.extraLines(cursor), ["On-demand: $0, no limit"])
     }
 
@@ -250,16 +250,19 @@ final class UsageFormatTests: XCTestCase {
     }
 
     func testWindowLabels() {
-        XCTAssertEqual(UsageFormat.windowLabel("5h", seconds: nil), "5 h")
-        XCTAssertEqual(UsageFormat.windowLabel("7d", seconds: nil), "Weekly")
-        XCTAssertEqual(UsageFormat.windowLabel("1d", seconds: nil), "Daily")
-        XCTAssertEqual(UsageFormat.windowLabel("30d", seconds: nil), "30 days")
-        XCTAssertEqual(UsageFormat.windowLabel("7d_sonnet", seconds: nil), "Weekly, Sonnet")
-        XCTAssertEqual(UsageFormat.windowLabel("7d_oauth_apps", seconds: nil), "Weekly, Oauth apps")
-        XCTAssertEqual(UsageFormat.windowLabel("included", seconds: 2_678_400), "Included")
-        XCTAssertEqual(UsageFormat.windowLabel(nil, seconds: 604_800), "Weekly")
-        XCTAssertEqual(UsageFormat.windowLabel(nil, seconds: 18_000), "5 h")
-        XCTAssertEqual(UsageFormat.windowLabel(nil, seconds: nil), "Quota")
+        XCTAssertEqual(UsageFormat.windowLabel("5h", seconds: nil, harness: "claude"), "5 h")
+        XCTAssertEqual(UsageFormat.windowLabel("7d", seconds: nil, harness: "claude"), "Weekly")
+        XCTAssertEqual(UsageFormat.windowLabel("1d", seconds: nil, harness: "claude"), "Daily")
+        XCTAssertEqual(UsageFormat.windowLabel("30d", seconds: nil, harness: "codex"), "30 days")
+        XCTAssertEqual(UsageFormat.windowLabel("7d_sonnet", seconds: nil, harness: "claude"), "Weekly, Sonnet")
+        XCTAssertEqual(UsageFormat.windowLabel("7d_oauth_apps", seconds: nil, harness: "claude"), "Weekly, Oauth apps")
+        XCTAssertEqual(UsageFormat.windowLabel("included", seconds: 2_678_400, harness: "cursor"), "Cursor models")
+        XCTAssertEqual(UsageFormat.windowLabel("api", seconds: 2_678_400, harness: "cursor"), "Other models")
+        // Another harness's lookalike keys keep the generic names.
+        XCTAssertEqual(UsageFormat.windowLabel("included", seconds: 2_678_400, harness: "claude"), "Included")
+        XCTAssertEqual(UsageFormat.windowLabel(nil, seconds: 604_800, harness: "codex"), "Weekly")
+        XCTAssertEqual(UsageFormat.windowLabel(nil, seconds: 18_000, harness: "codex"), "5 h")
+        XCTAssertEqual(UsageFormat.windowLabel(nil, seconds: nil, harness: "codex"), "Quota")
     }
 
     func testCompactTokens() {

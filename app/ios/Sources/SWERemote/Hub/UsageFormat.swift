@@ -44,10 +44,16 @@ enum UsageFormat {
         return small == 0 ? "resets in \(big) \(units.0)" : "resets in \(big) \(units.0) \(small) \(units.1)"
     }
 
-    /// A provider's window label as a person would say it: "5h" is "5 h",
-    /// "7d" is "Weekly", "7d_sonnet" is "Weekly, Sonnet". With no label the
-    /// window's length names it (Codex reports a bare 7-day window).
-    static func windowLabel(_ raw: String?, seconds: Double?) -> String {
+    /// A provider's window label as a person would say it: Cursor's
+    /// "included" and "api" read "Cursor models" and "Other models",
+    /// "5h" is "5 h", "7d" is "Weekly", "7d_sonnet" is "Weekly, Sonnet".
+    /// With no label the window's length names it (Codex reports a bare
+    /// 7-day window).
+    static func windowLabel(_ raw: String?, seconds: Double?, harness: String) -> String {
+        if harness == "cursor" {
+            if raw == "included" { return "Cursor models" }
+            if raw == "api" { return "Other models" }
+        }
         if let raw, !raw.isEmpty {
             let parts = raw.split(separator: "_", maxSplits: 1).map(String.init)
             if let span = span(parts[0]) {

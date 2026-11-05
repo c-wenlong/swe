@@ -86,7 +86,7 @@ struct LimitCard: View {
                 if let limit, limit.isOK {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(Array(limit.displayWindows.enumerated()), id: \.offset) { _, window in
-                            LimitBar(window: window, now: now)
+                            LimitBar(window: window, harness: harness.name, now: now)
                         }
                     }
                     .opacity(stale ? 0.55 : 1)
@@ -136,6 +136,7 @@ struct LimitCard: View {
 /// One quota window: label, reset countdown and percent over a 6 pt bar.
 struct LimitBar: View {
     var window: LimitWindow
+    var harness: String
     var now: Date
 
     var body: some View {
@@ -144,7 +145,7 @@ struct LimitBar: View {
         let tone = UsageFormat.tone(usedPercent: used, limitReached: window.limitReached == true)
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(window.label).font(Theme.control).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                Text(window.label(harness: harness)).font(Theme.control).foregroundStyle(Theme.textPrimary).lineLimit(1)
                 Spacer(minLength: 4)
                 Text(unavailable ? asOf : UsageFormat.resetCountdown(window.resetAt, now: now.timeIntervalSince1970))
                     .font(Theme.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary).lineLimit(1)

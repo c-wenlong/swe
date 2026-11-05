@@ -49,6 +49,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Cursor's limit meters read "Cursor models" and "Other models", and
+  reset times show two units.** The rows the Cursor accounts and harness
+  cards listed as "Included" and "API" now say what they count; any
+  reset a day or more out adds the hours ("in 6d 13h" rather than
+  "in 6d"), matching the shorter windows' "in 4h 28m". Same names and
+  countdown on the Mac, iPhone and web apps.
+
 - **The chapters rail's "+" opens New chapter in one click.** It was a menu behind a hover tip that swallowed the first click; New folder went with it since an empty File field already creates a folder.
 
 - **The New chapter suggestions drop below their field and wait for typing.** The floating list now hangs 4pt under the focused field (the earlier overlay drew it upward over the field), opens only after a 250ms pause on a non-empty field or on Down Arrow, and an empty field shows no list at all.
