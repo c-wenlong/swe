@@ -28,7 +28,7 @@ permissions:
 # tests, the macOS install smoke test and the Nix derivation build now
 # run in native.yml (nightly on main, on merge_group, on demand) and
 # again on every `v*` tag in release.yml, which builds and verifies the
-# shipping artifacts (wheel, Nix derivation, Quiver.app and its DMG).
+# shipping artifacts (wheel, Nix derivation, SWE.app and its DMG).
 
 env:
   # How many jobs each interpreter's suite is split across.  Must match the

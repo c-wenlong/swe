@@ -49,7 +49,7 @@ DAYS=14
 APPLY=0
 REPO_ARG=""
 
-usage() { sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^#\{1,2\} \{0,1\}//'; }
+usage() { sed -n '2,44p' "${BASH_SOURCE[0]}" | sed 's/^#\{1,2\} \{0,1\}//'; }
 
 die() { printf 'reaper: ERROR: %s\n' "$*" >&2; exit 1; }
 log() { printf '%s [reaper] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }

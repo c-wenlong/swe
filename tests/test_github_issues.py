@@ -346,6 +346,15 @@ class TestBuildPrompt(unittest.TestCase):
         self.assertLess(text.count("b"), gh_issues.BODY_LIMIT + 200)
         self.assertLess(text.count("c"), gh_issues.COMMENT_LIMIT + 200)
 
+    def test_many_short_lines_still_fit_once_quoted(self):
+        # 20,000 characters whose quoting would add 16,000 more: the
+        # body is cut again until the prompt fits.
+        body = "a\n" * 8000 + " " * 3998 + "\nz"
+        text = gh_issues.build_prompt("o/r", _issue(body=body), "/w")
+        self.assertLessEqual(len(text), gh_issues.PROMPT_LIMIT)
+        self.assertIn("more characters cut", text)
+        self.assertTrue(text.endswith('("Closes #5").'))
+
     def test_issue_number(self):
         for ref, want in (("5", 5), ("#5", 5), ("0", None), ("abc", None),
                           ("https://github.com/o/r/issues/12", 12),

@@ -20,6 +20,8 @@ from swe.remote import hub
 from swe.remote.hub import HubState, make_server
 from swe.sessions.models import Session
 
+from tests._tempdir import temp_dir
+
 
 def _session(sid="s1", tool="claude", path="/tmp/proj"):
     return Session(timestamp=0, agent="Claude Code", path=path,
@@ -113,7 +115,7 @@ class TestRemoteKeys(unittest.TestCase):
 
 class TestRemoteCatalog(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def test_merge_stamps_and_persists(self):
         rows = [{"key": "claude:a", "title": "t", "ownership": "observed"}]
@@ -266,13 +268,13 @@ class TestRemoteCatalog(unittest.TestCase):
         self.assertEqual(catalog_mod.last_used_models(self.home),
                          {"claude": "opus", "codex": "gpt-5"})
         self.assertEqual(catalog_mod.last_used_models(
-            Path(tempfile.mkdtemp())), {})
+            temp_dir(self)), {})
 
     def test_app_prefs_follow_the_current_home(self):
         # Bound to Path.home() at import, the path ignored a HOME set
         # later (a test home, a hub started for another user's home).
         import plistlib
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         prefs = home / catalog_mod._APP_PREFS_REL
         prefs.parent.mkdir(parents=True)
         prefs.write_bytes(plistlib.dumps({"providerOrder": ["codex"]}))
@@ -282,7 +284,7 @@ class TestRemoteCatalog(unittest.TestCase):
 
     def _launchable(self, reg, prefs=None, on_path=None):
         import plistlib
-        prefs_path = Path(tempfile.mkdtemp()) / "prefs.plist"
+        prefs_path = temp_dir(self) / "prefs.plist"
         if prefs is not None:
             prefs_path.write_bytes(plistlib.dumps(prefs))
         on_path = set(reg) if on_path is None else on_path
@@ -319,7 +321,7 @@ class TestRemoteCatalog(unittest.TestCase):
         self.assertEqual([i["tracked"] for i in items], [False, True, True])
 
     def test_known_session_ids_adds_the_parsers_fresh_view(self):
-        proj = tempfile.mkdtemp()
+        proj = str(temp_dir(self))
         def sess(sid, path=proj, tool="opencode"):
             return Session(timestamp=0, agent="x", path=path,
                            session_id=sid, tool_name=tool)
@@ -348,7 +350,7 @@ class TestRemoteCatalog(unittest.TestCase):
 
 class TestPresence(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.state = HubState(self.home)
 
     def test_connect_disconnect_events(self):
@@ -381,7 +383,7 @@ class TestPresence(unittest.TestCase):
 
 class TestCommandQueue(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.state = HubState(self.home)
 
     def test_queue_journals_and_replays(self):
@@ -421,7 +423,7 @@ class TestCommandQueue(unittest.TestCase):
 
 class TestAgentState(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def _agent(self):
         return agent_mod.RemoteAgent("http://hub", "cred", home=self.home)
@@ -1192,7 +1194,7 @@ class TestEndToEnd(unittest.TestCase):
                 # A fresh satellite credential, unbound: the agent's own
                 # register binds it to its generated machine_id.
                 cred = srv._pair(role="satellite")["credential"]
-                sat_home = Path(tempfile.mkdtemp())
+                sat_home = temp_dir(self)
                 agent = agent_mod.RemoteAgent(
                     srv.base, cred, home=sat_home)
                 sess = _session("r1")
@@ -1279,7 +1281,7 @@ class TestAgentEdges(unittest.TestCase):
     """agent.py: HTTP helpers, pairing, frame handling, op edges."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def _agent(self):
         return agent_mod.RemoteAgent("http://h:1", "cred", self.home)
@@ -1882,7 +1884,7 @@ class TestAgentLoopEdges(unittest.TestCase):
     """agent.py: stream loop, run(), save-cursor failure."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def _agent(self):
         return agent_mod.RemoteAgent("http://h:1", "cred", self.home)
@@ -1967,7 +1969,7 @@ class TestAgentLoopEdges(unittest.TestCase):
 
 class TestCatalogEdge(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def test_lookups_use_the_index_built_with_the_rows(self):
         sessions = [_session(f"s{i}") for i in range(300)]
@@ -2114,7 +2116,7 @@ class TestR3FinalEdges(unittest.TestCase):
     """Tail of the diff: loop bodies, read failures, upload variants."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def test_stream_sleep_between_reconnects(self):
         ag = agent_mod.RemoteAgent("http://h:1", "c", self.home)
@@ -2254,7 +2256,7 @@ class TestReviewFixes(unittest.TestCase):
     dispatch threading, backlog cap, path safety, tail op."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def _agent(self):
         return agent_mod.RemoteAgent("http://h:1", "cred", self.home)
@@ -2548,7 +2550,7 @@ class TestSatelliteQueueMode(unittest.TestCase):
     """``queue``-mode sends wait for idle on the satellite, like the hub."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         poll = patch.object(agent_mod, "QUEUE_POLL_S", 0.01)
         poll.start()
         self.addCleanup(poll.stop)

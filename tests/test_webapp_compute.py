@@ -20,6 +20,8 @@ from swe.webapp.pages import compute as page
 from tests.test_remote_hub import HubBase
 from tests.test_webapp import app_js_function
 
+from tests._tempdir import temp_dir
+
 HOME = "/home/u"
 TICK = 100
 
@@ -166,7 +168,7 @@ class TestAttribution(unittest.TestCase):
                     "claude": {"command": "claude", "aliases": ["cc"], "state": "starred", "pin": 1},
                     "gemini": {"command": "gemini"},
                     "old": {"command": "old", "state": "archived", "archived": {"reason": "x"}}}
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         (home / "real").mkdir()
         os.symlink(home / "real", home / ".claude")
         with patch("swe.harness.registry.load_registry_readonly", return_value=registry), \
@@ -181,7 +183,7 @@ class TestAttribution(unittest.TestCase):
 
 
     def test_legacy_install_reads_stars_without_migrating(self):
-        folder = Path(tempfile.mkdtemp())
+        folder = temp_dir(self)
         tools, stars, archive = folder / "tools.json", folder / "stars.json", folder / "archived.json"
         tools.write_text(json.dumps({"claude": {"command": "claude"}, "codex": {"command": "codex"},
                                      "old": {"command": "old"}}))
@@ -225,7 +227,7 @@ class TestMeters(unittest.TestCase):
         self.assertEqual(mem["swap_used_bytes"], 600 * 1024)
         self.assertEqual(compute.read_load(m.proc), [0.5, 0.25, 0.1])
         self.assertEqual(compute.boot_time(m.proc), 1000.0)
-        empty = Path(tempfile.mkdtemp())
+        empty = temp_dir(self)
         self.assertIsNone(compute.read_cpu_times(empty))
         self.assertIsNone(compute.read_memory(empty))
         self.assertIsNone(compute.read_load(empty))
@@ -244,7 +246,7 @@ class TestSensors(unittest.TestCase):
         self.assertEqual(fans, {"rpm": 2500.0, "up": True})
 
     def test_no_sensors(self):
-        self.assertEqual(compute.read_temperatures(Path(tempfile.mkdtemp())), ({}, None))
+        self.assertEqual(compute.read_temperatures(temp_dir(self)), ({}, None))
 
     def test_nvidia_rows(self):
         text = ("0, NVIDIA GeForce GTX 1070, 12, 17, 8192, 45, 10.72\n"
@@ -498,14 +500,14 @@ class TestAutoClean(_Model):
         return calls
 
     def _config(self, section):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         from swe.configuration import save_config
         save_config({"compute": section}, config_file_for(home))
         self.model.home = home
 
     def test_no_config_signals_nothing(self):
         calls = self._signals()
-        self.model.home = Path(tempfile.mkdtemp())
+        self.model.home = temp_dir(self)
         self.model.sample()
         self.assertEqual(calls, [])
 
@@ -615,7 +617,7 @@ class TestAutoClean(_Model):
         self.assertFalse(self.model.payload(10)["orphans"][0]["quitting"])
 
     def test_clean_settings_coerces_and_defaults(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         self.assertEqual(compute.clean_settings(home),
                          {"enabled": False, "force": False,
                           "orphan_age_seconds": compute.DEFAULT_ORPHAN_AGE,
@@ -661,7 +663,7 @@ class TestSettingsPost(_Model):
         return ctx
 
     def test_settings_round_trip_starts_the_ticker(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         with patch.object(compute, "supported", return_value=True), \
                 patch.object(compute, "model", return_value=self.model), \
                 patch.object(compute, "start_ticker") as ticker:
@@ -679,7 +681,7 @@ class TestSettingsPost(_Model):
                           "orphan_age_seconds": 7200})
 
     def test_disabling_keeps_the_saved_age(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         ctx = self._ctx(home)
         with patch.object(compute, "supported", return_value=True), \
                 patch.object(compute, "model", return_value=self.model), \
@@ -690,7 +692,7 @@ class TestSettingsPost(_Model):
         self.assertEqual(body["autoclean"]["orphan_age_seconds"], 7200)
 
     def test_bad_bodies_are_refused(self):
-        ctx = self._ctx(Path(tempfile.mkdtemp()))
+        ctx = self._ctx(temp_dir(self))
         with patch.object(compute, "supported", return_value=True):
             for body, code in (({}, "bad_enabled"),
                                ({"enabled": "yes"}, "bad_enabled")):
@@ -704,7 +706,7 @@ class TestSettingsPost(_Model):
         self.assertFalse(config_file_for(ctx.home).exists())
 
     def test_the_age_clamps_to_the_field_bounds(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         # model and the ticker are patched like the neighbouring tests:
         # an enabled write starts the real sampler otherwise, and the
         # real sampler signals the host's real orphans.

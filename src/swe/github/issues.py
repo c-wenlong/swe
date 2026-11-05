@@ -216,7 +216,10 @@ def build_prompt(repo: str, issue: dict, worktree_path: str,
     while len(text) > limit and kept:
         kept.pop(0)
         text = assemble(body, kept)
-    if len(text) > limit:
-        room = max(_BODY_FLOOR, len(body) - (len(text) - limit) - 80)
+    # Quoting grows the body by two characters a line, so one cut sized
+    # on the raw length can still land over: cut again until it fits.
+    room = len(body)
+    while len(text) > limit and room > _BODY_FLOOR:
+        room = max(_BODY_FLOOR, room - (len(text) - limit) - 80)
         text = assemble(_clip(body, room), kept)
     return text

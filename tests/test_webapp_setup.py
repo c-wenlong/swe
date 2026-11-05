@@ -28,6 +28,8 @@ from tests.test_init_hub import _hub_repo
 from tests.test_remote_hub import HubBase
 from tests.test_webapp import app_js_function
 
+from tests._tempdir import temp_dir
+
 GIT = shutil.which("git")
 
 
@@ -323,7 +325,7 @@ class TestInstall(_Home, unittest.TestCase):
     """Install on a missing agent's sheet: swe install --via, output captured."""
 
     def setUp(self):
-        self.make_home(Path(tempfile.mkdtemp()))
+        self.make_home(temp_dir(self))
 
     def install(self, body, *, returncode=0, which=None, run=None):
         """POST install with the installer and PATH stubbed; returns (reply, run)."""

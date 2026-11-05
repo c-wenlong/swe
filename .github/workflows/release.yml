@@ -157,7 +157,7 @@ jobs:
     #                                imported
     #
     # With no MACOS_CERTIFICATE the job still compiles the prod bundle
-    # ad-hoc (`QUIVER_SIGN_IDENTITY=-`), which keeps the scaffold honest
+    # ad-hoc (`SWE_SIGN_IDENTITY=-`), which keeps the scaffold honest
     # before the secrets exist; make-dmg.sh still runs, but to a scratch
     # path, so signing, notarization and the release upload stay off.
     steps:

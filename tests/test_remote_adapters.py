@@ -7,7 +7,6 @@ No real harness binaries — ``_spawn`` is patched with scripted fakes
 import io
 import json
 import os
-import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -15,6 +14,8 @@ from unittest.mock import MagicMock, patch
 
 from swe.remote import inject, protocol, supervise
 from swe.sessions.models import Session
+
+from tests._tempdir import temp_dir
 
 
 def _session(tool="opencode", sid="ses_1", cwd="/tmp/proj"):
@@ -47,7 +48,7 @@ class _FakeServeProc:
 
 class TestOpencodeServe(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         inject.OpencodeServeInjector._serves.clear()
         self.calls = []          # (method, path, payload)
         self.proc = _FakeServeProc()
@@ -454,7 +455,7 @@ _HANDSHAKE = {
 
 class TestCodexAppServer(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         inject.CodexAppServerInjector._servers.clear()
         self.procs = []
 
@@ -664,7 +665,7 @@ class TestCodexAppServer(unittest.TestCase):
 
 class TestAttachModes(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def test_resolve_mode_matrix(self):
         oc = _session(tool="opencode")
@@ -749,7 +750,7 @@ class TestOpencodeServeEdges(unittest.TestCase):
     """Error/lifecycle branches of the opencode serve adapter."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         inject.OpencodeServeInjector._serves.clear()
 
     def tearDown(self):
@@ -1021,7 +1022,7 @@ class TestCodexAppServerEdges(unittest.TestCase):
     """Error/handshake branches of the codex app-server adapter."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         inject.CodexAppServerInjector._servers.clear()
         self.session = _session(
             tool="codex",
@@ -1275,7 +1276,7 @@ class TestCodexAppServerEdges(unittest.TestCase):
 
 class TestTmuxApprovalGates(unittest.TestCase):
     def test_stale_request_id_refused(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         supervise.mark(
             home, "k-stale", {"mode": "tmux", "tool_name": "claude"})
         supervise.set_pending_approval("k-stale", "req-new", "fp")
@@ -1287,7 +1288,7 @@ class TestTmuxApprovalGates(unittest.TestCase):
 
 class TestInjectResultDegraded(unittest.TestCase):
     def test_headless_steer_marks_degraded(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         supervise.mark(home, "k", _meta("headless", "claude"))
         inj = inject.ClaudeHeadlessInjector(home, "k")
         session = _session(tool="claude", sid="s1")
@@ -1304,7 +1305,7 @@ class TestInjectResultDegraded(unittest.TestCase):
         self.assertIn("steer queued", res.note)
 
     def test_tmux_steer_not_degraded(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         supervise.mark(home, "k", _meta("tmux", "claude"))
         inj = inject.TmuxInjector(home, "k")
         session = _session(tool="claude", sid="s1")

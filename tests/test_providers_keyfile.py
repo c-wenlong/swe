@@ -1,13 +1,14 @@
 """swe.providers.keyfile: the Mac app's APIKeysFile and APIKeysStore."""
 
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from swe.providers import keyfile
 from swe.providers.keyfile import KeyFileError, KeysFile
+
+from tests._tempdir import temp_dir
 
 
 class TestParse(unittest.TestCase):
@@ -103,7 +104,7 @@ class TestEdit(unittest.TestCase):
 
 class TestStore(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.path = self.home / ".swe" / "secrets" / "providers" / ".api_keys"
 
     def test_a_new_file_is_private_and_its_folder_sealed(self):
