@@ -453,7 +453,10 @@ class TestTaskGroupNames(unittest.TestCase):
         from tests.test_webapp_launch_sheets import MENU_JS, PAGES, STUB
         flow = r"""
 globalThis.pageHeader = (title, subtitle, actions = "") => `<header>${actions}</header>`;
-const task = (id, extra) => ({ id, kind: "issue", ref: id, title: "T" + id, state: "open",
+const lastQ = {};
+const qsa = panel.querySelectorAll.bind(panel);
+panel.querySelectorAll = (sel) => (lastQ[sel] = qsa(sel));
+const task = (id, extra) => ({ id, kind: "issue", ref: id, title: "Task" + id, state: "open",
   status: "Open", sessions: [], ...extra });
 const rows = [task("1", { source: "linear" }), task("2", { source: "github", repo: "" }),
   task("3", { source: "jira" }), task("4", {}), task("5", { source: "linear", repo: "", project: "QUI" }),
@@ -465,7 +468,14 @@ apiAnswers.push(["/v1/app/tasks", { status: 200, data: { machine: "hub", github:
   await tick();
   const html = panel.innerHTML;
   const rail = html.slice(html.indexOf('<aside class="gh-rail"'), html.indexOf("</aside>"));
-  process.stdout.write(JSON.stringify([...rail.matchAll(/data-shown="([^"]+)"/g)].map((m) => m[1])));
+  const groups = {};
+  // Each group, chosen in the rail, shows exactly its own tasks.
+  for (const [, name] of rail.matchAll(/data-shown="([^"]+)"/g)) {
+    lastQ["[data-shown]"].find((e) => e.attrs["data-shown"] === name).onclick();
+    const list = panel.innerHTML.slice(panel.innerHTML.indexOf("</aside>"));
+    groups[name] = [...list.matchAll(/Task(\d+)/g)].map((m) => m[1]).filter((v, i, a) => a.indexOf(v) === i);
+  }
+  process.stdout.write(JSON.stringify(groups));
 })().catch((e) => { console.error(e && e.stack || e); process.exit(1); });
 """
         script = (STUB + MENU_JS.read_text(encoding="utf-8") + "\n"
@@ -473,7 +483,8 @@ apiAnswers.push(["/v1/app/tasks", { status: 200, data: { machine: "hub", github:
                   + (PAGES / "tasks.js").read_text(encoding="utf-8") + "\n" + flow)
         done = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(sorted(json.loads(done.stdout)), sorted(["Linear", "GitHub", "Jira", "Other", "QUI", "o/a"]))
+        self.assertEqual(json.loads(done.stdout), {"Linear": ["1"], "GitHub": ["2"], "Jira": ["3"], "Other": ["4"],
+                                                   "QUI": ["5"], "o/a": ["6"]})
 
 
 # The detail's stepper for each ladder, as TaskStepper.steps draws it on
