@@ -210,6 +210,23 @@ const Fmt = (() => {
       || label || "Usage";
   }
 
+  /* UsageFormat.windowInfo: what a meter bills for, for the click-pinned
+   * tip beside its row on Accounts. Only meters worth explaining have a
+   * line; the rest get no button. "on_demand" stands for the on-demand
+   * row, not a window. Same table as the Mac app's windowInfo. */
+  const METER_INFO = {
+    cursor: {
+      included: "Everything billed this cycle: the included credit pool and on-demand spend together.",
+      auto: "The draw on the credit pool by Auto-routed requests, where Cursor picks the model.",
+      api: "The draw on the credit pool by named-model requests. At 100%, further usage bills on-demand.",
+      grok_bot: "Grok Bot's own weekly allowance, separate from the billing cycle.",
+      on_demand: "Metered spend once the credit pool runs out, capped by the account's spend limit.",
+    },
+  };
+  function meterInfo(harness, label) {
+    return (METER_INFO[harness] || {})[label] || null;
+  }
+
   /* "max_20x" -> "Max 20x"; blank or a dash means no plan. */
   function planTitle(plan) {
     if (!plan || plan === "—" || plan === "-") return "";
@@ -332,7 +349,7 @@ const Fmt = (() => {
   }
 
   return { tokens, dollars, ago, relative, harnessName, modelName, thought, harnessColor, logo, mark, markView, tilde, marbleScale,
-    resetIn, windowLabel, planTitle, money, balance, onDemand,
+    resetIn, windowLabel, meterInfo, planTitle, money, balance, onDemand,
     copyIcon, copy, copyTick, shellWord };
 })();
 

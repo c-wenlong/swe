@@ -788,7 +788,31 @@ function paintAccounts() {
   for (const chip of document.querySelectorAll("[data-machine]")) {
     chip.onclick = () => { a.machine = chip.dataset.machine; paintAccounts(); };
   }
+  for (const btn of document.querySelectorAll(".meter-info")) {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const tip = btn.parentElement.querySelector(".meter-tip");
+      if (!tip) return;
+      const opening = tip.hidden;
+      closeMeterTips();
+      tip.hidden = !opening;
+    };
+  }
 }
+
+function closeMeterTips() {
+  for (const tip of document.querySelectorAll(".meter-tip")) tip.hidden = true;
+}
+
+/* A click anywhere but a meter's "i" or its open tip closes every tip;
+ * Esc does too. The listeners live once for the app's life: a repaint
+ * that drops the buttons drops the tips with them. */
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".meter-info") && !e.target.closest(".meter-tip")) closeMeterTips();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeMeterTips();
+});
 
 /* Ages, countdowns, staleness and the late-satellite note move with the
  * clock, so the open page repaints them every 30 s (no provider call). */
@@ -811,9 +835,16 @@ function barColor(pct) {
   return pct >= 90 ? "var(--danger)" : pct >= 70 ? "var(--warning)" : "var(--accent-fill)";
 }
 
+/* The "i" button and its click-pinned tip beside a meter's label; empty
+ * for a meter with no explanation. */
+function meterInfoBtn(text, label) {
+  if (!text) return "";
+  return `<button class="meter-info" type="button" aria-label="What ${esc(label)} bills for" title="What this meter bills for">${icon("info")}</button><span class="meter-tip" role="note" hidden>${esc(text)}</span>`;
+}
+
 /* ``now`` ages the machine's own stamps (as_of); a reset time is the
  * provider's absolute clock, so it counts down on this browser's. */
-function windowRow(w, now) {
+function windowRow(harness, w, now) {
   const pct = Math.max(0, Math.min(100, Math.round(w.used_percent || 0)));
   const failed = !!w.unavailable;
   const real = Date.now() / 1000;
@@ -821,7 +852,7 @@ function windowRow(w, now) {
     ? (w.as_of ? `as of ${Fmt.ago(w.as_of, now)}` : "")
     : (w.reset_at && w.reset_at > real ? `Resets ${Fmt.resetIn(w.reset_at, real)}` : "");
   return `<div class="limit${failed ? " failed" : ""}">
-    <div class="limit-head"><span class="limit-label">${esc(Fmt.windowLabel(w.window))}</span>
+    <div class="limit-head"><span class="limit-label-wrap"><span class="limit-label">${esc(Fmt.windowLabel(w.window))}</span>${meterInfoBtn(Fmt.meterInfo(harness, w.window), Fmt.windowLabel(w.window))}</span>
       <span class="num">${failed && !w.as_of ? "—" : `${pct}%`}</span></div>
     <div class="track"><div class="fill" style="width:${pct}%; background:${barColor(pct)}"></div></div>
     ${right ? `<div class="caption">${esc(right)}</div>` : ""}
@@ -847,10 +878,10 @@ function accountCard(h, machine) {
   } else if (!rl) {
     status = LIMIT_HARNESSES.has(h.name) ? "No reading yet" : "No usage limits to read";
   } else if (rl.status === "ok") {
-    body = readingWindows(rl).map((w) => windowRow(w, now)).join("");
+    body = readingWindows(rl).map((w) => windowRow(h.name, w, now)).join("");
     if (rl.on_demand) {
       const [value, detail] = Fmt.onDemand(rl.on_demand);
-      body += `<div class="limit-extra"><span class="caption">On-demand</span><span>${esc(value)} · <span class="caption">${esc(detail)}</span></span></div>`;
+      body += `<div class="limit-extra"><span class="caption limit-label-wrap">On-demand${meterInfoBtn(Fmt.meterInfo(h.name, "on_demand"), "On-demand")}</span><span>${esc(value)} · <span class="caption">${esc(detail)}</span></span></div>`;
     }
     if (rl.extra_usage_usd != null) {
       body += `<div class="limit-extra"><span class="caption">Extra usage balance</span><span class="num">${Fmt.balance(rl.extra_usage_usd)}</span></div>`;

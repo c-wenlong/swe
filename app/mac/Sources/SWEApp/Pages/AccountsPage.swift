@@ -287,6 +287,9 @@ struct UsageBars: View {
 
 struct UsageBar: View {
     var window: UsageWindow
+    /// What the meter bills for, in a click-pinned tip beside the label;
+    /// nil shows no button (everywhere but the account cards).
+    var info: String? = nil
     /// The reading is a kept older one after a failed fetch: red label,
     /// greyed bar, and the real age in place of the reset time.
     var failed: Bool = false
@@ -298,6 +301,12 @@ struct UsageBar: View {
             HStack {
                 Text(window.label).font(Theme.control)
                     .foregroundStyle(failed ? Theme.dangerText : Theme.textPrimary)
+                if let info {
+                    Image(systemName: "info.circle")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                        .hoverTip(info, title: window.label)
+                }
                 Spacer()
                 if failed {
                     if let asOf {
@@ -704,11 +713,18 @@ private struct HarnessAccountCard: View {
             UsageBar(window: UsageWindow(label: window.window.isEmpty ? "Usage" : UsageFormat.window(window.window),
                                          usedPercent: Double(min(max(window.usedPercent, 0), 100)),
                                          resetsAt: window.resetAt),
+                     info: UsageFormat.windowInfo(row.name, window.window),
                      failed: window.unavailable, asOf: window.asOf)
         }
         if let onDemand = limit.onDemand {
             HStack {
                 Text("On-demand").font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                if let info = UsageFormat.windowInfo(row.name, "on_demand") {
+                    Image(systemName: "info.circle")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                        .hoverTip(info, title: "On-demand")
+                }
                 Spacer()
                 Text("\(onDemand.value) · \(onDemand.detail)").font(Theme.caption.monospacedDigit())
                     .foregroundStyle(Theme.textPrimary)

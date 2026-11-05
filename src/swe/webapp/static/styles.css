@@ -426,6 +426,15 @@ code.muted { background: transparent; padding: 0; }
 .account.stale > :not(.account-head) { opacity: .55; }
 .limit { display: flex; flex-direction: column; gap: 4px; }
 .limit-head { display: flex; justify-content: space-between; font-size: 13px; }
+.limit-label-wrap { position: relative; display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.meter-info { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0;
+  border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; flex: none; }
+.meter-info:hover { color: var(--text-primary); }
+.meter-info svg { width: 13px; height: 13px; }
+.meter-tip { position: absolute; top: calc(100% + 4px); left: 0; z-index: 6; width: 240px; max-width: 70vw;
+  padding: 8px 10px; background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.16); font-size: 12px; font-weight: 400; color: var(--text-secondary);
+  text-align: left; line-height: 1.4; }
 .limit.failed .limit-label { color: var(--danger-text); }
 .limit.failed .num, .limit.failed .track { opacity: .45; }
 .track { height: 6px; border-radius: 3px; background: var(--usage-track); overflow: hidden; }
