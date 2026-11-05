@@ -2083,7 +2083,11 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._local_host_gate():
                 return
             rid = unquote(path[len("/v1/pair/request/"):])
-            secret = str((args.get("secret") or [""])[0])
+            # The secret rides a header: a query string lands in proxy
+            # and access logs. ``?secret=`` still works for the iPhone
+            # builds already out, which send it there.
+            secret = (self.headers.get("X-Pair-Secret")
+                      or str((args.get("secret") or [""])[0]))
             result = pairing.poll_request(self._state.home, rid, secret)
             if result is None:
                 self._send_error(
