@@ -184,6 +184,12 @@ waits while a link to the old folder could not be relinked (qwen-code
 archived, or the link in <code>.linkignore</code>) or a settings file names the
 old folder, so no hook stops running.</p>
 </li>
+<li><p><strong><code>swe skills new</code> says when it had to make <code>~/.swe/skills</code>.</strong>
+<code>create()</code> promised to report whether it made the hub skills root but
+always answered no, so a skill written into a brand-new root (one no
+harness links to yet) printed only &quot;Created&quot;. It now adds a line
+saying to run <code>swe init</code> to link the root into your harnesses.</p>
+</li>
 <li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
 The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its
 command, but sessions carry the registry id <code>qwen-code</code>, so a file

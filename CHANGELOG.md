@@ -80,6 +80,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   archived, or the link in `.linkignore`) or a settings file names the
   old folder, so no hook stops running.
 
+- **`swe skills new` says when it had to make `~/.swe/skills`.**
+  `create()` promised to report whether it made the hub skills root but
+  always answered no, so a skill written into a brand-new root (one no
+  harness links to yet) printed only "Created". It now adds a line
+  saying to run `swe init` to link the root into your harnesses.
+
 - **Qwen Code sessions get `@` file references for attachments again.**
   The hub's attachment fallback table keyed Qwen Code as `qwen`, its
   command, but sessions carry the registry id `qwen-code`, so a file

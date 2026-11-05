@@ -145,6 +145,25 @@ class SkillsNewTest(unittest.TestCase):
         shutil.rmtree(self.home / ".swe" / "skills")
         code, out, err = self.run_skills("new", "s")
         self.assertEqual(code, 0, out + err)
+        self.assertTrue(self.skill("s").is_file())
+        # A root no harness links to yet: the command says what to run.
+        self.assertIn("is new: run swe init", out)
+        code, out, err = self.run_skills("new", "t")
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("swe init", out)
+
+    def test_create_reports_whether_it_made_the_skills_root(self):
+        import shutil
+        from swe.skills.create import create
+
+        _, made = create("existing-root", home=self.home)
+        self.assertFalse(made)
+        shutil.rmtree(self.home / ".swe" / "skills")
+        path, made = create("fresh-root", home=self.home)
+        self.assertTrue(made)
+        self.assertEqual(path, self.skill("fresh-root"))
+        _, made = create("second", home=self.home)
+        self.assertFalse(made)
 
     def test_json_shape_and_listing(self):
         code, out, _ = self.run_skills("new", "s", "--json")
