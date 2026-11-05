@@ -1465,7 +1465,10 @@ import Testing
     @MainActor @Test func aFailedRemovalStillHandsTheFansBack() async {
         let installer = FakeInstaller()
         installer.installed.value = true
-        let (fans, url) = control(FakeSMC.twoFans(), installer: installer)
+        // The Starting deadline parks here; let it go when the test ends.
+        let sleeper = Sleeper()
+        defer { sleeper.fire() }
+        let (fans, url) = control(FakeSMC.twoFans(), installer: installer, sleeper: sleeper)
         await fans.refresh()
         await fans.applyManual()
         #expect(FanControlFile.request(at: url) != nil)
@@ -1483,7 +1486,10 @@ import Testing
     @MainActor @Test func aCancelledRemovalHandsTheFansBackAndKeepsTheHelper() async {
         let installer = FakeInstaller()
         installer.installed.value = true
-        let (fans, url) = control(FakeSMC.twoFans(), installer: installer)
+        // The Starting deadline parks here; let it go when the test ends.
+        let sleeper = Sleeper()
+        defer { sleeper.fire() }
+        let (fans, url) = control(FakeSMC.twoFans(), installer: installer, sleeper: sleeper)
         await fans.refresh()
         await fans.applyManual()
         installer.error = .cancelled
@@ -1504,6 +1510,7 @@ import Testing
         let arrived = CountGate()
         let release = DispatchSemaphore(value: 0)
         let sleeper = Sleeper()
+        defer { sleeper.fire() }
         let url = scratch.url.appending(path: "fan-\(UUID().uuidString)/control.json")
         let fans = FanControl(control: url,
                               reader: {
