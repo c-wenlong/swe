@@ -444,6 +444,11 @@ class TestEdit(_TempRegistry, unittest.TestCase):
         error = self.refused({"name": "codex", "fields": {"command": "  "}})
         self.assertEqual((error.status, error.code), (422, "command_required"))
 
+    def test_a_command_cant_start_with_a_dash(self):
+        """As Add refuses it: a flag-shaped command word."""
+        error = self.refused({"name": "codex", "fields": {"command": " --version"}})
+        self.assertEqual((error.status, error.code), (422, "bad_command"))
+
     def test_only_the_editors_fields(self):
         for fields in ({}, None, ["notes"], {"primary_color": "#fff"}, {"state": "archived"},
                        {"notes": 3}, {"command": "a\nb"}, {"aliases": "a\nb"},

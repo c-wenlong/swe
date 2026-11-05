@@ -163,6 +163,10 @@ def _fields(value) -> dict:
         fields[field] = text
     if "command" in fields and not fields["command"].strip():
         raise PageError(422, "command_required", "Enter the command that runs it.")
+    # Add refuses this too: a command word that starts with - reads as a
+    # flag wherever it is put back on a command line.
+    if "command" in fields and fields["command"].strip().startswith("-"):
+        raise PageError(422, "bad_command", "The command can't start with -.")
     return fields
 
 

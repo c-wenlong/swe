@@ -162,6 +162,14 @@ class TestRun(_TempHome, unittest.TestCase):
         self.assertEqual((caught.exception.status, caught.exception.code),
                          (404, "unknown_remedy"))
 
+    def test_drift_checks_run_against_the_doctor_home(self):
+        # _doctor_probe ran the drift checks against the real home.
+        from unittest.mock import Mock
+        drift = Mock(return_value=[])
+        with patch("swe.harness.drift.run_drift_checks", drift):
+            doctor_page.get(self.ctx, {})
+        drift.assert_called_with(home=self.home)
+
     def test_undeclare_drops_the_declaration_and_backs_up(self):
         self.seed({"claude": {"command": "claude"}})
         claude = self.home / ".claude"

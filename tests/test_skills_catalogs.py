@@ -109,6 +109,37 @@ class SkillsCatalogTest(unittest.TestCase):
                 saved = load_skill_catalogs()
                 self.assertEqual(Path(saved[0]["path"]).resolve(), catalog.resolve())
 
+    def test_list_beside_a_folder_named_list_still_lists(self):
+        # The path check ran first, so `catalog list` beside ./list tried
+        # to add ./list as a catalog.
+        import contextlib
+        import io
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_dir = home / ".config" / "swe"
+            catalogs_file = config_dir / "skill_catalogs.json"
+            work = home / "work"
+            self._write_skill(work / "list", "x", name="x")
+            p1, p2, p3, p4 = _catalog_patches(config_dir, catalogs_file)
+            before = os.getcwd()
+            os.chdir(work)
+            try:
+                with p1, p2, p3, p4:
+                    from swe.skills.catalog_commands import cmd_skills_catalog
+
+                    out = io.StringIO()
+                    with contextlib.redirect_stdout(out):
+                        self.assertEqual(cmd_skills_catalog(["list"]), 0)
+                    self.assertIn("No catalogs configured", out.getvalue())
+                    self.assertEqual(load_skill_catalogs(), [])
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(cmd_skills_catalog(["add", "list"]), 0)
+                    self.assertEqual([c["label"] for c in load_skill_catalogs()], ["list"])
+            finally:
+                os.chdir(before)
+
     def test_remove_catalog(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)

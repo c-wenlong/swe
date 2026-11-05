@@ -159,6 +159,19 @@ class GatewayServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual([r["id"] for r in body], ["a", "b"])
 
+    def test_a_cancel_with_malformed_params_is_dropped(self):
+        # `params: [1]` raised AttributeError in the handler and the
+        # connection closed with no answer.
+        for params in ([1], "x", None):
+            status, _, body = self.request(
+                {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": params})
+            self.assertEqual((status, body), (202, None))
+        self.assertEqual(self.request({"jsonrpc": "2.0", "id": 3, "method": "ping"})[2]["result"], {})
+
+    def test_the_gateway_names_itself_swe(self):
+        _, headers, _ = self.request({"jsonrpc": "2.0", "id": 3, "method": "ping"})
+        self.assertTrue(headers.get("Server", "").startswith("swe-mcp-gateway"))
+
     def test_server_to_client_requests_are_refused(self):
         answer = self.payload(self.call("ask"))["args"]["answer"]
         self.assertEqual(answer["id"], "srv-1")
