@@ -183,7 +183,9 @@ private let awkwardPaths = paths("/Users/me/it's a dir/home", desktop: "/Users/m
             == "export CODEX_HOME='/Users/me/.swe/accounts/codex/codex-side/home'; codex")
     }
 
-    @Test func aDefaultProfileIsJustTheCommand() {
+    /// The default profile unsets the home variable an inherited shell
+    /// might carry, so the CLI lands on its own default home.
+    @Test func aDefaultProfileUnsetsTheHomeVariableBeforeTheCommand() {
         #expect(LaunchPlanner.shellLine(for: claudeDefault, paths: claudeDefaultPaths, command: "claude") == "unset CLAUDE_CONFIG_DIR; claude")
         #expect(LaunchPlanner.shellLine(for: codexDefault, paths: codexDefaultPaths, command: "codex") == "unset CODEX_HOME; codex")
     }

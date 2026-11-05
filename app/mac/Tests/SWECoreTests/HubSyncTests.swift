@@ -77,6 +77,9 @@ import Testing
     @Test func refusalThrowsSwesReason() async throws {
         let runner = FakeRunner(.init(status: 1, stdout: Data(),
                                       stderr: "swe sync: ~/.swe does not exist yet; run swe init first"))
-        await #expect(throws: SweError.self) { try await SweClient(runner: runner).hubSync() }
+        await #expect(throws: SweError.commandFailed(
+            status: 1, message: "swe sync: ~/.swe does not exist yet; run swe init first")) {
+            try await SweClient(runner: runner).hubSync()
+        }
     }
 }

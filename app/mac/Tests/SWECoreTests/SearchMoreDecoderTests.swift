@@ -97,7 +97,7 @@ import Testing
          "started_at":"2026-09-15T11:17:11.371Z","ended_at":null,"exit_code":0,
          "status":"done","interactive":true,"provider":"cline",
          "model":"grok-4-1-fast-reasoning","cwd":"/Users/x/ws",
-         "workspace_root":"/Users/x/ws","prompt":"say hi","metadata":{},
+         "workspace_root":"/Users/x","prompt":"say hi","metadata":{},
          "messages_path":"/sessions/1789471031317_jp2hv.messages.json"}
         """
 
@@ -121,9 +121,13 @@ import Testing
         let out = SearchDecoder.decode(agent: .cline, line: Data(clineManifest.utf8))
         #expect(out.messages.isEmpty)
         #expect(out.hints.sessionId == "1789471031317_jp2hv")
-        // `cwd` beats `workspace_root` (Orca's order).
+        // `cwd` beats `workspace_root` (Orca's order); the two differ here.
         #expect(out.hints.cwd == "/Users/x/ws")
         #expect(out.hints.title == "say hi")
+        // With no `cwd`, the workspace root answers.
+        let rootOnly = SearchDecoder.decode(agent: .cline, line: Data(
+            clineManifest.replacingOccurrences(of: #""cwd":"/Users/x/ws","#, with: "").utf8))
+        #expect(rootOnly.hints.cwd == "/Users/x")
     }
 
     @Test func clineMessagesDocumentDecodesItsTurns() {

@@ -17,8 +17,10 @@ import Testing
             .appending(path: "gh-history-\(UUID().uuidString).db")
     }
 
-    private func pr(_ n: Int) -> GhPr {
-        GhPr(number: n, title: "Fix \(n)", state: .open, draft: false,
+    private func pr(_ n: Int) -> GhPr { pr(n, state: .open) }
+
+    private func pr(_ n: Int, state: GhPr.State) -> GhPr {
+        GhPr(number: n, title: "Fix \(n)", state: state, draft: false,
              author: "me", branch: "f", base: "main", labels: [],
              mergeable: .mergeable, reviewDecision: .approved,
              checks: .passing, updatedAt: GhTime(Date()),
@@ -193,16 +195,18 @@ import Testing
                                 boards: ["o/a": board]))
         #expect(store.importedLegacy)
 
-        // The live store now knows newer rows — a repeat import must
+        // The live store now knows newer rows, and #9 merged since the
+        // snapshot (which still holds it open) — a repeat import must
         // not resurrect the snapshot's copy.
-        store.remember(repo: "o/a", surface: .pulls, rows: [pr(20), pr(19)])
+        store.remember(repo: "o/a", surface: .pulls,
+                       rows: [pr(20), pr(19), pr(9, state: .merged)])
         #expect(store.importAll(["o/a": RepoHistory(pulls: [pr(7)])],
                                 boards: ["o/a": board]))
         let pulls: [GhPr] = store.rows(repo: "o/a", surface: .pulls)
-        // IGNOREd, not replaced: 20 and 19 stayed, 7/9/8 still fill in.
-        #expect(pulls.count == 5)
-        #expect(pulls.contains { $0.number == 20 })
-        #expect(pulls.contains { $0.number == 7 })
+        // IGNOREd, not replaced: 20, 19 and the merged 9 stayed, 7 and 8
+        // still fill in.
+        #expect(pulls.map(\.number) == [20, 19, 9, 8, 7])
+        #expect(pulls.first { $0.number == 9 }?.state == .merged)
         let tags: [GhTag] = store.rows(repo: "o/a", surface: .tags)
         #expect(tags.map(\.name) == ["v1"])
     }

@@ -75,11 +75,11 @@ import Testing
         let working = row("claude:a@m2", machine: "m2", status: "active",
                           model: "claude-opus-4-5-20251101")
         #expect(OtherMachines.details(working, online: true, lastSeenAt: nil, now: now)
-                == "Working · ~/src/app · \(HarnessMark("claude").name) · claude-opus-4-5")
+                == "Working · ~/src/app · Claude Code · claude-opus-4-5")
         // No model known: nothing in its place.
         let idle = row("codex:b@m2", machine: "m2", ago: 7200, cwd: "/home/kai/work", harness: "codex")
         #expect(OtherMachines.details(idle, online: true, lastSeenAt: nil, now: now)
-                == "Idle 2h · ~/work · \(HarnessMark("codex").name)")
+                == "Idle 2h · ~/work · Codex")
         // An offline machine's rows say when the hub last heard from it.
         #expect(OtherMachines.details(idle, online: false, lastSeenAt: t - 86_400, now: now)
                 .hasPrefix("Last seen 1d · "))
