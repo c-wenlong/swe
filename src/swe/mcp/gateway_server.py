@@ -380,7 +380,7 @@ class Backend:
         child.send({"jsonrpc": "2.0", "id": gid, "method": "initialize", "params": {
             "protocolVersion": protocol,
             "capabilities": {},
-            "clientInfo": {"name": "quiver-mcp-gateway", "version": __version__},
+            "clientInfo": {"name": "swe-mcp-gateway", "version": __version__},
         }})
         if not waiter.event.wait(INIT_TIMEOUT_S):
             child.forget(gid)
@@ -661,7 +661,11 @@ class Gateway:
         if method not in FORWARDED_NOTIFICATIONS:
             return  # e.g. initialized: the gateway's own handshake sent it
         if method == "notifications/cancelled":
-            params = message.get("params") or {}
+            params = message.get("params")
+            if not isinstance(params, dict):
+                # `params: [1]` raised AttributeError and dropped the
+                # connection; with no request id there is nothing to cancel.
+                return
             key = (session, json.dumps(params.get("requestId")))
             with self._inflight_lock:
                 hit = self._inflight.get(key)
@@ -673,7 +677,7 @@ class Gateway:
 
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "quiver-mcp-gateway"
+    server_version = "swe-mcp-gateway"
     sys_version = ""
 
     gateway: Gateway  # set on the subclass by make_server

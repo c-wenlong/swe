@@ -379,6 +379,24 @@ import Testing
         #expect(model.pinError != nil)
     }
 
+    /// A hand-edited `github.json` can list one repo twice; reordering
+    /// used to trap building the name lookup.
+    @Test func reorderToleratesADuplicatePin() async {
+        let calls = router([
+            "gh --json": "\(env),\"repos\":["
+                + "{\"name\":\"o/a\",\"added_at\":100},"
+                + "{\"name\":\"o/a\",\"added_at\":150},"
+                + "{\"name\":\"o/b\",\"added_at\":200}]",
+            "gh repo reorder o/b o/a --json": "\"pinned\":[\"o/b\",\"o/a\"]",
+        ])
+        let model = GitHubModel()
+        let swe = SweClient(runner: calls)
+        await model.load(swe: swe)
+        await model.reorderPins(["o/b", "o/a"], swe: swe)
+        #expect(model.pins.map(\.name) == ["o/b", "o/a"])
+        #expect(model.pins.last?.addedAt == Date(timeIntervalSince1970: 100))
+    }
+
     /// A drop while the first reorder's save is in flight used to be
     /// discarded: the optimistic order showed but nothing persisted it.
     /// The second order queues behind the first and lands when it settles.

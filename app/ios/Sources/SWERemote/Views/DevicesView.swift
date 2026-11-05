@@ -50,7 +50,9 @@ struct DevicesView: View {
             }
         }
         .navigationTitle("Pair requests and devices")
-        .navigationBarTitleDisplayMode(.large)
+        // Inline like every other sheet: a large title this long cut
+        // off at "Pair request…" even at the default text size.
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         .refreshable { await load() }
         .confirmationDialog(removing.map { "Remove \($0.label)?" } ?? "Remove device?",

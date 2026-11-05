@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import plistlib
 import socket
 import tempfile
@@ -21,6 +22,20 @@ def _run(args):
     with redirect_stdout(out), redirect_stderr(err):
         rc = commands.cmd_remote(list(args))
     return rc, out.getvalue(), err.getvalue()
+
+
+class _TempHome:
+    """Points HOME at a scratch folder for each test.
+
+    ``pair`` reads the saved ``~/.swe`` hub.json and ``serve --install``
+    checks ``~/Library/LaunchAgents`` for a conflicting service; under the
+    real HOME a machine running a hub or agent would change their answers.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.home = temp_dir(self)
+        self.enterContext(patch.dict(os.environ, {"HOME": str(self.home)}))
 
 
 class TestDispatch(unittest.TestCase):
@@ -54,9 +69,8 @@ class TestDispatch(unittest.TestCase):
         self.assertIn("unexpected args", err)
 
 
-class TestPair(unittest.TestCase):
+class TestPair(_TempHome, unittest.TestCase):
     def test_pair_mints_and_prints_url(self):
-        home = temp_dir(self)
         with patch.object(pairing, "mint_pair_token",
                           return_value="tok123") as mint, \
              patch.object(commands.pairing, "mint_pair_token", mint):
@@ -214,7 +228,7 @@ class TestAttachCmd(unittest.TestCase):
         self.assertIn("unexpected args: extra args", err)
 
 
-class TestServe(unittest.TestCase):
+class TestServe(_TempHome, unittest.TestCase):
     def test_serve_binds_tailscale(self):
         seen = {}
 
@@ -511,7 +525,7 @@ class TestServe(unittest.TestCase):
         self.assertIn("--port", err)
 
 
-class TestProbeAndPair(unittest.TestCase):
+class TestProbeAndPair(_TempHome, unittest.TestCase):
     def test_probe_returns_json_or_none(self):
         import io as _io
         import urllib.error
@@ -645,7 +659,7 @@ class TestAttachFail(unittest.TestCase):
         self.assertIn("busy", err)
 
 
-class TestPairApp(unittest.TestCase):
+class TestPairApp(_TempHome, unittest.TestCase):
     def test_pair_app_encodes_deep_link(self):
         ran = []
         with patch("swe.remote.pairing.mint_pair_token",
