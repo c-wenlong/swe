@@ -68,6 +68,26 @@ final class ShareKindTests: XCTestCase {
         XCTAssertEqual(ShareInbox.fileName(suggested: "Q3 report", provided: bare, type: "com.adobe.pdf"), "Q3 report.pdf")
         XCTAssertEqual(ShareInbox.fileName(suggested: "a/b.md", provided: bare, type: "com.adobe.pdf"), "a-b.md")
         XCTAssertEqual(ShareInbox.fileName(suggested: nil, provided: temp, type: "public.png"), "PNG image.png")
+        // The sharing app picks the name; a dot segment is no name.
+        XCTAssertEqual(ShareInbox.fileName(suggested: "..", provided: bare, type: "public.data"), "download")
+        XCTAssertEqual(ShareInbox.fileName(suggested: ".", provided: bare, type: "public.data"), "download")
+    }
+
+    /// `folder/0/..` is the share folder itself: copying there would
+    /// first delete it, with every item already read.
+    func testACopyNeverLandsOutsideItsItemFolder() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("share-test-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let kept = folder.appendingPathComponent("kept.txt")
+        try Data("read already".utf8).write(to: kept)
+        let source = folder.appendingPathComponent("source.txt")
+        try Data("new".utf8).write(to: source)
+        for name in ["..", ".", "", "a/b"] {
+            XCTAssertNil(ShareInbox.copy(source, into: folder, index: 0, name: name), name)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path))
+        XCTAssertEqual(ShareInbox.copy(source, into: folder, index: 0, name: "ok.txt")?.lastPathComponent, "ok.txt")
     }
 
     func testURLItemsInEveryShape() {
