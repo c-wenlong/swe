@@ -387,9 +387,15 @@ class Backend:
             self.last_error = f"no answer to initialize in {INIT_TIMEOUT_S:.0f}s"
             raise RuntimeError(f"{self.name}: {self.last_error}")
         response = waiter.response or {}
-        if "result" not in response:
-            detail = (response.get("error") or {}).get("message", "no result")
-            self.last_error = f"initialize failed: {detail}"
+        # A result or error of the wrong shape is a failed handshake too: a
+        # ValueError from reading it escaped ``ready``, so the process was
+        # never stopped and the next request started a second one.
+        if not isinstance(response.get("result"), dict):
+            error = response.get("error")
+            detail = error.get("message") if isinstance(error, dict) else error
+            if "result" in response and not error:
+                detail = "the result is not an object"
+            self.last_error = f"initialize failed: {detail or 'no result'}"
             raise RuntimeError(f"{self.name}: {self.last_error}")
         child.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
         self.last_error = ""
