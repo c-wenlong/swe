@@ -203,6 +203,21 @@ class LazyRemoteImportTest(unittest.TestCase):
                 self.assertTrue(callable(getattr(importlib.import_module(module), name)))
 
 
+    def test_commands_import_the_module_that_defines_them(self):
+        # No forwarder in a package __init__ in between: `swe gh` went
+        # through one in swe/github/__init__.py, and two re-export shims
+        # (swe.history, swe.mcp_formats) outlived every importer.
+        import importlib.util
+
+        from swe.cli import COMMANDS
+
+        self.assertIn("``swe.github.cli.main``", COMMANDS["gh"].__doc__)
+        import swe.github
+        self.assertFalse(hasattr(swe.github, "main"))
+        for shim in ("swe.history", "swe.mcp_formats"):
+            with self.subTest(shim=shim):
+                self.assertIsNone(importlib.util.find_spec(shim))
+
 class ProvidersHelpRouteTest(unittest.TestCase):
     """`swe providers --help` reaches the group's own fuller help, not
     the summary that ends by pointing back at `swe providers --help`."""

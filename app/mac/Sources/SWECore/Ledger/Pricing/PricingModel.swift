@@ -60,7 +60,7 @@ public final class PricingModel {
             if isFree { return .free }
             return switch source {
             case .yours: .yours
-            case .quiver: .quiver
+            case .swe: .swe
             case .liteLLM: .liteLLM
             case nil: .unpriced
             }
@@ -83,7 +83,7 @@ public final class PricingModel {
         case free
         case yours
         /// SWE's bundled list, filling in or correcting LiteLLM's.
-        case quiver
+        case swe
         /// LiteLLM's API price list.
         case liteLLM
         case unpriced

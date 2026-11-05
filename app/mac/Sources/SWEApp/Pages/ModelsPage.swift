@@ -839,7 +839,7 @@ private struct ListPriceCell: View {
     static func help(_ price: ModelsModel.ListPrice) -> String {
         let source = switch price.source {
         case .liteLLM: "LiteLLM"
-        case .quiver: "SWE's price list"
+        case .swe: "SWE's price list"
         case .yours: "your price"
         }
         return "\(price.key), from \(source)\nCache write \(ModelCard.price(price.cacheWrite)) / 1M"

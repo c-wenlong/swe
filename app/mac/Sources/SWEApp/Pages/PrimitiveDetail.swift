@@ -971,28 +971,31 @@ struct PluginDetailView: View {
     /// `interface.displayName` when the plugin ships one.
     private func saveName() {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        do {
-            try app.primitiveNames.saved({ $0.set(trimmed.isEmpty ? nil : trimmed, forPlugin: plugin.ref) },
-                                         to: PluginDisplayNames.file(home: home))
-            nameError = nil
-        } catch {
-            // The write left the overlay untouched: show that name again
-            // and stop, so a failed rename changes nothing.
-            name = app.primitiveNames.name(forPlugin: plugin.ref) ?? plugin.displayName ?? plugin.name
-            nameError = "Couldn't save the name: \(error.localizedDescription)"
-            return
-        }
-        guard editable, let dir else { return }
-        let codex = dir.appending(path: ".codex-plugin/plugin.json")
-        // Only a plugin that ships a Codex manifest has one to update; a
-        // manifest that exists but cannot be read or written must be
-        // reported, or the rename looks saved while the file keeps the
-        // old name.
-        // Disk work in the plugin's folder, so off the main actor.
+        let ref = plugin.ref
+        let file = PluginDisplayNames.file(home: home)
+        let codex = editable ? dir?.appending(path: ".codex-plugin/plugin.json") : nil
         let shown = trimmed.isEmpty ? plugin.name : trimmed
+        // Disk work (the overlay under ~/.swe, then the plugin's own
+        // folder), so off the main actor, one save after another.
         let previous = manifestWrite
         manifestWrite = Task {
             await previous?.value
+            do {
+                try await app.saveDisplayNames({ $0.set(trimmed.isEmpty ? nil : trimmed, forPlugin: ref) },
+                                               to: file)
+                nameError = nil
+            } catch {
+                // The write left the overlay untouched: show that name
+                // again and stop, so a failed rename changes nothing.
+                name = app.primitiveNames.name(forPlugin: ref) ?? plugin.displayName ?? plugin.name
+                nameError = "Couldn't save the name: \(error.localizedDescription)"
+                return
+            }
+            // Only a plugin that ships a Codex manifest has one to update;
+            // a manifest that exists but cannot be read or written must be
+            // reported, or the rename looks saved while the file keeps the
+            // old name.
+            guard let codex else { return }
             let failure: String? = await offMain {
                 guard FileManager.default.fileExists(atPath: codex.path) else { return nil }
                 do {
