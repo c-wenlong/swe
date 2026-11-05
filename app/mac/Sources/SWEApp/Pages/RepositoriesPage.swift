@@ -1,5 +1,6 @@
 import AppKit
 import SWECore
+import SWEWidgetsUI
 import SwiftUI
 
 /// The GitHub dashboard: one list of every pinned repo's rows, grouped
