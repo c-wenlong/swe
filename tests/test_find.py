@@ -241,10 +241,6 @@ class TrieSanitizeTest(unittest.TestCase):
         self.assertEqual(rows[0][1], "xy")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ScopeTest(unittest.TestCase):
     """--root scans from where ~/.swe lives; default scans the cwd."""
 
@@ -751,3 +747,7 @@ class NestedResultTest(unittest.TestCase):
         ])
         self.assertEqual(len(rows), 3)
         self.assertTrue(all(n is not None for _i, _l, n in rows))
+
+
+if __name__ == "__main__":
+    unittest.main()

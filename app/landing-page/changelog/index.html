@@ -126,7 +126,26 @@ comments in <code>--json</code> gain <code>association</code>.</li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
-<li><strong>Codex sessions were undercounted when codex ran subagents.</strong>
+<li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
+The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its
+command, but sessions carry the registry id <code>qwen-code</code>, so a file
+sent from a phone arrived as an <code>[Attached file: …]</code> line instead of
+an <code>@</code> reference.</p>
+</li>
+<li><p><strong>A wildcard hub bind no longer turns off the Host check, and a
+second <code>swe remote serve</code> on a taken port no longer disturbs the
+running hub.</strong> <code>--host=0.0.0.0 --unsafe-bind-any</code> left the hub's
+allowed Host names empty, which lets any Host through, so a page that
+rebound its name to the hub could pass as the owner's own tailnet
+device; <code>::</code> was not even read as a wildcard. Both now answer this
+node's loopback, hostname and tailnet names, plus any IP address on
+the hub's port (a LAN pairing link), since a rebound page always
+arrives under its own domain name. <code>serve</code> also binds before
+it starts the hub's loops, so a copy that can't get the port exits
+before it registers the machine, settles kept sessions or retires
+ntfy credentials under the running hub.</p>
+</li>
+<li><p><strong>Codex sessions were undercounted when codex ran subagents.</strong>
 <code>parse_codex</code> dropped every thread whose store <code>preview</code> was empty,
 treating it as opened and never typed into — but codex also leaves
 <code>preview</code> blank on spawned threads (subagents, automations) no matter
@@ -137,7 +156,8 @@ that it never ran — and kept spawned threads are titled from
 <code>agent_path</code>'s leaf or <code>agent_nickname</code> rather than their transcript's
 injected-context first line. <code>swe session</code> and the session counts on
 <code>swe list</code> also pick up <code>~/.codex/archived_sessions/</code> now: archiving a
-thread moves its rollout there, and an archived session still ran.</li>
+thread moves its rollout there, and an archived session still ran.</p>
+</li>
 </ul>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
@@ -385,7 +405,8 @@ shows one. The web Overview gets a Machines card with each machine's
 tokens and spend for the period (pick one to filter the page), and the
 iPhone's Usage tab a row of machine chips under the periods. A
 satellite's days are its own local days, and its view has no top
-models, since daily rows carry none. Closes</p>
+models, since daily rows carry none. Closes
+<a href="https://github.com/c-wenlong/swe/issues/525">#525</a>.</p>
 </li>
 <li><p><strong>Mac and web: Hub sync card.</strong> Settings › Files shows <code>swe sync status</code> for <code>~/.swe</code> (branch mode, uncommitted changes by primitive,
 commits to push and pull, new commits on <code>origin/main</code>, files kept
@@ -867,7 +888,8 @@ doesn't fit the database answers <code>bad-config</code> naming the property,
 while other databases and sources keep listing. The adapter pins
 <code>Notion-Version: 2022-06-28</code>, paginates with a cap, waits out a 429's
 <code>Retry-After</code>, and renders a page body to markdown for a resolve
-prompt. Read-only. Part of</p>
+prompt. Read-only. Part of
+<a href="https://github.com/c-wenlong/swe/issues/847">#847</a>.</p>
 </li>
 <li><p><strong>Tasks on the Mac, the web and the iPhone show Notion like Linear.</strong>
 The three clients read the hub's new <code>notion</code> env block beside
@@ -5285,8 +5307,10 @@ column order, separator/header/body visible-width parity, green/red
 status colors, dim version text, <code>version unknown</code> fallback, three
 heal-side-effect cases (live overrides stored, live matches stored,
 dirty stored value cleared), off-PATH footer conditional rendering
-(with/without orphans), alphabetical row order, and bold header line.- <code>swe list</code> now shows a <strong>RATE</strong> column with usage percentage and reset countdown for tools that expose rate limit APIs. Currently supports:</li>
+(with/without orphans), alphabetical row order, and bold header line.</li>
 </ul>
+</li>
+<li><p><code>swe list</code> now shows a <strong>RATE</strong> column with usage percentage and reset countdown for tools that expose rate limit APIs. Currently supports:</p>
 <ul>
 <li><strong>Codex</strong> via ChatGPT <code>backend-api/wham/usage</code> endpoint using OAuth
 tokens from <code>~/.codex/auth.json</code></li>
