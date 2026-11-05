@@ -9,6 +9,10 @@ from unittest.mock import patch
 
 from swe.sessions.parsers import parse_pi
 
+# Captured before any patch: the patch replaces posixpath.expanduser itself,
+# so a fallback through ``os.path.expanduser`` would call the mock again.
+REAL_EXPANDUSER = os.path.expanduser
+
 
 def _session_record():
     return {"type": "session", "id": "s1", "cwd": "/Users/dev/project"}
@@ -46,7 +50,7 @@ class ParsePiTitleSourceTest(unittest.TestCase):
             def fake_expanduser(path: str) -> str:
                 if path in ("~/.pi/agent/sessions/", "~/.pi/agent/sessions"):
                     return str(sessions_root) + "/"
-                return os.path.expanduser(path)
+                return REAL_EXPANDUSER(path)
 
             with patch("swe.sessions.parsers.os.path.expanduser", side_effect=fake_expanduser):
                 sessions = parse_pi()
@@ -139,7 +143,7 @@ class ParsePiSessionsPerFileTest(unittest.TestCase):
             def fake_expanduser(path: str) -> str:
                 if path in ("~/.pi/agent/sessions/", "~/.pi/agent/sessions"):
                     return str(sessions_root) + "/"
-                return os.path.expanduser(path)
+                return REAL_EXPANDUSER(path)
 
             with patch("swe.sessions.parsers.os.path.expanduser", side_effect=fake_expanduser):
                 return parse_pi()
