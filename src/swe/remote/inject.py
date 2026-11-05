@@ -141,10 +141,6 @@ class TmuxInjector:
     # injector is built per request; bounded so a long-lived hub does
     # not grow it forever.
     _answered: dict[str, "collections.deque[str]"] = {}
-    # One lock per pane serializes a whole approval: the hub serves
-    # each client on its own thread, and two answers racing the same
-    # menu would otherwise interleave their arrow keys mid-walk.
-    _pane_locks: dict[str, threading.Lock] = {}
 
     def __init__(self, home: Path | None, session_key: str) -> None:
         self.home = home
@@ -181,8 +177,9 @@ class TmuxInjector:
         # Checks, pane capture, the key walk and the answered mark are
         # one critical section per pane — a concurrent reply must see
         # either the request still open or the menu already consumed.
-        lock = self._pane_locks.setdefault(self.key, threading.Lock())
-        with lock:
+        # It is send_text's own pane lock, so a message steered in
+        # meanwhile can't land between the walk's arrow keys either.
+        with supervise._pane_lock(self.name):
             return self._approval(session, request_id, decision)
 
     def _approval(self, session: Session, request_id: str, decision: str) -> InjectResult:
@@ -200,7 +197,8 @@ class TmuxInjector:
         # on screen, only that id may answer it — a stale or superseded
         # id cannot consume the new menu.
         outstanding = supervise.pending_approval(self.key)
-        if outstanding and request_id != outstanding:
+        if (outstanding and request_id != outstanding) \
+                or supervise.approval_retired(self.key, request_id):
             return InjectResult(False, "stale approval request id")
         pane = supervise.capture_pane(self.name)
         if not supervise.pane_shows_approval(pane):

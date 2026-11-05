@@ -32,6 +32,7 @@ launching a second run, and ``reap_kept`` closes one nobody uses.
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import fcntl
 import hashlib
@@ -736,15 +737,33 @@ def pane_shows_approval(pane: str) -> bool:
 # Injectors reject a request_id that does not match — a stale or
 # superseded id then cannot answer a newer menu.
 _PENDING_APPROVALS: dict[str, tuple[str, str | None]] = {}
+# Ids the watcher has since replaced or cleared, per session (bounded):
+# once a prompt is answered at the terminal no id is outstanding, so a
+# late tap on the old id must still not answer whatever prompt the
+# agent shows next before the watcher mints its id.
+_RETIRED_APPROVALS: dict[str, "collections.deque[str]"] = {}
 
 
 def set_pending_approval(
     key: str, request_id: str | None, fingerprint: str | None = None
 ) -> None:
+    prev = _PENDING_APPROVALS.get(key)
+    if prev and prev[0] != request_id:
+        _RETIRED_APPROVALS.setdefault(
+            key, collections.deque(maxlen=64)).append(prev[0])
     if request_id:
+        retired = _RETIRED_APPROVALS.get(key)
+        if retired and request_id in retired:
+            # The same prompt back on screen under its old id.
+            retired.remove(request_id)
         _PENDING_APPROVALS[key] = (request_id, fingerprint)
     else:
         _PENDING_APPROVALS.pop(key, None)
+
+
+def approval_retired(key: str, request_id: str) -> bool:
+    """Whether ``request_id`` was this session's prompt and no longer is."""
+    return request_id in (_RETIRED_APPROVALS.get(key) or ())
 
 
 def pending_approval(key: str) -> str | None:

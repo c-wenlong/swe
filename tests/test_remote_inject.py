@@ -6,7 +6,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from swe.remote import attachments, inject, protocol, supervise
 from swe.sessions.models import Session
@@ -277,8 +277,7 @@ class TestTmuxInjector(unittest.TestCase):
         # A second answer cannot even capture the pane until the first
         # walk's keys have all landed — interleaved arrows would select
         # a row nobody asked for.
-        lock = inject.TmuxInjector._pane_locks.setdefault(
-            self.key, threading.Lock())
+        lock = supervise._pane_lock(self.inj.name)
         sent = []
 
         def _key(_name, key):
@@ -361,6 +360,48 @@ class TestTmuxInjector(unittest.TestCase):
             sk.assert_not_called()
         finally:
             supervise.set_pending_approval(key, None)
+
+    def test_a_retired_id_cannot_answer_the_next_prompt(self):
+        # Prompt A was answered at the terminal, so the watcher cleared
+        # its id; prompt B is up before B's id is minted. A late tap on
+        # A's id must not answer B.
+        key = self.key
+        pane_b = "Do you want to run rm -rf?\n1. Yes\n2. No"
+        supervise.set_pending_approval(key, "req-a", "fp-a")
+        supervise.set_pending_approval(key, None)
+        try:
+            with patch.object(supervise, "capture_pane",
+                              return_value=pane_b), \
+                    patch.object(supervise, "send_key") as sk:
+                out = self.inj.approval(self.session, "req-a", "allow")
+            self.assertFalse(out.ok)
+            self.assertIn("stale", out.note)
+            sk.assert_not_called()
+            # The same prompt back under its old id answers again.
+            supervise.set_pending_approval(
+                key, "req-a", supervise.approval_fingerprint(pane_b))
+            self.assertFalse(supervise.approval_retired(key, "req-a"))
+        finally:
+            supervise.set_pending_approval(key, None)
+            supervise._RETIRED_APPROVALS.pop(key, None)
+
+    def test_a_steered_message_waits_for_an_approval_walk(self):
+        # The walk and send_text share one pane lock: text typed
+        # between the arrow keys would land in the menu.
+        lock = supervise._pane_lock(self.inj.name)
+        typed = []
+        with patch.object(supervise, "_tmux",
+                          side_effect=lambda *a: typed.append(a) or
+                          MagicMock(returncode=0)):
+            with lock:
+                t = threading.Thread(target=supervise.send_text,
+                                     args=(self.inj.name, "hi"))
+                t.start()
+                t.join(0.2)
+                self.assertTrue(t.is_alive())
+                self.assertEqual(typed, [])
+            t.join(2)
+        self.assertEqual(len(typed), 2)
 
     def test_interrupt_escape(self):
         with patch.object(supervise, "send_key", return_value=True) as sk:
