@@ -97,8 +97,14 @@ def _resolve_data_dir(base: Path) -> Path:
         # ~/.quiver is itself a link: mirror it as ~/.swe rather than
         # move the target out from under whatever put it there. When the
         # mirror fails the old path keeps serving, so it is the answer.
+        target = os.readlink(old)
+        if os.path.normpath(os.path.join(base, target)) == os.path.normpath(new):
+            # The ~/.quiver -> .swe link an earlier move left, after
+            # ~/.swe was deleted: mirroring it would make ~/.swe a link
+            # to itself. Start a fresh root instead.
+            return new
         try:
-            new.symlink_to(os.readlink(old))
+            new.symlink_to(target)
         except OSError:
             return old
         return new
