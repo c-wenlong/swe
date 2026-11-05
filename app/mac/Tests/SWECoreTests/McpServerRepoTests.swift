@@ -117,7 +117,7 @@ private func git(_ args: String..., in dir: URL) async throws {
         }
     }
 
-    @Test func anUnreadableRootThrows() throws {
+    @Test(skippedAsRoot) func anUnreadableRootThrows() throws {
         let root = try tempDir()
         try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: root.path)
         defer { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path) }

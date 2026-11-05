@@ -9,6 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from swe.console import strip_ansi
 from swe.init import hub as hub_repo
 from swe.setup import commands as sc
 from swe.setup.wizard import _stage_hub, run_setup_wizard
@@ -220,6 +221,19 @@ class WizardHubStageTest(unittest.TestCase):
         self.assertIn("can't reach bad", out)
         self.assertIn("Cloned good into ~/.swe", out)
         self.assertIn("mine registered in claude", out)
+
+    def test_a_marketplace_a_harness_refused_is_named_with_its_error(self):
+        def clone(home, url):
+            return {"url": url, "path": str(home / ".swe"), "marketplaces": [
+                {"harness": "claude", "marketplace": "mine", "error": None},
+                {"harness": "codex", "marketplace": "mine", "error": "codex is not installed"},
+            ]}
+
+        outcome, out = self._stage(["https://github.com/x/hub"], clone)
+        out = strip_ansi(out)
+        self.assertEqual(outcome.status, "changed")
+        self.assertIn("+ mine registered in claude", out)
+        self.assertIn("! mine not registered in codex: codex is not installed", out)
 
     def test_a_failure_that_left_a_hub_behind_stops_asking(self):
         def clone(home, url):

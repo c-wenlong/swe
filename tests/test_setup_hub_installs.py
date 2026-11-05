@@ -391,6 +391,26 @@ class PrintHubInstallsTest(unittest.TestCase):
         self.assertNotIn("@", out)
         self.assertNotIn("synced to", out)
 
+    def test_a_named_server_that_failed_or_was_skipped_says_where_and_why(self):
+        from swe.setup.wizard import print_hub_installs
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            print_hub_installs({"mcp": [
+                {"harness": "claude", "name": "linear", "skipped": None, "needs": [],
+                 "error": "cannot write\n~/.claude.json"},
+                {"harness": "codex", "name": "linear", "skipped": None, "needs": [],
+                 "error": "cannot write\n~/.claude.json"},
+                {"harness": "codex", "name": "notion", "skipped": "already there",
+                 "error": None, "needs": []},
+            ]})
+        out = strip_ansi(out.getvalue())
+        # One line for both harnesses, the multi-line error folded onto it.
+        self.assertIn("! linear not synced to claude, codex: cannot write ~/.claude.json\n", out)
+        self.assertIn("· notion not synced to codex: already there\n", out)
+        self.assertNotIn("Plugins", out)
+        self.assertNotIn("then: swe mcp sync", out)
+
 
 PLUGIN_ROWS = [
     {"harness": "claude", "name": "git-helpers", "marketplace": "starter",

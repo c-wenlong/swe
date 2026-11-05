@@ -26,7 +26,7 @@ import Testing
 
     @Test func refusesWhatIsNotAnHttpHub() {
         for text in ["", "   ", "file:///etc/passwd", "ftp://box", "javascript:alert(1)",
-                     "https://", "https://kai:secret@box.ts.net", "quiver://issue/a/b/1"] {
+                     "https://", "https://kai:secret@box.ts.net", "swe://issue/a/b/1", "quiver://issue/a/b/1"] {
             #expect(HubOrigin(text) == nil, "\(text)")
         }
     }
@@ -78,7 +78,7 @@ import Testing
 
     @Test func otherSchemesNeverLoad() {
         for text in ["file:///etc/passwd", "javascript:alert(1)", "data:text/html,hi",
-                     "quiver://issue/a/b/1", "blob:https://evil.example/5f0c", "about:config"] {
+                     "swe://issue/a/b/1", "quiver://issue/a/b/1", "blob:https://evil.example/5f0c", "about:config"] {
             #expect(decide(text, clicked: true) == .cancel, "\(text)")
         }
         #expect(HubNavigation.decide(nil, hub: hub, userInitiated: true) == .cancel)

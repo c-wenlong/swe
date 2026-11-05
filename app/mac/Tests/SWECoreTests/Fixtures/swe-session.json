@@ -6,7 +6,7 @@
         "id": "fixture-session",
         "harness": "claude",
         "agent": "Claude Code",
-        "cwd": "/tmp/quiver-fixture",
+        "cwd": "/tmp/swe-fixture",
         "title": "first fixture message",
         "title_source": null,
         "last_active_at": 1791837129.1108034,
@@ -17,7 +17,7 @@
             "--resume",
             "fixture-session"
           ],
-          "cwd": "/tmp/quiver-fixture"
+          "cwd": "/tmp/swe-fixture"
         }
       }
     ],
