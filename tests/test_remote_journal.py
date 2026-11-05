@@ -1,6 +1,8 @@
 """Journal: seq numbering, replay, ring trim."""
 
 import json
+import os
+import stat
 import threading
 import unittest
 from pathlib import Path
@@ -56,6 +58,30 @@ class TestJournal(unittest.TestCase):
         seqs = [e["seq"] for e in events]
         self.assertEqual(seqs[-1], 5001)  # newest survived
         self.assertLess(len(events), 5001)  # ring was trimmed
+
+    def test_journal_is_private_to_this_account(self):
+        # Transcripts hold every prompt and reply: a 0700 folder and
+        # 0600 files, also for a trimmed file and a folder made 0755
+        # before modes were set.
+        def mode(path):
+            return stat.S_IMODE(os.stat(path).st_mode)
+
+        self.assertEqual(mode(self.journal.dir), 0o700)
+        self._append("a:x", 1)
+        path = self.journal.dir / f"{protocol.key_slug('a:x')}.jsonl"
+        self.assertEqual(mode(path), 0o600)
+        os.chmod(self.journal.dir, 0o755)
+        again = Journal(Path(self.tmp))
+        self.assertEqual(mode(again.dir), 0o700)
+        big = again.dir / f"{protocol.key_slug('a:big')}.jsonl"
+        fd = os.open(big, os.O_WRONLY | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            for i in range(5000):
+                fh.write(json.dumps({"seq": i + 1, "type": "t",
+                                     "data": "x" * 300}) + "\n")
+        again.append("a:big", protocol.event("session.status", "a:big",
+                                              "m", {}))
+        self.assertEqual(mode(big), 0o600)
 
     def test_big_journal_under_ring_max_is_not_reread_per_append(self):
         # Large tool events: >1 MB on disk but far fewer than RING_MAX
