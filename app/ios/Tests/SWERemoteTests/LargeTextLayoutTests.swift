@@ -86,6 +86,23 @@ final class LargeTextLayoutTests: XCTestCase {
         }
     }
 
+    /// The menu over the keyboard grows for a grown row or two, but
+    /// never past its default height: more grown rows scroll inside it.
+    func testThePromptMenuWindowNeverOutgrowsItsDefaultHeight() {
+        func card(_ n: Int) -> some View {
+            PromptMenuCard(count: n, rowHeight: CommandMenuView.rowHeight, visibleRows: 5) {
+                ForEach(0..<n, id: \.self) { i in
+                    CommandRow(command: SlashCommand(name: "command\(i)", description: "What it does"))
+                }
+            }
+            .frame(width: 340)
+        }
+        let full = size(card(5).dynamicTypeSize(.large)).height
+        XCTAssertLessThanOrEqual(size(card(5).dynamicTypeSize(.accessibility5)).height, full)
+        XCTAssertGreaterThan(size(card(1).dynamicTypeSize(.accessibility3)).height,
+                             size(card(1).dynamicTypeSize(.large)).height)
+    }
+
     @ViewBuilder private var details: some View {
         Text("#1214")
         Text("· c-wenlong")

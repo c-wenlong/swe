@@ -55,8 +55,10 @@ struct PromptField: View {
 /// The card both prompt menus sit in, just above the prompt box: rows
 /// on `Theme.card` with a hairline border; past `visibleRows` it scrolls.
 /// With `refresh` it always scrolls, so a pull can reload it. Rows are
-/// `rowHeight` at the default text size and grow with the text, so the
-/// scrolling window grows with them.
+/// `rowHeight` at the default text size and grow with the text; the
+/// window grows with a few of them, never past its default height (the
+/// keyboard is up under it), and at accessibility sizes it always
+/// scrolls.
 struct PromptMenuCard<Rows: View>: View {
     let count: Int
     let rowHeight: CGFloat
@@ -65,14 +67,14 @@ struct PromptMenuCard<Rows: View>: View {
     var footnotes: [String] = []
     var refresh: (() async -> Void)? = nil
     @ViewBuilder let rows: () -> Rows
+    @Environment(\.dynamicTypeSize) private var size
 
     var body: some View {
         VStack(spacing: 0) {
             if let refresh {
-                scroller.scaledHeight(CGFloat(max(1, min(count, visibleRows))) * rowHeight)
-                    .refreshable { await refresh() }
-            } else if count > visibleRows {
-                scroller.scaledHeight(CGFloat(visibleRows) * rowHeight)
+                window.refreshable { await refresh() }
+            } else if count > visibleRows || size.isAccessibilitySize {
+                window
             } else {
                 VStack(spacing: 0) { rows() }
             }
@@ -92,6 +94,12 @@ struct PromptMenuCard<Rows: View>: View {
         .background(Theme.card, in: .rect(cornerRadius: Theme.blockRadius))
         .overlay(RoundedRectangle(cornerRadius: Theme.blockRadius).strokeBorder(Theme.border, lineWidth: 1))
         .clipShape(.rect(cornerRadius: Theme.blockRadius))
+    }
+
+    /// The rows scrolling in at most `visibleRows` rows' default height.
+    private var window: some View {
+        scroller.scaledHeight(CGFloat(max(1, min(count, visibleRows))) * rowHeight,
+                              cap: CGFloat(visibleRows) * rowHeight)
     }
 
     private var scroller: some View {
