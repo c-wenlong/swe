@@ -218,9 +218,9 @@ const Fmt = (() => {
     cursor: {
       included: "Everything billed this cycle: the included credit pool and on-demand spend together.",
       auto: "The draw on the credit pool by Auto-routed requests, where Cursor picks the model.",
-      api: "The draw on the credit pool by named-model requests. At 100%, further usage bills on-demand.",
+      api: "The draw on the credit pool by named-model requests; at 100% they only continue if on-demand billing is on.",
       grok_bot: "Grok Bot's own weekly allowance, separate from the billing cycle.",
-      on_demand: "Metered spend once the credit pool runs out, capped by the account's spend limit.",
+      on_demand: "Metered spend once the credit pool runs out; uncapped when the account sets no spend limit.",
     },
   };
   function meterInfo(harness, label) {

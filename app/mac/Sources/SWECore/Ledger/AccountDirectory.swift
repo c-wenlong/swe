@@ -159,11 +159,11 @@ public enum UsageFormat {
         case ("cursor", "auto"):
             "The draw on the credit pool by Auto-routed requests, where Cursor picks the model."
         case ("cursor", "api"):
-            "The draw on the credit pool by named-model requests. At 100%, further usage bills on-demand."
+            "The draw on the credit pool by named-model requests; at 100% they only continue if on-demand billing is on."
         case ("cursor", "grok_bot"):
             "Grok Bot's own weekly allowance, separate from the billing cycle."
         case ("cursor", "on_demand"):
-            "Metered spend once the credit pool runs out, capped by the account's spend limit."
+            "Metered spend once the credit pool runs out; uncapped when the account sets no spend limit."
         default: nil
         }
     }

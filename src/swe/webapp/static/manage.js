@@ -796,6 +796,7 @@ function paintAccounts() {
       const opening = tip.hidden;
       closeMeterTips();
       tip.hidden = !opening;
+      accountsPage.openTip = opening ? tip.dataset.key : null;
     };
   }
   /* The outside-click and Esc closers attach once, here rather than at
@@ -813,6 +814,7 @@ function paintAccounts() {
 
 function closeMeterTips() {
   for (const tip of document.querySelectorAll(".meter-tip")) tip.hidden = true;
+  accountsPage.openTip = null;
 }
 
 /* Ages, countdowns, staleness and the late-satellite note move with the
@@ -837,10 +839,12 @@ function barColor(pct) {
 }
 
 /* The "i" button and its click-pinned tip beside a meter's label; empty
- * for a meter with no explanation. */
-function meterInfoBtn(text, label) {
+ * for a meter with no explanation. ``key`` names the meter so a repaint
+ * redraws its tip open rather than dropping it mid-read. */
+function meterInfoBtn(text, label, key) {
   if (!text) return "";
-  return `<button class="meter-info" type="button" aria-label="What ${esc(label)} bills for" title="What this meter bills for">${icon("info")}</button><span class="meter-tip" role="note" hidden>${esc(text)}</span>`;
+  const open = accountsPage.openTip === key;
+  return `<button class="meter-info" type="button" aria-label="What ${esc(label)} bills for" title="What this meter bills for">${icon("info")}</button><span class="meter-tip" role="note" data-key="${esc(key)}"${open ? "" : " hidden"}>${esc(text)}</span>`;
 }
 
 /* ``now`` ages the machine's own stamps (as_of); a reset time is the
@@ -853,7 +857,7 @@ function windowRow(harness, w, now) {
     ? (w.as_of ? `as of ${Fmt.ago(w.as_of, now)}` : "")
     : (w.reset_at && w.reset_at > real ? `Resets ${Fmt.resetIn(w.reset_at, real)}` : "");
   return `<div class="limit${failed ? " failed" : ""}">
-    <div class="limit-head"><span class="limit-label-wrap"><span class="limit-label">${esc(Fmt.windowLabel(w.window))}</span>${meterInfoBtn(Fmt.meterInfo(harness, w.window), Fmt.windowLabel(w.window))}</span>
+    <div class="limit-head"><span class="limit-label-wrap"><span class="limit-label">${esc(Fmt.windowLabel(w.window))}</span>${meterInfoBtn(Fmt.meterInfo(harness, w.window), Fmt.windowLabel(w.window), `${harness}:${w.window}`)}</span>
       <span class="num">${failed && !w.as_of ? "—" : `${pct}%`}</span></div>
     <div class="track"><div class="fill" style="width:${pct}%; background:${barColor(pct)}"></div></div>
     ${right ? `<div class="caption">${esc(right)}</div>` : ""}
@@ -882,7 +886,7 @@ function accountCard(h, machine) {
     body = readingWindows(rl).map((w) => windowRow(h.name, w, now)).join("");
     if (rl.on_demand) {
       const [value, detail] = Fmt.onDemand(rl.on_demand);
-      body += `<div class="limit-extra"><span class="caption limit-label-wrap">On-demand${meterInfoBtn(Fmt.meterInfo(h.name, "on_demand"), "On-demand")}</span><span>${esc(value)} · <span class="caption">${esc(detail)}</span></span></div>`;
+      body += `<div class="limit-extra"><span class="caption limit-label-wrap">On-demand${meterInfoBtn(Fmt.meterInfo(h.name, "on_demand"), "On-demand", `${h.name}:on_demand`)}</span><span>${esc(value)} · <span class="caption">${esc(detail)}</span></span></div>`;
     }
     if (rl.extra_usage_usd != null) {
       body += `<div class="limit-extra"><span class="caption">Extra usage balance</span><span class="num">${Fmt.balance(rl.extra_usage_usd)}</span></div>`;
