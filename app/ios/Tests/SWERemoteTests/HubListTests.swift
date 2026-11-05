@@ -125,10 +125,14 @@ final class HubListTests: XCTestCase {
     func testARefusedCredentialIsDroppedWithoutTellingTheHub() async {
         let app = AppModel(hub: hub("mac"))
         // The hub already refused it; there's nothing to sign out. A
-        // revoke would run in a Task on this actor, so yielding a while
-        // gives one every chance to land, without a fixed wait.
+        // revoke would run in a Task on this actor: yielding lets one
+        // enqueued there run, without a fixed wait, and the closure
+        // fails the test itself, so even a later call is caught.
         var revoked = false
-        app.revokeOnHub = { _, _ in revoked = true }
+        app.revokeOnHub = { _, _ in
+            revoked = true
+            XCTFail("a refused credential must not be revoked on the hub")
+        }
         app.unpair(from: HubClient(baseURL: hub("mac").baseURL, credential: "c"))
         XCTAssertNil(app.hub)
         for _ in 0..<100 { await Task.yield() }
