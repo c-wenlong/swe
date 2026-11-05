@@ -7,6 +7,7 @@ import re
 import sqlite3
 
 from swe.sessions import opencode_store
+from swe.sessions.engines.common import sqlite_uri
 
 
 def classify_provider(model: str) -> str:
@@ -75,7 +76,10 @@ def _drizzle_model_counts(db_path: str) -> dict[tuple[str, str], int]:
     seen: dict[tuple[str, str], int] = {}
     conn = None
     try:
-        conn = sqlite3.connect(db_path)
+        # Read-only: a read-write connection checkpoints OpenCode's or
+        # Kilo's WAL into their database when it closes, so `swe models`
+        # wrote to another app's store.
+        conn = sqlite3.connect(sqlite_uri(db_path), uri=True)
         cur = conn.cursor()
         cur.execute(
             """

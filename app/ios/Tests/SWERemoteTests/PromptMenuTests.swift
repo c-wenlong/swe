@@ -420,6 +420,40 @@ final class CommandMenuTests: XCTestCase {
         XCTAssertEqual(calls, 3)
     }
 
+    /// A refresh cut short (the pull let go) while a newer load is still
+    /// out must not take that load's spinner away.
+    func testACancelledRefreshLeavesANewerLoadsSpinner() async {
+        let menu = CommandMenu()
+        let firstGate = Gate(), secondGate = Gate()
+        // Each fetch says when it has started, so the test never runs on
+        // a guess about task timing.
+        let firstStarted = Gate(), secondStarted = Gate()
+        var calls = 0
+        menu.fetch = {
+            calls += 1
+            if calls == 1 {
+                firstStarted.release()
+                await firstGate.wait()
+                throw CancellationError()
+            }
+            secondStarted.release()
+            await secondGate.wait()
+            return CommandsResponse(commands: [SlashCommand(name: "review")])
+        }
+        let first = Task { await menu.refresh() }
+        await firstStarted.wait()
+        let second = Task { await menu.refresh() }
+        await secondStarted.wait()
+        XCTAssertEqual(calls, 2)
+        firstGate.release()
+        await first.value
+        XCTAssertTrue(menu.loading, "the newer load is still out")
+        secondGate.release()
+        await second.value
+        XCTAssertFalse(menu.loading)
+        XCTAssertEqual(menu.response?.commands.map(\.name), ["review"])
+    }
+
     func testErrorRetriesOnTheNextOpen() async {
         let menu = CommandMenu()
         var fail = true

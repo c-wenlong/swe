@@ -126,6 +126,12 @@ comments in <code>--json</code> gain <code>association</code>.</li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
+The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its
+command, but sessions carry the registry id <code>qwen-code</code>, so a file
+sent from a phone arrived as an <code>[Attached file: …]</code> line instead of
+an <code>@</code> reference.</p>
+</li>
 <li><p><strong>An approval resolved without a request id now kills its ntfy
 buttons.</strong> The hub clears every pending approval on such a resolve,
 but the notification tokens were retired only by exact request id, so
@@ -405,7 +411,8 @@ shows one. The web Overview gets a Machines card with each machine's
 tokens and spend for the period (pick one to filter the page), and the
 iPhone's Usage tab a row of machine chips under the periods. A
 satellite's days are its own local days, and its view has no top
-models, since daily rows carry none. Closes</p>
+models, since daily rows carry none. Closes
+<a href="https://github.com/c-wenlong/swe/issues/525">#525</a>.</p>
 </li>
 <li><p><strong>Mac and web: Hub sync card.</strong> Settings › Files shows <code>swe sync status</code> for <code>~/.swe</code> (branch mode, uncommitted changes by primitive,
 commits to push and pull, new commits on <code>origin/main</code>, files kept
@@ -887,7 +894,8 @@ doesn't fit the database answers <code>bad-config</code> naming the property,
 while other databases and sources keep listing. The adapter pins
 <code>Notion-Version: 2022-06-28</code>, paginates with a cap, waits out a 429's
 <code>Retry-After</code>, and renders a page body to markdown for a resolve
-prompt. Read-only. Part of</p>
+prompt. Read-only. Part of
+<a href="https://github.com/c-wenlong/swe/issues/847">#847</a>.</p>
 </li>
 <li><p><strong>Tasks on the Mac, the web and the iPhone show Notion like Linear.</strong>
 The three clients read the hub's new <code>notion</code> env block beside
@@ -5305,8 +5313,10 @@ column order, separator/header/body visible-width parity, green/red
 status colors, dim version text, <code>version unknown</code> fallback, three
 heal-side-effect cases (live overrides stored, live matches stored,
 dirty stored value cleared), off-PATH footer conditional rendering
-(with/without orphans), alphabetical row order, and bold header line.- <code>swe list</code> now shows a <strong>RATE</strong> column with usage percentage and reset countdown for tools that expose rate limit APIs. Currently supports:</li>
+(with/without orphans), alphabetical row order, and bold header line.</li>
 </ul>
+</li>
+<li><p><code>swe list</code> now shows a <strong>RATE</strong> column with usage percentage and reset countdown for tools that expose rate limit APIs. Currently supports:</p>
 <ul>
 <li><strong>Codex</strong> via ChatGPT <code>backend-api/wham/usage</code> endpoint using OAuth
 tokens from <code>~/.codex/auth.json</code></li>

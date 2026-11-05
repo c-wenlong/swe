@@ -340,6 +340,25 @@ class TestFixAll(_TempHome, unittest.TestCase):
             doctor_page._RUN_LOCK.release()
 
 
+class TestLocks(unittest.TestCase):
+    """A fix runs behind the locks of the pages writing the same files:
+    the registry lock always, and the MCP, Skills and Setup pages'
+    CONFIG_LOCK unless it is an install, which writes none of theirs."""
+
+    def held(self, **kw):
+        from swe.webapp.pages import CONFIG_LOCK
+        from swe.webapp.pages.harness import REGISTRY_LOCK
+
+        return doctor_page._guarded(
+            lambda h: f"registry={REGISTRY_LOCK.locked()} config={CONFIG_LOCK.locked()}", Path("."), **kw)
+
+    def test_a_fix_holds_the_config_lock(self):
+        self.assertEqual(self.held(), "registry=True config=True")
+
+    def test_an_install_leaves_the_config_lock_free(self):
+        self.assertEqual(self.held(config=False), "registry=True config=False")
+
+
 class TestInstall(_TempHome, unittest.TestCase):
     """An off-PATH harness gets Run: swe install <name> --via=<method>."""
 
