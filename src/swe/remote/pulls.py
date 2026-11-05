@@ -170,8 +170,9 @@ def detail(state, owner: str, name: str, number_raw: str,
     # The Repositories page caches the same PR under ("pr", hk, repo,
     # n): one entry keeps the phone and the page on the same read, and
     # its merge/rerun invalidation (_drop_repo) covers us too. A
-    # page-populated entry lacks the two fields only this route adds,
-    # so they're filled in on the way out (both are pure).
+    # page-populated entry lacks the fields only this route adds, so
+    # they're filled in on the way out: the worktree and prompt are
+    # pure, the author's association one small REST read.
     value, at = G.CACHE.get(
         ("pr", G.home_key(state.home), pinned, str(number)), fetch,
         refresh=_refresh(args), ok=lambda v: v["status"] == "ok")
@@ -179,9 +180,9 @@ def detail(state, owner: str, name: str, number_raw: str,
     if isinstance(pr, dict) and "worktree" not in pr:
         worktree = gh_pulls.worktree_path(pinned, number, state.home)
         pr = {**pr, "worktree": worktree,
-              "suggested_prompt": gh_pulls.build_prompt(
-                  pinned, pr, worktree,
-                  limit=protocol.MAX_LAUNCH_PROMPT)}
+              "association": gh_pulls.author_association(pinned, number)}
+        pr = {**pr, "suggested_prompt": gh_pulls.build_prompt(
+            pinned, pr, worktree, limit=protocol.MAX_LAUNCH_PROMPT)}
         value = {**value, "pr": pr}
     return 200, {**base, **value, "fetched_at": at}
 
