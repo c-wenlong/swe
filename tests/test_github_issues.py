@@ -397,6 +397,8 @@ class TestBuildPrompt(unittest.TestCase):
 
     def test_issue_number(self):
         for ref, want in (("5", 5), ("#5", 5), ("0", None), ("abc", None),
+                          ("²", None), ("#٣", None),
+                          ("https://github.com/o/r/issues/٣", None),
                           ("https://github.com/o/r/issues/12", 12),
                           ("https://github.com/o/r/pull/12", None)):
             self.assertEqual(gh_issues.issue_number(ref), want, ref)

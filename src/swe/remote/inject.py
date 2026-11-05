@@ -639,8 +639,6 @@ class _ServeProc:
 
 def _serve_event_loop(serve: _ServeProc) -> None:
     """Read ``GET /event``; permission asks become approval events."""
-    from swe.remote import protocol
-
     try:
         req = urllib.request.Request(
             serve.base + "/event", headers={"Accept": "text/event-stream"}
