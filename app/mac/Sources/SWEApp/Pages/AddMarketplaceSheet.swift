@@ -28,7 +28,7 @@ struct AddMarketplaceSheet: View {
     /// `swe plugins marketplace add` takes the source as a positional
     /// word, where one that starts with "-" reads as a flag; the CLI
     /// refuses it, so the sheet says so before Add.
-    static func sourceProblem(_ source: String) -> String? {
+    nonisolated static func sourceProblem(_ source: String) -> String? {
         source.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("-")
             ? "A source can't start with -" : nil
     }
