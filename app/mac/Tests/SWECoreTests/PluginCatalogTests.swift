@@ -855,10 +855,10 @@ func decodedInventory() throws -> [Skill] {
     }
 
     /// Opt-in: the same check against this Mac's swe, which is too slow and
-    /// machine-specific for every run. Set QUIVER_COVERAGE_SWE to its path.
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["QUIVER_COVERAGE_SWE"] != nil))
+    /// machine-specific for every run. Set SWE_COVERAGE_SWE to its path.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["SWE_COVERAGE_SWE"] != nil))
     func everySkillOnThisMacIsShownExactlyOnce() async throws {
-        let path = try #require(ProcessInfo.processInfo.environment["QUIVER_COVERAGE_SWE"])
+        let path = try #require(ProcessInfo.processInfo.environment["SWE_COVERAGE_SWE"])
         let swe = SweClient(runner: ProcessRunner(executable: path))
         let explore = PluginCatalogModel(timeout: .seconds(120))
         await explore.load(swe: swe)

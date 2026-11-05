@@ -34,7 +34,7 @@ import Testing
         #expect(issue.comments[1].createdAt?.date != nil)
         #expect(issue.comments[1].url?.hasSuffix("issuecomment-2") == true)
         #expect(issue.branch == "quiver/issue-816")
-        #expect(issue.worktree == "/Users/k/.swe/worktrees/c-wenlong__quiver-issue816")
+        #expect(issue.worktree == "/Users/k/.swe/worktrees/c-wenlong__swe-issue816")
         #expect(issue.suggestedPrompt?.contains("Closes #816") == true)
     }
 
@@ -304,7 +304,7 @@ import Testing
         #expect(IssueResolve.inRepo("/Users/k/.swe/worktrees/c-wenlong__swe-issue816", repo: "c-wenlong/swe"))
         // Folders made before the quiver -> swe rename still match.
         #expect(IssueResolve.inRepo("/Users/k/src/Quiver", repo: "c-wenlong/swe"))
-        #expect(IssueResolve.inRepo("/Users/k/.swe/worktrees/c-wenlong__quiver-issue816", repo: "c-wenlong/swe"))
+        #expect(IssueResolve.inRepo("/Users/k/.swe/worktrees/c-wenlong__swe-issue816", repo: "c-wenlong/swe"))
         #expect(IssueResolve.inRepo("/Users/k/src/quiver/.claude/worktrees/agent-1", repo: "c-wenlong/swe"))
         #expect(!IssueResolve.inRepo("/Users/k/.swe/worktrees/other__quiver-issue7", repo: "other/swe"))
         #expect(!IssueResolve.inRepo("/Users/k/src/quiverish", repo: "c-wenlong/swe"))

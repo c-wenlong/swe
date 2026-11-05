@@ -1,12 +1,12 @@
 {
   "schema": 1,
   "data": {
-    "shared_dir": "/tmp/quiver-fixture-home/.swe/skills",
+    "shared_dir": "/tmp/swe-fixture-home/.swe/skills",
     "harnesses": [
       {
         "name": "claude",
         "label": "claude",
-        "path": "/tmp/quiver-fixture-home/.claude/skills",
+        "path": "/tmp/swe-fixture-home/.claude/skills",
         "state": "linked",
         "detail": "",
         "archived": false
@@ -14,7 +14,7 @@
       {
         "name": "codex",
         "label": "codex",
-        "path": "/tmp/quiver-fixture-home/.codex/skills",
+        "path": "/tmp/swe-fixture-home/.codex/skills",
         "state": "create",
         "detail": "",
         "archived": false
@@ -24,7 +24,7 @@
       {
         "name": "fixture-skill",
         "description": "A made-up skill for contract fixtures",
-        "path": "/private/tmp/quiver-fixture-home/.swe/skills/fixture-skill",
+        "path": "/private/tmp/swe-fixture-home/.swe/skills/fixture-skill",
         "root": "shared",
         "source": "shared",
         "harnesses": [
