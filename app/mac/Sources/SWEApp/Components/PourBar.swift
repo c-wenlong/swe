@@ -154,7 +154,8 @@ final class PourBarView: NSView {
             return
         }
         splitting = true
-        landed = Dictionary(uniqueKeysWithValues: order.map { ($0, max(landed[$0] ?? 0, 1)) })
+        // Keyed by harness without trapping on a repeat, as MarbleScene.show does.
+        landed = Dictionary(order.map { ($0, max(landed[$0] ?? 0, 1)) }, uniquingKeysWith: max)
         total = landed.values.reduce(0, +)
 
         // Out of the clipping pill, at the same place, before they move.
