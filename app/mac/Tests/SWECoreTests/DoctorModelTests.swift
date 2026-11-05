@@ -284,6 +284,17 @@ final class SequencedRunner: CommandRunning, @unchecked Sendable {
         #expect(runner.calls.contains(["setup", "--apply", "--json"]))
     }
 
+    /// Every model that rewrites harness.json waits at the same gate in
+    /// the app, so two pages can't each read the file and lose an edit.
+    @Test func everyRegistryWriterSharesTheAppWideGateByDefault() {
+        let swe = SweClient(runner: ScriptedRunner([]))
+        let shared = HarnessesModel.registryWrites
+        #expect(HarnessesModel(swe: swe).registryGate === shared)
+        #expect(DoctorModel(swe: swe).registryGate === shared)
+        #expect(InstallCatalogModel(swe: swe).registryGate === shared)
+        #expect(FirstRunSetupModel(swe: { swe }).registryGate === shared)
+    }
+
     @Test func setupAndDiscoverWaitForTheRegistryGate() async throws {
         for action in [DoctorReport.Finding.Action.setup, .discover] {
             let runner = ScriptedRunner([
@@ -292,8 +303,12 @@ final class SequencedRunner: CommandRunning, @unchecked Sendable {
                 (["harness", "discover"], .init(status: 0, stdout: Data("ok".utf8), stderr: "")),
             ])
             let model = DoctorModel(swe: SweClient(runner: runner))
+            // A gate of the test's own: the app-wide one is shared by
+            // every test that runs at the same time.
+            let gate = SerialGate()
+            model.registryGate = gate
             // A Harnesses page edit holds the gate.
-            await HarnessesModel.registryWrites.acquire()
+            await gate.acquire()
             let run = Task { await model.run(DoctorReport.Finding(
                 check: "setup.registry", severity: .warning, message: "none",
                 fix: nil, action: action)) }
@@ -301,7 +316,7 @@ final class SequencedRunner: CommandRunning, @unchecked Sendable {
             // The gate has no change stream to wait on, so this re-checks
             // once per turn, bounded by `gateTimeout`.
             let settled = await withinTimeout {
-                while HarnessesModel.registryWrites.waiters == 0, runner.calls.isEmpty {
+                while gate.waiters == 0, runner.calls.isEmpty {
                     if Task.isCancelled { return false }
                     await Task.yield()
                 }
@@ -309,7 +324,7 @@ final class SequencedRunner: CommandRunning, @unchecked Sendable {
             }
             #expect(settled, "\(action) neither queued at the gate nor reached swe")
             #expect(runner.calls.isEmpty, "\(action) ran while the gate was held")
-            HarnessesModel.registryWrites.release()
+            gate.release()
             await run.value
             #expect(!runner.calls.isEmpty)
         }

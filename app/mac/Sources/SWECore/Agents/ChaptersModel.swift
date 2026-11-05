@@ -714,21 +714,28 @@ public final class ChaptersModel {
         status = next
         guard case .loaded(let check) = next, check.indexExists else { return }
 
+        // The documents opened here are read before load returns: an edit
+        // made right after must compare against what was on disk at load
+        // time, not whatever a detached read happened to find later.
+        var opened: [InstructionDocument] = []
         if indexDocument?.url.path != check.index {
             let document = InstructionDocument(url: URL(fileURLWithPath: check.index))
             indexDocument = document
-            Task { await document.load() }
+            opened.append(document)
         }
         if output?.url.path != check.output {
             let document = InstructionDocument(url: URL(fileURLWithPath: check.output))
             output = document
-            Task { await document.load() }
+            opened.append(document)
         }
         let targetsPath = check.directory + "/targets.json"
         if targetsDocument?.url.path != targetsPath {
             let document = InstructionDocument(url: URL(fileURLWithPath: targetsPath))
             targetsDocument = document
-            Task { await document.load() }
+            opened.append(document)
+        }
+        await withDiscardingTaskGroup { group in
+            for document in opened { group.addTask { await document.load() } }
         }
         await refreshTree(under: check.directory,
                           order: check.entries?.map(\.name)

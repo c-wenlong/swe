@@ -371,8 +371,7 @@ struct GitHubNotifierTests {
         defer { task.cancel() }
         try #require(await counted.runs.reach(1), "the first poll never ran")
         // The first poll done and the loop asleep on the slow pace.
-        for _ in 0..<10_000 where !notifier.isNapping { await Task.yield() }
-        try #require(notifier.isNapping)
+        try #require(await observed { notifier.isNapping }, "the loop never fell asleep")
         // Two minutes on, hidden with banners off: the 15 minute pace
         // still has the poll asleep. The window showing wakes it, and
         // the minute pace says it is due.

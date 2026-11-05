@@ -201,7 +201,10 @@ public final class HarnessesModel {
     /// Every swe run that rewrites harness.json, from any page, waits here:
     /// two at once can each read the file and one loses the other's change.
     static let registryWrites = SerialGate()
-    private var gate: SerialGate { Self.registryWrites }
+    /// The gate every harness.json write waits at: the one app-wide
+    /// gate unless a test hands the model its own, so tests holding a
+    /// gate never share one.
+    @ObservationIgnored var registryGate: SerialGate = HarnessesModel.registryWrites
     private var generation = 0
 
     public init(swe: SweClient) {
@@ -211,8 +214,8 @@ public final class HarnessesModel {
     /// Registers those names behind the registry gate; the reply also
     /// says which names were refused, and why.
     public func register(_ names: [String]) async throws -> HarnessDiscovery.Applied {
-        await gate.acquire()
-        defer { gate.release() }
+        await registryGate.acquire()
+        defer { registryGate.release() }
         return try await swe.registerHarnesses(names).applied
             ?? .init(added: [], skipped: [])
     }
@@ -220,8 +223,8 @@ public final class HarnessesModel {
     /// Adds a custom harness behind the registry gate; never overwrites.
     public func add(name: String, command: String, description: String,
                     aliases: [String], tags: [String]) async throws {
-        await gate.acquire()
-        defer { gate.release() }
+        await registryGate.acquire()
+        defer { registryGate.release() }
         try await swe.addHarness(name: name, command: command, description: description,
                                  aliases: aliases, tags: tags)
     }
@@ -309,8 +312,8 @@ public final class HarnessesModel {
         guard !busy.contains(harness.name) else { return "\(harness.name) is still saving." }
         busy.insert(harness.name)
         defer { busy.remove(harness.name) }
-        await gate.acquire()
-        defer { gate.release() }
+        await registryGate.acquire()
+        defer { registryGate.release() }
         do {
             try await swe.editHarness(harness.name, flags: flags)
         } catch is CancellationError {
@@ -328,8 +331,8 @@ public final class HarnessesModel {
         defer { busy.remove(name) }
         // Each swe run reads harness.json, changes one row and writes it
         // back, so two at once can lose one change. Run them in turn.
-        await gate.acquire()
-        defer { gate.release() }
+        await registryGate.acquire()
+        defer { registryGate.release() }
         actionError = nil
         do {
             _ = try await work(swe)
