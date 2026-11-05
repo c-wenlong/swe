@@ -180,10 +180,6 @@ class EditCommandTest(unittest.TestCase):
         edit.assert_called_once()
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RedrawTest(unittest.TestCase):
     """Each redraw must rewind by exactly what it drew.
 
@@ -999,3 +995,7 @@ class MultiselectMouseTest(unittest.TestCase):
         # A shell left reporting the wheel spews escape sequences at the
         # prompt, so the off switch has to precede the termios restore.
         self.assertIn(keys.MOUSE_OFF, seen[0])
+
+
+if __name__ == "__main__":
+    unittest.main()

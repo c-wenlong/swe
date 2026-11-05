@@ -73,10 +73,6 @@ class FilterByPatternsTest(unittest.TestCase):
         self.assertEqual(set(sel), {"a1", "a2"})
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class HubAsSourceTest(unittest.TestCase):
     """~/.swe/mcp.json is a sync source, never a sync target.
 
@@ -276,3 +272,7 @@ class SecretIndirectionTest(unittest.TestCase):
                     {"h": scheme + "ntn_secretvalue123456"}, home=home
                 )
                 self.assertEqual(out["h"], scheme + "${MCP_NOTION_TOKEN}")
+
+
+if __name__ == "__main__":
+    unittest.main()
