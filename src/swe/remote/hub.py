@@ -128,8 +128,8 @@ GLOBAL_KEY = "_global"
 
 # ``queue``-mode sends poll a fresh session status on this cadence and
 # give up after the cap — a turn outliving it fails the send honestly.
-QUEUE_POLL_S = 2.0
-QUEUE_WAIT_MAX_S = 1800
+QUEUE_POLL_S = protocol.IDLE_POLL_S
+QUEUE_WAIT_MAX_S = protocol.IDLE_WAIT_MAX_S
 # Per-key in-flight sends (waiting plus running) get an honest 429
 # rather than an unbounded backlog nobody reads.
 MAX_SEND_BACKLOG = 20
@@ -1223,7 +1223,7 @@ def _json_bytes(payload) -> bytes:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    server_version = "quiver-remote"
+    server_version = "swe-remote"
     protocol_version = "HTTP/1.1"
     state: HubState  # stamped on the server, set in make_server
 
@@ -2101,7 +2101,11 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._local_host_gate():
                 return
             rid = unquote(path[len("/v1/pair/request/"):])
-            secret = str((args.get("secret") or [""])[0])
+            # The secret rides a header: a query string lands in proxy
+            # and access logs. ``?secret=`` still works for the iPhone
+            # builds already out, which send it there.
+            secret = (self.headers.get("X-Pair-Secret")
+                      or str((args.get("secret") or [""])[0]))
             result = pairing.poll_request(self._state.home, rid, secret)
             if result is None:
                 self._send_error(

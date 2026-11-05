@@ -142,10 +142,6 @@ class TmuxInjector:
     # injector is built per request; bounded so a long-lived hub does
     # not grow it forever.
     _answered: dict[str, "collections.deque[str]"] = {}
-    # One lock per pane serializes a whole approval: the hub serves
-    # each client on its own thread, and two answers racing the same
-    # menu would otherwise interleave their arrow keys mid-walk.
-    _pane_locks: dict[str, threading.Lock] = {}
 
     def __init__(self, home: Path | None, session_key: str) -> None:
         self.home = home
@@ -182,8 +178,9 @@ class TmuxInjector:
         # Checks, pane capture, the key walk and the answered mark are
         # one critical section per pane — a concurrent reply must see
         # either the request still open or the menu already consumed.
-        lock = self._pane_locks.setdefault(self.key, threading.Lock())
-        with lock:
+        # It is send_text's own pane lock, so a message steered in
+        # meanwhile can't land between the walk's arrow keys either.
+        with supervise._pane_lock(self.name):
             return self._approval(session, request_id, decision)
 
     def _approval(self, session: Session, request_id: str, decision: str) -> InjectResult:
@@ -200,10 +197,20 @@ class TmuxInjector:
         # When the tailer issued a request_id for the prompt currently
         # on screen, only that id may answer it — a stale or superseded
         # id cannot consume the new menu.
-        outstanding = supervise.pending_approval(self.key)
-        if outstanding and request_id != outstanding:
+        # The id and its fingerprint are read once, together: the
+        # watcher may clear or replace them while the pane is captured.
+        snap = supervise.pending_entry(self.key)
+        outstanding, fp = snap if snap else (None, None)
+        if (outstanding and request_id != outstanding) \
+                or supervise.approval_retired(self.key, request_id):
             return InjectResult(False, "stale approval request id")
         pane = supervise.capture_pane(self.name)
+        if supervise.pending_entry(self.key) != snap:
+            # Answered at the terminal, or a new prompt named, while
+            # capturing: the screen may already be the next prompt.
+            return InjectResult(
+                False, "approval prompt changed since the request"
+            )
         if not supervise.pane_shows_approval(pane):
             return InjectResult(
                 False, "no approval prompt is on screen"
@@ -211,7 +218,6 @@ class TmuxInjector:
         # The id was minted for the prompt that was on screen then —
         # re-fingerprint now so a menu swapped in between polls can't
         # be answered by the old id.
-        fp = supervise.pending_approval_fp(self.key)
         if fp and fp != supervise.approval_fingerprint(pane):
             return InjectResult(
                 False, "approval prompt changed since the request"
@@ -288,6 +294,18 @@ class TmuxInjector:
                 supervise.detach(self.home, self.key),
                 "supervisor stopped; session is observed again",
             )
+        if op in {"model", "effort"}:
+            from swe.remote import slash_builtins
+
+            # Only a TUI verified to run /<op> <value> gets it typed: in
+            # any other, the line would reach the model as a prompt. The
+            # same rule model_modes advertises and launch_tuning_error
+            # applies at launch and attach.
+            if not slash_builtins.launch_op_ok(session.tool_name, op):
+                return InjectResult(
+                    False, f"unsupported_control: "
+                           f"{session.tool_name or 'this harness'}'s TUI "
+                           f"has no /{op} that takes a value")
         text = control_text(op, value)
         if not text:
             return InjectResult(False, f"unsupported control {op}")
@@ -639,8 +657,6 @@ class _ServeProc:
 
 def _serve_event_loop(serve: _ServeProc) -> None:
     """Read ``GET /event``; permission asks become approval events."""
-    from swe.remote import protocol
-
     try:
         req = urllib.request.Request(
             serve.base + "/event", headers={"Accept": "text/event-stream"}
@@ -1097,8 +1113,6 @@ def _appserver_read_loop(server: _AppServer, key: str, emit, machine: str,
     """Demux stdout: responses go to waiting calls; server-initiated
     approval requests become protocol events; message text streams
     into ``deltas``."""
-    from swe.remote import protocol
-
     proc = server.proc
     try:
         assert proc.stdout is not None
@@ -1109,48 +1123,62 @@ def _appserver_read_loop(server: _AppServer, key: str, emit, machine: str,
                 continue
             if not isinstance(msg, dict):
                 continue
-            method = str(msg.get("method") or "")
-            if method:
-                # Server -> client request or notification.
-                params = msg.get("params")
-                if isinstance(params, dict):
-                    _appserver_live(method, params, key, machine, deltas)
-                if "requestApproval" in method or "Approval" in method:
-                    req_id = msg.get("id")
-                    if req_id is not None:
-                        request_id = str(req_id)
-                        server.approvals[request_id] = req_id
-                        params = msg.get("params") or {}
-                        prompt = str(
-                            params.get("reason")
-                            or params.get("command")
-                            or params.get("itemId")
-                            or method
-                        )
-                        if emit is not None:
-                            emit(key, protocol.event(
-                                "approval.requested", key, machine,
-                                {"request_id": request_id,
-                                 "prompt": _tr._redact_secrets(prompt)},
-                            ))
-                elif method in ("turn/started", "codex/turnStarted"):
-                    params = msg.get("params") or {}
-                    turn = params.get("turn") or {}
-                    if isinstance(turn, dict) and turn.get("id"):
-                        server.turn_id = str(turn["id"])
-                elif method in ("turn/completed", "turn/failed",
-                                "codex/turnCompleted"):
-                    server.turn_id = ""
+            try:
+                _appserver_message(server, msg, key, emit, machine, deltas)
+            except Exception:
+                # One odd message (list params, an unhashable id) is
+                # skipped; ending the reader would strand every later
+                # reply until the session detaches.
                 continue
-            if "id" in msg:
-                q = server.replies.pop(msg["id"], None)
-                if q is not None:
-                    q.put(msg)
     except Exception:
         pass
     server.dead = True
     if deltas is not None:
         deltas.finish_all(key)
+
+
+def _appserver_message(server: _AppServer, msg: dict, key: str, emit,
+                       machine: str, deltas) -> None:
+    """Route one app-server message (see ``_appserver_read_loop``)."""
+    from swe.remote import protocol
+
+    method = str(msg.get("method") or "")
+    if method:
+        # Server -> client request or notification.
+        params = msg.get("params")
+        if not isinstance(params, dict):
+            params = {}
+        else:
+            _appserver_live(method, params, key, machine, deltas)
+        if "requestApproval" in method or "Approval" in method:
+            req_id = msg.get("id")
+            if req_id is not None:
+                request_id = str(req_id)
+                server.approvals[request_id] = req_id
+                prompt = str(
+                    params.get("reason")
+                    or params.get("command")
+                    or params.get("itemId")
+                    or method
+                )
+                if emit is not None:
+                    emit(key, protocol.event(
+                        "approval.requested", key, machine,
+                        {"request_id": request_id,
+                         "prompt": _tr._redact_secrets(prompt)},
+                    ))
+        elif method in ("turn/started", "codex/turnStarted"):
+            turn = params.get("turn") or {}
+            if isinstance(turn, dict) and turn.get("id"):
+                server.turn_id = str(turn["id"])
+        elif method in ("turn/completed", "turn/failed",
+                        "codex/turnCompleted"):
+            server.turn_id = ""
+        return
+    if "id" in msg:
+        q = server.replies.pop(msg["id"], None)
+        if q is not None:
+            q.put(msg)
 
 
 class CodexAppServerInjector:
@@ -1189,11 +1217,19 @@ class CodexAppServerInjector:
         spawned = False
         with self._servers_lock:
             server = self._servers.get(self.key)
-            if server is not None and server.proc.poll() is None:
+            if server is not None and server.proc.poll() is None \
+                    and not server.dead:
                 spawned = False
             else:
                 if server is not None:
                     self._servers.pop(self.key, None)
+                    if server.proc.poll() is None:
+                        # Its reader is gone: no reply would ever be
+                        # read and its stdout would back up unread.
+                        try:
+                            server.proc.kill()
+                        except OSError:
+                            pass
                 thread_id = self._thread_id(session)
                 if not thread_id:
                     return None

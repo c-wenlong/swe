@@ -8,7 +8,7 @@ struct AddHarnessPathTests {
     @Test func findsAnExecutableOnTheGivenPath() throws {
         let dir = try TempDir()
         // A name no real install has: the check also searches Homebrew's folders.
-        let name = "quiver-test-\(UUID().uuidString)"
+        let name = "swe-test-\(UUID().uuidString)"
         let tool = dir.url.appending(path: name)
         try Data("#!/bin/sh\n".utf8).write(to: tool)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
@@ -19,7 +19,7 @@ struct AddHarnessPathTests {
     /// A file that isn't executable is not a command.
     @Test func skipsAFileThatIsNotExecutable() throws {
         let dir = try TempDir()
-        let name = "quiver-test-\(UUID().uuidString)"
+        let name = "swe-test-\(UUID().uuidString)"
         try Data("x".utf8).write(to: dir.url.appending(path: name))
         #expect(!AddHarnessSheet.onPath(name, path: dir.url.path))
     }

@@ -250,9 +250,14 @@ public final class FanControl {
     public var thresholdEnabled: Bool {
         didSet {
             defaults.set(thresholdEnabled, forKey: Self.thresholdEnabledKey)
+            if !thresholdEnabled { thresholdOffs += 1 }
             if !thresholdEnabled && heldByThreshold { restoreAutomatic() }
         }
     }
+
+    /// Counts switch-offs, so an `enableThreshold` still waiting on the
+    /// install prompt can tell an Off picked meanwhile must win.
+    private var thresholdOffs = 0
 
     public var threshold: Double {
         didSet {
@@ -669,6 +674,7 @@ public final class FanControl {
     /// there: the rule acts from the background, where a password prompt
     /// must never appear, so the one prompt happens here, on a click.
     public func enableThreshold() async {
+        let offs = thresholdOffs
         if installUnchecked { await refresh() }
         if !helperInstalled {
             switch await installHelper() {
@@ -682,6 +688,8 @@ public final class FanControl {
                 return
             }
         }
+        // Switched off while the prompt was up: that choice is newer.
+        guard thresholdOffs == offs else { return }
         thresholdEnabled = true
     }
 

@@ -302,7 +302,23 @@ import Testing
         let item = CleanupItem.process(swe, harness: "claude")
         let order = ComputeSummary.killOrder(for: item, in: [launchd, swe, helper],
                                              selfPID: 99, ancestors: [1])
-        #expect(order == [10])
+        // The helper runs under SWE, so it is SWE's own too.
+        #expect(order.isEmpty)
+    }
+
+    /// A `claude` SWE started for its own reads is attributed to Claude;
+    /// "Quit all" must leave it (and what it spawned) alone while the
+    /// user's own claude still goes.
+    @Test func killOrderSkipsWhatRunsUnderSWE() {
+        let swe = Self.proc(99, 1, path: "/Applications/SWE.app/Contents/MacOS/SWE")
+        let probe = Self.proc(20, 99, path: "/opt/homebrew/bin/claude")
+        let probeChild = Self.proc(21, 20, path: "/x/node")
+        let users = Self.proc(30, 1, path: "/opt/homebrew/bin/claude")
+        let samples = [swe, probe, probeChild, users]
+        #expect(ComputeSummary.killOrder(for: .process(probe, harness: "claude"), in: samples,
+                                         selfPID: 99, ancestors: [1]).isEmpty)
+        #expect(ComputeSummary.killOrder(for: .process(users, harness: "claude"), in: samples,
+                                         selfPID: 99, ancestors: [1]) == [30])
     }
 
     @Test func aHarnessRootQuitsAlone() {
@@ -704,6 +720,63 @@ import Testing
         await model.quitHarness("claude", force: true)
         #expect(fake.signalled.map(\.0) == [10])
         #expect(fake.signalled.map(\.1) == [SIGKILL])
+    }
+
+    // MARK: Never SWE's own ancestors
+
+    /// SWE (pid 99) launched from inside a claude session: claude (10)
+    /// started a shell (11) that started SWE. Its siblings are fair game.
+    private static let launchedFromClaude = [
+        proc(10, 1, path: "/opt/homebrew/bin/claude"),
+        proc(11, 10, path: "/bin/zsh"),
+        proc(99, 11, path: "/Applications/SWE.app/Contents/MacOS/SWE"),
+        proc(12, 10, path: "/x/worker"),
+    ]
+
+    @MainActor @Test func quitHarnessSparesTheProcessesSWERunsUnder() async {
+        // The model walks its own parent chain in the fresh sample; the
+        // summary tests hand the chain in, so only this catches a walk
+        // that stops early or never starts.
+        for force in [false, true] {
+            let fake = Fake(Self.launchedFromClaude)
+            let model = ComputeModel(sampler: fake, matchers: { [Self.claude] },
+                                     signaller: fake, defaults: TestDefaults("compute-test"), selfPID: 99)
+            await model.loadMatchers()
+            await model.quitHarness("claude", force: force)
+            #expect(fake.signalled.map(\.0) == [12])
+        }
+    }
+
+    @MainActor @Test func quittingAnItemSparesTheProcessesSWERunsUnder() async {
+        // The same rule on the clean-up sheet's path: an orphaned runner
+        // tree that happens to hold SWE's shell keeps that shell and itself.
+        let root = Self.proc(30, 1, path: "/opt/homebrew/bin/node", cwd: "/w")
+        let shell = Self.proc(31, 30, path: "/bin/zsh", cwd: "/w")
+        let me = Self.proc(99, 31, path: "/Applications/SWE.app/Contents/MacOS/SWE")
+        let sibling = Self.proc(32, 30, path: "/x/server", cwd: "/w")
+        let fake = Fake([root, shell, me, sibling])
+        let model = ComputeModel(sampler: fake, matchers: { [] },
+                                 signaller: fake, defaults: TestDefaults("compute-test"), selfPID: 99)
+        await model.quit(.orphanTree(OrphanTree(root: root, descendants: [shell, me, sibling])))
+        #expect(fake.signalled.map(\.0) == [32])
+    }
+
+    @MainActor @Test func aParentLoopInTheSampleEndsTheWalk() async {
+        // A torn sample can link two pids to each other (and pid 0 is its
+        // own parent); the walk must stop rather than spin, and both
+        // still count as ancestors.
+        let fake = Fake([
+            Self.proc(0, 0, path: "kernel_task"),
+            Self.proc(40, 41, path: "/opt/homebrew/bin/claude"),
+            Self.proc(41, 40, path: "/bin/zsh"),
+            Self.proc(99, 40, path: "/Applications/SWE.app/Contents/MacOS/SWE"),
+            Self.proc(42, 40, path: "/x/worker"),
+        ])
+        let model = ComputeModel(sampler: fake, matchers: { [Self.claude] },
+                                 signaller: fake, defaults: TestDefaults("compute-test"), selfPID: 99)
+        await model.loadMatchers()
+        await model.quitHarness("claude")
+        #expect(!fake.signalled.contains { [0, 40, 41, 99].contains($0.0) })
     }
 
     // MARK: Earlier-launch leftovers
