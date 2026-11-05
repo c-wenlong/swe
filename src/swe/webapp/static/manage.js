@@ -798,21 +798,22 @@ function paintAccounts() {
       tip.hidden = !opening;
     };
   }
+  /* The outside-click and Esc closers attach once, here rather than at
+   * load, so the file evals DOM-free in the node tests. */
+  if (!accountsPage.tipsWired) {
+    accountsPage.tipsWired = true;
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".meter-info") && !e.target.closest(".meter-tip")) closeMeterTips();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeMeterTips();
+    });
+  }
 }
 
 function closeMeterTips() {
   for (const tip of document.querySelectorAll(".meter-tip")) tip.hidden = true;
 }
-
-/* A click anywhere but a meter's "i" or its open tip closes every tip;
- * Esc does too. The listeners live once for the app's life: a repaint
- * that drops the buttons drops the tips with them. */
-document.addEventListener("click", (e) => {
-  if (!e.target.closest(".meter-info") && !e.target.closest(".meter-tip")) closeMeterTips();
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeMeterTips();
-});
 
 /* Ages, countdowns, staleness and the late-satellite note move with the
  * clock, so the open page repaints them every 30 s (no provider call). */
