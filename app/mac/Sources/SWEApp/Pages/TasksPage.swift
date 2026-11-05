@@ -523,7 +523,7 @@ private struct TaskRowView: View {
                             Badge("PR #\(number)")
                                 .hoverTip(pr.title ?? "Pull request #\(number)")
                         }
-                        if stale { Badge("stale") }
+                        if stale { Badge("Stale") }
                     }
                     Text(subtitle)
                         .font(Theme.caption).foregroundStyle(Theme.textSecondary)
