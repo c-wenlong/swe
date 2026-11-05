@@ -31,6 +31,10 @@ struct PromptField: View {
         var body: some View {
             TextField(placeholder, text: $text, selection: $selection, axis: .vertical)
                 .onChange(of: selection) { _, s in cursor = Self.caret(s, in: text) }
+                // The selection can move before the text it indexes lands:
+                // read the caret again against the new text, or it trails
+                // a keystroke behind (a lone "/" opened no menu).
+                .onChange(of: text) { _, t in cursor = Self.caret(selection, in: t) }
                 .onChange(of: moveCaret) { _, c in
                     guard let c else { return }
                     moveCaret = nil
