@@ -177,6 +177,14 @@ class ForcedLinkBacksUpTest(unittest.TestCase):
 
     def setUp(self):
         self.home = temp_dir(self)
+        # link_skill_root records the link in skill_links.json, a path
+        # fixed at import from the runner's HOME: keep it in this home.
+        records = self.home / ".swe" / "config" / "skill_links.json"
+        for target, value in (("swe.skills.layout.SKILL_LINKS_FILE", records),
+                              ("swe.skills.layout.CONFIG_DIR", records.parent)):
+            patcher = mock.patch(target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         (self.home / ".swe" / "skills").mkdir(parents=True)
         self.root = self.home / ".codex" / "skills"
         self.root.mkdir(parents=True)

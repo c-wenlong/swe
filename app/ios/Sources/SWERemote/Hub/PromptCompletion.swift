@@ -439,7 +439,9 @@ final class CommandMenu {
             response = body
             error = nil
         } catch is CancellationError {
-            // Pull to refresh was cut short: keep the list shown.
+            // Pull to refresh was cut short: keep the list shown. A newer
+            // load still out owns the spinner, so only the newest clears it.
+            guard gen == generation else { return }
         } catch {
             guard gen == generation else { return }
             self.error = Self.message(for: error)

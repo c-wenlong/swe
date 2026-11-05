@@ -475,5 +475,67 @@ apiAnswers.push(["/v1/app/tasks", { status: 200, data: { machine: "hub", github:
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(sorted(json.loads(done.stdout)), sorted(["Linear", "GitHub", "Jira", "Other", "QUI", "o/a"]))
 
+
+# The detail's stepper for each ladder, as TaskStepper.steps draws it on
+# the Mac and the iPhone: [title, class] per rung, "done" a tick, "at"
+# the current rung.
+STEPPER_FLOW = r"""
+globalThis.pageHeader = (title, subtitle, actions = "") => `<header>${actions}</header>`;
+const base = { source: "github", kind: "issue", repo: "o/a", title: "T", status: "", sessions: [] };
+const rows = [
+  { ...base, id: "a", ref: "1", state: "pr_open" },
+  { ...base, id: "b", ref: "2", state: "closed" },
+  { ...base, id: "c", ref: "3", state: "triaged" },
+  { ...base, id: "d", ref: "4", kind: "pull", state: "closed" },
+  { ...base, id: "e", ref: "ENG-1", source: "linear", repo: null, project: "Core", state: "closed" },
+  { ...base, id: "f", ref: "ENG-2", source: "linear", repo: null, project: "Core", state: "merged" },
+];
+apiAnswers.push(["/v1/app/tasks", { status: 200, data: { machine: "hub", github: { status: "ok" }, tasks: rows } }]);
+const out = {};
+(async () => {
+  for (const t of rows) {
+    location.hash = "#/tasks?task=" + t.id;
+    PAGES.tasks();
+    await tick();
+    const html = panel.innerHTML;
+    out[t.id] = {
+      closed: /class="tk-steps closed"/.test(html),
+      steps: [...html.matchAll(/class="tk-step ([a-z]*)"[^>]*>([\s\S]*?)<\/span><\/span>/g)]
+        .map((m) => [m[2].replace(/[\s\S]*<span>/, ""), m[1]]),
+    };
+  }
+  process.stdout.write(JSON.stringify(out));
+})().catch((e) => { console.error(e && e.stack || e); process.exit(1); });
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestStepper(unittest.TestCase):
+    """tasks.js's stepper lights the rungs the Mac and the iPhone light:
+    a closed task only its two ends, an unknown state the first rung."""
+
+    def test_rungs_match_task_stepper(self):
+        from tests.test_webapp_launch_sheets import MENU_JS, PAGES, STUB
+        script = (STUB + MENU_JS.read_text(encoding="utf-8") + "\n"
+                  + (PAGES / "github.js").read_text(encoding="utf-8") + "\n"
+                  + (PAGES / "tasks.js").read_text(encoding="utf-8") + "\n" + STEPPER_FLOW)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "run.js"
+            path.write_text(script)
+            done = subprocess.run(["node", str(path)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+        self.assertEqual(out["a"], {"closed": False, "steps": [
+            ["Open", "done"], ["Agent", "done"], ["PR open", "at"], ["Merged", ""]]})
+        self.assertEqual(out["b"], {"closed": True, "steps": [
+            ["Open", "done"], ["Agent", ""], ["PR open", ""], ["Closed", "at"]]})
+        self.assertEqual(out["c"]["steps"], [
+            ["Open", "at"], ["Agent", ""], ["PR open", ""], ["Merged", ""]])
+        self.assertEqual(out["d"]["steps"], [["Open", "done"], ["Agent", ""], ["Closed", "at"]])
+        self.assertEqual(out["e"]["steps"], [["Open", "done"], ["Started", ""], ["Closed", "at"]])
+        self.assertEqual(out["f"], {"closed": False, "steps": [
+            ["Open", "done"], ["Started", "done"], ["Done", "at"]]})
+
+
 if __name__ == "__main__":
     unittest.main()

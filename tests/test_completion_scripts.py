@@ -66,6 +66,31 @@ class BashScriptTest(unittest.TestCase):
         self.assertEqual(_run(["bash", "--norc", "--noprofile"], probe),
                          ["[__complete]", "[mcp]", "[]"])
 
+    def test_candidates_are_never_expanded(self):
+        # `compgen -W` expanded its word list, so a candidate spelled
+        # `$(...)` ran as a command on TAB and one with a space split.
+        probe = (
+            "complete() { :; }\n"
+            "swe() { printf '%s\\t%s\\n' 'sync' 'Sync' '$(echo ran >> \"$PROBE_OUT\")' 'x'"
+            " 'two words' 'y' 'other' 'z'; echo ':4'; }\n"
+            + BASH_SCRIPT
+            + "\nCOMP_WORDS=(swe mcp '')\nCOMP_CWORD=2\n_swe_completion\n"
+            "printf '[%s]\\n' \"${COMPREPLY[@]}\" >> \"$PROBE_OUT\"\n"
+        )
+        self.assertEqual(_run(["bash", "--norc", "--noprofile"], probe),
+                         ["[sync]", "[$(echo ran >> \"$PROBE_OUT\")]", "[two words]", "[other]"])
+
+    def test_candidates_are_filtered_by_the_current_word(self):
+        probe = (
+            "complete() { :; }\n"
+            "swe() { printf '%s\\t%s\\n' 'sync' 'S' 'status' 'T' 'add' 'A'; echo ':4'; }\n"
+            + BASH_SCRIPT
+            + "\nCOMP_WORDS=(swe mcp 's')\nCOMP_CWORD=2\n_swe_completion\n"
+            "printf '[%s]\\n' \"${COMPREPLY[@]}\" >> \"$PROBE_OUT\"\n"
+        )
+        self.assertEqual(_run(["bash", "--norc", "--noprofile"], probe),
+                         ["[sync]", "[status]"])
+
 
 @unittest.skipUnless(shutil.which("fish"), "fish not installed")
 class FishScriptTest(unittest.TestCase):

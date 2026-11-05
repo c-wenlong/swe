@@ -1100,6 +1100,70 @@ final class SessionSearchTests: XCTestCase {
         XCTAssertEqual(runs.map(\.hit), [false, true, false])
     }
 
+    /// Holds a stubbed search until the test lets it go.
+    private final class Latch {
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        private var open = false
+        func wait() async {
+            if open { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+        func release() {
+            open = true
+            waiters.forEach { $0.resume() }
+            waiters = []
+        }
+    }
+
+    private func app(with rows: [SessionRow]) -> AppModel {
+        let app = AppModel(hub: PairedHub(baseURL: URL(string: "http://mac:8477")!,
+                                          credential: Credential(deviceId: "d", credential: "c", name: nil)))
+        app.applyLists(sessions: rows, machines: nil, inbox: [], attachedAtStart: [])
+        return app
+    }
+
+    /// A hub older than `/v1/search` answers 404: the list loaded on the
+    /// phone is searched instead.
+    func testAnOlderHubsSearchFallsBackToTheLoadedList() async {
+        let search = SessionSearch()
+        search.pause = { _ in }
+        search.lookup = { _, _ in throw HubError(status: 404, code: "not_found", message: "") }
+        search.query = "ledger"
+        await search.run(app: app(with: [row("a", "Fix ledger cursor", ago: 1)]))
+        XCTAssertEqual(search.results.map(\.key), ["a"])
+        XCTAssertEqual(search.answered, "ledger")
+        XCTAssertFalse(search.indexed)
+    }
+
+    /// A keystroke cancels the search under way; its late 404 must not
+    /// replace the newer query's answer with the old query's matches.
+    func testACancelledSearchsLate404KeepsTheNewerAnswer() async {
+        let search = SessionSearch()
+        search.pause = { _ in }
+        let started = Latch(), late = Latch()
+        search.lookup = { _, q in
+            if q == "old" {
+                started.release()
+                await late.wait()
+                throw HubError(status: 404, code: "not_found", message: "")
+            }
+            return SearchResponse(results: [], indexed: true)
+        }
+        let app = app(with: [row("a", "old ledger", ago: 1)])
+        search.query = "old"
+        let first = Task { await search.run(app: app) }
+        await started.wait()
+        first.cancel()
+        search.query = "new"
+        await search.run(app: app)
+        XCTAssertEqual(search.answered, "new")
+        late.release()
+        await first.value
+        XCTAssertEqual(search.answered, "new")
+        XCTAssertEqual(search.results.map(\.key), [])
+        XCTAssertTrue(search.indexed)
+    }
+
     func testDecodesHubSearchResult() throws {
         let json = #"{"results":[{"key":"claude:1","source":"index","snippet":"a b","marked_snippet":"a b","role":"user","session":{"key":"claude:1","title":"T"}}],"indexed":true}"#
         let body = try Hub.decoder.decode(SearchResponse.self, from: Data(json.utf8))
