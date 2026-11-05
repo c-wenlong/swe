@@ -1304,13 +1304,11 @@ struct FakeShell: ShellEnvironmentReading {
         #expect(model.checks["SOCLAAS_API_KEY"]?.result == .works)
     }
 
-    /// Holds each request until the test lets it answer.
+    /// Holds each request at `gate` until the test opens it.
     private final class GatedTransport: HTTPTransport {
-        let entered = AsyncStream<Void>.makeStream()
-        let release = AsyncStream<Void>.makeStream()
+        let gate = HoldGate()
         func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-            entered.continuation.yield()
-            for await _ in release.stream { break }
+            try await gate.pass()
             return (Data(#"{"data":[]}"#.utf8),
                     HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: [:])!)
         }
@@ -1325,11 +1323,10 @@ struct FakeShell: ShellEnvironmentReading {
             """, transport: transport)
         await model.load()
         let check = Task { await model.check(name: "SOCLAAS_API_KEY") }
-        var entered = transport.entered.stream.makeAsyncIterator()
-        await entered.next()
+        try #require(await transport.gate.arrived(), "the check never sent its request")
         // The verdict below was earned against the old endpoint.
         try await model.set(name: "SOCLAAS_BASE_URL", value: "https://other.test/v1", provider: "SoCLaaS")
-        transport.release.continuation.yield()
+        transport.gate.open()
         await check.value
         let key = try #require(model.rows.first { $0.name == "SOCLAAS_API_KEY" })
         #expect(model.checks["SOCLAAS_API_KEY"]?.result == .works)

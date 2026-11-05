@@ -29,7 +29,7 @@ import Testing
         #expect(five.harness == "claude")
         #expect(five.at == at)
         #expect(!five.isStale)
-        #expect(five.id == "claude-work|5h|\(at.timeIntervalSince1970)")
+        #expect(five.id == "claude-work|5h|1793372400.0")
     }
 
     @Test func aStaleReadingMarksItsResets() {

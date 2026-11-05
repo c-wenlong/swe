@@ -298,9 +298,16 @@ final class SequencedRunner: CommandRunning, @unchecked Sendable {
                 check: "setup.registry", severity: .warning, message: "none",
                 fix: nil, action: action)) }
             // Either the run queues at the gate or, without it, reaches swe.
-            while HarnessesModel.registryWrites.waiters == 0, runner.calls.isEmpty {
-                await Task.yield()
+            // The gate has no change stream to wait on, so this re-checks
+            // once per turn, bounded by `gateTimeout`.
+            let settled = await withinTimeout {
+                while HarnessesModel.registryWrites.waiters == 0, runner.calls.isEmpty {
+                    if Task.isCancelled { return false }
+                    await Task.yield()
+                }
+                return true
             }
+            #expect(settled, "\(action) neither queued at the gate nor reached swe")
             #expect(runner.calls.isEmpty, "\(action) ran while the gate was held")
             HarnessesModel.registryWrites.release()
             await run.value
@@ -402,18 +409,50 @@ final class SequencedRunner: CommandRunning, @unchecked Sendable {
     }
 
     @Test func aSecondRunWaitsWhileOneIsInFlight() async throws {
-        // Not directly observable without a suspendable runner; the guard
-        // is `running.isEmpty`, so a finding queued mid-run returns at once.
-        let runner = ScriptedRunner([
-            (["init"], .init(status: 0, stdout: Data(), stderr: "")),
-            (["doctor"], .init(status: 0, stdout: doctorData(), stderr: "")),
+        // The first run's `swe init` is held at swe; a second finding
+        // asked for meanwhile returns at once without running anything.
+        let replies = GatedReplies([
+            .init(status: 0, stdout: Data(), stderr: ""),            // first run: init
+            .init(status: 0, stdout: doctorData(), stderr: ""),      // first run: reload
         ])
-        let model = DoctorModel(swe: SweClient(runner: runner))
-        model.running = ["setup.unlinked x"]
-        await model.run(DoctorReport.Finding(
-            check: "setup.unlinked", severity: .warning, message: "y",
-            fix: "swe init", action: .`init`))
-        #expect(!runner.calls.contains(["init"]))
+        let model = DoctorModel(swe: SweClient(runner: replies))
+        let first = DoctorReport.Finding(check: "setup.unlinked", severity: .warning,
+                                         message: "x", fix: "swe init", action: .`init`)
+        let second = DoctorReport.Finding(check: "setup.unlinked", severity: .warning,
+                                          message: "y", fix: "swe init", action: .`init`)
+        let inFlight = Task { await model.run(first) }
+        try #require(await replies.gates[0].arrived(), "the first run never reached swe")
+        #expect(model.running == [first.id])
+
+        // Run in a task of its own: a second run that did reach swe would
+        // park there (on the reload's gate), and this wait would time out.
+        let returned = CountGate()
+        Task {
+            await model.run(second)
+            await returned.bump()
+        }
+        let didReturn = await returned.reach(1)
+        #expect(didReturn, "the second run waited instead of returning")
+        #expect(await replies.gates[1].arrivalCount == 0, "the second run asked swe")
+        #expect(model.running == [first.id])
+        #expect(model.runErrors[second.id] == nil)
+
+        for gate in replies.gates { gate.open() }
+        guard didReturn else {
+            // The reload's reply went to the second run; the first would
+            // hang past the last reply.
+            inFlight.cancel()
+            return
+        }
+        // A run that asked swe for more than its two replies parks past
+        // the last one: bound the wait and stop it rather than hang.
+        let finished = await withinTimeout {
+            await inFlight.value
+            return true
+        }
+        if !finished { inFlight.cancel() }
+        #expect(finished, "the first run asked swe for more than its replies")
+        #expect(model.running.isEmpty)
     }
 
     @Test func aFailedRunStillReloadsAndKeepsTheError() async throws {

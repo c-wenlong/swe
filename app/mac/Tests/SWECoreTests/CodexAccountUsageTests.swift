@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import SWECore
 
@@ -214,7 +215,6 @@ import Testing
     }
 
     @Test func sweTooOldHidesTheSection() async {
-        let (model, _) = model()
         let tooOld = CodexAccountUsage(
             cacheFile: scratch.url
                 .appendingPathComponent("\(UUID().uuidString).json"),
@@ -226,7 +226,6 @@ import Testing
         await tooOld.refresh(homes: ["/h"])
         #expect(tooOld.sweTooOld)
         #expect(tooOld.section(for: "/h") == nil)
-        _ = model
     }
 
     @Test func aFailedFirstFetchShowsTheFailedStateThenRetries() async {
@@ -356,33 +355,25 @@ import Testing
     @Test func aStaleTooOldReplyCannotReinstateTheVerdict() async {
         // Fetch 1 is the old swe path's: it parks on a gate while the
         // path change's forced refresh runs and succeeds.
-        var gate: CheckedContinuation<CodexDailyReport, Error>?
-        var entered = false
-        let parked = CountGate()
+        let fetches = FetchGates(1)
         let url = scratch.url
             .appendingPathComponent("codex-usage-\(UUID().uuidString).json")
         let model = CodexAccountUsage(
             cacheFile: url,
             fetch: { _ in
-                if !entered {
-                    entered = true
-                    return try await withCheckedThrowingContinuation {
-                        (c: CheckedContinuation<CodexDailyReport, Error>) in
-                        gate = c
-                        Task { await parked.bump() }
-                    }
-                }
-                return self.report([("2026-10-13", 10)])
+                guard let gate = fetches.take() else { return self.report([("2026-10-13", 10)]) }
+                try await gate.pass()
+                throw SweError.commandFailed(
+                    status: 1, message: "Unknown harness subcommand: 'usage-daily'")
             },
             macDays: { _, _ in [:] }, now: { self.now }, calendar: calendar)
         let stale = Task { await model.refresh(homes: ["/h"]) }
-        #expect(await parked.reach(1))
+        #expect(await fetches.gates[0].arrived())
         await model.swePathChanged()
         #expect(model.section(for: "/h")?.kind == .data)
         // Only now does the old path's fetch fail "unknown subcommand":
         // its generation is stale, so it must not set sweTooOld.
-        gate?.resume(throwing: SweError.commandFailed(
-            status: 1, message: "Unknown harness subcommand: 'usage-daily'"))
+        fetches.gates[0].open()
         await stale.value
         #expect(!model.sweTooOld)
         let section = model.section(for: "/h")!
@@ -394,32 +385,33 @@ import Testing
     @Test func anOlderReplyCannotOverwriteANewerFetch() async {
         // Both fetches park: the older refresh's reply lands while the
         // newer one is still in flight.
-        var gates: [CheckedContinuation<CodexDailyReport, Error>] = []
-        let parked = CountGate()
+        let fetches = FetchGates(2)
         let url = scratch.url
             .appendingPathComponent("codex-usage-\(UUID().uuidString).json")
         let model = CodexAccountUsage(
             cacheFile: url,
             fetch: { _ in
-                try await withCheckedThrowingContinuation {
-                    (c: CheckedContinuation<CodexDailyReport, Error>) in
-                    gates.append(c)
-                    Task { await parked.bump() }
+                let first = fetches.gates[0]
+                guard let gate = fetches.take() else {
+                    throw SweError.commandFailed(status: 1, message: "a third fetch")
                 }
+                try await gate.pass()
+                return gate === first ? self.report([("2026-10-14", 999)])
+                    : self.report([("2026-10-13", 10)])
             },
             macDays: { _, _ in [:] }, now: { self.now }, calendar: calendar)
         let stale = Task { await model.refresh(homes: ["/h"]) }
-        #expect(await parked.reach(1))
+        #expect(await fetches.gates[0].arrived())
         let fresh = Task { await model.refresh(homes: ["/h"]) }
-        #expect(await parked.reach(2))
+        #expect(await fetches.gates[1].arrived())
         #expect(model.fetching == ["/h"])
         // The old reply lands first: dropped, and it must not clear the
         // newer refresh's in-flight flag.
-        gates[0].resume(returning: report([("2026-10-14", 999)]))
+        fetches.gates[0].open()
         await stale.value
         #expect(model.fetching == ["/h"])
         #expect(model.section(for: "/h")?.kind == .loading)
-        gates[1].resume(returning: report([("2026-10-13", 10)]))
+        fetches.gates[1].open()
         await fresh.value
         #expect(model.fetching.isEmpty)
         #expect(model.section(for: "/h")?.weeks.last?.account == 10)
@@ -429,5 +421,20 @@ import Testing
             fetch: { _ in throw SweError.commandFailed(status: 1, message: "no fetch") },
             macDays: { _, _ in [:] }, now: { self.now }, calendar: calendar)
         #expect(reloaded.entries["/h"]?.report.days.first?.tokens == 10)
+    }
+}
+
+/// One `HoldGate` per fetch, handed out in call order, so a test parks
+/// each fetch and picks when it lands. A fetch past the last gate gets nil.
+private final class FetchGates: Sendable {
+    let gates: [HoldGate]
+    private let next = Mutex(0)
+    init(_ count: Int) { gates = (0..<count).map { _ in HoldGate() } }
+    func take() -> HoldGate? {
+        let index = next.withLock { n -> Int in
+            defer { n += 1 }
+            return n
+        }
+        return index < gates.count ? gates[index] : nil
     }
 }

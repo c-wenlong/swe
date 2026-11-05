@@ -5,29 +5,28 @@ import Testing
 /// `CalendarFormat`: the one set of rules every block, card, row and
 /// sheet prints times, durations and session labels with.
 @Suite struct CalendarFormatTests {
-    private func clock(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: date)
+    /// A wall-clock moment in the test machine's own time zone, so the
+    /// expected text is a literal whatever zone the suite runs in.
+    private func local(_ day: Int, _ hour: Int, _ minute: Int, _ second: Int = 0) -> Date {
+        Calendar.current.date(from: DateComponents(
+            year: 2026, month: 10, day: day, hour: hour, minute: minute, second: second))!
     }
 
     @Test func aBlockInsideOneMinutePrintsOneTime() {
-        let start = utc("2026-10-13T11:02:00Z")
-        let end = utc("2026-10-13T11:02:45Z")
-        #expect(CalendarFormat.range(start: start, end: end) == clock(start))
+        #expect(CalendarFormat.range(start: local(13, 9, 5), end: local(13, 9, 5, 45))
+                == "09:05")
     }
 
     @Test func aRangeSpanningMinutesPrintsBothTimes() {
-        let start = utc("2026-10-13T11:02:00Z")
-        let end = utc("2026-10-13T11:47:30Z")
-        #expect(CalendarFormat.range(start: start, end: end)
-                == "\(clock(start))–\(clock(end))")
+        // Zero-padded, 24-hour, en dash.
+        #expect(CalendarFormat.range(start: local(13, 9, 5), end: local(13, 14, 47, 30))
+                == "09:05–14:47")
     }
 
     @Test func matchingClockTimesAcrossDaysStayARange() {
-        // 11:02 today to 11:02 tomorrow is not one moment.
-        let start = utc("2026-10-13T11:02:00Z")
-        let end = utc("2026-10-14T11:02:00Z")
-        #expect(CalendarFormat.range(start: start, end: end)
-                == "\(clock(start))–\(clock(end))")
+        // 14:02 today to 14:02 tomorrow is not one moment.
+        #expect(CalendarFormat.range(start: local(13, 14, 2), end: local(14, 14, 2))
+                == "14:02–14:02")
     }
 
     @Test func activeTimeUnderAMinuteIsLessThanOne() {
