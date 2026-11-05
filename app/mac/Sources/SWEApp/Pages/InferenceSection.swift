@@ -355,7 +355,7 @@ struct InferenceSection: View {
         case .notSourced, .notWritable:
             return "From \(displayPath(model.path)). New terminals don't read this file yet."
         case .unsupportedShell:
-            return "From \(displayPath(model.path)). Add `source \(displayPath(model.path))` to your shell's startup file so new terminals get these keys."
+            return "From \(displayPath(model.path)). Add \"source \(displayPath(model.path))\" to your shell's startup file so new terminals get these keys."
         case .unknown:
             return "From \(displayPath(model.path))."
         }
