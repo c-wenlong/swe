@@ -40,6 +40,8 @@ final class SessionSearch {
             indexed = body.indexed ?? false
             error = nil
         } catch let e as HubError where e.status == 404 {
+            // A newer keystroke cancelled this one: its answer is stale.
+            guard !Task.isCancelled else { return }
             results = Self.localMatches(app.displaySessions, query: q)
             indexed = false
             error = nil
