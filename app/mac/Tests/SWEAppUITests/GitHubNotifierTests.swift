@@ -64,8 +64,8 @@ struct GitHubNotifierTests {
         "\(env),\"status\":\"ok\",\"notifications\":[\(notes.joined(separator: ","))]"
     }
 
-    private func quiverDir() -> URL {
-        scratch.url.appending(path: "quiver-\(UUID().uuidString)")
+    private func sweDir() -> URL {
+        scratch.url.appending(path: "swe-\(UUID().uuidString)")
     }
 
     /// The thread ids in the state file, each key's `@updated_at` dropped.
@@ -81,7 +81,7 @@ struct GitHubNotifierTests {
 
     /// History is not news: the very first poll only seeds the set.
     @Test func firstPollSeedsWithoutBanners() async throws {
-        let dir = quiverDir()
+        let dir = sweDir()
         let posts = Posts()
         let swe = SweClient(runner: Router([inboxKey: inbox([note("a"), note("b")])]))
         let notifier = GitHubNotifier(swe: dir, model: GitHubModel(), defaults: TestDefaults()) {
@@ -95,7 +95,7 @@ struct GitHubNotifierTests {
 
     /// A notification id banners once; re-polls of it do not stack.
     @Test func newUnreadNoteBannersOnceThenDedupes() async throws {
-        let dir = quiverDir()
+        let dir = sweDir()
         let posts = Posts()
         let router = Router([inboxKey: inbox([note("a")])])
         let swe = SweClient(runner: router)
@@ -115,7 +115,7 @@ struct GitHubNotifierTests {
     /// GitHub keeps a thread's id when new activity lands and only moves
     /// `updated_at`: a later review on a PR already bannered banners again.
     @Test func newActivityOnASeenThreadBannersAgain() async throws {
-        let dir = quiverDir()
+        let dir = sweDir()
         let posts = Posts()
         let router = Router([inboxKey: inbox([])])
         let swe = SweClient(runner: router)
@@ -138,7 +138,7 @@ struct GitHubNotifierTests {
     /// Upgrading does not banner those threads again, and the next update
     /// on one of them does banner.
     @Test func bareIdsFromAnOlderFileMigrateWithoutBanners() async throws {
-        let dir = quiverDir()
+        let dir = sweDir()
         let file = dir.appending(path: "cache/github-notified.json")
         try FileManager.default.createDirectory(
             at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -162,7 +162,7 @@ struct GitHubNotifierTests {
     /// and a bare id the inbox no longer shows is dropped: either one's
     /// next update banners.
     @Test func bareIdsMigrateWhenReadAndLeftoversAreDropped() async throws {
-        let dir = quiverDir()
+        let dir = sweDir()
         let file = dir.appending(path: "cache/github-notified.json")
         try FileManager.default.createDirectory(
             at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -193,7 +193,7 @@ struct GitHubNotifierTests {
 
     /// A note that arrives already read is not actionable — no banner.
     @Test func readNotesDoNotBanner() async throws {
-        let dir = quiverDir()
+        let dir = sweDir()
         let posts = Posts()
         let router = Router([inboxKey: inbox([note("a")])])
         let swe = SweClient(runner: router)
@@ -211,7 +211,7 @@ struct GitHubNotifierTests {
     /// The delivered set survives a relaunch: a new instance over the
     /// same `~/.swe` dir does not re-banner what the last run sent.
     @Test func deliveredIdsPersistAcrossInstances() async throws {
-        let dir = quiverDir()
+        let dir = sweDir()
         let posts = Posts()
         let router = Router([inboxKey: inbox([note("a")])])
         let swe = SweClient(runner: router)
@@ -236,7 +236,7 @@ struct GitHubNotifierTests {
     /// The delivered set is bounded at 500; eviction drops the oldest
     /// first, so a just-bannered id is never the first out.
     @Test func deliveredSetCapsAtBound() async throws {
-        let dir = quiverDir()
+        let dir = sweDir()
         let file = dir.appending(path: "cache/github-notified.json")
         try FileManager.default.createDirectory(
             at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -259,7 +259,7 @@ struct GitHubNotifierTests {
     /// that arrived while the app was closed must banner on relaunch,
     /// not be silently re-seeded because no ids were on disk.
     @Test func emptyFirstPollStillMarksPrimed() async throws {
-        let dir = quiverDir()
+        let dir = sweDir()
         let posts = Posts()
         let router = Router([inboxKey: inbox([])])
         let swe = SweClient(runner: router)
@@ -286,7 +286,7 @@ struct GitHubNotifierTests {
     /// Banners off still polls: ids are recorded and the notified repo's
     /// visible board is invalidated and refetched.
     @Test func bannersDisabledStillPollsAndInvalidates() async throws {
-        let dir = quiverDir()
+        let dir = sweDir()
         let posts = Posts()
         let router = Router([
             inboxKey: inbox([note("a")]),
@@ -322,10 +322,10 @@ struct GitHubNotifierTests {
     /// and a switch turned on stays on for the next launch.
     @Test func bannersStartOffAndTheSwitchPersists() {
         let defaults = TestDefaults()
-        let notifier = GitHubNotifier(swe: quiverDir(), model: GitHubModel(), defaults: defaults) { _ in }
+        let notifier = GitHubNotifier(swe: sweDir(), model: GitHubModel(), defaults: defaults) { _ in }
         #expect(!notifier.bannersEnabled)
         notifier.bannersEnabled = true
-        let relaunched = GitHubNotifier(swe: quiverDir(), model: GitHubModel(), defaults: defaults) { _ in }
+        let relaunched = GitHubNotifier(swe: sweDir(), model: GitHubModel(), defaults: defaults) { _ in }
         #expect(relaunched.bannersEnabled)
     }
 
@@ -353,7 +353,7 @@ struct GitHubNotifierTests {
             }
         }
         let clock = Clock()
-        let notifier = GitHubNotifier(swe: quiverDir(), model: GitHubModel(), interval: 60,
+        let notifier = GitHubNotifier(swe: sweDir(), model: GitHubModel(), interval: 60,
                                       defaults: TestDefaults()) { _ in }
         notifier.now = { clock.now }
         let (runs, continuation) = AsyncStream<Void>.makeStream()
@@ -377,7 +377,7 @@ struct GitHubNotifierTests {
     /// The watcher loop returns when its task is cancelled rather than
     /// holding the AppModel watcher slot forever.
     @Test func keepFreshStopsOnCancel() async throws {
-        let dir = quiverDir()
+        let dir = sweDir()
         let notifier = GitHubNotifier(swe: dir, model: GitHubModel(), interval: 60, defaults: TestDefaults()) { _ in }
         let swe = SweClient(runner: Router([inboxKey: inbox([note("a")])]))
         let task = Task { await notifier.keepFresh(swe: { swe }) }

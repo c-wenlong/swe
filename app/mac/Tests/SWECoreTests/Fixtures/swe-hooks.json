@@ -6,8 +6,8 @@
         "name": "beacon.py",
         "harness": "claude",
         "tier": "harness",
-        "source_path": "/tmp/quiver-fixture-home/.swe/hooks/claude/beacon.py",
-        "dest_path": "/tmp/quiver-fixture-home/.claude/hooks/beacon.py",
+        "source_path": "/tmp/swe-fixture-home/.swe/hooks/claude/beacon.py",
+        "dest_path": "/tmp/swe-fixture-home/.claude/hooks/beacon.py",
         "link_status": "linked",
         "enabled": true,
         "declared": [],
@@ -31,8 +31,8 @@
         "name": "fixture-hook.py",
         "harness": "claude",
         "tier": "harness",
-        "source_path": "/tmp/quiver-fixture-home/.swe/hooks/claude/fixture-hook.py",
-        "dest_path": "/tmp/quiver-fixture-home/.claude/hooks/fixture-hook.py",
+        "source_path": "/tmp/swe-fixture-home/.swe/hooks/claude/fixture-hook.py",
+        "dest_path": "/tmp/swe-fixture-home/.claude/hooks/fixture-hook.py",
         "link_status": "create",
         "enabled": true,
         "declared": [],
@@ -56,8 +56,8 @@
         "name": "night-watch.py",
         "harness": "claude",
         "tier": "harness",
-        "source_path": "/tmp/quiver-fixture-home/.swe/hooks/claude/night-watch.py",
-        "dest_path": "/tmp/quiver-fixture-home/.claude/hooks/night-watch.py",
+        "source_path": "/tmp/swe-fixture-home/.swe/hooks/claude/night-watch.py",
+        "dest_path": "/tmp/swe-fixture-home/.claude/hooks/night-watch.py",
         "link_status": "create",
         "enabled": true,
         "declared": [],
@@ -81,15 +81,15 @@
         "name": "prose-guard.py",
         "harness": "claude",
         "tier": "harness",
-        "source_path": "/tmp/quiver-fixture-home/.swe/hooks/claude/prose-guard.py",
-        "dest_path": "/tmp/quiver-fixture-home/.claude/hooks/prose-guard.py",
+        "source_path": "/tmp/swe-fixture-home/.swe/hooks/claude/prose-guard.py",
+        "dest_path": "/tmp/swe-fixture-home/.claude/hooks/prose-guard.py",
         "link_status": "linked",
         "enabled": true,
         "declared": [
           {
             "event": "PreToolUse",
             "matcher": "Bash",
-            "file": "/tmp/quiver-fixture-home/.claude/settings.json"
+            "file": "/tmp/swe-fixture-home/.claude/settings.json"
           }
         ],
         "events_supported": [
@@ -112,15 +112,15 @@
         "name": "block-rm.py",
         "harness": "codex",
         "tier": "harness",
-        "source_path": "/tmp/quiver-fixture-home/.swe/hooks/codex/block-rm.py",
-        "dest_path": "/tmp/quiver-fixture-home/.codex/hooks/block-rm.py",
+        "source_path": "/tmp/swe-fixture-home/.swe/hooks/codex/block-rm.py",
+        "dest_path": "/tmp/swe-fixture-home/.codex/hooks/block-rm.py",
         "link_status": "create",
         "enabled": true,
         "declared": [
           {
             "event": "SessionStart",
             "matcher": "",
-            "file": "/tmp/quiver-fixture-home/.codex/hooks.json"
+            "file": "/tmp/swe-fixture-home/.codex/hooks.json"
           }
         ],
         "events_supported": [
@@ -147,8 +147,8 @@
         "name": "probe.py",
         "harness": "fixturetool",
         "tier": "harness",
-        "source_path": "/tmp/quiver-fixture-home/.swe/hooks/fixturetool/probe.py",
-        "dest_path": "/tmp/quiver-fixture-home/.swe/hooks/fixturetool/probe.py",
+        "source_path": "/tmp/swe-fixture-home/.swe/hooks/fixturetool/probe.py",
+        "dest_path": "/tmp/swe-fixture-home/.swe/hooks/fixturetool/probe.py",
         "link_status": "skipped",
         "enabled": true,
         "declared": [],
@@ -158,8 +158,8 @@
         "name": "legacy.sh",
         "harness": "oldtool",
         "tier": "harness",
-        "source_path": "/tmp/quiver-fixture-home/.swe/hooks/oldtool/legacy.sh",
-        "dest_path": "/tmp/quiver-fixture-home/.oldtool/hooks/legacy.sh",
+        "source_path": "/tmp/swe-fixture-home/.swe/hooks/oldtool/legacy.sh",
+        "dest_path": "/tmp/swe-fixture-home/.oldtool/hooks/legacy.sh",
         "link_status": "skipped",
         "enabled": true,
         "declared": [],
