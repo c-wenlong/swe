@@ -24,7 +24,7 @@ COMMENT_LIMIT = 8_000
 # The smallest body a prompt over the limit is cut down to.
 _BODY_FLOOR = 1_000
 
-_ISSUE_URL_RE = re.compile(r"/issues/(\d+)")
+_ISSUE_URL_RE = re.compile(r"/issues/([0-9]+)")
 
 # The ``authorAssociation`` words whose comments join a resolve prompt:
 # the repo's owner, a member of the owning organisation and an invited
@@ -43,7 +43,7 @@ def issue_number(ref) -> int | None:
     text = str(ref or "").strip()
     if text.startswith("#"):
         text = text[1:]
-    if text.isdigit():
+    if gh.digits(text):
         return int(text) or None
     match = _ISSUE_URL_RE.search(text)
     return int(match.group(1)) if match else None

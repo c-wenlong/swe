@@ -509,6 +509,9 @@ public actor Ledger {
             }
         }
         if let indexer {
+            // Every Kimi session reads the same session_index.jsonl; parse
+            // it once per scan rather than once per session (N² lines).
+            var kimiWorkDirs = KimiWorkDirCache()
             for job in indexJobs {
                 for file in job.files {
                     if Task.isCancelled { throw CancellationError() }
@@ -526,7 +529,7 @@ public actor Ledger {
                         indexGrokFile(file, sessionID: pathSessionID,
                                       indexer: indexer, report: &report)
                     case .kimi:
-                        indexKimiFile(file, sessionID: pathSessionID,
+                        indexKimiFile(file, sessionID: pathSessionID, workDirs: &kimiWorkDirs,
                                       indexer: indexer, report: &report)
                     case .cursor:
                         indexCursorFile(file, metaIndex: job.cursorMeta,
@@ -973,7 +976,8 @@ public actor Ledger {
     /// manifest commits `.none`; a missing wire transcript still yields the
     /// metadata-only session.
     private func indexKimiFile(
-        _ url: URL, sessionID: String?, indexer: SearchIndexer, report: inout ScanReport
+        _ url: URL, sessionID: String?, workDirs: inout KimiWorkDirCache,
+        indexer: SearchIndexer, report: inout ScanReport
     ) {
         let path = url.resolvingSymlinksInPath().path
         guard let info = FileInfo(path: path) else { return }
@@ -1008,7 +1012,9 @@ public actor Ledger {
                     // `lastPrompt` is the last-resort title — it fills a
                     // session the wire transcript never retitled.
                     title: manifest["lastPrompt"],
-                    cwd: sessionID.flatMap { Self.kimiWorkDirs(forStateFile: path)[$0] }))
+                    cwd: sessionID.flatMap {
+                        workDirs.map(forStateFile: path, indexInfo: sessionIndexInfo)[$0]
+                    }))
                 if FileManager.default.fileExists(atPath: wireURL.path) {
                     let result = try reader.read(wireURL, from: 0) { indexer.consume(line: $0) }
                     report.skippedLines += result.skippedLines
@@ -1981,6 +1987,27 @@ public actor Ledger {
 }
 
 /// `stat` of one file.
+/// Kimi's shared `session_index.jsonl`, parsed once per scan per index
+/// and stamp: every session under one index reads the same map, and the
+/// stamp each session records for freshness is the stamp the map was
+/// parsed at, so an index rewritten mid-scan is parsed again rather than
+/// served stale under its new stamp.
+struct KimiWorkDirCache {
+    private var entries: [String: (stamp: [Double], map: [String: String])] = [:]
+    /// How many times an index was actually parsed, for tests.
+    private(set) var parses = 0
+
+    mutating func map(forStateFile path: String, indexInfo: FileInfo?) -> [String: String] {
+        let key = Ledger.kimiSessionIndexURL(forStateFile: path).path
+        let stamp = indexInfo.map { [Double($0.size), $0.modified, $0.changed] } ?? []
+        if let entry = entries[key], entry.stamp == stamp { return entry.map }
+        let map = Ledger.kimiWorkDirs(forStateFile: path)
+        parses += 1
+        entries[key] = (stamp, map)
+        return map
+    }
+}
+
 struct FileInfo {
     var inode: UInt64
     var size: UInt64

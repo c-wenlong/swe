@@ -49,6 +49,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import NamedTuple
@@ -293,6 +294,18 @@ class TmuxInjector:
                 supervise.detach(self.home, self.key),
                 "supervisor stopped; session is observed again",
             )
+        if op in {"model", "effort"}:
+            from swe.remote import slash_builtins
+
+            # Only a TUI verified to run /<op> <value> gets it typed: in
+            # any other, the line would reach the model as a prompt. The
+            # same rule model_modes advertises and launch_tuning_error
+            # applies at launch and attach.
+            if not slash_builtins.launch_op_ok(session.tool_name, op):
+                return InjectResult(
+                    False, f"unsupported_control: "
+                           f"{session.tool_name or 'this harness'}'s TUI "
+                           f"has no /{op} that takes a value")
         text = control_text(op, value)
         if not text:
             return InjectResult(False, f"unsupported control {op}")
@@ -591,6 +604,13 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
+def _seg(value: str) -> str:
+    """``value`` as one URL path segment. The approval's request id is
+    the client's string: unquoted, ``../abort`` or ``x?y`` would aim the
+    POST at another opencode serve route."""
+    return urllib.parse.quote(str(value), safe="")
+
+
 def _serve_call(
     base: str, method: str, path: str, payload: dict | None,
     timeout: float = _SERVE_REQ_TIMEOUT,
@@ -637,8 +657,6 @@ class _ServeProc:
 
 def _serve_event_loop(serve: _ServeProc) -> None:
     """Read ``GET /event``; permission asks become approval events."""
-    from swe.remote import protocol
-
     try:
         req = urllib.request.Request(
             serve.base + "/event", headers={"Accept": "text/event-stream"}
@@ -950,7 +968,7 @@ class OpencodeServeInjector:
             payload["variant"] = effort
         status_code, body = _serve_call(
             serve.base, "POST",
-            f"/session/{session.session_id}/prompt_async",
+            f"/session/{_seg(session.session_id)}/prompt_async",
             payload,
         )
         if status_code not in (200, 204):
@@ -973,14 +991,14 @@ class OpencodeServeInjector:
         session_id = serve.permissions.get(request_id) or session.session_id
         status_code, _ = _serve_call(
             serve.base, "POST",
-            f"/session/{session_id}/permissions/{request_id}",
+            f"/session/{_seg(session_id)}/permissions/{_seg(request_id)}",
             {"response": response},
         )
         if status_code in (404, 405):
             # Older opencode: /permission/{id}/reply {reply}.
             status_code, _ = _serve_call(
                 serve.base, "POST",
-                f"/permission/{request_id}/reply",
+                f"/permission/{_seg(request_id)}/reply",
                 {"reply": response},
             )
         if status_code not in (200, 204):
@@ -999,7 +1017,7 @@ class OpencodeServeInjector:
                 return InjectResult(False, "opencode serve failed to start")
             status_code, _ = _serve_call(
                 serve.base, "POST",
-                f"/session/{session.session_id}/abort", {},
+                f"/session/{_seg(session.session_id)}/abort", {},
             )
             if status_code not in (200, 204):
                 return InjectResult(

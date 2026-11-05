@@ -30,22 +30,10 @@
 .doctor-command { flex: 1; min-width: 0; color: var(--text-primary); white-space: pre-wrap; word-break: break-word;
   user-select: text; line-height: 18px; }
 .doctor-copy { width: 30px; height: 30px; border-radius: 8px; flex: none; color: var(--text-secondary); }
-.doctor-button {
-  height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong); flex: none;
-  background: var(--card); color: var(--text-primary); font-size: 13px; cursor: pointer; white-space: nowrap;
-}
-.doctor-button:hover:not(:disabled) { background: var(--hover); }
-.doctor-button.primary { background: var(--text-primary); color: var(--card); border-color: var(--text-primary); }
-.doctor-button.primary:hover:not(:disabled) { background: var(--text-primary); opacity: .9; }
-.doctor-button:disabled { opacity: .45; cursor: default; }
-.doctor-button:focus-visible, .doctor-copy:focus-visible, .doctor-back:focus-visible {
+.doctor-copy:focus-visible, .doctor-back:focus-visible {
   outline: 1px solid var(--interactive); outline-offset: 2px;
 }
 .doctor-running { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); flex: none; }
-.doctor-spinner {
-  width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border-strong);
-  border-top-color: var(--text-secondary); animation: spin 1s linear infinite;
-}
 .doctor-confirm {
   display: flex; flex-direction: column; gap: 10px; margin-top: 4px; padding: 12px 14px;
   border: 1px solid var(--border); border-radius: 10px; background: var(--card);
@@ -62,7 +50,6 @@
 .doctor-blocked { display: flex; flex-direction: column; gap: 10px; }
 .doctor-blocked p { margin: 0; }
 .doctor-blocked-text { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
-.doctor-button.primary.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .doctor-pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
 
 /* The source line and the remedies box (pages/doctor.js doctorRemedies):

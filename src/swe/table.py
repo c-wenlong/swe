@@ -16,9 +16,8 @@ with a single component that:
   ``column_gap=" | "`` (or any string) to the constructor instead of
   the default ``column_gap=2`` integer-width gap.
 
-The component is intentionally additive: nothing in the existing
-commands imports it yet. Migration is opt-in, one ``cmd_*`` handler at
-a time (see ``tests/test_table.py`` for the contract examples).
+The listing commands render through it; ``tests/test_table.py`` holds
+the contract examples.
 """
 
 from __future__ import annotations
@@ -137,8 +136,8 @@ def _register_default_kinds() -> None:
     def _number(value, width, attrs):
         try:
             n = None if value is None else int(value)
-        except (TypeError, ValueError):
-            # A missing key substitutes the ``empty`` marker itself — a
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError: int(float("inf")). A missing key substitutes the ``empty`` marker itself — a
             # string in a numeric column renders as the placeholder, not
             # a traceback.
             n = None
@@ -153,7 +152,7 @@ def _register_default_kinds() -> None:
         threshold = attrs.get("threshold", 0)
         try:
             n = None if value is None else int(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             n = None
         if n is None:
             plain = attrs.get("empty", "-")

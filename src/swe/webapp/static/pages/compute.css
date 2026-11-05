@@ -54,12 +54,6 @@
 .compute-empty { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .compute-empty-label { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 13px; }
 .compute-empty-label svg { width: 15px; height: 15px; flex: none; }
-.compute-button {
-  display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 8px;
-  border: 1px solid var(--border-strong); background: var(--subtle); color: var(--text-primary);
-  font-size: 12px; font-weight: 500; text-decoration: none; cursor: pointer;
-}
-.compute-button:hover { background: var(--tab-hover); }
 
 /* Trend card */
 .compute-trend-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

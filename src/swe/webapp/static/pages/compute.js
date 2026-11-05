@@ -25,7 +25,7 @@ const computePage = {
   limits: computeLimits(computeStoredJSON("limits", {})),
   collapsed: new Set(), showAll: new Set(), hover: null,
   // The settings sheet's hub write in flight and its last error.
-  acBusy: false, acError: null,
+  acBusy: false, acError: null, pendingAge: null,
 };
 
 const COMPUTE_VISIBLE_ROWS = 5;
@@ -51,8 +51,18 @@ function computeStoredJSON(key, fallback) {
  * minute to a year (a day by default). A bad stored value falls back. */
 function computeLimits(saved) {
   const gb = [1, 2, 4, 8].includes(Number(saved && saved.memoryGB)) ? Number(saved.memoryGB) : 2;
-  const age = Number(saved && saved.orphanAge);
+  // Whole seconds, as the hub keeps them: a fractional age would never
+  // match the hub's answer.
+  const age = Math.round(Number(saved && saved.orphanAge));
   return { memoryGB: gb, orphanAge: age > 0 ? Math.min(Math.max(age, 60), 365 * 86400) : 24 * 3600 };
+}
+
+/* After an auto clean write lands: the age to send next, or null. Only
+ * an age commitAge dropped while that write was out is owed, and only
+ * when the hub doesn't already hold it; this browser's own threshold is
+ * never pushed over another browser's choice. */
+function computeAgeFollowUp(pendingAge, savedAge) {
+  return pendingAge != null && pendingAge !== savedAge ? pendingAge : null;
 }
 
 function computeStore(key, value) {
@@ -302,7 +312,7 @@ function computeRest(d) {
     // Only a successful read of the stars can say there are none.
     parts.push(d.matchers_loaded && !d.starred.length
       ? emptyCard("Nothing is starred. Star a harness to watch what it runs.",
-        `<a class="compute-button" href="#/harnesses">Open Harnesses</a>`)
+        `<a class="btn secondary" href="#/harnesses">Open Harnesses</a>`)
       : emptyCard("Nothing a starred harness runs is up right now."));
   }
   for (const usage of d.harnesses) parts.push(harnessCard(usage));
@@ -753,12 +763,12 @@ function splitAge(seconds) {
   return [minutes, "minute"];
 }
 
-/* The settings page's set-switch as a button: the same markup so the
+/* The settings page's switch as a button: the same markup so the
  * shared stylesheet draws the Mac's switch. `type="button"` matters —
  * the sheet is a form, and a bare button would submit and close it. */
 function computeSwitch(id, on, opts = {}) {
-  return `<button type="button" class="set-switch" role="switch" aria-checked="${on}" data-cswitch="${esc(id)}"
-    aria-label="${esc(opts.label || id)}"${opts.disabled ? " disabled" : ""}><span></span></button>`;
+  return `<button type="button" class="switch" role="switch" aria-checked="${on}" data-cswitch="${esc(id)}"
+    aria-label="${esc(opts.label || id)}"${opts.disabled ? " disabled" : ""}></button>`;
 }
 
 function openComputeLimits() {
@@ -798,7 +808,7 @@ function openComputeLimits() {
       <p class="caption">${hasHub
         ? "Thresholds are kept in this browser; auto clean is kept on the hub. Quitting processes and Clean up are in the Mac app."
         : "Kept in this browser. Quitting processes and Clean up are in the Mac app."}</p>
-      <div class="sheet-actions"><button class="compute-button" value="done">Done</button></div>
+      <div class="sheet-actions"><button class="btn secondary" value="done">Done</button></div>
     </form>`;
   const age = dialog.querySelector("#compute-age"), ageUnit = dialog.querySelector("#compute-age-unit");
   const memory = dialog.querySelector("#compute-memory");
@@ -856,18 +866,32 @@ function openComputeLimits() {
     drawAutoclean();
     apiPost("/v1/app/compute/settings", body).then(({ status, data }) => {
       p.acBusy = false;
+      if (status === 401) {
+        if (dialog.open) dialog.close();
+        // Stop the poll and drop a read already out, or its reply would
+        // paint the page over the pair form.
+        clearTimeout(p.timer);
+        p.seq++;
+        if (currentRoute() === "compute") renderGate();
+        return;
+      }
       if (status === 200 && data && data.autoclean) {
         if (p.data) p.data.autoclean = data.autoclean;
         // An age typed while the request was out never reached the hub
         // (commitAge drops its own write while busy), so send it now —
         // carrying the switches just saved, not the stale request's.
-        if (hasHub && p.limits.orphanAge !== data.autoclean.orphan_age_seconds) {
+        const owed = computeAgeFollowUp(p.pendingAge, data.autoclean.orphan_age_seconds);
+        p.pendingAge = null;
+        if (hasHub && owed != null) {
           postClean({ enabled: data.autoclean.enabled === true,
                       force: data.autoclean.force === true,
-                      orphan_age_seconds: p.limits.orphanAge }, refocus);
+                      orphan_age_seconds: owed }, refocus);
           return;
         }
       } else {
+        // The write failed, so the queued age didn't reach the hub either;
+        // it stays in this browser and the error says to try again.
+        p.pendingAge = null;
         p.acError = failText(status, data, "");
       }
       drawAutoclean(refocus);
@@ -896,7 +920,11 @@ function openComputeLimits() {
   const commitAge = () => {
     const before = p.limits.orphanAge;
     const seconds = resolveAge();
-    if (!hasHub || seconds === before || p.acBusy) return;
+    if (!hasHub || seconds === before) return;
+    if (p.acBusy) { p.pendingAge = seconds; return; }
+    // This write carries the newest age: an older one still queued (its
+    // write failed, so nothing sent it) must not follow and undo it.
+    p.pendingAge = null;
     const cur = ac();
     postClean({ enabled: cur.enabled === true, force: cur.force === true,
                 orphan_age_seconds: seconds });

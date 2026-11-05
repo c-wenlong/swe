@@ -27,7 +27,7 @@ struct RemoteSetupSheet: View {
         .background(Theme.panel)
         // Ends when the sheet closes, and the poll with it.
         .task { await setup.watch(onScreen: { [app] in app.mainWindowOnScreen }) }
-        .quiverSheet(isPresented: showTicket, onDismiss: { remote.dismissTicket() }) {
+        .cardSheet(isPresented: showTicket, onDismiss: { remote.dismissTicket() }) {
             PairSheet(model: remote, target: $target)
         }
     }
