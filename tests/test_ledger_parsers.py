@@ -1,12 +1,13 @@
 """ledger/parsers.py and models.py: the Swift ledger's line rules."""
 
 import json
-import tempfile
 import unittest
 from pathlib import Path
 
 from swe.ledger import parsers
 from swe.ledger.models import MAX_TOKENS, parse_timestamp
+
+from tests._tempdir import temp_dir
 
 
 def _claude(**over):
@@ -177,7 +178,7 @@ class TestCodex(unittest.TestCase):
         self.assertIsNone(parsers.normalized_tier("Default"))
 
     def test_file_reader_skips_partial_last_line(self):
-        d = Path(tempfile.mkdtemp())
+        d = temp_dir(self)
         f = d / "rollout-z.jsonl"
         lines = [_codex("turn_context", {"model": "gpt-5.5"}),
                  _tc({"input_tokens": 3, "output_tokens": 1})]

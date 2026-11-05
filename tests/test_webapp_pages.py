@@ -13,6 +13,8 @@ from swe.webapp import pages
 
 from tests.test_remote_hub import HubBase
 
+from tests._tempdir import temp_dir
+
 
 def _page(get=None, post=None):
     mod = types.SimpleNamespace()
@@ -52,7 +54,7 @@ class TestLoad(unittest.TestCase):
             self.assertEqual(pages.tilde("C:\\Users\\a", "C:\\Users\\a\\"), "~")
 
     def test_bundle_concatenates_in_name_order(self):
-        folder = Path(tempfile.mkdtemp())
+        folder = temp_dir(self)
         (folder / "b.js").write_text("B")
         (folder / "a.js").write_text("A")
         (folder / "a.css").write_text("CSS")
@@ -65,7 +67,7 @@ class TestLoad(unittest.TestCase):
 
     def test_bundled_rebuilds_only_when_a_file_changes(self):
         import os
-        folder = Path(tempfile.mkdtemp())
+        folder = temp_dir(self)
         page = folder / "a.js"
         page.write_text("A")
         real = pages.bundle
@@ -91,7 +93,7 @@ class TestLoad(unittest.TestCase):
 
     def test_concurrent_requests_build_once(self):
         import threading
-        folder = Path(tempfile.mkdtemp())
+        folder = temp_dir(self)
         (folder / "a.js").write_text("A")
         gate, built = threading.Event(), []
         real = pages.bundle
@@ -120,7 +122,7 @@ class TestLoad(unittest.TestCase):
         skipped; the pages around them still register."""
         import shutil
         import subprocess
-        folder = Path(tempfile.mkdtemp())
+        folder = temp_dir(self)
         (folder / "a.js").write_text('registerPage("a", () => "a");\n')
         (folder / "b.js").write_text('registerPage("b", () => {;\n')        # syntax error
         (folder / "c.js").write_text('throw new Error("boom");\n')         # throws on load
@@ -154,7 +156,7 @@ class TestLoad(unittest.TestCase):
         """Two pages reusing private names both register their own render."""
         import shutil
         import subprocess
-        folder = Path(tempfile.mkdtemp())
+        folder = temp_dir(self)
         for page in ("one", "two"):
             (folder / f"{page}.js").write_text(
                 '"use strict";\nconst label = "%s";\n'

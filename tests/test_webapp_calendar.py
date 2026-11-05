@@ -18,6 +18,8 @@ from swe.webapp.pages import calendar as cal
 
 from tests.test_remote_hub import HubBase
 
+from tests._tempdir import temp_dir
+
 CATALOG = PricingCatalog({"m": rates_from_entry(
     {"input_cost_per_token": 1e-06, "output_cost_per_token": 2e-06})})
 T0 = datetime(2026, 10, 20, 9, 0, tzinfo=timezone.utc).timestamp()  # a Tuesday
@@ -30,7 +32,7 @@ def _ev(session, ts, harness="claude", cwd="/w", model="m", account="/h", out=20
 
 class _Store(unittest.TestCase):
     def setUp(self):
-        self.store = LedgerStore(Path(tempfile.mkdtemp()) / "l.sqlite")
+        self.store = LedgerStore(temp_dir(self) / "l.sqlite")
         self.addCleanup(self.store.close)
         self.n = 0
 
@@ -132,7 +134,7 @@ class TestPieces(_Store):
 class TestGrouping(_Store):
     def setUp(self):
         super().setUp()
-        self.root = Path(tempfile.mkdtemp())
+        self.root = temp_dir(self)
         for repo in ("one/app", "two/app"):
             (self.root / repo / ".git").mkdir(parents=True)
 
@@ -202,7 +204,7 @@ class TestTotals(unittest.TestCase):
 
 class TestAccounts(unittest.TestCase):
     def test_labels(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         accounts_dir = home / ".swe" / "accounts"
         accounts_dir.mkdir(parents=True)
         (accounts_dir / "profiles.json").write_text(json.dumps({"schema": 1, "profiles": [
@@ -220,7 +222,7 @@ class TestAccounts(unittest.TestCase):
         self.assertEqual(len(a.homes["claude"]), 2)
 
     def test_cursor_accounts_are_the_apps_user_data_dirs(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         accounts_dir = home / ".swe" / "accounts"
         accounts_dir.mkdir(parents=True)
         (accounts_dir / "profiles.json").write_text(json.dumps({"schema": 1, "profiles": [
@@ -238,7 +240,7 @@ class TestAccounts(unittest.TestCase):
         self.assertEqual(a.homes["devin"][1], str(accounts_dir / "devin" / "devin-b" / "home"))
 
     def test_no_profiles_file(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         self.assertEqual(cal.Accounts(home).label(str(home / ".claude")), "Claude: Default")
 
 
@@ -259,7 +261,7 @@ class TestGrokRoster(unittest.TestCase):
     def setUp(self):
         import base64
         import tempfile
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.store = self.home / cal._GROK_STORE
         self.store.mkdir(parents=True)
         self.b32 = lambda key: base64.b32encode(key.encode()).decode().lower().rstrip("=")

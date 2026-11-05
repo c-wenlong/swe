@@ -10,6 +10,8 @@ from swe.webapp.pages import models
 from tests.test_remote_hub import HubBase
 from tests.test_webapp_pricing import NOW, _Store, catalog
 
+from tests._tempdir import temp_dir
+
 
 class TestQualifier(unittest.TestCase):
     def test_effort_fast_and_thinking(self):
@@ -83,7 +85,7 @@ class TestSearchCatalog(unittest.TestCase):
     def test_rebuilt_when_a_price_file_changes(self):
         import tempfile
         from pathlib import Path
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         first = models.search_catalog(home)
         self.assertIs(models.search_catalog(home), first)
         (home / ".swe" / "config").mkdir(parents=True)

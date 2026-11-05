@@ -7,7 +7,6 @@ tailnet client (checked against a live serve, 2026-10-23).
 
 import json
 import ssl
-import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
@@ -19,6 +18,8 @@ from swe.remote import hub as hub_mod
 
 from tests.test_remote_commands import _run
 from tests.test_remote_hub import _Server
+
+from tests._tempdir import temp_dir
 
 _PHONE_IP = "100.64.0.9"
 _PHONE = {"node_id": "n-phone", "login": "dev@github", "node_name":
@@ -120,7 +121,7 @@ class TestOrigin(unittest.TestCase):
 
 class TestConfigure(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.state = hub_mod.HubState(self.home)
         self.state.whois = MagicMock(return_value={
             "login": "dev@github", "node_name": "box.tailnet.ts.net",

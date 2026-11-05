@@ -26,6 +26,8 @@ from swe.harness.drift import Finding
 from swe.console import strip_ansi
 from swe.harness.path_health import NodeEnv, OffPathHit
 
+from tests._tempdir import temp_dir
+
 try:  # `unittest discover -s tests` puts tests/ itself on sys.path
     from test_json_output import decode, run_swe, write_registry
 except ImportError:  # `python -m unittest tests.test_mcp_doctor_json`
@@ -59,7 +61,7 @@ def by_name(result) -> dict:
 
 class McpListJsonTest(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         write_registry(self.home, REGISTRY)
         write_claude(self.home, {
             "github": {
@@ -167,7 +169,7 @@ class McpListJsonTest(unittest.TestCase):
         self.assertEqual(rows["shared"]["harnesses"], ["cursor"])
 
     def test_no_servers_is_an_empty_list_not_a_sentence(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         write_registry(home, REGISTRY)
         result = run_swe(home, "mcp", "list", "--json")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -200,7 +202,7 @@ class McpListJsonTest(unittest.TestCase):
 
 class McpListConflictTest(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         write_registry(self.home, REGISTRY)
 
     def rows(self) -> dict:
@@ -286,7 +288,7 @@ class McpStatusJsonTest(unittest.TestCase):
         cls.server.server_close()
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         write_registry(self.home, REGISTRY)
         write_claude(self.home, {
             "ok-stdio": {"command": sys.executable, "args": ["-V"],
@@ -359,7 +361,7 @@ class McpStatusJsonTest(unittest.TestCase):
         self.assertEqual(rows["only-cursor"]["health"], "error")
 
     def test_no_servers_is_an_empty_list(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         write_registry(home, REGISTRY)
         result = run_swe(home, "mcp", "status", "--json")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -385,7 +387,7 @@ class McpListSecretSafetyTest(unittest.TestCase):
     reach stdout from any of the commands that read those files."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         write_registry(self.home, REGISTRY)
         secrets = self.home / ".swe" / "secrets"
         secrets.mkdir(parents=True)
@@ -464,7 +466,7 @@ class McpMalformedConfigJsonTest(unittest.TestCase):
     JSON document: the app has nothing to show for a traceback."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         write_registry(self.home, REGISTRY)
         write_claude(self.home, {
             "weird": {"command": "zz-not-a-real-binary", "args": [1, {"a": 1}],
@@ -567,7 +569,7 @@ class DoctorJsonTest(unittest.TestCase):
     FINDING_KEYS = {"check", "severity", "message", "fix"}
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def doctor(self, registry: dict):
         write_registry(self.home, registry)
@@ -864,7 +866,7 @@ class McpSyncJsonTest(unittest.TestCase):
     """
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         write_registry(self.home, REGISTRY)
         write_claude(self.home, {
             "github": {"command": "npx", "args": ["gh"], "env": {"GITHUB_TOKEN": FAKE_KEY}},

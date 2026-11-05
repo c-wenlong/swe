@@ -24,6 +24,8 @@ from swe.reports.followups import FollowUpLedger
 from swe.reports.models import FollowUp
 from swe.reports.pipeline import ReportApprovalError, ReportWriterError
 
+from tests._tempdir import temp_dir
+
 
 class ReportCommandsTest(unittest.TestCase):
     @staticmethod
@@ -399,7 +401,7 @@ class HelpRoutesTest(unittest.TestCase):
 
     def test_followup_add_help_does_not_create_an_item(self):
         ledger = FollowUpLedger(
-            root=Path(tempfile.mkdtemp()),
+            root=temp_dir(self),
             clock=lambda: "2026-08-01T00:00:00+00:00",
         )
         with patch("swe.reports.commands.FollowUpLedger", return_value=ledger):

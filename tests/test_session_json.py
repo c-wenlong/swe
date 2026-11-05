@@ -10,11 +10,12 @@ its mtime with os.utime to make "last_active_at" a known number.
 
 import json
 import os
-import tempfile
 import unittest
 from pathlib import Path
 
 from tests.test_json_output import decode, run_swe
+
+from tests._tempdir import temp_dir
 
 CLAUDE_ID = "11111111-2222-3333-4444-555555555555"
 CODEX_UUID = "0199aaaa-bbbb-cccc-dddd-eeeeffff0001"
@@ -66,7 +67,7 @@ def add_codex_session(home: Path, stem: str = CODEX_STEM,
 
 class SessionJsonTestBase(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def sessions(self, *args: str) -> list[dict]:
         result = run_swe(self.home, "session", "--json", *args)

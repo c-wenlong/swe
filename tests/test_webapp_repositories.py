@@ -22,6 +22,7 @@ from swe.webapp.pages import repositories as R
 
 from tests.test_remote_hub import HubBase
 from tests.test_webapp import app_js_function
+from tests._tempdir import temp_dir
 
 OK_ENV = gh.GhEnv(installed=True, authenticated=True, login="octo")
 
@@ -213,7 +214,7 @@ class _Clock:
 class _Base(unittest.TestCase):
     def setUp(self):
         super().setUp()
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.clock = _Clock()
         cache = G.TtlCache(clock=self.clock)
         p = patch.object(G, "CACHE", cache)
