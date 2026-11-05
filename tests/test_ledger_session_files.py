@@ -65,8 +65,17 @@ class TestPi(unittest.TestCase):
             + '{"type": "session"')  # partial line waits for the next read
         self.assertEqual(recs, [])
 
+    def test_reasoning_over_output_is_clamped(self):
+        # usage.output includes reasoning, so reasoning can never exceed
+        # it; a log that says otherwise gives all of output to reasoning
+        # instead of a negative output.
+        recs = self._write(
+            _pi_message("m1", 1759500000000, _pi_usage(out=50, reasoning=80)))
+        ev = recs[0].event
+        self.assertEqual((ev.output, ev.reasoning), (0, 50))
+
     def test_no_id_keys_on_timestamp_and_zero_tokens_with_cost_count(self):
-        # Reasoning over output is clamped; a cost-only request still counts.
+        # A zero-token, cost-less request is dropped; a cost-only one counts.
         recs = self._write(
             _pi_message(None, 1759500000000, _pi_usage(inp=0, out=0, cost=None))
             + _pi_message(None, 1759500000001,
