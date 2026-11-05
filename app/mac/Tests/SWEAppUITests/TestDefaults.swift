@@ -6,7 +6,7 @@ import Foundation
 final class TestDefaults: UserDefaults, @unchecked Sendable {
     let suite: String
 
-    init(_ prefix: String = "quiver-app-test") {
+    init(_ prefix: String = "swe-app-test") {
         suite = Self.folder.appending(path: "\(prefix)-\(UUID().uuidString)").path
         super.init(suiteName: suite)!
     }
@@ -17,7 +17,7 @@ final class TestDefaults: UserDefaults, @unchecked Sendable {
     /// cfprefsd writes later lands in the temp folder, never in Preferences.
     static let folder: URL = {
         let folder = FileManager.default.temporaryDirectory
-            .appending(path: "quiver-test-defaults-\(getpid())", directoryHint: .isDirectory)
+            .appending(path: "swe-test-defaults-\(getpid())", directoryHint: .isDirectory)
         atexit { try? FileManager.default.removeItem(at: TestDefaults.folder) }
         return folder
     }()

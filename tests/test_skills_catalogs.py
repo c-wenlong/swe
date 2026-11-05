@@ -207,6 +207,165 @@ class SkillsCatalogTest(unittest.TestCase):
                     self.assertFalse(_same_path("~/team/skills", root))
                 self.assertEqual([c["label"] for c in load_skill_catalogs()], ["team"])
 
+class SkillsCatalogRegistryEdgeTest(unittest.TestCase):
+    """Replacing, refusing and pruning catalogs, and hand-edited files."""
+
+    def setUp(self):
+        from tests._tempdir import temp_dir
+
+        self.home = temp_dir(self)
+        self.config_dir = self.home / ".config" / "swe"
+        self.file = self.config_dir / "skill_catalogs.json"
+        for p in _catalog_patches(self.config_dir, self.file):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _catalog(self, *parts: str, skills=("one",)) -> Path:
+        root = self.home.joinpath(*parts)
+        for name in skills:
+            (root / name).mkdir(parents=True, exist_ok=True)
+            (root / name / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
+        root.mkdir(parents=True, exist_ok=True)
+        return root.resolve()
+
+    def test_hand_edited_entries_that_are_not_catalogs_are_dropped(self):
+        self.config_dir.mkdir(parents=True)
+        for value in ({"label": "x"}, 5, "path"):
+            with self.subTest(catalogs=value):
+                self.file.write_text(json.dumps({"catalogs": value}))
+                self.assertEqual(load_skill_catalogs(), [])
+        self.file.write_text(json.dumps({"catalogs": [
+            "a string", {"label": "  ", "path": "/x"}, {"label": "l"},
+            {"label": "ok", "path": "/x", "extra": 1}]}))
+        self.assertEqual(load_skill_catalogs(),
+                         [{"label": "ok", "path": "/x", "extra": 1}])
+
+    def test_re_adding_a_label_replaces_it_and_keeps_its_first_date(self):
+        first = self._catalog("a", "skills")
+        moved = self._catalog("b", "skills")
+        entry = add_skill_catalog(first, "team")
+        again = add_skill_catalog(moved, "team")
+        self.assertEqual(again["added"], entry["added"])
+        saved = load_skill_catalogs()
+        self.assertEqual([(c["label"], c["path"]) for c in saved],
+                         [("team", str(moved))])
+
+    def test_re_adding_a_path_under_a_new_label_renames_it(self):
+        root = self._catalog("a", "skills")
+        add_skill_catalog(root, "old")
+        add_skill_catalog(root, "New Name")
+        self.assertEqual([(c["label"], c["path"]) for c in load_skill_catalogs()],
+                         [("new-name", str(root))])
+
+    def test_a_path_stored_with_a_tilde_is_still_the_same_catalog(self):
+        # Regression: add compared the stored path without expanding ~, so
+        # a hand-written "~/a/skills" got a duplicate entry beside it.
+        import os
+
+        root = self._catalog("a", "skills")
+        self.config_dir.mkdir(parents=True)
+        self.file.write_text(json.dumps({"catalogs": [
+            {"label": "mine", "path": "~/a/skills", "added": "2026-01-01"}]}))
+        with patch.dict(os.environ, {"HOME": str(self.home)}):
+            entry = add_skill_catalog(root, "renamed")
+        saved = load_skill_catalogs()
+        self.assertEqual(len(saved), 1, saved)
+        self.assertEqual(saved[0]["label"], "renamed")
+        self.assertEqual(entry["added"], "2026-01-01")
+
+    def test_a_missing_folder_or_one_without_skills_is_refused(self):
+        empty = self.home / "empty"
+        empty.mkdir()
+        with self.assertRaises(FileNotFoundError):
+            add_skill_catalog(self.home / "absent")
+        with self.assertRaises(ValueError):
+            add_skill_catalog(empty)
+        self.assertFalse(self.file.exists())
+
+    def test_a_corrupt_catalogs_file_is_never_overwritten(self):
+        from swe.configuration import ConfigurationError
+
+        root = self._catalog("a", "skills")
+        self.config_dir.mkdir(parents=True)
+        self.file.write_text("{not json")
+        with self.assertRaises(ConfigurationError):
+            add_skill_catalog(root)
+        self.assertEqual(self.file.read_text(), "{not json")
+
+    def test_discovery_prunes_nested_catalogs_and_skips_noise(self):
+        outer = self._catalog("Desktop", "proj", "skills")
+        self._catalog("Desktop", "proj", "skills", "vendored", "skills")
+        self._catalog("Desktop", "proj", "node_modules", "pkg", "skills")
+        self._catalog("Desktop", "proj", ".hidden", "skills")
+        docs = self._catalog("Documents", "notes", "Skills")
+        # A folder named skills with no SKILL.md is not a catalog.
+        (self.home / "Desktop" / "bare" / "skills").mkdir(parents=True)
+        self.assertEqual(discover_catalog_dirs(self.home), [outer, docs])
+
+    def test_discovery_keeps_its_alphabetical_order_after_pruning(self):
+        # Regression: pruning re-sorted by depth, so a shallow catalog
+        # jumped ahead of a deeper one that sorts first.
+        deep = self._catalog("Desktop", "a", "b", "c", "skills")
+        shallow = self._catalog("Desktop", "z", "skills")
+        self.assertEqual(discover_catalog_dirs(self.home), [deep, shallow])
+
+    def test_discovery_stops_at_the_depth_limit(self):
+        deep = self._catalog("Desktop", "a", "b", "skills")
+        self.assertEqual(discover_catalog_dirs(self.home, max_depth=3), [deep])
+        self.assertEqual(discover_catalog_dirs(self.home, max_depth=2), [])
+
+    def test_a_linked_catalog_is_listed_once(self):
+        real = self._catalog("Desktop", "real", "skills")
+        (self.home / "Documents").mkdir()
+        (self.home / "Documents" / "skills").symlink_to(real)
+        self.assertEqual(discover_catalog_dirs(self.home), [real])
+
+    def test_findings_name_their_source_and_skip_registered_ones(self):
+        desktop = self._catalog("Desktop", "team", "skills", skills=("a", "b"))
+        documents = self._catalog("Documents", "notes", "skills")
+        add_skill_catalog(documents, "notes")
+        found = discover_skill_catalogs(home=self.home, cwd=self.home)
+        self.assertEqual([(f.label, f.source, f.status, f.skill_count)
+                          for f in found],
+                         [("team", "desktop", "new", 2)])
+        both = discover_skill_catalogs(home=self.home, cwd=self.home,
+                                       include_registered=True)
+        self.assertEqual([(f.label, f.source, f.status) for f in both],
+                         [("team", "desktop", "new"),
+                          ("notes", "documents", "registered")])
+        # Applying adds only the new one.
+        self.assertEqual(apply_skill_catalog_findings(both), ["team"])
+        self.assertEqual(sorted(c["label"] for c in load_skill_catalogs()),
+                         ["notes", "team"])
+        self.assertEqual(desktop, Path(load_skill_catalogs()[1]["path"]))
+
+    def test_a_home_reached_through_a_link_still_labels_its_finds(self):
+        # Discovery hands back resolved paths; with the home itself behind
+        # a link (macOS /var, /home -> /usr/home) they only sit under it
+        # once it is resolved too.
+        real_home = self.home / "real-home"
+        (real_home / "Desktop" / "team" / "skills" / "a").mkdir(parents=True)
+        (real_home / "Desktop" / "team" / "skills" / "a" / "SKILL.md").write_text("x")
+        (real_home / "Documents" / "notes" / "skills" / "b").mkdir(parents=True)
+        (real_home / "Documents" / "notes" / "skills" / "b" / "SKILL.md").write_text("x")
+        linked_home = self.home / "linked-home"
+        linked_home.symlink_to(real_home)
+        found = discover_skill_catalogs(home=linked_home, cwd=linked_home)
+        self.assertEqual(sorted((f.label, f.source) for f in found),
+                         [("notes", "documents"), ("team", "desktop")])
+        self.assertTrue(all(f.path.is_relative_to(real_home.resolve()) for f in found))
+
+    def test_a_catalog_outside_home_is_labelled_catalog(self):
+        from swe.skills.catalog_discover import _source_for_path
+
+        self.assertEqual(_source_for_path(Path("/opt/skills"), self.home),
+                         "catalog")
+        self.assertEqual(_source_for_path(self.home / "work" / "skills",
+                                          self.home), "catalog")
+        self.assertEqual(_source_for_path(self.home / "desktop" / "skills",
+                                          self.home), "desktop")
+
+
 class SkillsCatalogCommandTest(unittest.TestCase):
     def _run(self, args):
         import io
