@@ -60,15 +60,24 @@ struct NeedsYouCards: View {
         var retry = Self.firstRetry
         var loaded = false
         while !Task.isCancelled {
-            if onScreen() || !loaded {
+            let loads = onScreen() || !loaded
+            if loads {
                 await model.load { try await hub.withClient { try await $0.inbox(done: true) } }
                 loaded = true
-                retry = model.reachable ? Self.firstRetry : retry
             }
-            let wait = model.reachable ? 15 : retry
-            if !model.reachable { retry = Self.nextRetry(after: retry) }
-            try? await Task.sleep(for: .seconds(wait))
+            let next = Self.step(loaded: loads, reachable: model.reachable, retry: retry)
+            retry = next.retry
+            try? await Task.sleep(for: .seconds(next.wait))
         }
+    }
+
+    /// One tick's wait and the retry after it. Only a load that ran and
+    /// found the hub down grows the retry: a tick skipped behind another
+    /// window learned nothing, so it waits the same and doubles nothing.
+    static func step(loaded: Bool, reachable: Bool,
+                     retry: TimeInterval) -> (wait: TimeInterval, retry: TimeInterval) {
+        if reachable { return (15, loaded ? firstRetry : retry) }
+        return (retry, loaded ? nextRetry(after: retry) : retry)
     }
 
     static let firstRetry: TimeInterval = 60
@@ -101,6 +110,9 @@ private struct NeedsYouRow: View {
     var open: () -> Void
     var clear: (() -> Void)?
     @State private var hovering = false
+    /// The Clear button has keyboard focus: it shows then too, so a Tab
+    /// stop never lands on an invisible button.
+    @FocusState private var clearFocused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -136,8 +148,10 @@ private struct NeedsYouRow: View {
                     Image(systemName: "xmark")
                 }
                 .iconButton()
-                .opacity(hovering ? 1 : 0)
-                .hoverTip("Clear on this Mac until the session moves again")
+                .focused($clearFocused)
+                .opacity(hovering || clearFocused ? 1 : 0)
+                .accessibilityLabel("Clear \(item.displayTitle)")
+                .hoverTip("Clear on this Mac until the session moves again", replacesLabel: false)
             }
         }
         .padding(.trailing, clear == nil ? 0 : 4)

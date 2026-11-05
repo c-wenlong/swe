@@ -1,3 +1,4 @@
+import SWECore
 import AppKit
 import SwiftUI
 
@@ -392,7 +393,10 @@ struct FlowLayout: Layout {
         let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
         let width = rows.map(\.width).max() ?? 0
         let height = rows.map(\.height).reduce(0, +) + lineSpacing * CGFloat(max(rows.count - 1, 0))
-        return CGSize(width: proposal.width ?? width, height: height)
+        // An unbounded proposal (a horizontal scroll view, sizeThatFits
+        // at .infinity) gets the rows' own width, never an infinite one.
+        let proposed = proposal.width.flatMap { $0.isFinite ? $0 : nil }
+        return CGSize(width: proposed ?? width, height: height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
@@ -437,6 +441,7 @@ struct FlowLayout: Layout {
 /// `~/…` for a path under the home folder.
 func displayPath(_ path: String) -> String {
     let home = FileManager.default.homeDirectoryForCurrentUser.path
+    if path == home || path == home + "/" { return "~" }
     return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
 }
 
@@ -447,4 +452,44 @@ func displayPath(_ url: URL) -> String {
 func copyToPasteboard(_ text: String) {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(text, forType: .string)
+}
+
+extension Caret {
+    /// A line break in place of `selection` in `text`, and the caret
+    /// offset just after it. A selection the field reports from an older
+    /// copy of the text (cleared after a send, edited since) can hold
+    /// indices that fall inside one of its characters, and replacing
+    /// there corrupts the text; then, as with no selection at all, the
+    /// break goes at the end.
+    static func newline(in text: String, replacing selection: TextSelection?) -> (text: String, cursor: Int) {
+        var text = text
+        guard case .selection(let range) = selection?.indices,
+              range.upperBound <= text.endIndex,
+              // Character boundaries of this text, or nothing: an index
+              // inside a character would split it into garbage.
+              let lower = boundary(range.lowerBound, in: text),
+              let upper = boundary(range.upperBound, in: text),
+              lower <= upper else {
+            text += "\n"
+            return (text, text.count)
+        }
+        let at = text.distance(from: text.startIndex, to: lower)
+        text.replaceSubrange(lower..<upper, with: "\n")
+        return (text, at + 1)
+    }
+
+    /// `index` as one of `text`'s own character positions, matched by its
+    /// UTF-8 offset; nil when that offset falls inside a character.
+    /// (`samePosition(in:)` and `String.Index(_:within:)` trust an index
+    /// from an ASCII string and pass it through unchecked.)
+    private static func boundary(_ index: String.Index, in text: String) -> String.Index? {
+        let target = text.utf8.distance(from: text.utf8.startIndex, to: index)
+        var offset = 0
+        var position = text.startIndex
+        while offset < target, position < text.endIndex {
+            offset += text[position].utf8.count
+            position = text.index(after: position)
+        }
+        return offset == target ? position : nil
+    }
 }
