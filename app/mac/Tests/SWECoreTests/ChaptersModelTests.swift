@@ -126,6 +126,95 @@ import Testing
         #expect(runner.builds == 1)
     }
 
+    /// A folder fixture: `index` lists `folder/one.md` between a.md and
+    /// b.md so a move can show the slot and order are kept.
+    private func folderModel(_ dir: TempDir, runner: Runner,
+                             folder: String = "eng", index: String? = nil,
+                             targets: String? = nil) async throws -> ChaptersModel {
+        try dir.write("a.md", "# A\n")
+        try dir.write("b.md", "# B\n")
+        try FileManager.default.createDirectory(
+            at: dir.path(folder), withIntermediateDirectories: true)
+        try dir.write("\(folder)/one.md", "# One\n")
+        try dir.write("index.txt", index ?? "# in order\na.md\n\(folder)/one.md\nb.md\n")
+        if let targets { try dir.write("targets.json", targets) }
+        let model = ChaptersModel()
+        await model.load(swe: SweClient(runner: runner))
+        return model
+    }
+
+    @Test func moveFileToTheTopLevelKeepsItsSlotAndRebuilds() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await folderModel(dir, runner: runner)
+        model.selected = "eng/one.md"
+        let problem = await model.move(file: "eng/one.md", toFolder: "",
+                                       swe: SweClient(runner: runner))
+        #expect(problem == nil)
+        #expect(try dir.read("one.md") == "# One\n")
+        #expect(try dir.read("index.txt") == "# in order\na.md\none.md\nb.md\n")
+        #expect(model.selected == "one.md")
+        #expect(runner.builds == 1)
+    }
+
+    @Test func moveFileIntoAFolderKeepsItsSlot() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await folderModel(dir, runner: runner)
+        let problem = await model.move(file: "a.md", toFolder: "eng",
+                                       swe: SweClient(runner: runner))
+        #expect(problem == nil)
+        #expect(try dir.read("index.txt") == "# in order\neng/a.md\neng/one.md\nb.md\n")
+        #expect(FileManager.default.fileExists(atPath: dir.path("eng/a.md").path))
+    }
+
+    @Test func moveFileRetargetsItsHarnessRule() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await folderModel(
+            dir, runner: runner,
+            targets: #"{"version":1,"chapters":{"eng/one.md":{"only":["claude"]}}}"#)
+        let problem = await model.move(file: "eng/one.md", toFolder: "",
+                                       swe: SweClient(runner: runner))
+        #expect(problem == nil)
+        let rules = try ChapterTargets.parse(dir.read("targets.json")).rules
+        #expect(rules["one.md"] == ["only": ["claude"]])
+        #expect(rules["eng/one.md"] == nil)
+    }
+
+    @Test func moveFileRefusesCollisionsAndUnsavedText() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await folderModel(dir, runner: runner)
+        try dir.write("eng/a.md", "# Taken\n")
+        #expect(await model.move(file: "a.md", toFolder: "eng",
+                                 swe: SweClient(runner: runner)) != nil)
+        // The losing side is untouched.
+        #expect(try dir.read("eng/a.md") == "# Taken\n")
+        #expect(try dir.read("a.md") == "# A\n")
+        let chapter = InstructionsCheck.Chapter(
+            name: "eng/one.md", path: dir.path("eng/one.md").path, exists: true)
+        let document = try #require(model.document(for: chapter))
+        await document.load()
+        document.text = "# Draft\n"
+        #expect(await model.move(file: "eng/one.md", toFolder: "",
+                                 swe: SweClient(runner: runner)) != nil)
+        #expect(FileManager.default.fileExists(atPath: dir.path("eng/one.md").path))
+        #expect(model.document(for: chapter)?.isDirty == true)
+    }
+
+    @Test func moveAnUnlistedFileSkipsTheIndexAndBuild() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await folderModel(
+            dir, runner: runner, index: "# in order\na.md\nb.md\n")
+        let problem = await model.move(file: "eng/one.md", toFolder: "",
+                                       swe: SweClient(runner: runner))
+        #expect(problem == nil)
+        #expect(try dir.read("index.txt") == "# in order\na.md\nb.md\n")
+        #expect(runner.builds == 0)
+    }
+
     @Test func removeUnlistsButKeepsTheFileOnDisk() async throws {
         let dir = try TempDir()
         let runner = Runner([check(dir.url), check(dir.url, chapters: [("b.md", true)])])
@@ -302,6 +391,18 @@ import Testing
         #expect(ChapterIndex.enabling(text, name: "b.md")
                 == "# top\na.md\nb.md\n\n# tail\n")
         #expect(ChapterIndex.enabling(text, name: "gone.md") == text)
+    }
+
+    @Test func renamingRetargetsTheEntryAndItsOffComment() {
+        let text = "# top\na.md\neng/one.md\n# eng/off.md\nb.md\n"
+        #expect(ChapterIndex.renaming(text, from: "eng/one.md", to: "x/one.md")
+                == "# top\na.md\nx/one.md\n# eng/off.md\nb.md\n")
+        #expect(ChapterIndex.renaming(text, from: "eng/off.md", to: "x/off.md")
+                == "# top\na.md\neng/one.md\n# x/off.md\nb.md\n")
+        // A comment that only mentions the path is not the chapter's slot.
+        #expect(ChapterIndex.renaming("# see eng/one.md\n", from: "eng/one.md", to: "x.md")
+                == "# see eng/one.md\n")
+        #expect(ChapterIndex.renaming("a.md\n", from: "gone.md", to: "x.md") == "a.md\n")
     }
 
     @Test func targetsParseAndDeterministicEncode() throws {

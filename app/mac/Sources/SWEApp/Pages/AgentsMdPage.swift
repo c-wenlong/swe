@@ -734,6 +734,10 @@ private struct ChaptersEditor: View {
     @Environment(AppModel.self) private var app
     var check: InstructionsCheck
     @State private var creating: NewChapterSheet.Initial?
+    /// Why the last drag-move was refused, under the rail's header.
+    @State private var moveError: String?
+    /// A drag is over the rail's empty space: a drop moves to top level.
+    @State private var railTargeted = false
 
     var body: some View {
         let chapters = app.chapters
@@ -807,12 +811,21 @@ private struct ChaptersEditor: View {
                 .plainButton()
                 .accessibilityLabel("New chapter")
             }
+            if let moveError {
+                Label(moveError, systemImage: "exclamationmark.triangle")
+                    .font(Theme.caption).foregroundStyle(Theme.dangerText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(chapters.tree) { node in
-                        OutlineNode(node: node, depth: 0, compiled: check.compiledNames) { folder in
-                            creating = NewChapterSheet.Initial(folder: folder)
-                        }
+                        OutlineNode(node: node, depth: 0, compiled: check.compiledNames,
+                                    onNewChapter: { folder in
+                                        creating = NewChapterSheet.Initial(folder: folder)
+                                    },
+                                    onMove: { path, folder in
+                                        move(file: path, toFolder: folder)
+                                    })
                     }
                     // Dirty drafts whose files vanished: their text is
                     // still in the editor, so the row stays selectable.
@@ -825,10 +838,32 @@ private struct ChaptersEditor: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .dropDestination(for: String.self) { paths, _ in
+                guard let path = paths.first else { return false }
+                move(file: path, toFolder: "")
+                return true
+            } isTargeted: { targeted in
+                withAnimation(.easeInOut(duration: Theme.fadeDuration)) {
+                    railTargeted = targeted
+                }
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.controlRadius)
+                    .strokeBorder(railTargeted ? Theme.borderHover : .clear,
+                                  lineWidth: 1))
         }
         .frame(width: 260)
         .frame(maxHeight: .infinity)
+    }
+
+    /// A file row dropped on a folder row or on the rail's empty space
+    /// (the top level): the model moves the file and its index entry.
+    private func move(file: String, toFolder folder: String) {
+        Task {
+            moveError = await app.chapters.move(file: file, toFolder: folder,
+                                                swe: app.swe)
+        }
     }
 
     /// A rail row for a dirty draft whose file is gone: the unsaved text
@@ -882,17 +917,24 @@ private struct ChaptersEditor: View {
         var depth: Int
         var compiled: Set<String>
         var onNewChapter: (String) -> Void
+        /// (chapter path, destination folder) dropped on a row.
+        var onMove: (String, String) -> Void
 
         @Environment(AppModel.self) private var app
         @State private var hovering = false
+        /// A drag is over this folder row: it glows and grows a little so
+        /// the shift of neighbouring rows marks it as the drop target.
+        @State private var dropTargeted = false
         @AppStorage private var expanded: Bool
 
         init(node: ChapterNode, depth: Int, compiled: Set<String>,
-             onNewChapter: @escaping (String) -> Void) {
+             onNewChapter: @escaping (String) -> Void,
+             onMove: @escaping (String, String) -> Void) {
             self.node = node
             self.depth = depth
             self.compiled = compiled
             self.onNewChapter = onNewChapter
+            self.onMove = onMove
             // Expanded by default; each folder's state is its own key.
             _expanded = AppStorage(wrappedValue: true,
                                    "agentsMd.outline.\(node.path)")
@@ -904,7 +946,8 @@ private struct ChaptersEditor: View {
                 if node.isFolder && expanded {
                     ForEach(node.children) { child in
                         OutlineNode(node: child, depth: depth + 1,
-                                    compiled: compiled, onNewChapter: onNewChapter)
+                                    compiled: compiled, onNewChapter: onNewChapter,
+                                    onMove: onMove)
                     }
                 }
             }
@@ -935,12 +978,22 @@ private struct ChaptersEditor: View {
                 }
             }
             .padding(.leading, CGFloat(depth) * 14 + 8)
-            .padding(.trailing, 8).padding(.vertical, 4)
-            .background(hovering ? Theme.hover : .clear,
+            .padding(.trailing, 8)
+            .padding(.vertical, dropTargeted ? 6 : 4)
+            .background(dropTargeted ? Theme.dropTarget : hovering ? Theme.hover : .clear,
                         in: .rect(cornerRadius: Theme.controlRadius))
             .contentShape(.rect)
             .onTapGesture { expanded.toggle() }
             .onHover { hovering = $0 }
+            .dropDestination(for: String.self) { paths, _ in
+                guard let path = paths.first else { return false }
+                onMove(path, node.path)
+                return true
+            } isTargeted: { targeted in
+                withAnimation(.easeInOut(duration: Theme.fadeDuration)) {
+                    dropTargeted = targeted
+                }
+            }
             .contextMenu {
                 Button("New chapter here…") { onNewChapter(node.path) }
                 Divider()
@@ -974,6 +1027,7 @@ private struct ChaptersEditor: View {
             .contentShape(.rect)
             .onTapGesture { chapters.selected = node.path }
             .onHover { hovering = $0 }
+            .draggable(node.path)
             .hoverTip(isCompiled ? node.path
                       : "Not in AGENTS.md. Include it on the Compile page",
                       replacesLabel: false)

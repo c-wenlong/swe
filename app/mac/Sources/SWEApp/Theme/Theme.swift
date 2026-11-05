@@ -26,6 +26,8 @@ enum Theme {
     /// `tint.primary` (8% / 8%): selected tabs and the active nav row.
     static let selected = Color(light: "#0d0d0d14", dark: "#ffffff14")
     static let navActive = Color(light: "#0d0d0d14", dark: "#ffffff14")
+    /// A folder lit as a drag's drop target: one step over `navActive`.
+    static let dropTarget = Color(light: "#0d0d0d1f", dark: "#ffffff1f")
     static let segmentTrack = Color(light: "#0d0d0d0a", dark: "#ffffff08")
     /// `bg.elevated`: the selected segment lifts off the tinted track.
     static let segmentSelected = Color(light: "#fefefe", dark: "#252525")

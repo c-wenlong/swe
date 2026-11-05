@@ -138,6 +138,25 @@ public enum ChapterIndex {
         return lines.joined(separator: "\n")
     }
 
+    /// `text` with every line naming `from` retargeted to `to`: an active
+    /// entry becomes `to`, a `# from` off-comment becomes `# to`, so a
+    /// moved chapter keeps its slot and its on/off state. Comments that
+    /// merely mention the name are not the slot and stay untouched.
+    public static func renaming(_ text: String, from: String, to: String) -> String {
+        var lines = lines(text)
+        for (index, line) in lines.enumerated() {
+            if isEntry(line) {
+                if names(line, from) { lines[index] = to }
+            } else {
+                let stripped = line.trimmingCharacters(in: .whitespaces)
+                guard stripped.hasPrefix("#") else { continue }
+                let rest = stripped.dropFirst().trimmingCharacters(in: .whitespaces)
+                if normalize(rest) == normalize(from) { lines[index] = "# \(to)" }
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
     /// The full check createChapter runs: the folder must pass
     /// `folderProblem`, then the file's name must pass `nameProblem`, be
     /// a name rather than a path, and not start with "." — the two file
@@ -827,6 +846,95 @@ public final class ChaptersModel {
             // its own, so a dirty flag nobody can clear must not wedge ops.
             await document.load()
             buildError = "index.txt changed on disk; drag again."
+        }
+    }
+
+    /// Drop `name` into `folder` ("" is the top level): the file moves on
+    /// disk and its index line and targets rule follow, so the chapter
+    /// keeps its slot and its harness scope. Returns why it was refused.
+    @discardableResult
+    public func move(file name: String, toFolder folder: String,
+                     swe: SweClient) async -> String? {
+        guard case .loaded(let check) = status else { return "The chapters aren't loaded yet." }
+        let base = (name as NSString).lastPathComponent
+        let newName = folder.isEmpty ? base : folder + "/" + base
+        guard newName != name else { return nil }
+        if documents[name]?.isDirty == true {
+            return "Save or revert \(name) before moving it."
+        }
+        if let problem = ChapterIndex.folderProblem(folder)
+            ?? ChapterIndex.nameProblem(newName) { return problem }
+        guard let from = Self.inside(name, under: check.directory),
+              let to = Self.inside(newName, under: check.directory) else {
+            return "The path cannot leave AGENTS_MD."
+        }
+        return await queuedCompile { () -> String? in
+            guard let index = await self.readyIndex(),
+                  let targetsDocument = await self.readyTargets() else {
+                return "The chapter files haven't been read."
+            }
+            let rules: [String: [String: [String]]]
+            if targetsDocument.existsOnDisk {
+                guard let parsed = try? ChapterTargets.parse(targetsDocument.text) else {
+                    return self.targetsParseProblem ?? "targets.json can't be edited."
+                }
+                rules = parsed.rules
+            } else {
+                rules = [:]
+            }
+            guard !ChapterIndex.entries(index.text).contains(where: {
+                ChapterIndex.names($0, newName)
+            }) else { return "\(newName) is already in the index." }
+            // The file moves first: until index.txt catches up, the old
+            // entry is missing, which a racing build reports rather than
+            // compiling the chapter without its rule.
+            let clash = await offMain {
+                FileManager.default.fileExists(atPath: to.path)
+            }
+            if clash { return "\(newName) already exists." }
+            let moved = await offMain {
+                (try? FileManager.default.moveItem(at: from, to: to)) != nil
+            }
+            guard moved else { return "Couldn't move \(name) to \(newName)." }
+            let undo = { await offMain {
+                try? FileManager.default.moveItem(at: to, to: from)
+            } }
+            // The rule moves under the new key ahead of the index: while
+            // index.txt still names the old path the chapter is absent to
+            // a build, never unruled.
+            var targetsUndo: String?
+            if let rule = rules[ChapterIndex.normalize(name)] ?? rules[name] {
+                var renamed = rules
+                renamed.removeValue(forKey: ChapterIndex.normalize(name))
+                renamed.removeValue(forKey: name)
+                renamed[ChapterIndex.normalize(newName)] = rule
+                targetsUndo = targetsDocument.text
+                targetsDocument.text = ChapterTargets(rules: renamed).encoded()
+                if await targetsDocument.save() != .saved {
+                    await targetsDocument.load()
+                    _ = await undo()
+                    return "targets.json changed on disk; try again."
+                }
+            }
+            let renamed = ChapterIndex.renaming(index.text, from: name, to: newName)
+            let indexChanged = renamed != index.text
+            if indexChanged {
+                index.text = renamed
+                if await index.save() != .saved {
+                    await index.load()
+                    _ = await undo()
+                    if let targetsUndo {
+                        targetsDocument.text = targetsUndo
+                        _ = await targetsDocument.save()
+                    }
+                    return "index.txt changed on disk; try again."
+                }
+            }
+            self.documents[name] = nil
+            if self.selected == name { self.selected = newName }
+            await self.refreshTree(under: check.directory)
+            if indexChanged { await self.build(swe: swe) }
+            return nil
         }
     }
 
