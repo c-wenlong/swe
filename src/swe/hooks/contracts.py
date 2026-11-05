@@ -56,7 +56,7 @@ stderr to block, or a JSON object on stdout — Claude's shape
 (``hookSpecificOutput``, ``decision``, ``continue``, ``reason``), which
 the shim maps back into the harness's contract, including a mandatory
 valid default on any failure path for the contracts that stall without
-one (cursor, gemini, qwen, copilot).
+one (cursor, gemini, qwen-code, copilot).
 """
 
 from __future__ import annotations
@@ -218,7 +218,9 @@ CONTRACTS: dict[str, HookContract] = {
         events=_GEMINI_EVENTS, event_map=_GEMINI_EVENT_MAP,
         note="timeout is in MILLISECONDS; stdout must be JSON only",
     ),
-    "qwen": HookContract(
+    # Keyed by the registry id like every row: deploy, archive checks and
+    # capabilities.hooks lookups all go by it, and the command is "qwen".
+    "qwen-code": HookContract(
         mechanism="scripts", schema="grouped",
         root=Path(".qwen/hooks"),
         settings=(Path(".qwen/settings.json"),),

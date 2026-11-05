@@ -1,5 +1,9 @@
-"""Tests for the migration of ``cmd_list`` (providers/commands.py) to
-``swe.table.Table``.
+"""Tests for ``swe providers`` (providers/commands.py): list, info, add
+and remove. The discover layer they read through has its own file,
+test_providers_discover.py.
+
+Most of the list and info tests come from the migration of ``cmd_list``
+to ``swe.table.Table``.
 
 The migration replaces hand-rolled f-string padding with a single
 5-column Table build (PROVIDER | ALIASES | ENV VAR | API KEY | URL)
@@ -64,9 +68,12 @@ def _setup(tmp_path: Path, *, create_keys_dir: bool = True):
 
 
 def _run_cmd_list(args):
+    """``cmd_list``'s stdout; every list these tests run succeeds."""
     buf = io.StringIO()
     with redirect_stdout(buf):
-        cmd_list(list(args))
+        rc = cmd_list(list(args))
+    if rc != 0:
+        raise AssertionError(f"cmd_list({args!r}) returned {rc!r}:\n{buf.getvalue()}")
     return buf.getvalue()
 
 
@@ -239,6 +246,8 @@ class CmdListMigrationTest(unittest.TestCase):
                 output = _run_cmd_list([])
             # cpad("green", "sk-proj-...***...", w) → \033[32m prefix.
             self.assertIn("\033[32m", output)
+            # The cell shows the prefix, the last four and the length.
+            self.assertIn("sk-proj-***5678 (35)", strip_ansi(output))
 
     def test_url_strips_https_www_prefix(self):
         with TemporaryDirectory() as tmp:
@@ -311,6 +320,15 @@ class CmdListMigrationTest(unittest.TestCase):
                         desc, strip_ansi(output),
                         f"description for {name!r} not rendered with --desc",
                     )
+
+    def test_short_desc_flag_and_no_description_by_default(self):
+        with TemporaryDirectory() as tmp:
+            patches = self._patches(Path(tmp))
+            with patches[0], patches[1], patches[2]:
+                plain = strip_ansi(_run_cmd_list(["openai"]))
+                short = strip_ansi(_run_cmd_list(["-d", "openai"]))
+        self.assertNotIn("OpenAI API (ChatGPT", plain)
+        self.assertIn("OpenAI API (ChatGPT", short)
 
     def test_desc_flag_skips_empty_descriptions(self):
         # Even with --desc, a row whose description is empty gets no
@@ -426,6 +444,9 @@ class CmdListMigrationTest(unittest.TestCase):
             idx_dashes = output.find("\u2500" * 10)
             self.assertGreater(idx_dashes, 0)
             self.assertGreater(idx_tip, idx_dashes)
+            # It counts against the whole catalog and names the next step.
+            self.assertIn(f"0/{len(DEFAULT_PROVIDERS)}", output)
+            self.assertIn("swe providers info", output)
 
     def test_no_keys_dir_advisory_after_table(self):
         with TemporaryDirectory() as tmp:
@@ -489,6 +510,9 @@ class CmdListMigrationTest(unittest.TestCase):
             self.assertNotIn("ShouldNotLeakAnywhere", output)
             # Masked summary IS rendered.
             self.assertIn("***", output)
+            # A provider with no key shows the dash placeholder in its
+            # API KEY cell ("sk-proj-" has a hyphen too, so read the cell).
+            self.assertEqual(strip_ansi(_row_cells(output, "anthropic")[3]).strip(), "-")
 
     def test_visible_bar_column_gap_matches_swe_list(self):
         # Cross-Table regression: ``swe providers list`` is supposed
@@ -585,7 +609,8 @@ class CmdInfoMigrationTest(unittest.TestCase):
             tmp_path = Path(tmp)
             patches = self._patches(tmp_path)
             with patches[0], patches[1], patches[2]:
-                output, _ = self._run_cmd_info(["openai"])
+                output, rc = self._run_cmd_info(["openai"])
+        self.assertEqual(rc, 0)
         body_rows = self._body_rows(output)
         self.assertEqual(len(body_rows), 8, strip_ansi(output))
         # Rows end at their own value's width (fit="content"), but every
@@ -839,6 +864,8 @@ class CmdInfoMigrationTest(unittest.TestCase):
         self.assertIn("MOONSHOT_API_KEY", plain)
         self.assertIn("KIMI_API_KEY", plain)
         self.assertIn("(matched; fallbacks:", plain)
+        # A key read from the export file is masked too.
+        self.assertNotIn("infoFallback", plain)
 
     # ------------------------------------------------------------ error paths
 
@@ -1079,6 +1106,73 @@ class CmdAddTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("not valid", out)
 
+    def test_add_registers_a_new_provider(self):
+        from swe.providers.registry import load_registry
+
+        with TemporaryDirectory() as tmp:
+            patches, _ = self._patches(Path(tmp))
+            with patches[0], patches[1]:
+                rc, _ = self._run_add([
+                    "myprov", "My Provider blurb", "--env=MY_API_KEY",
+                    "--url=https://example.com", "--file=myprov",
+                ])
+                providers = load_registry()
+        self.assertEqual(rc, 0)
+        info = providers["myprov"]
+        self.assertEqual(info["url"], "https://example.com")
+        self.assertEqual(info["env_vars"], ["MY_API_KEY"])
+        self.assertEqual(info["key_filename"], "myprov")
+        # `name` and `aliases` are derived from env_vars[0] at load time
+        # (API_KEY is the source of truth); the blurb only lands in
+        # `description`.
+        self.assertEqual(info["aliases"], ["my"])
+        self.assertEqual(info["name"], "My")
+        self.assertEqual(info["description"], "My Provider blurb")
+
+    def test_add_rejects_an_unknown_flag(self):
+        with TemporaryDirectory() as tmp:
+            patches, registry_file = self._patches(Path(tmp))
+            with patches[0], patches[1]:
+                rc, _ = self._run_add(["myprov", "--aliases=my-provider"])
+        self.assertEqual(rc, 1)
+        self.assertFalse(registry_file.exists())
+
+
+class CmdRemoveTest(unittest.TestCase):
+    def test_add_then_remove_roundtrip(self):
+        from swe.providers.commands import cmd_add, cmd_remove
+        from swe.providers.registry import load_registry
+
+        with TemporaryDirectory() as tmp:
+            config_dir, registry_file, keys_dir = _setup(Path(tmp))
+            patches = _registry_patches(config_dir, registry_file)
+            with patches[0], patches[1], patch(
+                "swe.providers.commands.default_keys_dir",
+                return_value=keys_dir,
+            ), redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(cmd_add(["myprov", "--env=MY_KEY"]), 0)
+                self.assertIn("myprov", load_registry())
+                self.assertEqual(cmd_remove(["myprov"]), 0)
+                self.assertNotIn("myprov", load_registry())
+                # A second remove reports the provider as not found.
+                self.assertEqual(cmd_remove(["myprov"]), 1)
+        self.assertIn("Provider 'myprov' not found", out.getvalue())
+
+    def test_remove_keeps_the_key_file(self):
+        from swe.providers.commands import cmd_remove
+
+        with TemporaryDirectory() as tmp:
+            config_dir, registry_file, keys_dir = _setup(Path(tmp))
+            key_file = keys_dir / "openai"
+            key_file.write_text("sk-proj-DontDeleteMe1234567890")
+            patches = _registry_patches(config_dir, registry_file)
+            with patches[0], patches[1], patch(
+                "swe.providers.commands.default_keys_dir",
+                return_value=keys_dir,
+            ), redirect_stdout(io.StringIO()):
+                self.assertEqual(cmd_remove(["openai"]), 0)
+            self.assertEqual(key_file.read_text(), "sk-proj-DontDeleteMe1234567890")
+
 
 class CmdRemoveHelpTest(unittest.TestCase):
     def test_remove_help_token_prints_help_not_lookup(self):
@@ -1152,11 +1246,88 @@ class CmdStoreWordingTest(unittest.TestCase):
     ``~/.api_keys/`` directory.
     """
 
+    def setUp(self):
+        # A home outside the temp folders, so printed key paths stay
+        # absolute (not "~/...") even when TMPDIR sits under HOME.
+        self.enterContext(patch.object(Path, "home", return_value=Path("/nonexistent-home")))
+
     def _patches(self, tmp_path: Path):
         return _registry_patches(
             tmp_path / ".config" / "swe",
             tmp_path / ".config" / "swe" / "providers.json",
         )
+
+    def _add(self, tmp_path: Path, store: Path) -> str:
+        from swe.providers.commands import cmd_add
+
+        buf = io.StringIO()
+        patches = self._patches(tmp_path)
+        with patches[0], patches[1], patch(
+            "swe.providers.commands.default_keys_dir", return_value=store,
+        ), redirect_stdout(buf):
+            self.assertEqual(
+                cmd_add(["myprov", "--env=MY_API_KEY", "--file=myprov"]), 0)
+        return buf.getvalue()
+
+    def test_add_hint_points_at_the_export_file(self):
+        # The default store is one file of export lines; a directory of
+        # per-provider files is only for --api-keys-dir overrides.
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            store = tmp_path / "keys" / ".api_keys"
+            store.parent.mkdir()
+            store.write_text("export OLD=1\n")
+            out = self._add(tmp_path, store)
+        self.assertIn("export MY_API_KEY", out)
+        self.assertIn(str(store), out)
+        self.assertNotIn(str(store / "myprov"), out)
+
+    def test_add_hint_points_inside_a_real_keys_directory(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            store = tmp_path / ".api_keys"
+            store.mkdir()
+            out = self._add(tmp_path, store)
+        self.assertIn(str(store / "myprov"), out)
+
+    def test_api_keys_dir_flag_overrides_the_default_store(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            default = tmp_path / ".api_keys"
+            default.mkdir()
+            other = tmp_path / "other_keys"
+            other.mkdir()
+            (other / "openai").write_text("sk-proj-OtherDirTest1234567")
+            patches = self._patches(tmp_path)
+            with patches[0], patches[1], patch(
+                "swe.providers.commands.default_keys_dir", return_value=default,
+            ):
+                output = strip_ansi(_run_cmd_list([f"--api-keys-dir={other}"]))
+        # The key comes from the override, not the default dir.
+        self.assertIn("sk-proj-***4567 (27)", output)
+        self.assertIn(f"dir: {other}", output)
+
+    def test_footer_names_the_store_through_the_display_helper(self):
+        with TemporaryDirectory() as tmp:
+            patches = self._patches(Path(tmp))
+            with patches[0], patches[1], patch(
+                "swe.providers.commands._display_keys_dir",
+                return_value="~/.api_keys",
+            ):
+                output = _run_cmd_list([])
+        self.assertIn("~/.api_keys", output)
+        self.assertNotIn(str(Path.home()), output)
+
+    def test_display_keys_dir_tildes_only_under_home(self):
+        from swe.providers.commands import _display_keys_dir
+
+        home = Path("/Users/someone")
+        with patch.object(Path, "home", return_value=home):
+            self.assertEqual(_display_keys_dir(home / ".api_keys"), "~/.api_keys")
+            self.assertEqual(_display_keys_dir(home / "projects" / "keys"),
+                             "~/projects/keys")
+            self.assertEqual(_display_keys_dir(Path("/tmp/somewhere/else")),
+                             "/tmp/somewhere/else")
 
     def test_missing_default_store_advises_export_lines(self):
         # The default store is a single file: telling users to "add a file
@@ -1185,10 +1356,7 @@ class CmdStoreWordingTest(unittest.TestCase):
             patches = self._patches(tmp_path)
             missing_dir = tmp_path / "keys"
             with patches[0], patches[1]:
-                buf = io.StringIO()
-                with redirect_stdout(buf):
-                    cmd_list([f"--api-keys-dir={missing_dir}"])
-                output = buf.getvalue()
+                output = _run_cmd_list([f"--api-keys-dir={missing_dir}"])
             self.assertIn("No key store", output)
             self.assertIn("one bare-key file per provider", output)
             self.assertIn("export NAME=<key>", output)

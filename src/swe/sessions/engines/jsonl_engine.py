@@ -12,10 +12,12 @@ from typing import Any
 
 from swe.sessions.engines.common import (
     clean_title,
+    decoded_lines,
     expand_path,
     extract_user_text,
     get_mtime,
     parse_iso_ts,
+    read_tail_lines,
 )
 from swe.sessions.models import Session
 
@@ -254,8 +256,8 @@ def _parse_index_jsonl(base: str, config: JsonlParserConfig) -> list[Session]:
                     except Exception:
                         fallback = ""
                 try:
-                    with open(index_path) as f:
-                        for line in f:
+                    with open(index_path, "rb") as f:
+                        for line in decoded_lines(f):
                             if not line.strip():
                                 continue
                             try:
@@ -382,8 +384,8 @@ def _title_from_jsonl(fp: str, config: JsonlParserConfig) -> tuple[str, str]:
     if not config.title_from_event:
         return "", ""
     try:
-        with open(fp) as f:
-            for line in f:
+        with open(fp, "rb") as f:
+            for line in decoded_lines(f):
                 if not line.strip():
                     continue
                 try:
@@ -413,22 +415,12 @@ def _title_from_tail(fp: str, config: JsonlParserConfig) -> tuple[str, str]:
     if not config.tail_title_from_event:
         return "", ""
     try:
-        size = os.path.getsize(fp)
-        with open(fp, "rb") as f:
-            start = max(0, size - config.tail_bytes)
-            # Read from one byte before the window: when that byte is the
-            # newline ending the previous record, the "partial" first line
-            # dropped below is empty and the window's first record is kept.
-            f.seek(start - 1 if start > 0 else 0)
-            chunk = f.read().decode("utf-8", errors="ignore")
+        lines, _ = read_tail_lines(fp, config.tail_bytes)
     except OSError:
         parse_cache.note_read_error()
         return "", ""
     except Exception:
         return "", ""
-    lines = chunk.split("\n")
-    if start > 0 and lines:
-        lines = lines[1:]  # first line is a partial record
     best_priority: int | None = None
     best_text = ""
     best_source = ""
@@ -545,8 +537,8 @@ def _scan_jsonl(fp: str, config: JsonlParserConfig) -> list:
     # for nothing).
     if config.path_from_event or config.title_from_event:
         try:
-            with open(fp) as f:
-                for i, line in enumerate(f):
+            with open(fp, "rb") as f:
+                for i, line in enumerate(decoded_lines(f)):
                     if not line.strip():
                         continue
                     try:

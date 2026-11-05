@@ -239,10 +239,9 @@ import Testing
                                            end: utc("2026-12-07T00:00:00Z")))
         // October's six weeks already cover Oct 26 to Nov 8, so the
         // prefetch reads only the days after them, widened by a day each
-        // side for edge-spanning blocks.
-        #expect(ranges.contains(DateInterval(
-            start: model.visibleRange.end.addingTimeInterval(-CalendarModel.edgeLookout),
-            end: expectedNext.end.addingTimeInterval(CalendarModel.edgeLookout))))
+        // side for edge-spanning blocks: Nov 9 less a day to Dec 7 plus one.
+        #expect(ranges.contains(DateInterval(start: utc("2026-11-08T00:00:00Z"),
+                                             end: utc("2026-12-08T00:00:00Z"))))
         // The same for a 3-day span, on a model with nothing cached.
         let days = Calls()
         let threeDay = CalendarModel(providers: [days], defaults: freshDefaults(),
@@ -250,13 +249,10 @@ import Testing
         threeDay.mode = .days(3)
         await threeDay.load()
         ranges = await days.wait(for: 3)
-        // The next span's render range reaches 3 days past this one's;
-        // only those days are read.
-        let next = threeDay.renderRange(for: threeDay.shiftedAnchor(1, mode: .days(3)),
-                                        mode: .days(3))
-        #expect(ranges.contains(DateInterval(
-            start: threeDay.renderRange.end.addingTimeInterval(-CalendarModel.edgeLookout),
-            end: next.end.addingTimeInterval(CalendarModel.edgeLookout))))
+        // Oct 14-17 renders Oct 11-20; the next span (Oct 17-20) renders
+        // Oct 14-23, so only Oct 20-23 is read, widened a day each side.
+        #expect(ranges.contains(DateInterval(start: utc("2026-10-19T00:00:00Z"),
+                                             end: utc("2026-10-24T00:00:00Z"))))
     }
 
     @Test func keyCommandsMapLettersDigitsAndArrows() {

@@ -82,7 +82,7 @@ import Testing
         #expect(t.rows == [["1", "2"]])
     }
 
-    @Test func renderingDefectsFromTheHarnessSurvey() {
+    @Test func renderingDefectsFromTheHarnessSurvey() throws {
         let blocks = ChatMarkdown.blocks("""
         Done.
 
@@ -94,6 +94,9 @@ import Testing
         "elements":{}}</json-render>
         After.
         """)
+        // Five blocks exactly: nothing merged, dropped or left over.
+        try #require(blocks.count == 5)
+        #expect(blocks[0] == .paragraph("Done."))
         #expect(blocks[1] == .image(alt: "Backfill outcomes", source: "/Users/k/Downloads/outcomes.png"))
         guard case .list(let items) = blocks[2], items.count == 2 else {
             Issue.record("expected a task list"); return
@@ -103,6 +106,11 @@ import Testing
         guard case .rendered = blocks[3] else { Issue.record("expected a rendered view block"); return }
         #expect(blocks[4] == .paragraph("After."))
         #expect(ChatMarkdown.inlineImagesAsText("see ![chart](a.png) here") == "see *Image: chart* here")
+    }
+
+    @Test func emptyInputHasNoBlocks() {
+        #expect(ChatMarkdown.blocks("").isEmpty)
+        #expect(ChatMarkdown.blocks("\n\n  \n").isEmpty)
     }
 
     @Test func renderingReviewEdgeCases() {

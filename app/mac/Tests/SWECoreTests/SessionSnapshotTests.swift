@@ -2,48 +2,44 @@ import Foundation
 import Testing
 @testable import SWECore
 
-/// Holds the listing until released, then fails if its caller was
-/// cancelled meanwhile, as swe's client does when the child is stopped.
+/// Holds the listing until released; a listing cancelled meanwhile
+/// fails, as swe's client does when the child is stopped.
 actor CancellableGatedSource: SessionListing {
     let list: SessionList
-    private var gate: CheckedContinuation<Void, Never>?
+    /// Where each listing waits; `arrived` says one is parked.
+    nonisolated let gate = HoldGate()
     private(set) var calls = 0
-    /// Bumped once a listing is parked, so a test waits for it without
-    /// spinning.
-    let parks = CountGate()
     init(_ list: SessionList) { self.list = list }
     func sessions(days: Int?, limit: Int) async throws -> SessionList {
         calls += 1
-        let parks = self.parks
-        await withCheckedContinuation {
-            gate = $0
-            Task { await parks.bump() }
-        }
-        try Task.checkCancellation()
+        try await gate.pass()
         return list
     }
-    func release() { gate?.resume(); gate = nil }
+    nonisolated func release() { gate.open() }
 }
 
 /// A swe that never answers, until it is cancelled.
 actor HangingSource: SessionListing {
     private(set) var calls = 0
+    private let hang = HoldGate()
     func sessions(days: Int?, limit: Int) async throws -> SessionList {
         calls += 1
-        try await Task.sleep(for: .seconds(3600))
+        try await hang.pass()
         return SessionList(sessions: [], failures: [])
     }
 }
 
-/// A swe that shrugs off SIGTERM: its runner returns only when it exits.
+/// A swe that shrugs off SIGTERM and never exits: its listing never
+/// returns, cancelled or not.
 struct StubbornSource: SessionListing {
+    private let hang = HoldGate()
+    /// Lets the parked listing finish once its test is done with it.
+    func release() { hang.open() }
     func sessions(days: Int?, limit: Int) async throws -> SessionList {
-        // Shrugs off cancellation without spinning: a checked
-        // continuation is never resumed by cancellation, so the
-        // listing still waits out the full hold.
-        await withCheckedContinuation { (parked: CheckedContinuation<Void, Never>) in
-            DispatchQueue.global().asyncAfter(deadline: .now() + 60) { parked.resume() }
-        }
+        // The wait runs in a task of its own, which the caller's
+        // cancellation never reaches, and a task's value can't be
+        // cancelled out of.
+        await Task { [hang] in try? await hang.pass() }.value
         return SessionList(sessions: [], failures: [])
     }
 }
@@ -123,11 +119,11 @@ struct StubbornSource: SessionListing {
                           clock: TestClock(start))
         // The page opens, then closes while swe is still listing.
         let first = Task { await model.loadIfStale(for: "/bin/swe") }
-        try #require(await source.parks.reach(1))
+        try #require(await source.gate.arrived())
         first.cancel()
         // Reopened before swe answers: it joins the listing in flight.
         let reopened = Task { await model.loadIfStale(for: "/bin/swe") }
-        await source.release()
+        source.release()
         await reopened.value
         #expect(model.rows.map(\.id) == ["a"])
         #expect(model.isLoading == false)
@@ -146,14 +142,20 @@ struct StubbornSource: SessionListing {
     }
 
     @Test func aListingThatIgnoresCancellationStillTimesOutOnTime() async throws {
-        let model = SessionsModel(source: StubbornSource(), ledger: FakeSessionLedger(),
+        let source = StubbornSource()
+        defer { source.release() }
+        let model = SessionsModel(source: source, ledger: FakeSessionLedger(),
                                   snapshots: MemorySnapshotStore<SessionSnapshot>(), listTimeout: .milliseconds(50),
                                   now: { [start] in start }, searchIndexingEnabled: false)
-        let elapsed = await ContinuousClock().measure { await model.load(for: "/bin/swe") }
-        // The bound catches a hang, not latency: it sits under the
-        // source's 60s hold, so a broken timeout still fails while a
-        // starved CI runner cannot trip it.
-        #expect(elapsed < .seconds(30))
+        // The source never returns, so a load that waited on it would
+        // never finish: the load runs beside the test, and the test waits
+        // for it on a gate that gives up after `gateTimeout`.
+        let loaded = CountGate()
+        Task {
+            await model.load(for: "/bin/swe")
+            await loaded.bump()
+        }
+        try #require(await loaded.reach(1))
         #expect(model.error != nil)
         #expect(!model.isLoading)
     }

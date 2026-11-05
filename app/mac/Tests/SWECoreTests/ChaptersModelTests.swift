@@ -59,6 +59,9 @@ import Testing
     private final class Runner: CommandRunning, @unchecked Sendable {
         var checks: [String]
         var builds = 0
+        /// Bumped once per build, after its count: a test awaits
+        /// `built.reach(n)` for work that lands through an unawaited task.
+        let built = CountGate()
         var checkCalls = 0
         var buildStatus: Int32 = 0
 
@@ -69,6 +72,7 @@ import Testing
             let status: Int32
             if arguments.contains("build") {
                 builds += 1
+                await built.bump()
                 data = #"{"changed":true}"#
                 status = buildStatus
             } else {
@@ -279,16 +283,6 @@ import Testing
         #expect(runner.builds == 1)
     }
 
-    /// The undo's Task lands a beat after `undo()`: wait out the work
-    /// rather than racing it.
-    private func until(_ condition: @escaping () -> Bool) async -> Bool {
-        for _ in 0..<200 {
-            if condition() { return true }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        return condition()
-    }
-
     @Test func undoPutsTheFileAndIndexBack() async throws {
         let dir = try TempDir()
         let runner = Runner([check(dir.url)])
@@ -300,17 +294,18 @@ import Testing
         #expect(problem == nil)
         #expect(try dir.read("index.txt") == "# in order\na.md\none.md\nb.md\n")
         #expect(undo.canUndo)
+        #expect(runner.builds == 1)
+        // The undo's work runs in a Task of its own and ends in a build,
+        // after the file and index are back: wait for that build.
         undo.undo()
-        #expect(await until {
-            FileManager.default.fileExists(atPath: dir.path("eng/one.md").path)
-                && (try? dir.read("index.txt")) == "# in order\na.md\neng/one.md\nb.md\n"
-        })
+        try #require(await runner.built.reach(2), "the undo never rebuilt")
+        #expect(FileManager.default.fileExists(atPath: dir.path("eng/one.md").path))
+        #expect(try dir.read("index.txt") == "# in order\na.md\neng/one.md\nb.md\n")
         #expect(undo.canRedo)
         undo.redo()
-        #expect(await until {
-            FileManager.default.fileExists(atPath: dir.path("one.md").path)
-                && (try? dir.read("index.txt")) == "# in order\na.md\none.md\nb.md\n"
-        })
+        try #require(await runner.built.reach(3), "the redo never rebuilt")
+        #expect(FileManager.default.fileExists(atPath: dir.path("one.md").path))
+        #expect(try dir.read("index.txt") == "# in order\na.md\none.md\nb.md\n")
     }
 
     @Test func undoRestoresTheChapterOrder() async throws {
@@ -322,10 +317,10 @@ import Testing
         await model.move(chapter: "b.md", before: "a.md",
                          swe: SweClient(runner: runner))
         #expect(try dir.read("index.txt") == "# in order\nb.md\na.md\n")
+        #expect(runner.builds == 1)
         undo.undo()
-        #expect(await until {
-            (try? dir.read("index.txt")) == "# in order\na.md\nb.md\n"
-        })
+        try #require(await runner.built.reach(2), "the undo never rebuilt")
+        #expect(try dir.read("index.txt") == "# in order\na.md\nb.md\n")
     }
 
     @Test func removeUnlistsButKeepsTheFileOnDisk() async throws {
@@ -562,14 +557,14 @@ import Testing
 
     @Test func harnessToggleAddsAndRemovesReceipt() throws {
         // on with no rule -> except [h] narrows (rule write only)
-        var writes = try try CompileToggle.harness(
+        var writes = try CompileToggle.harness(
             "claude", want: false, index: "a.md\n", rules: [:],
             state: .on, name: "a.md", folder: "")
         if case .targets(let t) = writes.first {
             #expect(t.contains(#""a.md": { "except": ["claude"] }"#))
         } else { Issue.record("expected a targets write") }
         // off + want -> only [h] written first, then the enable
-        writes = try try CompileToggle.harness(
+        writes = try CompileToggle.harness(
             "claude", want: true, index: "# a.md\n", rules: [:],
             state: .off, name: "a.md", folder: "")
         #expect(writes.count == 2)
@@ -579,13 +574,13 @@ import Testing
         if case .index(let t) = writes[1] { #expect(t == "a.md\n") }
         else { Issue.record("enable after the rule") }
         // unlisted + want -> only [h] then an insert
-        writes = try try CompileToggle.harness(
+        writes = try CompileToggle.harness(
             "codex", want: true, index: "a.md\n", rules: [:],
             state: .unlisted, name: "x.md", folder: "")
         if case .index(let t) = writes[1] { #expect(t == "a.md\nx.md\n") }
         else { Issue.record("insert after the rule") }
         // on + only -> removing the last name disables the line first
-        writes = try try CompileToggle.harness(
+        writes = try CompileToggle.harness(
             "claude", want: false, index: "a.md\n",
             rules: ["a.md": ["only": ["claude"]]],
             state: .on, name: "a.md", folder: "")
@@ -596,7 +591,7 @@ import Testing
             #expect(!t.contains("\"a.md\""))
         } else { Issue.record("rule dropped after") }
         // on + only -> adding a name widens the rule
-        writes = try try CompileToggle.harness(
+        writes = try CompileToggle.harness(
             "codex", want: true, index: "a.md\n",
             rules: ["a.md": ["only": ["claude"]]],
             state: .on, name: "a.md", folder: "")
@@ -604,7 +599,7 @@ import Testing
             #expect(t.contains(#""only": ["claude", "codex"]"#))
         } else { Issue.record("only widens") }
         // on + except -> removing the harness drops an emptied rule
-        writes = try try CompileToggle.harness(
+        writes = try CompileToggle.harness(
             "codex", want: true, index: "a.md\n",
             rules: ["a.md": ["except": ["codex"]]],
             state: .on, name: "a.md", folder: "")
@@ -680,12 +675,11 @@ import Testing
         let problem = await model.setIncluded(
             name: "a.md", on: false, swe: SweClient(runner: runner))
         let text = try String(contentsOf: dir.path("index.txt"), encoding: .utf8)
-        if problem == nil {
-            #expect(text.contains("# a.md"))
-            #expect(text.contains("b.md"))  // the rest survived
-        } else {
-            #expect(text == "# in order\na.md\nb.md\n")  // refused, never clobbered
-        }
+        // The toggle read the index first: a.md is off and the rest of
+        // the file survived. One that wrote over the unread document
+        // would have lost the comment and b.md.
+        #expect(problem == nil)
+        #expect(text == "# in order\n# a.md\nb.md\n")
     }
 
     @Test func targetsParseNormalizesChapterKeys() throws {

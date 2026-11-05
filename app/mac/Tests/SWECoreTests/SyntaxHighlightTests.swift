@@ -168,8 +168,15 @@ import Testing
         #expect(toks.last?.text.hasSuffix("more = 1") == true)
         #expect(state == nil)
         // A surrogate pair straddling the cut stays whole.
-        let emoji = String(repeating: "a", count: SyntaxHighlight.maxColoured - 1) + "😀tail"
-        #expect(SyntaxHighlight.tokens(emoji, language: "python").map(\.text).joined() == emoji)
+        let lead = String(repeating: "a", count: SyntaxHighlight.maxColoured - 1)
+        let emoji = lead + "😀tail"
+        let split = SyntaxHighlight.tokens(emoji, language: "python")
+        #expect(split.map(\.text).joined() == emoji)
+        // The cut falls back before the pair: the emoji leads the plain
+        // remainder, and everything coloured is the run of a's.
+        #expect(split.last?.kind == .plain)
+        #expect(split.last?.text == "😀tail")
+        #expect(split.dropLast().map(\.text).joined() == lead)
     }
 
     @Test func sql() {

@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import SWECore
 
@@ -772,21 +773,31 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
 
 /// swe's plugin drift as state: each fix removes its finding, may clear
 /// others, or fails with a reason.
-final class DriftRunner: CommandRunning, @unchecked Sendable {
-    private let lock = NSLock()
-    /// Finding id -> runnable, in report order.
-    private var findings: [(id: String, runnable: Bool)]
+final class DriftRunner: CommandRunning, Sendable {
+    private struct State {
+        /// Finding id -> runnable, in report order.
+        var findings: [(id: String, runnable: Bool)]
+        var fixed: [String] = []
+        var attempted: [String] = []
+        var onFix: (@Sendable (String) async -> Void)?
+    }
+    /// Fixes run off the test's actor, so every read and write of the
+    /// state, the test's included, goes through the lock.
+    private let state: Mutex<State>
     private let clears: [String: [String]]
     private let reveals: [String: [String]]
     private let failing: [String: String]
-    private(set) var fixed: [String] = []
-    private(set) var attempted: [String] = []
+    var fixed: [String] { state.withLock { $0.fixed } }
+    var attempted: [String] { state.withLock { $0.attempted } }
     /// Runs after a fix succeeds, outside the lock.
-    var onFix: (@Sendable (String) async -> Void)?
+    var onFix: (@Sendable (String) async -> Void)? {
+        get { state.withLock { $0.onFix } }
+        set { state.withLock { $0.onFix = newValue } }
+    }
 
     init(_ findings: KeyValuePairs<String, Bool>, clears: [String: [String]] = [:],
          reveals: [String: [String]] = [:], failing: [String: String] = [:]) {
-        self.findings = findings.map { (id: $0.key, runnable: $0.value) }
+        state = Mutex(State(findings: findings.map { (id: $0.key, runnable: $0.value) }))
         self.clears = clears
         self.reveals = reveals
         self.failing = failing
@@ -801,20 +812,20 @@ final class DriftRunner: CommandRunning, @unchecked Sendable {
     }
 
     private func answer(_ arguments: [String]) -> CommandResult {
-        lock.withLock {
+        state.withLock { s in
             if let fix = arguments.first(where: { $0.hasPrefix("--fix=") }) {
                 let id = String(fix.dropFirst("--fix=".count))
-                attempted.append(id)
+                s.attempted.append(id)
                 if let reason = failing[id] {
                     return CommandResult(status: 1, stdout: Data(), stderr: reason + "\n")
                 }
                 let gone = Set([id] + (clears[id] ?? []))
-                findings.removeAll { gone.contains($0.id) }
-                findings += (reveals[id] ?? []).map { (id: $0, runnable: true) }
-                fixed.append(id)
+                s.findings.removeAll { gone.contains($0.id) }
+                s.findings += (reveals[id] ?? []).map { (id: $0, runnable: true) }
+                s.fixed.append(id)
                 return json(#"{"fixed": \#(entry(id, runnable: true))}"#)
             }
-            let rows = findings.map { entry($0.id, runnable: $0.runnable) }.joined(separator: ",")
+            let rows = s.findings.map { entry($0.id, runnable: $0.runnable) }.joined(separator: ",")
             return json(#"{"sources": 2, "drift": [\#(rows)]}"#)
         }
     }

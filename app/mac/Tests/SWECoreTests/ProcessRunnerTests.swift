@@ -359,17 +359,26 @@ import Testing
 
     @Test func earlyCallersShareTheFirstRead() async {
         let reads = Reads([["PATH": "/login/bin"]])
+        // Holds the first read open on a gate, not a wall-clock sleep.
+        let held = HoldGate()
         let cache = ShellEnvironmentCache(retryAfter: .zero) {
-            try? await Task.sleep(for: .milliseconds(100))
+            try? await held.pass()
             return reads.next()
         } fallback: {
             ["PATH": "/usr/bin"]
         }
-        async let a = cache.environment()
-        async let b = cache.environment()
-        let results = await [a, b]
+        let a = Task { await cache.environment() }
+        #expect(await held.arrived(1))
+        let b = Task { await cache.environment() }
+        // A second caller that started its own read would park beside the
+        // first. The cache has no hook saying a caller is waiting on the
+        // read in flight, so b being inside before the gate opens is not
+        // proven; a read b started itself is.
+        held.open()
+        let results = [await a.value, await b.value]
         #expect(results == [["PATH": "/login/bin"], ["PATH": "/login/bin"]])
         #expect(reads.calls == 1)
+        #expect(await held.arrivalCount == 1)
     }
 }
 

@@ -67,10 +67,10 @@ import Testing
         let sync = AccountSyncModel(swe: SweClient(runner: runner))
         await sync.load()
         let flip = Task { await sync.set(.hooks, on: true) }
-        await runner.configEntered.wait()
+        try #require(await runner.configGate.arrived(), "the switch never ran config set")
         #expect(sync.busy)
         await sync.syncIfOn()  // busy: queued, not dropped
-        runner.releaseConfig.signal()
+        runner.configGate.open()
         await flip.value
         #expect(runner.calls.filter { $0 == ["init", "--accounts", "--json"] }.count == 2)
         #expect(!sync.busy)
