@@ -41,8 +41,12 @@ extension SweClient {
     }
 
     /// `swe harness discover --apply <names>`: registers exactly those.
+    /// A refused name exits 1 with the JSON body still naming it under
+    /// `applied.skipped`, which the Detect sheet shows, so a JSON reply
+    /// is read whatever the status.
     public func registerHarnesses(_ names: [String]) async throws -> HarnessDiscovery {
-        try await call(["harness", "discover", "--apply"] + names + ["--json"])
+        try await call(["harness", "discover", "--apply"] + names + ["--json"],
+                       allowFailure: true)
     }
 
     /// `swe add` for the app's form: never overwrites (--no-replace).
