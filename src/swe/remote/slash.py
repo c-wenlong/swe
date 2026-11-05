@@ -581,13 +581,18 @@ def combine(harness: str, user: dict, project: dict) -> list[dict]:
     spec = _HARNESSES.get(harness)
     if spec is None:
         return []
-    scopes = {"user": user or {}, "project": project or {}}
+    # A satellite's pushed layers arrive as JSON from another machine:
+    # anything but a dict of lists of rows with string name and source
+    # is skipped rather than failing the menu route.
+    scopes = {"user": user if isinstance(user, dict) else {},
+              "project": project if isinstance(project, dict) else {}}
     out: dict[str, dict] = {}
     for scope, layer in spec.order:
         rows = scopes[scope].get(layer) or []
         for row in rows if isinstance(rows, list) else []:
-            if isinstance(row, dict) and row.get("name"):
-                out.setdefault(str(row["name"]), dict(row))
+            if (isinstance(row, dict) and isinstance(row.get("name"), str)
+                    and row["name"] and isinstance(row.get("source"), str)):
+                out.setdefault(row["name"], dict(row))
     return list(out.values())
 
 
@@ -889,9 +894,10 @@ def for_remote_row(home: Path | None, key: str, row: dict) -> dict:
     mode = modes.get(local_key) if isinstance(modes, dict) else None
     if isinstance(slot, dict):
         channel = str(mode or slot.get("auto") or "tmux")
-        folders = slot.get("folders") or {}
-        custom = combine(harness, slot.get("user") or {},
-                         folders.get(cwd) or {})
+        folders = slot.get("folders")
+        custom = combine(harness, slot.get("user"),
+                         folders.get(cwd) if isinstance(folders, dict)
+                         else None)
         rows, custom_ok = for_channel(harness, channel, custom)
         return _answer(key, harness, channel, attached, rows,
                        custom_available=custom_ok, note="")
