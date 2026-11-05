@@ -149,6 +149,17 @@ import Testing
         #expect(HarnessColor.palette.contains(a))
     }
 
+    /// The picks the iOS `Theme.harnessHex` and the web's
+    /// `Fmt.harnessColor` make for the same ids (their tests pin these
+    /// too), so an unlisted harness is one colour on every client.
+    @Test func thePalettePickMatchesTheOtherClients() {
+        let pick = { (id: String) in HarnessColor.resolve(id: id, colorSVG: nil).hex }
+        #expect(pick("made-up-harness") == "#f0755f")
+        #expect(pick("aider") == "#d9b44a")
+        #expect(pick("amp") == "#8ac74f")
+        #expect(pick("zed") == "#4ec9b0")
+    }
+
     @Test func aDarkLogoIsLiftedToReadOnTheCard() {
         let rgb = HarnessColor.resolve(id: "made-up-harness", colorSVG: ##"<path fill="#200010"/>"##)
         #expect(rgb.luminance >= HarnessColor.luminanceFloor)

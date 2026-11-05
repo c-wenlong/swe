@@ -523,6 +523,31 @@ class TestShellWord(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestHarnessColor(unittest.TestCase):
+    """Fmt.harnessColor: a hand-picked colour, else the palette slot the
+    Mac's HarnessColor.stableIndex and iOS Theme.harnessHex pick (64-bit
+    FNV-1a over UTF-8), so an unlisted harness is one colour on every
+    client. Their tests pin the same ids."""
+
+    def colors(self, ids):
+        src = (FORMAT_JS.read_text(encoding="utf-8")
+               + "\nprocess.stdout.write(JSON.stringify("
+               + json.dumps(ids) + ".map((id) => Fmt.harnessColor(id))));\n")
+        done = subprocess.run(["node", "-e", src], capture_output=True,
+                              text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def test_unlisted_harnesses_take_the_shared_palette_pick(self):
+        self.assertEqual(
+            self.colors(["claude", "made-up-harness", "aider", "amp", "zed", ""]),
+            ["#d97757", "#f0755f", "#d9b44a", "#8ac74f", "#4ec9b0", "#f0755f"])
+
+    def test_an_object_key_name_is_not_a_listed_harness(self):
+        self.assertEqual(self.colors(["constructor"])[0][0], "#")
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
 class TestResetIn(unittest.TestCase):
     """Fmt.resetIn: "in 12m", "in 4h 28m", "in 6d 13h" — two units, so a
     day-plus reset still shows the hours. The day count floors: 1d 30m
