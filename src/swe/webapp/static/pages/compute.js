@@ -866,6 +866,15 @@ function openComputeLimits() {
     drawAutoclean();
     apiPost("/v1/app/compute/settings", body).then(({ status, data }) => {
       p.acBusy = false;
+      if (status === 401) {
+        if (dialog.open) dialog.close();
+        // Stop the poll and drop a read already out, or its reply would
+        // paint the page over the pair form.
+        clearTimeout(p.timer);
+        p.seq++;
+        if (currentRoute() === "compute") renderGate();
+        return;
+      }
       if (status === 200 && data && data.autoclean) {
         if (p.data) p.data.autoclean = data.autoclean;
         // An age typed while the request was out never reached the hub

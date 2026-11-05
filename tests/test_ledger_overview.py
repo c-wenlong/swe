@@ -23,7 +23,10 @@ def _at(y, m, d, h=10):
     return datetime(y, m, d, h, tzinfo=SG).timestamp()
 
 
-class TestOverview(unittest.TestCase):
+class _LedgerCase(unittest.TestCase):
+    """A throwaway ledger plus the helpers both suites below use. Holds no
+    tests itself, so subclassing it runs nothing twice."""
+
     def setUp(self):
         self.store = LedgerStore(temp_dir(self) / "l.sqlite")
         self.addCleanup(self.store.close)
@@ -37,6 +40,25 @@ class TestOverview(unittest.TestCase):
 
     def build(self, period):
         return overview.build(self.store, CATALOG, period, "Asia/Singapore", now=NOW)
+
+
+class TestOverview(_LedgerCase):
+    def test_an_empty_ledger_is_all_zeros(self):
+        # No events: nothing to divide by and no first day to name.
+        for period in ("today", "7d", "month", "all"):
+            with self.subTest(period=period):
+                body = self.build(period)
+                self.assertEqual(body["quick"], {"active_days": 0,
+                                                 "tokens_per_day": 0,
+                                                 "busiest_day": None})
+                self.assertIsNone(body["first_day"])
+                self.assertEqual(body["totals"]["tokens"], 0)
+                self.assertEqual(body["totals"]["cost_usd"], 0.0)
+                self.assertEqual((body["days"], body["harnesses"],
+                                  body["top_models"]), ([], [], []))
+                self.assertEqual({d["level"] for d in body["heatmap"]["days"]
+                                  if not d.get("future")}, {0})
+        self.assertIsNone(self.build("all")["range"])
 
     def test_periods_and_totals(self):
         self.add(_at(2026, 10, 23), 100)
@@ -92,7 +114,7 @@ def _row(day, tokens, harness="codex", cost=0.5):
             "unpriced_tokens": 0}
 
 
-class TestOtherMachines(TestOverview):
+class TestOtherMachines(_LedgerCase):
     """Satellites' daily rows in the Overview (#525)."""
 
     def test_daily_totals_group_by_day_and_harness(self):

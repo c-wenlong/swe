@@ -74,7 +74,12 @@ class TestTmuxHelpers(unittest.TestCase):
         with patch.object(supervise, "_tmux",
                           return_value=self._cp(stdout="pane text")) as t:
             self.assertTrue(supervise.send_key("qv-x", "Escape"))
+            self.assertEqual(t.call_args.args, ("send-keys", "-t", "qv-x", "Escape"))
             self.assertEqual(supervise.capture_pane("qv-x"), "pane text")
+            self.assertEqual(t.call_args.args, ("capture-pane", "-p", "-t", "qv-x"))
+            supervise.capture_pane("qv-x", lines=50)
+            self.assertEqual(t.call_args.args,
+                             ("capture-pane", "-p", "-t", "qv-x", "-S", "-50"))
 
     def test_helpers_tolerate_tmux_errors(self):
         # _tmux raising OSError/SubprocessError degrades each helper to

@@ -244,7 +244,8 @@ public final class GitHubModel {
     /// `probed` alone would leave Repositories stuck on the empty card.
     private var pinsFetchedAt: Date?
     private var generation = 0
-    private let now: () -> Date
+    /// The clock every freshness check reads, injectable for tests.
+    let now: () -> Date
     private let staleAfter: TimeInterval
     /// Where the warm-start snapshot lives; nil (tests) disables disk.
     private let snapshot: SnapshotFile<GitHubSnapshot>?

@@ -229,14 +229,6 @@ class McpLoadJsonStrictTest(unittest.TestCase):
 class McpSaverRefuseTest(unittest.TestCase):
     """The write path must refuse to touch a malformed target file."""
 
-    def _tool(self, path):
-        cfg = {"mcp_servers": {"x": {}}}
-        with patch(
-            "swe.mcp.cli.get_tool_config",
-            return_value={"path": path, "key": "mcpServers", "format": "standard"},
-        ):
-            yield cfg
-
     def test_save_refuses_corrupt_target(self):
         from swe.mcp.cli import get_tool_saver
 
@@ -463,6 +455,7 @@ class McpSyncCorruptTargetIntegrationTest(unittest.TestCase):
         return subprocess.run(
             [sys.executable, "-m", MCP_MODULE, *args],
             env=_mcp_env(self.home), capture_output=True, text=True,
+            timeout=60,
         )
 
     def test_sync_refuses_corrupt_target(self):
@@ -547,7 +540,7 @@ class CorruptRegistryIntegrationTest(unittest.TestCase):
             )
             r = subprocess.run(
                 [sys.executable, "-m", "swe.cli", "list"],
-                env=env, capture_output=True, text=True,
+                env=env, capture_output=True, text=True, timeout=60,
             )
             self.assertEqual(r.returncode, 1)
             self.assertIn("Cannot parse JSON", r.stdout + r.stderr)

@@ -1064,5 +1064,33 @@ class TestLeavingForgetsSecrets(unittest.TestCase):
                                                   "replacing": 0, "gen": 1, "error": None})
 
 
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestSecretValueGate(unittest.TestCase):
+    """mcp.js: Show or Copy on a secret that answers 401 puts up the pair
+    gate on the MCP page (not a line in the sheet), and nothing on a page
+    the browser moved to."""
+
+    def gates(self, hash_):
+        page = Path(__file__).resolve().parents[1] / "src/swe/webapp/static/pages/mcp.js"
+        prelude = ("globalThis.location = { hash: " + json.dumps(hash_) + " };\n"
+                   "globalThis.window = { addEventListener() {} };\n"
+                   "globalThis.document = { addEventListener() {}, getElementById: () => null };\n"
+                   "const gates = []; function renderGate() { gates.push(1); }\n"
+                   "function registerPage() {}\n" + app_js_function("currentRoute")
+                   + app_js_function("failText")
+                   + "const apiPost = async () => ({ status: 401, data: null });\n")
+        tail = ("const st = {}; mcpSecretValue('K', st).then((v) => process.stdout.write("
+                "JSON.stringify([v, gates.length, st.secretError || null])));\n")
+        done = subprocess.run(["node", "-e", prelude + page.read_text(encoding="utf-8") + "\n" + tail],
+                              capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def test_gate_on_the_page_only(self):
+        self.assertEqual(self.gates("#/mcp"), [None, 1, None])
+        self.assertEqual(self.gates("#/overview"), [None, 0, None])
+
+
 if __name__ == "__main__":
     unittest.main()
