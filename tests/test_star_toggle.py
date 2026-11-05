@@ -40,29 +40,33 @@ class StarTogglesTest(unittest.TestCase):
         self.assertNotIn("unstar", COMMANDS)
 
     def test_it_is_not_offered_in_completion(self):
-        import swe.completion as comp
+        from swe.completion import get_completions
 
-        source = comp.__file__
-        with open(source) as fh:
-            self.assertNotIn('"unstar"', fh.read())
+        for words in ([""], ["unst"], ["harness", ""], ["hs", ""]):
+            offered = [word for word, _ in get_completions(words)]
+            self.assertNotIn("unstar", offered, words)
+        # The toggle itself is still offered where unstar used to sit.
+        self.assertIn("star", [word for word, _ in get_completions(["harness", ""])])
 
     def test_help_no_longer_advertises_it(self):
-        from pathlib import Path
+        from swe.help_text import HELP, cmd_help
 
-        text = Path("src/swe/help_text.py").read_text()
-        self.assertNotIn("swe unstar", text)
+        self.assertNotIn("unstar", HELP)
+        for name, (summary, detail) in HELP.items():
+            self.assertNotIn("unstar", strip_ansi(summary + detail), name)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(cmd_help(["unstar"]), 1)
+        self.assertIn("Unknown command", strip_ansi(buf.getvalue()))
 
     def test_star_then_star_again_returns_to_the_start(self):
         from swe.harness.stars import is_starred, toggle_star
 
-        with mock.patch("swe.harness.stars.load_stars",
-                        side_effect=lambda: list(self.stars)), \
-             mock.patch("swe.harness.stars.save_stars",
-                        side_effect=lambda s: self.stars.__init__(list(s))):
-            self.assertTrue(toggle_star("claude"))
-            self.assertTrue(is_starred("claude", self.stars))
-            self.assertFalse(toggle_star("claude"))
-            self.assertFalse(is_starred("claude", self.stars))
+        # setUp's patches keep the stars in self.stars.
+        self.assertTrue(toggle_star("claude"))
+        self.assertTrue(is_starred("claude", self.stars))
+        self.assertFalse(toggle_star("claude"))
+        self.assertFalse(is_starred("claude", self.stars))
 
     def test_an_orphan_star_can_still_be_removed(self):
         """A star can outlive its registry entry; removing one used to
