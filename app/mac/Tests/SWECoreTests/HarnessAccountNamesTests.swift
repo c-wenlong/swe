@@ -9,7 +9,7 @@ import Testing
 
     private func tempFile() -> URL {
         scratch.url
-            .appendingPathComponent("quiver-names-\(UUID().uuidString)")
+            .appendingPathComponent("swe-names-\(UUID().uuidString)")
             .appendingPathComponent("harness-names.json")
     }
 

@@ -39,8 +39,10 @@ def display_name(info: dict) -> str:
     if not env_vars:
         return ""
     stripped = _strip_suffix(env_vars[0])
-    titled = stripped.replace("_", " ").title()
-    return titled.replace(" Ai", " AI")
+    words = stripped.replace("_", " ").title().split(" ")
+    # Whole words only: a substring replace turned ``MY_AIRTABLE`` into
+    # "My AIrtable".
+    return " ".join("AI" if word == "Ai" else word for word in words)
 
 
 def derived_alias(info: dict) -> str | None:

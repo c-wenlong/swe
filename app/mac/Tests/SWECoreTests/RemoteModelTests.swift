@@ -61,7 +61,7 @@ import Testing
          "devices": [{"id": "dev-1", "name": "phone",
                       "display_name": "Dev's iPhone",
                       "kind": "iphone", "model": "iPhone16,2",
-                      "client": "Quiver Remote 1.0", "os": "iOS 18.5",
+                      "client": "SWE Remote 1.0", "os": "iOS 18.5",
                       "node_name": "test-iphone.tail0000.ts.net",
                       "paired_via": "tailscale",
                       "created_at": 1759999000, "last_seen_at": 1760000000,
@@ -77,7 +77,7 @@ import Testing
         #expect(device.displayName == "Dev's iPhone")
         #expect(device.kind == "iphone")
         #expect(device.model == "iPhone16,2")
-        #expect(device.client == "Quiver Remote 1.0")
+        #expect(device.client == "SWE Remote 1.0")
         #expect(device.os == "iOS 18.5")
         #expect(device.nodeName == "test-iphone.tail0000.ts.net")
     }

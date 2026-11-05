@@ -80,7 +80,7 @@ replays the journal.
 | `GET /v1/status` | `{ok, v}` (unauthenticated reachability check) |
 | `POST /v1/pair` | `{device_id, credential, name}` for a live pair token; `429 rate_limited` past 5 attempts/600s per IP |
 | `POST /v1/pair/request` | unauthenticated; identifies the caller via `tailscale whois` on the peer IP (behind `tailscale serve`, the `X-Forwarded-For` client). `201 {request_id, poll_secret, code, expires_in_s, node: {name, login}, auto_approved?}`; `auto_approved: true` when owner auto-approve took it (the first poll then answers `approved`); `403 not_tailnet` when the peer can't be identified; `429 rate_limited` past 5 requests/600s per IP; `429 busy` past the pending cap |
-| `GET /v1/pair/request/{id}?secret=` | unauthenticated; `200 {status: pending, expires_in_s}` or `{status: denied}` or `{status: approved, device_id, credential, name}` (approved answers once, then the row is gone); `404 unknown_request` |
+| `GET /v1/pair/request/{id}` | unauthenticated; the poll secret goes in an `X-Pair-Secret` header (`?secret=` is still read, for older iPhone builds, but a URL lands in logs); `200 {status: pending, expires_in_s}` or `{status: denied}` or `{status: approved, device_id, credential, name}` (approved answers once, then the row is gone); `404 unknown_request` |
 | `GET /v1/pair/requests` | `{requests: [{request_id, name, node_name, login, peer_ip, created_at, expires_in_s}]}`; a paired bearer OR a peer whose tailnet login matches the hub owner's |
 | `POST /v1/pair/requests/approve` | `{code, request_id?}` → `200 {ok, device_id, name}`; `401`, `403 self_approval` (a device can't approve itself), `404 no_match`; 5 wrong codes deny the request |
 | `POST /v1/pair/requests/deny` | `{code, request_id?}` → `200 {ok}` or `404` |

@@ -484,7 +484,7 @@ POST /v1/inbox/dismiss               {key, last_active_at} → cleared for this 
 POST /v1/sessions/{id}/read          {at?} → this device's last-read cursor; rows carry unread
 POST /v1/pair                        QR payload → device credential; optional {device:{kind,model,client,os}} metadata
 POST /v1/pair/request                a device asks to be paired; identified by tailscale whois, no credential needed → {request_id, poll_secret, code, ...}
-GET  /v1/pair/request/{id}?secret=   the requester's poll: pending|denied|approved (approved answers once with the credential)
+GET  /v1/pair/request/{id}           the requester's poll (secret in X-Pair-Secret): pending|denied|approved (approved answers once with the credential)
 GET  /v1/pair/requests               pending pair requests; a paired bearer or the hub owner's tailnet login
 POST /v1/pair/requests/approve|deny  {code, request_id?}; the owner's yes or no
 GET  /v1/devices                     every paired device (device_view rows + paired_via + this_device) and the pending pair requests, for the pair-requests-and-devices screen

@@ -34,7 +34,7 @@ import Testing
         let reply = try await client("swe-gh-worktree").ghPrWorktree(repo: "c-wenlong/swe", pr: 459)
         #expect(reply.repo == "c-wenlong/swe")
         #expect(reply.pr == 459)
-        #expect(reply.path == "/Users/k/.swe/worktrees/c-wenlong__quiver-pr459")
+        #expect(reply.path == "/Users/k/.swe/worktrees/c-wenlong__swe-pr459")
         #expect(reply.head == "a9463720b1c2")
         #expect(reply.created)
         #expect(reply.error == nil)
@@ -99,7 +99,7 @@ import Testing
         let entry = try #require(reply.results.first)
         #expect(entry.status == .ok)
         let pages = try #require(entry.pages)
-        #expect(pages.url == "https://c-wenlong.github.io/quiver/")
+        #expect(pages.url == "https://c-wenlong.github.io/swe/")
         #expect(pages.sourceBranch == "main")
         #expect(pages.latestBuild == nil)
     }

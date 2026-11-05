@@ -5,8 +5,8 @@
       {
         "script": "beacon.py",
         "harness": "claude",
-        "source": "/tmp/quiver-fixture-home/.swe/hooks/claude/beacon.py",
-        "destination": "/tmp/quiver-fixture-home/.claude/hooks/beacon.py",
+        "source": "/tmp/swe-fixture-home/.swe/hooks/claude/beacon.py",
+        "destination": "/tmp/swe-fixture-home/.claude/hooks/beacon.py",
         "state": "linked",
         "detail": "",
         "declared": []
@@ -14,8 +14,8 @@
       {
         "script": "fixture-hook.py",
         "harness": "claude",
-        "source": "/tmp/quiver-fixture-home/.swe/hooks/claude/fixture-hook.py",
-        "destination": "/tmp/quiver-fixture-home/.claude/hooks/fixture-hook.py",
+        "source": "/tmp/swe-fixture-home/.swe/hooks/claude/fixture-hook.py",
+        "destination": "/tmp/swe-fixture-home/.claude/hooks/fixture-hook.py",
         "state": "create",
         "detail": "",
         "declared": []
@@ -23,8 +23,8 @@
       {
         "script": "night-watch.py",
         "harness": "claude",
-        "source": "/tmp/quiver-fixture-home/.swe/hooks/claude/night-watch.py",
-        "destination": "/tmp/quiver-fixture-home/.claude/hooks/night-watch.py",
+        "source": "/tmp/swe-fixture-home/.swe/hooks/claude/night-watch.py",
+        "destination": "/tmp/swe-fixture-home/.claude/hooks/night-watch.py",
         "state": "create",
         "detail": "",
         "declared": []
@@ -32,8 +32,8 @@
       {
         "script": "prose-guard.py",
         "harness": "claude",
-        "source": "/tmp/quiver-fixture-home/.swe/hooks/claude/prose-guard.py",
-        "destination": "/tmp/quiver-fixture-home/.claude/hooks/prose-guard.py",
+        "source": "/tmp/swe-fixture-home/.swe/hooks/claude/prose-guard.py",
+        "destination": "/tmp/swe-fixture-home/.claude/hooks/prose-guard.py",
         "state": "linked",
         "detail": "",
         "declared": [
@@ -42,15 +42,15 @@
             "matcher": "Bash",
             "timeout": 10,
             "command": "~/.claude/hooks/prose-guard.py",
-            "settings": "/tmp/quiver-fixture-home/.claude/settings.json"
+            "settings": "/tmp/swe-fixture-home/.claude/settings.json"
           }
         ]
       },
       {
         "script": "block-rm.py",
         "harness": "codex",
-        "source": "/tmp/quiver-fixture-home/.swe/hooks/codex/block-rm.py",
-        "destination": "/tmp/quiver-fixture-home/.codex/hooks/block-rm.py",
+        "source": "/tmp/swe-fixture-home/.swe/hooks/codex/block-rm.py",
+        "destination": "/tmp/swe-fixture-home/.codex/hooks/block-rm.py",
         "state": "create",
         "detail": "",
         "declared": [
@@ -59,15 +59,15 @@
             "matcher": "",
             "timeout": null,
             "command": "~/.codex/hooks/block-rm.py",
-            "settings": "/tmp/quiver-fixture-home/.codex/hooks.json"
+            "settings": "/tmp/swe-fixture-home/.codex/hooks.json"
           }
         ]
       },
       {
         "script": "probe.py",
         "harness": "fixturetool",
-        "source": "/tmp/quiver-fixture-home/.swe/hooks/fixturetool/probe.py",
-        "destination": "/tmp/quiver-fixture-home/.swe/hooks/fixturetool/probe.py",
+        "source": "/tmp/swe-fixture-home/.swe/hooks/fixturetool/probe.py",
+        "destination": "/tmp/swe-fixture-home/.swe/hooks/fixturetool/probe.py",
         "state": "skipped",
         "detail": "no hooks root, set capabilities.hooks.root in harness.json",
         "declared": []
@@ -75,8 +75,8 @@
       {
         "script": "legacy.sh",
         "harness": "oldtool",
-        "source": "/tmp/quiver-fixture-home/.swe/hooks/oldtool/legacy.sh",
-        "destination": "/tmp/quiver-fixture-home/.oldtool/hooks/legacy.sh",
+        "source": "/tmp/swe-fixture-home/.swe/hooks/oldtool/legacy.sh",
+        "destination": "/tmp/swe-fixture-home/.oldtool/hooks/legacy.sh",
         "state": "ignored",
         "detail": "archived in harness.json",
         "declared": []
