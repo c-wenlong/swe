@@ -3,8 +3,6 @@ import Testing
 @testable import SWECore
 
 @Suite struct ActivityFileIndexTests {
-    /// A counter safe to capture from @Sendable parse closures.
-
     private func file(_ dir: TempDir, _ name: String, _ body: String) throws -> String {
         let url = dir.url.appending(path: name)
         try FileManager.default.createDirectory(
@@ -92,10 +90,19 @@ import Testing
         let forced = try await index.sessions(files: { [:] }, force: true, parse: parse)
         #expect(forced.isEmpty)
         #expect(parseCalls.value == 1)
-        // Past the window a plain query refreshes too.
+        // The file comes back inside the window: a plain query still
+        // answers from the last refresh and does not look.
+        _ = try file(dir, "a.jsonl", "one")
+        let back = try #require(ActivityFileIndex.stamp(URL(fileURLWithPath: path)))
+        now.value += 10
+        let throttled = try await index.sessions(files: { [path: back] }, parse: parse)
+        #expect(throttled.isEmpty)
+        #expect(parseCalls.value == 1)
+        // Past the window a plain query refreshes and finds it.
         now.value += 31
-        let later = try await index.sessions(files: { [:] }, parse: parse)
-        #expect(later.isEmpty)
+        let later = try await index.sessions(files: { [path: back] }, parse: parse)
+        #expect(later.map(\.sessionId) == ["s"])
+        #expect(parseCalls.value == 2)
     }
 }
 

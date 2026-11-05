@@ -136,7 +136,9 @@ func fixture(_ name: String) throws -> Data {
 
     @Test func nonJSONOutputIsReportedAsSuch() async throws {
         let client = SweClient(runner: FakeRunner(.init(status: 0, stdout: Data("Unknown flag".utf8), stderr: "")))
-        await #expect(throws: SweError.self) {
+        // Not a --json refusal (no "--json" in it): unreadable output,
+        // quoted back.
+        await #expect(throws: SweError.malformedOutput("Unknown flag")) {
             _ = try await client.harnesses(withUsage: false)
         }
     }
@@ -280,7 +282,7 @@ func fixture(_ name: String) throws -> Data {
     @Test func aRefusalRaisesCommandFailed() async throws {
         let runner = FakeRunner(.init(status: 1, stdout: Data(),
                                       stderr: "empty value; pipe one in"))
-        await #expect(throws: SweError.self) {
+        await #expect(throws: SweError.commandFailed(status: 1, message: "empty value; pipe one in")) {
             try await SweClient(runner: runner).mcpSecretSet(name: "A", value: "")
         }
     }

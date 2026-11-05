@@ -342,21 +342,38 @@ import Testing
         #expect(store.read() == snapshot)
     }
 
+    /// A whole snapshot the store can read, with only its schema changed:
+    /// a file of just `{"schema": N}` fails the full decode whatever the
+    /// schema gate does.
+    private func snapshotFile(_ temp: TempDir, schema: Int) throws -> URL {
+        let snapshot = make(activity: [row(0, tokens: 3, cost: 0.5)],
+                            limits: [reading("a", used: 91, resetsAt: now)])
+        var json = try JSONSerialization.jsonObject(with: WidgetSnapshot.encoder.encode(snapshot)) as! [String: Any]
+        json["schema"] = schema
+        let file = temp.url.appending(path: "snapshot-\(schema).json")
+        try JSONSerialization.data(withJSONObject: json).write(to: file)
+        return file
+    }
+
     @Test func aSnapshotFromAnOlderSchemaIsIgnored() throws {
         // The widgets show "Open SWE once" until the app rewrites the file.
         let temp = try TempDir()
         defer { withExtendedLifetime(temp) {} }
-        let file = temp.url.appending(path: "snapshot.json")
-        try Data(#"{"schema": 1}"#.utf8).write(to: file)
-        #expect(WidgetSnapshotStore(file: file).read() == nil)
+        // The same file at the current schema reads, so only the number
+        // turns the older one away.
+        let current = try snapshotFile(temp, schema: WidgetSnapshot.currentSchema)
+        #expect(WidgetSnapshotStore(file: current).read() != nil)
+        let older = try snapshotFile(temp, schema: WidgetSnapshot.currentSchema - 1)
+        #expect(WidgetSnapshotStore(file: older).read() == nil)
     }
 
     @Test func aSnapshotFromANewerAppIsIgnored() throws {
         let temp = try TempDir()
         defer { withExtendedLifetime(temp) {} }
-        let file = temp.url.appending(path: "snapshot.json")
-        try Data(#"{"schema": 99}"#.utf8).write(to: file)
-        #expect(WidgetSnapshotStore(file: file).read() == nil)
+        let current = try snapshotFile(temp, schema: WidgetSnapshot.currentSchema)
+        #expect(WidgetSnapshotStore(file: current).read() != nil)
+        let newer = try snapshotFile(temp, schema: 99)
+        #expect(WidgetSnapshotStore(file: newer).read() == nil)
     }
 
     @Test func theDefaultFileIsUnderTheRealHomeSWECache() {

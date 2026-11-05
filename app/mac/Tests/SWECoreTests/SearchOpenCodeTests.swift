@@ -172,8 +172,8 @@ import Testing
         #expect(session.fields.filePath == f.dbPath + "#ses_1")
         #expect(session.fields.title == "Fix the flaky test")
         #expect(session.fields.cwd == "/tmp/oc1")
-        #expect(session.fields.createdAt == SearchOpenCode.iso(ms: 1_791_100_000_000))
-        #expect(session.fields.updatedAt == SearchOpenCode.iso(ms: 1_791_100_003_000))
+        #expect(session.fields.createdAt == "2026-10-04T07:46:40.000Z")
+        #expect(session.fields.updatedAt == "2026-10-04T07:46:43.000Z")
         // Two user turns, one folded assistant turn, one tool row.
         #expect(session.fields.messageCount == 4)
     }

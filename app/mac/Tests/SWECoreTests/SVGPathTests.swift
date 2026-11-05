@@ -26,9 +26,9 @@ import Testing
 
     @Test func runTogetherNumbers() {
         // `.5-.5` is two numbers: `-` starts a new token.
+        // (0,0) → (.5,-.5) → (2.5,-.5) → (2.5,1.5): every segment counts.
         let p = SVGPath.path("M0 0l.5-.5h2v2z")
-        #expect(p.boundingBox.width > 1.9)
-        #expect(p.boundingBox.height > 1.4)
+        #expect(p.boundingBox == CGRect(x: 0, y: -0.5, width: 2.5, height: 2))
     }
 
     @Test func horizontalVertical() {

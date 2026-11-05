@@ -53,7 +53,7 @@ import Testing
 
     @Test func accountLabelsUseTheTable() {
         let directory = AccountDirectory.bare
-        #expect(directory.label(for: "/Users/k/.local/share/opencode") == HarnessMark("opencode").name)
-        #expect(directory.label(for: DevinCloud.accountHome) == HarnessMark(DevinCloud.harness).name)
+        #expect(directory.label(for: "/Users/k/.local/share/opencode") == "OpenCode")
+        #expect(directory.label(for: DevinCloud.accountHome) == "Devin cloud")
     }
 }
