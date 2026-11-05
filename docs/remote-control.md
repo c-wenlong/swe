@@ -646,10 +646,8 @@ property's group (To-do → `open`, In progress → `in_progress`,
 Complete → `closed`), a select option's words ("Done", "Shipped",
 "Won't do" → `closed`; "In progress", "Review" → `in_progress`;
 anything else → `open`), a ticked checkbox → `closed`. An archived page
-reads `closed`. A stored page refreshes through `GET /v1/pages/<id>`;
-`NotionTasks.detail` adds the page body, read with `GET
-/v1/blocks/<id>/children` (nested blocks to three levels, at most 12
-calls) and rendered to markdown for a resolve prompt.
+reads `closed`. A stored page refreshes through `GET /v1/pages/<id>`
+alone; nothing reads a page's body.
 
 The answer's `notion` block reads like `linear`'s: `disabled`, `ok`
 (`login` is the user's name), `auth-required` (the token won't resolve

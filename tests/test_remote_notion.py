@@ -618,7 +618,7 @@ class TestList(_Home):
         self.assertIn("502", out["error"])
 
 
-class TestGetAndDetail(_Home):
+class TestGet(_Home):
     def setUp(self):
         super().setUp()
         _config(self.home, _section())
@@ -635,6 +635,13 @@ class TestGetAndDetail(_Home):
         self.assertEqual(out["status_name"], "Shipped")
         self.assertEqual(out["title"], "Ship the roadmap")
         self.assertNotIn("description", out)
+
+    def test_get_reads_the_page_and_never_its_blocks(self):
+        routes = _routes()
+        routes[("GET", f"/pages/{PAGE_A}")] = ok(_page())
+        _out, router = self._run(routes, lambda s: s.get({"ref": PAGE_A}))
+        self.assertFalse(any(c[1].startswith("/blocks/")
+                             for c in router.calls), router.calls)
 
     def test_archived_page_is_closed(self):
         routes = _routes()
@@ -677,92 +684,6 @@ class TestGetAndDetail(_Home):
         out, router = self._run({}, lambda s: s.get({"ref": "QUI-12"}))
         self.assertIsNone(out)
         self.assertEqual(router.calls, [])
-
-    def test_detail_renders_the_body_as_markdown(self):
-        def rt(text, **marks):
-            item = {"type": "text", "plain_text": text,
-                    "annotations": marks}
-            if "href" in marks:
-                item["href"] = marks.pop("href")
-            return item
-
-        def block(kind, bid="b", children=False, **body):
-            return {"object": "block", "id": bid, "type": kind,
-                    "has_children": children, kind: body}
-
-        top = [
-            block("heading_2", rich_text=[rt("Spec")]),
-            block("paragraph", rich_text=[
-                rt("Do "), rt("this", bold=True), rt(" via "),
-                rt("api", code=True), rt(" see "),
-                rt("docs", href="https://x.dev")]),
-            block("bulleted_list_item", "li", True,
-                  rich_text=[rt("one")]),
-            block("numbered_list_item", rich_text=[rt("a")]),
-            block("numbered_list_item", rich_text=[rt("b")]),
-            block("to_do", checked=True, rich_text=[rt("done")]),
-            block("to_do", checked=False, rich_text=[rt("todo")]),
-            block("code", language="python", rich_text=[rt("x = 1")]),
-            block("divider"),
-            block("table", "tb", True, table_width=2),
-            block("child_page", title="Notes"),
-            block("image", type="file", file={"url": "https://s3/x"},
-                  caption=[rt("diagram")]),
-            block("unsupported"),
-        ]
-        routes = _routes()
-        routes[("GET", f"/pages/{PAGE_A}")] = ok(_page())
-        routes[("GET", f"/blocks/{PAGE_A}/children")] = [
-            ok({"results": top[:5], "has_more": True,
-                "next_cursor": "c1"}),
-            ok({"results": top[5:], "has_more": False})]
-        routes[("GET", "/blocks/li/children")] = ok({"results": [
-            block("bulleted_list_item", rich_text=[rt("nested")])],
-            "has_more": False})
-        routes[("GET", "/blocks/tb/children")] = ok({"results": [
-            block("table_row", cells=[[rt("k")], [rt("v")]]),
-            block("table_row", cells=[[rt("a|b")], [rt("2")]])],
-            "has_more": False})
-        out, _r = self._run(routes, lambda s: s.detail({"ref": PAGE_A}))
-        self.assertEqual(out["state"], "open")
-        self.assertEqual(out["description"], "\n".join([
-            "## Spec",
-            "",
-            "Do **this** via `api` see [docs](https://x.dev)",
-            "",
-            "- one",
-            "  - nested",
-            "1. a",
-            "2. b",
-            "- [x] done",
-            "- [ ] todo",
-            "",
-            "```python",
-            "x = 1",
-            "```",
-            "",
-            "---",
-            "",
-            "| k | v |",
-            "| --- | --- |",
-            "| a\\|b | 2 |",
-            "",
-            "[child page: Notes]",
-            "",
-            "[image: diagram]",
-        ]))
-
-    def test_detail_budget_truncates_and_says_so(self):
-        routes = _routes()
-        routes[("GET", f"/pages/{PAGE_A}")] = ok(_page())
-        routes[("GET", "/blocks/")] = ok({"results": [
-            {"id": "p", "type": "paragraph", "has_children": False,
-             "paragraph": {"rich_text": [{"plain_text": "x"}]}}],
-            "has_more": True, "next_cursor": "again"})
-        out, router = self._run(routes, lambda s: s.detail({"ref": PAGE_A}))
-        blocks = [c for c in router.calls if c[1].startswith("/blocks/")]
-        self.assertEqual(len(blocks), notion.MAX_BLOCK_CALLS)
-        self.assertIn("truncated", out["description"])
 
 
 class _Resp:
