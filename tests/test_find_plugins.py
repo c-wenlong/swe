@@ -392,10 +392,6 @@ class ScopeTest(unittest.TestCase):
         self.assertEqual(Plugin("h", "n", "").ref, "n")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class MarketplaceGroupingTest(_NoRegistry, unittest.TestCase):
     """Plugins group by marketplace, mirroring the on-disk layout.
 
@@ -476,3 +472,7 @@ class MarketplaceGroupingTest(_NoRegistry, unittest.TestCase):
             _plugin(cache / "slack", "slack", skills=("s",))
             got = discover_plugins(home)
             self.assertEqual(got[0].marketplace, "cursor-public")
+
+
+if __name__ == "__main__":
+    unittest.main()
