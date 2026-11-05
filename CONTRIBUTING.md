@@ -43,12 +43,10 @@ The CLI is organized by domain under `src/swe/`:
 | `remote/` | `swe remote`: the hub, the satellite agent, pairing and devices ([docs/remote-control.md](docs/remote-control.md)) |
 | `webapp/` | The web app the hub serves, and its page data ([docs/web-app.md](docs/web-app.md)) |
 | `ledger/`, `status/` | Python ports of the Mac app's usage ledger and service-status reader, for the web app |
-| `history/` | Backward-compatible re-exports — write new code against `sessions/` |
 | `config_commands.py` | `swe config` |
 | `bug.py` | `swe bug`: opens an issue form with this machine's versions filled in |
 | `completion.py`, `completion_scripts.py` | Completion candidates and the per-shell scripts `swe autocomplete` installs |
 | `mcp_server.py` | Optional FastMCP session server (the `server` extra) |
-| `mcp_formats.py` | Compatibility shim re-exporting `mcp/formats.py`; do not add to it |
 
 The bottom layer imports nothing above itself: `paths.py` (every path under
 `~/.swe`), `console.py` (colour, width, truncation), `table.py` (the table
