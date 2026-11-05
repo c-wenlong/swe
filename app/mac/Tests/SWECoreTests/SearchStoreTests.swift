@@ -1,5 +1,6 @@
 import Foundation
 import os
+import SQLite3
 import Testing
 @testable import SWECore
 
@@ -236,6 +237,13 @@ import Testing
             fields: fields)
 
         #expect(try store.drainOrphanedMessages() == 256)
+        // A drain that stops here (the scan's batch limit) leaves no
+        // statement on a row: an open read holds the WAL checkpoint back.
+        var statement = sqlite3_next_stmt(store.db.handle, nil)
+        while let current = statement {
+            #expect(sqlite3_stmt_busy(current) == 0, "\(String(cString: sqlite3_sql(current)))")
+            statement = sqlite3_next_stmt(store.db.handle, current)
+        }
         #expect(try store.drainOrphanedMessages() == 44)
         #expect(try store.drainOrphanedMessages() == 0)
         #expect(try store.status().messageCount == 0)
