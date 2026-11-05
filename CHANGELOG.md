@@ -181,6 +181,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A stored Linear task's refresh no longer downloads its
+  description.** The hub asked Linear for each issue's full body on
+  every task read and never used it. The unused Notion page-body
+  renderer, built for a resolve route that never shipped, is gone
+  too.
+
 - **Cursor's limit meters read "Cursor models" and "Other models", and
   reset times show two units.** The rows the Cursor accounts and harness
   cards listed as "Included" and "API" now say what they count; any

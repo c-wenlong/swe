@@ -287,6 +287,12 @@ Safe Storage item.</p>
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>A stored Linear task's refresh no longer downloads its
+description.</strong> The hub asked Linear for each issue's full body on
+every task read and never used it. The unused Notion page-body
+renderer, built for a resolve route that never shipped, is gone
+too.</p>
+</li>
 <li><p><strong>Cursor's limit meters read &quot;Cursor models&quot; and &quot;Other models&quot;, and
 reset times show two units.</strong> The rows the Cursor accounts and harness
 cards listed as &quot;Included&quot; and &quot;API&quot; now say what they count; any
