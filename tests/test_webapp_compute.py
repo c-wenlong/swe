@@ -6,7 +6,6 @@ import os
 import shutil
 import signal
 import subprocess
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -34,8 +33,8 @@ def _stat_line(pid, comm, state, ppid, utime, stime, threads, start):
 class FakeMachine:
     """A /proc and /sys under a temp folder, owned by this user."""
 
-    def __init__(self):
-        self.root = Path(tempfile.mkdtemp())
+    def __init__(self, case: unittest.TestCase):
+        self.root = temp_dir(case)
         self.proc = self.root / "proc"
         self.sys = self.root / "sys"
         self.proc.mkdir()
@@ -90,7 +89,7 @@ def _matchers():
 
 class TestReadProcesses(unittest.TestCase):
     def setUp(self):
-        self.m = FakeMachine()
+        self.m = FakeMachine(self)
 
     def test_fields_memory_and_skips(self):
         self.m.process(10, 1, ["/usr/bin/node", "/x/bin/claude", "--resume"], exe="/usr/bin/node",
@@ -125,7 +124,7 @@ class TestReadProcesses(unittest.TestCase):
 
 class TestAttribution(unittest.TestCase):
     def setUp(self):
-        self.m = FakeMachine()
+        self.m = FakeMachine(self)
 
     def _procs(self):
         return {p.pid: p for p in compute.read_processes(self.m.proc)}
@@ -219,7 +218,7 @@ class TestMeters(unittest.TestCase):
         self.assertEqual(meter.update([reused], t + 20), {})
 
     def test_machine_readers(self):
-        m = FakeMachine()
+        m = FakeMachine(self)
         self.assertEqual(compute.read_cpu_times(m.proc), (200, 1000))
         mem = compute.read_memory(m.proc)
         self.assertEqual(mem["total_bytes"], 8000000 * 1024)
@@ -235,7 +234,7 @@ class TestMeters(unittest.TestCase):
 
 class TestSensors(unittest.TestCase):
     def test_components_fans_and_zone_fill(self):
-        m = FakeMachine()
+        m = FakeMachine(self)
         m.hwmon(0, "k10temp", temps=(55000, 61000))
         m.hwmon(1, "iwlwifi_1_0", temps=(38000,))
         m.hwmon(2, "nvme", temps=(40000, -273000, 44000), fans=((2500, 2000), (900, 0)))
@@ -330,7 +329,7 @@ class TestHistory(unittest.TestCase):
 
 class _Model(unittest.TestCase):
     def setUp(self):
-        self.m = FakeMachine()
+        self.m = FakeMachine(self)
         m = self.m
         m.process(100, 1, ["/usr/bin/zsh"], exe="/usr/bin/zsh", start=100)
         m.process(101, 100, ["claude"], exe="/usr/bin/node", start=200, anon_kb=3 * 1024 * 1024, threads=12)
