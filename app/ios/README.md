@@ -40,8 +40,9 @@ copies the Mac app's `harness-*.svg` into `Assets.xcassets/Harnesses`.
 - **QR:** on the hub machine, open SWE › Settings › Remote › Pair a
   device (the Mac app, or the hub's web app), choose SWE app, and
   scan its code, either in the app or with the Camera app (the
-  `swe://pair` link opens the app, which names the hub and asks
-  before pairing with it). A server with neither runs
+  pair link opens the app, which names the hub and asks before
+  pairing with it; hubs still write it as `quiver://pair` so older
+  builds open it, and the app reads `swe://pair` the same way). A server with neither runs
   `swe remote setup` and then `swe remote pair --app`.
 - **Token:** paste the token `swe remote pair` prints.
 
@@ -157,8 +158,9 @@ run, and prints the `TEST_RUNNER_SWE_SSH_*` variables, the key
 included, to run the tests with.
 
 `project.yml` carries the pieces that matter: bundle id
-`com.swe.remote`, the `swe` URL scheme so pair QRs open the app (and
-`quiver`, so links written before the rename still do),
+`com.swe.remote`, the `swe` and `quiver` URL schemes (the app writes
+`swe://` issue and session links; hubs write pair links as `quiver://`,
+and links from before the rename use it too),
 the scoped ATS exceptions for a plain-HTTP hub on the tailnet
 (`NSAllowsLocalNetworking` for IP literals and local names — which is
 what covers Tailscale CGNAT addresses — plus an `NSExceptionDomains`
