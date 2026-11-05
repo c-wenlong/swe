@@ -87,10 +87,13 @@ def _isolate_list(test):
         mock.patch("swe.harness.commands.load_stars", lambda: []),
         mock.patch("swe.harness.commands._session_counts", lambda *_: {}),
         mock.patch("swe.harness.commands._broken_tools", lambda: set()),
+        # --refresh clears the session caches. Their paths were fixed when
+        # swe.paths was imported, so the home patch does not redirect them.
+        mock.patch("swe.sessions.aggregator.invalidate_cache"),
+        mock.patch("swe.sessions.usage.invalidate_counts_cache"),
     ):
         p.start()
         test.addCleanup(p.stop)
-
 
 
 class InspectTest(unittest.TestCase):
@@ -354,10 +357,6 @@ class CmdInitTest(unittest.TestCase):
             code, out = self._run(home, ["--wat"])
             self.assertEqual(code, 1)
             self.assertIn("Unknown option", out)
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class LinkStatesTest(unittest.TestCase):
@@ -742,3 +741,7 @@ class InitRegistryReadTest(unittest.TestCase):
                 tmp, '{"claude": {"command": "claude"}}')
             self.assertEqual(
                 load_registry(home), {"claude": {"command": "claude"}})
+
+
+if __name__ == "__main__":
+    unittest.main()
