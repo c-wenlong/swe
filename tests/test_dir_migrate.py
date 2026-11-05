@@ -117,6 +117,23 @@ class MigrateDataDirTest(unittest.TestCase):
         self.assertFalse(root.is_symlink())
         self.assertFalse(os.path.lexists(root))
 
+    def test_a_link_through_a_linked_folder_is_still_mirrored(self):
+        # ~/link -> <elsewhere>/child and ~/.quiver -> link/../.swe: the
+        # target is <elsewhere>/.swe, not ~/.swe, so it is mirrored.
+        elsewhere = temp_dir(self)
+        (elsewhere / "child").mkdir()
+        (elsewhere / ".swe").mkdir()
+        (self.home / "link").symlink_to(elsewhere / "child")
+        (self.home / ".quiver").symlink_to("link/../.swe")
+        root = paths.swe_dir_for(self.home)
+        self.assertTrue(root.is_symlink())
+        self.assertEqual(os.readlink(root), "link/../.swe")
+
+    def test_a_link_that_vanishes_mid_check_keeps_the_old_root(self):
+        (self.home / ".quiver").symlink_to(".swe")
+        with unittest.mock.patch("swe.paths.os.readlink", side_effect=OSError("gone")):
+            self.assertEqual(paths.swe_dir_for(self.home), self.home / ".quiver")
+
     def test_a_legacy_file_is_left_alone(self):
         (self.home / ".quiver").write_text("not a dir\n")
         self.assertEqual(paths.swe_dir_for(self.home), self.home / ".swe")
