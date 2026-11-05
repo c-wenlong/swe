@@ -68,6 +68,12 @@ public struct PricingOverrides: Sendable {
         try remove([name])
     }
 
+    /// Drop the saved keys `pick` chooses from the file's keys as they
+    /// are now, so a key another writer saved since loading is offered too.
+    public mutating func remove(choosing pick: ([String]) -> [String]) throws {
+        try remove(pick(Array(try Self.read(url).keys)))
+    }
+
     /// Drop every key in one write. Several saved keys can price the same
     /// model (`gpt-4.1` and `gpt-4-1` both cover `gpt-4.1`), so reset and
     /// remove take them all — taking just the row's own key would leave

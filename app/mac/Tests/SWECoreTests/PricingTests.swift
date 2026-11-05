@@ -595,6 +595,20 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
         withExtendedLifetime(temp) {}
     }
 
+    @Test func `reset also drops a matching key another writer saved after loading`() async throws {
+        let (_, model, temp) = try editableModel([event("gpt-4o", tokens: 1_000_000)])
+        await model.load()
+        try await model.save(key: "gpt-4o", prices: .init(input: 1, output: 2))
+        // The web app saves the dated form; the app's catalog never saw it.
+        var web = PricingOverrides(url: temp.path("config/pricing.json"))
+        try web.set("gpt-4o-2024-05-13", prices: .init(input: 3, output: 3))
+
+        try await model.remove(matching: "gpt-4o")
+        #expect(PricingOverrides(url: temp.path("config/pricing.json")).models.isEmpty)
+        let row = try #require(model.groups.flatMap(\.models).first)
+        #expect(row.source == .liteLLM)
+    }
+
     @Test func `a saved price with no list price under it offers remove`() async throws {
         let (_, model, temp) = try editableModel([event("swe-2-medium", tokens: 1_000)])
         try await model.save(key: "swe-2", prices: .init(input: 1, output: 1))
