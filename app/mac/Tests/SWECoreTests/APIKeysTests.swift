@@ -688,7 +688,13 @@ let fakeKey = "sk-ant-api03-SECRET0000000000000000abcd"
         try file.set(name: "A", value: "2", provider: "P")
         #expect(throws: APIKeysError.changedOnDisk) { try store.save(file, over: stamp) }
         #expect(try String(contentsOf: url, encoding: .utf8) == "export A=\"vim\"\n")
-        let leftovers = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.contains(".swe-") }
+        // The key file and its backup are both staged as `.<name>.swe-<uuid>`,
+        // one beside the file and one in the backups folder.
+        let fm = FileManager.default
+        let backups = dir.appending(path: "backups")
+        let leftovers = try ([dir] + (fm.fileExists(atPath: backups.path) ? [backups] : []))
+            .flatMap { try fm.contentsOfDirectory(atPath: $0.path) }
+            .filter { $0.contains(".swe-") }
         #expect(leftovers.isEmpty)
     }
 
