@@ -4227,10 +4227,14 @@ def make_server(
     return server
 
 
+# Bind values that listen on every interface rather than one address.
+WILDCARD_HOSTS = frozenset({"0.0.0.0", "::", ""})
+
+
 def _advertise_url(host: str, port: int) -> str:
     """The base URL handed to phones/ntfy — never a wildcard bind."""
     advertised = host
-    if host in ("0.0.0.0", "::", ""):
+    if host in WILDCARD_HOSTS:
         advertised = (
             catalog_mod.tailscale_ip()
             or socket.gethostname()
@@ -4384,8 +4388,11 @@ def configure(state: HubState, host: str, port: int,
         # local client would use.
         state.allowed_hosts = _loopback_hosts(port)
         return
-    if host not in {"127.0.0.1", "::1", "localhost", "0.0.0.0"}:
-        peer = state.whois(host)
+    if host not in {"127.0.0.1", "::1", "localhost"}:
+        # A wildcard bind ("--unsafe-bind-any") has no address of its
+        # own to look up or allow; it answers every name this node has.
+        wildcard = host in WILDCARD_HOSTS
+        peer = None if wildcard else state.whois(host)
         own_ip = catalog_mod.tailscale_ip()
         if peer is None and own_ip and own_ip != host:
             # whois wants an IP; a bind by MagicDNS name is looked up
@@ -4398,7 +4405,15 @@ def configure(state: HubState, host: str, port: int,
             # remote pair` defaults the phone address to the tailnet
             # IP). The names belong to the node even when it is
             # tagged; a tag only means there is no owner login.
-            state.allowed_hosts = {_hostport(host, port)}
+            if wildcard:
+                # Loopback, and the hostname _advertise_url falls back
+                # to off the tailnet, next to the tailnet names below.
+                state.allowed_hosts = _loopback_hosts(port)
+                if socket.gethostname():
+                    state.allowed_hosts.add(
+                        _hostport(socket.gethostname(), port))
+            else:
+                state.allowed_hosts = {_hostport(host, port)}
             if own_ip:
                 state.allowed_hosts.add(_hostport(own_ip, port))
             if peer:
@@ -4422,8 +4437,11 @@ def serve(state: HubState, host: str, port: int,
     # ``gh``.
     state.catalog.fetch_github = state._fetch_github_rows
     state.catalog.on_github_alert = state._github_alert
-    state.start()
+    # Bind first: a second serve on a taken port must fail before
+    # start() registers this machine, reconciles kept sessions, retires
+    # ntfy credentials and starts loops that would fight the running hub.
     server = make_server(state, host, port)
+    state.start()
     # Auto clean quits orphans without a browser ever opening Compute:
     # its switch is hub state, so the background sampler starts at boot
     # while it is on rather than wait for a page request.

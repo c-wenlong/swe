@@ -113,7 +113,18 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a><a href="https://github.com/c-wenlong/swe/compare/v1.2.2...HEAD">Unreleased</a></h2>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
-<li><strong>Codex sessions were undercounted when codex ran subagents.</strong>
+<li><p><strong>A wildcard hub bind no longer turns off the Host check, and a
+second <code>swe remote serve</code> on a taken port no longer disturbs the
+running hub.</strong> <code>--host=0.0.0.0 --unsafe-bind-any</code> left the hub's
+allowed Host names empty, which lets any Host through, so a page that
+rebound its name to the hub could pass as the owner's own tailnet
+device; <code>::</code> was not even read as a wildcard. Both now answer this
+node's loopback, hostname and tailnet names. <code>serve</code> also binds before
+it starts the hub's loops, so a copy that can't get the port exits
+before it registers the machine, settles kept sessions or retires
+ntfy credentials under the running hub.</p>
+</li>
+<li><p><strong>Codex sessions were undercounted when codex ran subagents.</strong>
 <code>parse_codex</code> dropped every thread whose store <code>preview</code> was empty,
 treating it as opened and never typed into — but codex also leaves
 <code>preview</code> blank on spawned threads (subagents, automations) no matter
@@ -124,7 +135,8 @@ that it never ran — and kept spawned threads are titled from
 <code>agent_path</code>'s leaf or <code>agent_nickname</code> rather than their transcript's
 injected-context first line. <code>swe session</code> and the session counts on
 <code>swe list</code> also pick up <code>~/.codex/archived_sessions/</code> now: archiving a
-thread moves its rollout there, and an archived session still ran.</li>
+thread moves its rollout there, and an archived session still ran.</p>
+</li>
 </ul>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
