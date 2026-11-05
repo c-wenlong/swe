@@ -79,7 +79,7 @@ final class HubListTests: XCTestCase {
         start.adopt(hub("mac"))
         start.adopt(hub("server"))
         let store = MemoryHubStore(start)
-        let suite = "quiver.tests.\(UUID().uuidString)"
+        let suite = "swe.tests.\(UUID().uuidString)"
         defer { UserDefaults().removePersistentDomain(forName: suite) }
         let targets = SSHTargetStore(defaults: UserDefaults(suiteName: suite)!)
         let target = SSHTarget(host: "server", port: 22, user: "u", hostKeys: ["ssh-ed25519 AAAA"])

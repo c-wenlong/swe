@@ -126,6 +126,12 @@ comments in <code>--json</code> gain <code>association</code>.</li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
+The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its
+command, but sessions carry the registry id <code>qwen-code</code>, so a file
+sent from a phone arrived as an <code>[Attached file: …]</code> line instead of
+an <code>@</code> reference.</p>
+</li>
 <li><p><strong>A wildcard hub bind no longer turns off the Host check, and a
 second <code>swe remote serve</code> on a taken port no longer disturbs the
 running hub.</strong> <code>--host=0.0.0.0 --unsafe-bind-any</code> left the hub's
