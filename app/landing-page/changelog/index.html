@@ -111,6 +111,19 @@ footer a:hover { color: var(--text); }
 <p>The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>,
 and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a><a href="https://github.com/c-wenlong/swe/compare/v1.2.2...HEAD">Unreleased</a></h2>
+<h3 id="security"><a class="anchor" href="#security"></a>Security</h3>
+<ul>
+<li><strong>A resolve prompt no longer carries strangers' comments.</strong> Anyone can
+comment on a public issue, and every comment went word for word into
+the first prompt of the agent resolving it. The prompt now quotes the
+issue's title, body and comments line by line behind a note that they
+are untrusted data the agent must not take instructions from, keeps
+only comments whose <code>authorAssociation</code> is <code>OWNER</code>, <code>MEMBER</code> or
+<code>COLLABORATOR</code>, and replaces the rest with &quot;N comments from others,
+not included&quot;. Every client prefills the hub's <code>suggested_prompt</code>, so
+the Mac, iPhone and web resolve sheets all get the new prompt; issue
+comments in <code>--json</code> gain <code>association</code>.</li>
+</ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
 <li><strong>Codex sessions were undercounted when codex ran subagents.</strong>
@@ -2483,7 +2496,7 @@ in the Nix build sandbox. It now resolves <code>env</code> through <code>PATH</c
 falling back to <code>/usr/bin/env</code>.</p>
 </li>
 </ul>
-<h3 id="security"><a class="anchor" href="#security"></a>Security</h3>
+<h3 id="security-1"><a class="anchor" href="#security-1"></a>Security</h3>
 <ul>
 <li><p><strong>Remote: ntfy approval buttons can no longer switch off later
 approvals.</strong> A notification's action token accepted any menu row
@@ -4199,7 +4212,7 @@ the old hour steps persist, and clamped to a minute through a year.
 The legacy hours setting still loads.</p>
 </li>
 </ul>
-<h3 id="security-1"><a class="anchor" href="#security-1"></a>Security</h3>
+<h3 id="security-2"><a class="anchor" href="#security-2"></a>Security</h3>
 <ul>
 <li><strong>The <code>server</code> extra now requires <code>mcp&gt;=1.30.0,&lt;2</code></strong> (was <code>&gt;=1.0.0</code>),
 the first 1.x release patched for
