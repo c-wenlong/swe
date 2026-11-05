@@ -159,12 +159,12 @@ private struct CalendarContent: View {
             model.noteScanCompleted()
             Task { await model.load(force: true) }
         }
-        .quiverSheet(item: $detail) { row in
+        .cardSheet(item: $detail) { row in
             SessionDetail(row: row,
                           resume: { resume(row) },
                           close: { detail = nil })
         }
-        .quiverSheet(item: $projectDetail) { block in
+        .cardSheet(item: $projectDetail) { block in
             ProjectSessionsSheet(block: block, model: model,
                                  rows: sessionIndex.rows(for: block),
                                  resume: resume)
@@ -1921,7 +1921,7 @@ private struct ProjectSessionsSheet: View {
         }
         .padding(20)
         .frame(width: 420)
-        .quiverSheet(item: $detail) { row in
+        .cardSheet(item: $detail) { row in
             SessionDetail(row: row, resume: { resume(row) }, close: { detail = nil })
         }
     }

@@ -930,8 +930,10 @@ public final class SessionChatModel {
     /// answered here.
     private func lit(_ decision: String?, on options: [HubApprovalOption],
                      picked: String?, rid: String) -> String? {
-        let menu = options.filter { $0.label?.isEmpty == false }
-        let rows = menu.isEmpty ? ["allow", "always", "deny"] : menu.map { $0.n ?? "" }
+        // The rows the card draws: a labelled row without a number the
+        // hub takes is no button, and none left means Allow, Always, Deny.
+        let menu = ApprovalRows.menu(options)
+        let rows = menu.isEmpty ? ["allow", "always", "deny"] : menu.map(\.n)
         if let decision, rows.contains(decision) { return decision }
         return picked ?? decisions[rid]
     }

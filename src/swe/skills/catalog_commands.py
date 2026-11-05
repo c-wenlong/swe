@@ -5,7 +5,6 @@ from pathlib import Path
 
 from swe.console import c, elide, tilde
 from swe.json_output import emit
-from swe.paths import expand_user
 from swe.skills.catalog_discover import apply_skill_catalog_findings, discover_skill_catalogs
 from swe.skills.models import CatalogRow
 from swe.skills.help_text import print_skills_catalog_help, print_skills_discover_help
@@ -20,15 +19,6 @@ from swe.skills.catalogs import (
 _CATALOG_SUBCOMMANDS = frozenset({"list", "ls", "add", "remove", "rm", "help", "-h", "--help"})
 
 
-def _looks_like_catalog_path(arg: str) -> bool:
-    if arg in (".", ".."):
-        return True
-    expanded = expand_user(arg)
-    if expanded.exists():
-        return True
-    return arg.startswith(("/", "~", "."))
-
-
 def cmd_skills_catalog(args):
     if not args or args[0] in ("-h", "--help", "help"):
         print_skills_catalog_help()
@@ -37,19 +27,19 @@ def cmd_skills_catalog(args):
     sub = args[0]
     rest = args[1:]
 
-    if sub == "add" or sub not in _CATALOG_SUBCOMMANDS or _looks_like_catalog_path(sub):
+    # A subcommand word is always the subcommand: checked as a path first,
+    # `swe skills catalog list` run beside a folder named list tried to add
+    # ./list. `add list` (or ./list) still adds such a folder.
+    if sub == "add" or sub not in _CATALOG_SUBCOMMANDS:
         if sub == "add":
             path = rest[0] if rest else "."
             label = rest[1] if len(rest) > 1 else None
-        elif sub not in _CATALOG_SUBCOMMANDS or _looks_like_catalog_path(sub):
+        else:
             path = sub
             label = rest[0] if rest and rest[0] not in ("-h", "--help") else None
             if rest and rest[0] in ("-h", "--help"):
                 print_skills_catalog_help()
                 return 0
-        else:
-            path = None
-            label = None
 
         if path is not None:
             try:

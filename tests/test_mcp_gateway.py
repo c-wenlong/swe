@@ -73,7 +73,12 @@ class GatewayHelpersTest(unittest.TestCase):
         self.assertFalse(gateway.looks_stateful("dv__linear", {"command": "node", "args": ["l.js"]}))
 
 
-class GatewayServerTest(unittest.TestCase):
+class _GatewayServerCase(unittest.TestCase):
+    """A live gateway on localhost and the helpers to talk to it.
+
+    Holds no tests, so the classes built on it each run only their own.
+    """
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.specs = {"fake": {"command": sys.executable, "args": [str(FAKE)]}}
@@ -112,6 +117,8 @@ class GatewayServerTest(unittest.TestCase):
     def payload(body):
         return json.loads(body["result"]["content"][0]["text"])
 
+
+class GatewayServerTest(_GatewayServerCase):
     def test_initialize_comes_from_one_handshake(self):
         status, headers, body = self.request(INIT)
         self.assertEqual(status, 200)
@@ -159,6 +166,19 @@ class GatewayServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual([r["id"] for r in body], ["a", "b"])
 
+    def test_a_cancel_with_malformed_params_is_dropped(self):
+        # `params: [1]` raised AttributeError in the handler and the
+        # connection closed with no answer.
+        for params in ([1], "x", None):
+            status, _, body = self.request(
+                {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": params})
+            self.assertEqual((status, body), (202, None))
+        self.assertEqual(self.request({"jsonrpc": "2.0", "id": 3, "method": "ping"})[2]["result"], {})
+
+    def test_the_gateway_names_itself_swe(self):
+        _, headers, _ = self.request({"jsonrpc": "2.0", "id": 3, "method": "ping"})
+        self.assertTrue(headers.get("Server", "").startswith("swe-mcp-gateway"))
+
     def test_server_to_client_requests_are_refused(self):
         answer = self.payload(self.call("ask"))["args"]["answer"]
         self.assertEqual(answer["id"], "srv-1")
@@ -166,12 +186,22 @@ class GatewayServerTest(unittest.TestCase):
 
     def test_a_crashed_server_restarts_on_the_next_request(self):
         first = self.payload(self.call("echo"))["pid"]
-        with patch.object(gateway_server, "BACKOFF_MIN_S", 0.0):
+        backend = self.gateway.backends["fake"]
+        # The reader thread notes the failure once it has cleared the dead
+        # child; wait for that instead of polling the state.
+        noted = threading.Event()
+        note_failure = backend._note_failure
+
+        def note(lived):
+            note_failure(lived)
+            noted.set()
+
+        with patch.object(gateway_server, "BACKOFF_MIN_S", 0.0), \
+                patch.object(backend, "_note_failure", note):
             body = self.call("crash")
             self.assertIn("exited", body["error"]["message"])
-            deadline = time.time() + 10
-            while self.gateway.backends["fake"].status()["state"] == "running" and time.time() < deadline:
-                time.sleep(0.05)
+            self.assertTrue(noted.wait(10))
+            self.assertNotEqual(backend.status()["state"], "running")
             second = self.payload(self.call("echo"))["pid"]
         self.assertNotEqual(first, second)
         self.assertEqual(self.gateway.backends["fake"].starts, 2)
@@ -235,7 +265,7 @@ class GatewayServerTest(unittest.TestCase):
         self.assertEqual(rows["fake"]["state"], "idle")
 
 
-class GatewayHardeningTest(GatewayServerTest):
+class GatewayHardeningTest(_GatewayServerCase):
     """The review's findings: smuggled requests, bad lengths, stray
     processes, pipe errors, unreadable hubs and unbounded logs."""
 

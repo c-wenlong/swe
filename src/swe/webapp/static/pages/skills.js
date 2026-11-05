@@ -1,7 +1,7 @@
 /* Skills: a port of the Mac app's SkillsPage and SkillDetailView. The
- * Harness links popover links, unlinks and links all, through
- * POST /v1/app/skills/<action>; New skill and frontmatter edits stay in
- * `swe skills` and the Mac app. The list is #/skills; one skill is
+ * Harness links popover links, unlinks and links all, and New skill
+ * makes one, through POST /v1/app/skills/<action>; frontmatter edits
+ * stay in `swe skills` and the Mac app. The list is #/skills; one skill is
  * #/skills?skill=<its folder>. Data: /v1/app/skills (pages/skills.py). */
 "use strict";
 
