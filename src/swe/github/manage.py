@@ -114,12 +114,14 @@ def search_repos(query: str, limit: int, probe: Callable[[], gh.GhEnv],
     if env.status != "ok":
         return {**body, "status": env.status, "error": gh.env_error(env),
                 "env_blocked": True}
-    args = ["search", "repos", query, "--limit", str(limit),
+    args = ["search", "repos", "--limit", str(limit),
             "--json", _SEARCH_FIELDS]
     owners = [] if everywhere else search_owners(env, home)[0]
     for owner in owners:
         args += ["--owner", owner]
-    result = gh.run_json(args)
+    # The query is what the user typed: after "--" so "--owner=x" or
+    # "--web" stays search text, never a gh flag.
+    result = gh.run_json(args + ["--", query])
     if result.status != "ok":
         return {**body, "status": result.status,
                 "error": result.error or result.status}

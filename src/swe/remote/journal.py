@@ -57,7 +57,16 @@ class Journal:
     def __init__(self, home: Path | str | None = None) -> None:
         root = remote_dir_for(Path(home) if home is not None else None)
         self.dir = root / "journal"
-        self.dir.mkdir(parents=True, exist_ok=True)
+        # Every prompt, reply and tool call lands here: 0700, like the
+        # harnesses' own transcript folders, so other local accounts
+        # can't read sessions. A folder made before modes were set is
+        # tightened in place.
+        self.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            if self.dir.stat().st_mode & 0o077:
+                os.chmod(self.dir, 0o700)
+        except OSError:
+            pass
         self._seqs: dict[str, int] = {}
         # Line counts for journals already past the trim size, kept so a
         # trim check costs nothing per append. Counted once from disk.
@@ -121,7 +130,9 @@ class Journal:
             # Encoded once: the same bytes are written and counted.
             line = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
             try:
-                with open(path, "ab") as fh:
+                fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT,
+                             0o600)
+                with os.fdopen(fd, "ab") as fh:
                     fh.write(line)
             except OSError:
                 return event
@@ -167,7 +178,8 @@ class Journal:
             kept_bytes -= len(kept.pop(0).encode("utf-8"))
         tmp = path.with_suffix(".tmp")
         try:
-            with open(tmp, "w", encoding="utf-8") as fh:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.writelines(kept)
             os.replace(tmp, path)
             self._lines[key] = len(kept)
