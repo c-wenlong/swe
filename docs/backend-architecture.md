@@ -60,6 +60,12 @@ The remaining packages sit outside that convention:
 
 - `history/`: a compatibility shim that re-exports `Session` and
   `get_all_sessions`; new code imports `swe.sessions`.
+- `sync/` (`swe sync`): `commands.py` is the controller (argv, the printed
+  report, `--json` through `json_output.emit`) and `repo.py` the service
+  (git plumbing for the `~/.swe` hub repo: commit, trial `merge-tree`
+  merge, push, the `harness.json` merge). It has no `models.py`: `repo.py`
+  builds the `swe sync` and `swe sync status` documents itself, and
+  [json-contracts.md](json-contracts.md) lists their shapes.
 - `ledger/`: the usage ledger (scan, SQLite store, pricing, Overview
   figures), a port of `SWECore/Ledger`. `models.py` holds
   `UsageEvent` and `LedgerRecord`.
@@ -92,6 +98,7 @@ The same packages by responsibility, with the ownership rules that go with them 
 | `remote/` | `swe remote`: the hub (`hub.py`, every `/v1/*` route), the satellite agent, pairing, devices and the session tailers; see [remote-control.md](remote-control.md) |
 | `github/` | `swe gh` and the hub's GitHub routes; within the package only `gh.py` spawns `gh` (the Copilot rate-limit fetcher in `harness/rate_limits.py` runs `gh auth token` itself) |
 | `status/` | service status pages for the web app, a port of the Mac app's `SWECore/Status` |
+| `sync/` | `swe sync` and `swe sync status`: commits, merges and pushes the `~/.swe` hub repo (device-branch or single-branch mode, never a rebase or a force-push), `harness.json` merged harness by harness |
 
 `harness/stars.py` and `harness/archive.py` are compatibility shims over `registry.py`, kept so old call sites work. Do not add new state to them.
 
