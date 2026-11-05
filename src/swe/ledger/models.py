@@ -112,8 +112,11 @@ def parse_timestamp(text) -> float | None:
     m = _UTC.match(text)
     if m:
         year, month, day, hour, minute, second = (int(g) for g in m.groups()[:6])
-        if not (1 <= month <= 12 and 1 <= day <= 31 and hour < 24
-                and minute < 60 and second < 61):
+        # timegm rolls an impossible date over silently (2026-02-30 would
+        # read as 2 March), so the day is checked against its month.
+        if not (1 <= month <= 12 and hour < 24 and minute < 60 and second < 61):
+            return None
+        if not 1 <= day <= calendar.monthrange(year, month)[1]:
             return None
         fraction = float("0." + m.group(7)) if m.group(7) else 0.0
         try:

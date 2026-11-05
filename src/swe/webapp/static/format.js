@@ -53,7 +53,10 @@ const Fmt = (() => {
     return mark(id).name;
   }
 
-  /* HarnessColor.fixed, then the same fallback palette by FNV-1a. */
+  /* HarnessColor.fixed, then the same fallback palette slot as the Mac's
+   * HarnessColor.stableIndex and iOS Theme.harnessHex: 64-bit FNV-1a over
+   * the id's UTF-8 bytes, modulo the palette (BigInt, as 64-bit products
+   * don't fit a double). */
   const COLORS = {
     claude: "#d97757", codex: "#3b7ff0", opencode: "#139f8b", devin: "#c4860f",
     cursor: "#c08ce0", "grok-bot": "#8a73e8", pi: "#5fb3d9", droid: "#e06c8f",
@@ -62,13 +65,12 @@ const Fmt = (() => {
   const PALETTE = ["#5aa2ff", "#f0a04b", "#4ec9b0", "#e06c8f", "#9b7ff0",
     "#8ac74f", "#5ac8e0", "#f0755f", "#d9b44a", "#c08ce0"];
   function harnessColor(id) {
-    if (COLORS[id]) return COLORS[id];
-    let h = 0x811c9dc5;
-    for (const ch of new TextEncoder().encode(id || "")) {
-      h ^= ch;
-      h = Math.imul(h, 0x01000193) >>> 0;
+    if (Object.prototype.hasOwnProperty.call(COLORS, id)) return COLORS[id];
+    let h = 0xcbf29ce484222325n;
+    for (const byte of new TextEncoder().encode(id || "")) {
+      h = ((h ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn;
     }
-    return PALETTE[h % PALETTE.length];
+    return PALETTE[Number(h % BigInt(PALETTE.length))];
   }
 
   /* HarnessIcons: every harness-<id>.svg shipped beside the page. Colour ones

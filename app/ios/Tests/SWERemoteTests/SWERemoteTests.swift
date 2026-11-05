@@ -937,6 +937,21 @@ final class HarnessIconTests: XCTestCase {
         XCTAssertNotNil(HarnessIcon.assetName("codex"))
         XCTAssertNil(HarnessIcon.assetName("no-such-harness"))
     }
+
+    /// The same picks the Mac's `HarnessColor.stableIndex` and the web's
+    /// `Fmt.harnessColor` make (their tests pin these ids too), so an
+    /// unlisted harness is one colour on every client.
+    func testAnUnlistedHarnessTakesThePalettePickEveryClientMakes() {
+        XCTAssertEqual(Theme.harnessHex("claude"), "#d97757")
+        XCTAssertEqual(Theme.harnessHex("made-up-harness"), "#f0755f")
+        XCTAssertEqual(Theme.harnessHex("aider"), "#d9b44a")
+        XCTAssertEqual(Theme.harnessHex("amp"), "#8ac74f")
+        XCTAssertEqual(Theme.harnessHex("zed"), "#4ec9b0")
+        XCTAssertEqual(Theme.harnessHex(""), "#f0755f")
+        // A huge or non-ASCII id still lands in the palette (the old
+        // signed hash could trap in `abs`).
+        XCTAssertTrue(Theme.harnessPalette.contains(Theme.harnessHex(String(repeating: "é漢🙂", count: 5000))))
+    }
 }
 
 final class ReviewFixTests: XCTestCase {
@@ -1635,6 +1650,17 @@ final class LaunchFlowTests: XCTestCase {
         XCTAssertEqual(key, "claude:new")
         XCTAssertEqual(asked, ["l1", "l1"])
         XCTAssertEqual(flow.phase, .started("claude:new"))
+    }
+
+    /// Every launch sheet words its Start button through the one button;
+    /// the fork sheet only names its own idle and waiting steps.
+    func testStartButtonWordsEachPhase() {
+        let phases: [LaunchFlow.Phase] = [.idle, .starting, .waiting, .started("k"), .failed("no"), .unconfirmed("slow")]
+        XCTAssertEqual(phases.map { LaunchStartButton.title($0) },
+                       ["Start session", "Starting", "Waiting for the session", "Opening the chat",
+                        "Start session", "Start session"])
+        XCTAssertEqual(phases.map { LaunchStartButton.title($0, idle: "Start", waiting: "Waiting for the fork") },
+                       ["Start", "Starting", "Waiting for the fork", "Opening the chat", "Start", "Start"])
     }
 
     func testTheLastPollIsStillRead() async {
