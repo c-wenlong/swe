@@ -22,6 +22,11 @@ import Testing
         #expect(UsageFormat.dollars(0.004) == "<$0.01")
         #expect(UsageFormat.dollars(3.456) == "$3.46")
         #expect(UsageFormat.dollars(4687.2) == "$4,687")
+        // The precision follows the rounded amount, so the boundary
+        // reads like the dollar it rounds to.
+        #expect(UsageFormat.dollars(99.996) == "$100")
+        #expect(UsageFormat.dollars(99.994) == "$99.99")
+        #expect(UsageFormat.dollars(100) == "$100")
     }
 
     @Test func harnessesHaveReadableNames() {
