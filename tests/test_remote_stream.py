@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import patch
 
 from swe.remote import agent as agent_mod
+from swe.remote import hub as hub_mod
 from swe.remote import inject, protocol, stream, supervise
 from tests._tempdir import temp_dir
 from tests.test_remote_adapters import _FakeServeProc
@@ -680,7 +681,7 @@ class TestHubRelay(HubBase):
     def test_publish_transient_reaches_the_chat_but_not_the_journal(self):
         key = "codex:quiet"  # no tailer, so nothing else lands here
         session_q = self.srv.state.bus.subscribe(key)
-        global_q = self.srv.state.bus.subscribe(None)
+        global_q = self.srv.state.bus.subscribe(hub_mod.GLOBAL_KEY)
         ev = protocol.delta_event(key, "mbp", "a", "assistant", "hi ", 1)
         self.srv.state.publish_transient(key, ev)
         got = session_q.get_nowait()
