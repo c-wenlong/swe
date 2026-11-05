@@ -136,6 +136,16 @@ struct AddHarnessSheet: View {
             ? "Start with a letter or digit; then . _ -" : nil
     }
 
+    /// `swe add` takes the command as a positional word, where one that
+    /// starts with "-" reads as a flag; the CLI and the web editor refuse
+    /// it, so the sheet says why before Add rather than after.
+    nonisolated static func commandProblem(_ command: String) -> String? {
+        command.trimmingCharacters(in: .whitespaces).hasPrefix("-") ? "The command can't start with -" : nil
+    }
+
+    /// The command as Add registers it, and as the PATH check looks it up.
+    private var trimmedCommand: String { command.trimmingCharacters(in: .whitespaces) }
+
     private func csv(_ text: String) -> [String] {
         text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
@@ -151,16 +161,18 @@ struct AddHarnessSheet: View {
             }
             FormField("Command") {
                 TextField("binary name or path", text: $command).sweField(monospaced: true)
-                if !command.isEmpty, !command.hasPrefix("/"), onPath == false {
+                if let problem = Self.commandProblem(command) {
+                    Text(problem).font(Theme.caption).foregroundStyle(Theme.dangerText)
+                } else if !trimmedCommand.isEmpty, !trimmedCommand.hasPrefix("/"), onPath == false {
                     Text("Not on PATH yet").font(Theme.caption).foregroundStyle(Theme.textSecondary)
                 }
             }
             // Checked off the main thread once typing pauses: a PATH entry
             // on a stale mount must not stall typing, and an edit that was
             // typed over starts no lookup of its own.
-            .task(id: command) {
+            .task(id: trimmedCommand) {
                 onPath = nil
-                let command = command
+                let command = trimmedCommand
                 guard !command.isEmpty, !command.hasPrefix("/") else { return }
                 try? await Task.sleep(for: .milliseconds(300))
                 let path = await LoginShell.cachedEnvironment()["PATH"] ?? ""
@@ -189,7 +201,7 @@ struct AddHarnessSheet: View {
                     Task {
                         do {
                             try await model.add(
-                                name: name, command: command,
+                                name: name, command: trimmedCommand,
                                 description: description,
                                 aliases: csv(aliases), tags: csv(tags))
                             await reload()
@@ -199,7 +211,8 @@ struct AddHarnessSheet: View {
                     }
                 }
                 .primaryButton()
-                .disabled(working || nameProblem != nil || command.isEmpty)
+                .disabled(working || nameProblem != nil || trimmedCommand.isEmpty
+                          || Self.commandProblem(command) != nil)
             }
         }
         .sheetScaffold(width: 420)
