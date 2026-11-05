@@ -1889,7 +1889,17 @@ class TestAgentRouteValidation(unittest.TestCase):
 
 
 class TestAgentCommand(unittest.TestCase):
-    """commands._cmd_agent: pairing flags, missing conf, serve call."""
+    """commands._cmd_agent: pairing flags, missing conf, serve call.
+
+    Each test gets its own HOME: ``_cmd_agent`` takes the one-agent lock
+    and writes ``machine.json`` under ``~/.swe/data/remote``, which was
+    the HOME the whole suite shares, so another test (or a running agent)
+    holding that lock changed the answer.
+    """
+
+    def setUp(self):
+        self.home = temp_dir(self)
+        self.enterContext(patch.dict(os.environ, {"HOME": str(self.home)}))
 
     def _run(self, flags):
         from swe.remote import commands
@@ -1933,6 +1943,10 @@ class TestAgentCommand(unittest.TestCase):
             rc, _o, _e = self._run({"--hub": "http://new:2"})
         self.assertEqual(rc, 0)
         srv.assert_called_once_with("http://new:2", "c")
+        from swe.paths import remote_dir_for
+        remote = remote_dir_for(self.home)
+        self.assertTrue((remote / agent_mod.LOCK_FILE).exists())
+        self.assertTrue((remote / "machine.json").exists())
 
 
 class TestAgentLoopEdges(unittest.TestCase):

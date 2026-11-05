@@ -536,12 +536,7 @@ private struct OrphanRowView: View {
     private var root: ProcessSample { row.tree.root }
 
     /// "npm run studio": argv[0]'s basename and up to two more words.
-    private var command: String {
-        guard !root.arguments.isEmpty else { return root.name }
-        var words = [(root.arguments[0] as NSString).lastPathComponent]
-        words += root.arguments.dropFirst().prefix(2)
-        return words.joined(separator: " ")
-    }
+    private var command: String { root.shortCommand }
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -775,6 +770,13 @@ private struct CleanupSheet: View {
 
     private func forceQuit(_ item: CleanupItem) async {
         await model.quit(item, force: true)
+        // quit samples straight after the signal, before a killed process
+        // has always left the table: look again for up to two seconds
+        // before calling it still running.
+        for _ in 0..<4 where !model.alivePids(of: item).isEmpty {
+            try? await Task.sleep(for: .milliseconds(500))
+            await model.refresh()
+        }
         stillThere[item.id] = !model.alivePids(of: item).isEmpty
     }
 }
@@ -796,10 +798,7 @@ private struct CleanupRow: View {
     private var name: String {
         switch item.kind {
         case .orphanTree(let tree):
-            guard !tree.root.arguments.isEmpty else { return tree.root.name }
-            var words = [(tree.root.arguments[0] as NSString).lastPathComponent]
-            words += tree.root.arguments.dropFirst().prefix(2)
-            return words.joined(separator: " ")
+            return tree.root.shortCommand
         case .process(let sample, _):
             return sample.name
         }
@@ -862,5 +861,16 @@ private struct ComputeTrendsLive: ViewModifier {
 
     func body(content: Content) -> some View {
         content.onScreenChange { model.setLiveViewer(id, onScreen: $0) }
+    }
+}
+
+extension ProcessSample {
+    /// "npm run studio": argv[0]'s basename and up to two more words, or
+    /// the process name when its argv could not be read.
+    var shortCommand: String {
+        guard !arguments.isEmpty else { return name }
+        var words = [(arguments[0] as NSString).lastPathComponent]
+        words += arguments.dropFirst().prefix(2)
+        return words.joined(separator: " ")
     }
 }

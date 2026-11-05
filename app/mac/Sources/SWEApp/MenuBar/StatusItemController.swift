@@ -260,7 +260,7 @@ final class MenuBarPanel: NSPanel {
     var onEscape: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53,
+        if event.keyCode == SheetKeys.escapeKeyCode,
            event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
             onEscape?()
         } else {
@@ -566,9 +566,15 @@ private struct SpendDonut: View {
     /// Every provider's spend: hiding one in Settings hides its entry, not its money.
     var totalCost: Double { slice?.costUSD ?? 0 }
     /// Spend of providers hidden in Settings, said in a line under the legend.
-    var hiddenCost: Double { totalCost - parts.reduce(0) { $0 + $1.totals.costUSD } }
+    func hiddenCost(_ parts: [(harness: String, totals: UsageTotals)]) -> Double {
+        totalCost - parts.reduce(0) { $0 + $1.totals.costUSD }
+    }
 
     var body: some View {
+        // Built once per body: the ring, the legend and the hidden line
+        // all read this one list.
+        let parts = self.parts
+        let hiddenCost = hiddenCost(parts)
         VStack(alignment: .leading, spacing: 10) {
             Tabs(options: [(SpendSlice.Period.today, "Today"), (.yesterday, "Yesterday"), (.thirtyDays, "30 days")],
                  selection: periodBinding, style: .period)

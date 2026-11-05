@@ -798,25 +798,56 @@ return div.innerHTML;
             " T.heading('#'), T.heading('###')];")
         self.assertEqual(out, [[2, "C#"], [2, "#123"], [2, "Title"], None, None])
 
+    # Each parser's best-of-three time at 4n over its time at n. Linear
+    # work comes out near 4 and quadratic near 16, however loaded the
+    # machine is, since both sizes run under the same load. The n time
+    # is floored at 5 ms so timer noise on a tiny run cannot fake a jump.
+    # T.hl's scanner can retry from every position, so it is quadratic up
+    # to HL_MAX (8,000) characters by design and escapes the rest plain.
+    # Its samples sit above the cap on purpose: what they guard is the
+    # cap: with HL_MAX lifted this test fails (node runs past its timeout).
+    GROWTH_JS = r"""
+const pieces = {
+  heading: (n) => T.heading("# a" + " ".repeat(n) + "b ##"),
+  inline: (n) => T.inline("[".repeat(n)),
+  blocks: (n) => T.mdBlocks("<json-render>\n" + "x".repeat(100).concat("\n").repeat(n / 4)),
+  html: (n) => T.hl("-".repeat(n), "html"),
+  bash: (n) => T.hl("${".repeat(n / 2), "bash"),
+};
+const best = (f, n) => {
+  let b = Infinity;
+  for (let i = 0; i < 3; i++) {
+    const t0 = performance.now();
+    f(n);
+    b = Math.min(b, performance.now() - t0);
+  }
+  return b;
+};
+const growth = {};
+for (const [name, f] of Object.entries(pieces)) {
+  f(1000);  // compile before timing
+  growth[name] = best(f, 80000) / Math.max(best(f, 20000), 5);
+}
+"""
+
     def test_long_agent_text_parses_in_linear_time(self):
         """A prompt-injected agent can print one huge line or block. Each
         of these took seconds when a regex rescanned to the end from every
-        position; together they now take a blink, and read the same."""
-        out = self.run_js(r"""
-const n = 40000, t0 = Date.now();
+        position; they now grow linearly with the input, and read the same."""
+        out = self.run_js(self.GROWTH_JS + r"""
+const n = 40000;
 const head = T.heading("# a" + " ".repeat(n) + "b ##");
-T.inline("[".repeat(n));
 const view = T.mdBlocks("<json-render>\n" + "x".repeat(100).concat("\n").repeat(10000));
 const html = T.hl("-".repeat(n), "html");
-T.hl("${".repeat(n / 2), "bash");
-const ms = Date.now() - t0;
-return { ms, head, view: view.map((b) => b.t), tail: html.endsWith("-".repeat(100)),
+return { growth, head, view: view.map((b) => b.t), tail: html.endsWith("-".repeat(100)),
   link: T.inline("[[x](https://a.test)"), hash: T.heading("## a  ###"),
   // A cut inside a long comment leaves no comment open for the next row.
   after: (() => { const st = { s: null }; T.hl("/*" + "c".repeat(9000) + "*/", "js", st);
     return T.hl("let x = 1", "js", st).includes("tk-c"); })() };
 """)
-        self.assertLess(out["ms"], 2000)
+        for name, ratio in out["growth"].items():
+            with self.subTest(parser=name):
+                self.assertLess(ratio, 10, f"{name} grew {ratio:.1f}x for 4x the input")
         self.assertEqual(out["head"], [1, "a" + " " * 40000 + "b"])
         self.assertEqual(out["view"], ["rendered"])
         self.assertTrue(out["tail"])

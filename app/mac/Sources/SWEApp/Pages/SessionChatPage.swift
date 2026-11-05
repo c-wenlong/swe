@@ -572,13 +572,9 @@ private struct Composer: View {
     /// A line break in place of the selection, or at the end when the
     /// field reports none.
     private func newline() {
-        guard case .selection(let range) = selection?.indices, range.upperBound <= draft.endIndex else {
-            draft += "\n"
-            return
-        }
-        let at = draft.distance(from: draft.startIndex, to: range.lowerBound)
-        draft.replaceSubrange(range, with: "\n")
-        selection = TextSelection(insertionPoint: draft.index(draft.startIndex, offsetBy: at + 1))
+        let next = Caret.newline(in: draft, replacing: selection)
+        draft = next.text
+        selection = TextSelection(insertionPoint: Caret.index(next.cursor, in: draft))
     }
 
     /// Edit: the queued message's text replaces the box's, caret at its end.

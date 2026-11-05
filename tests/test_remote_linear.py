@@ -309,9 +309,8 @@ class TestListAndGet(unittest.TestCase):
         self.assertIn("502", out["error"])
         self.assertEqual(out["tasks"], [])
 
-    def test_get_answers_state_title_url_and_description(self):
-        issue = {**_node("QUI-12", stype="started"),
-                 "description": "## Spec\nDo the thing."}
+    def test_get_answers_state_title_and_url(self):
+        issue = _node("QUI-12", stype="started")
         with patch("swe.remote.linear._graphql",
                    return_value=linear.GraphQLResult(
                        "ok", data={"issue": issue})) as call:
@@ -322,8 +321,10 @@ class TestListAndGet(unittest.TestCase):
                          call.call_args.kwargs else
                          call.call_args.args[2], {"id": "QUI-12"})
         self.assertEqual(out["state"], "in_progress")
-        self.assertEqual(out["description"], "## Spec\nDo the thing.")
         self.assertEqual(out["title"], "Ship the thing")
+        # Nothing reads an issue's body, so the query doesn't ask for it.
+        self.assertNotIn("description", out)
+        self.assertNotIn("description", call.call_args.args[1])
 
     def test_get_missing_issue_is_none(self):
         with patch("swe.remote.linear._graphql",

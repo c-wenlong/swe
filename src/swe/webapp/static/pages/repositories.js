@@ -1528,7 +1528,10 @@ const PrFilter = (() => {
   async function openSession(s, pr) {
     const x = { harnesses: null, harness: null, model: ModelMenu.fresh(),
       phase: null, error: null, note: null, started: false,
-      prompt: `Review pull request #${pr.number}, "${pr.title}", in ${pr.repo}. Its head is checked out in this folder.` };
+      // No title: anyone can open a PR, and its text stays out of an
+      // agent's prompt (the hub's suggested_prompt quotes it only for
+      // the owner's, members' and collaborators' PRs).
+      prompt: `Review pull request #${pr.number} in ${pr.repo}. Its head is checked out in this folder.` };
     s.session = x;
     paintSheet();
     const prompt = document.getElementById("gh-session-prompt");
