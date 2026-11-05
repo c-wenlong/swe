@@ -85,9 +85,9 @@ either stops instead of writing a DMG Gatekeeper would reject. A
 credential-free DMG for local testing needs an ad-hoc bundle:
 `SWE_SIGN_IDENTITY=-` on the prod build, or a plain debug build.
 The release job reads them from the repo's Actions secrets
-(`MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`, `NOTARY_KEY`,
-`NOTARY_KEY_ID`, `NOTARY_ISSUER`, `SPARKLE_PRIVATE_KEY`; see
-`.github/workflows/release.yml`).
+(`MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD`,
+`NOTARY_KEY`, `NOTARY_KEY_ID`, `NOTARY_ISSUER`, `SPARKLE_PRIVATE_KEY`;
+see `.github/workflows/release.yml` and the release checklist).
 
 ## Layout
 
