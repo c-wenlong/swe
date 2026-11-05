@@ -58,6 +58,23 @@ import Testing
         #expect(fm.fileExists(atPath: new.appending(path: "cache").path), "a fresh ~/.swe can be made")
     }
 
+    /// ~/link → <elsewhere>/child and ~/.quiver → link/../.swe: the
+    /// target is <elsewhere>/.swe, not ~/.swe, so it is mirrored.
+    @Test func aLinkThroughALinkedFolderIsStillMirrored() throws {
+        let home = try TempDir()
+        let elsewhere = try TempDir()
+        try fm.createDirectory(at: elsewhere.url.appending(path: "child"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: elsewhere.url.appending(path: ".swe"), withIntermediateDirectories: true)
+        try fm.createSymbolicLink(atPath: home.url.appending(path: "link").path,
+                                  withDestinationPath: elsewhere.url.appending(path: "child").path)
+        try fm.createSymbolicLink(atPath: home.url.appending(path: ".quiver").path,
+                                  withDestinationPath: "link/../.swe")
+
+        AppModel.migrateDataRoot(home: home.url)
+
+        #expect(link(home.url.appending(path: ".swe")) == "link/../.swe")
+    }
+
     @Test func anAbsoluteLinkToTheNewRootIsNotMirroredEither() throws {
         let home = try TempDir()
         let new = home.url.appending(path: ".swe")

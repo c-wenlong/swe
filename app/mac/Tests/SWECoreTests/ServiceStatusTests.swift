@@ -588,7 +588,7 @@ private func openGeminiIncident() throws -> Data {
     }
 
     @Test func storeRoundTripsThroughUserDefaults() throws {
-        let defaults = TestDefaults("quiver-test")
+        let defaults = TestDefaults("status-test")
         let store = CustomStatusServices(defaults: defaults)
         #expect(store.load() == StatusServicePrefs())
         var prefs = StatusServicePrefs()
@@ -607,7 +607,7 @@ private func openGeminiIncident() throws -> Data {
 
     /// Records written before feeds could sit off /api/v2 still load.
     @Test func aLegacyStoreFileStillReads() throws {
-        let defaults = TestDefaults("quiver-test")
+        let defaults = TestDefaults("status-test")
         let store = CustomStatusServices(defaults: defaults)
         defaults.set(Data(#"[{"id":"custom-x","name":"X","pageURL":"https://x.test","group":"providers"}]"#.utf8),
                      forKey: CustomStatusServices.defaultsKey)
@@ -618,7 +618,7 @@ private func openGeminiIncident() throws -> Data {
     }
 
     @Test func badStoreDataReadsAsEmpty() throws {
-        let defaults = TestDefaults("quiver-test")
+        let defaults = TestDefaults("status-test")
         let store = CustomStatusServices(defaults: defaults)
         defaults.set(Data("<not json".utf8), forKey: CustomStatusServices.defaultsKey)
         #expect(store.load() == StatusServicePrefs())
@@ -631,7 +631,7 @@ private func openGeminiIncident() throws -> Data {
     /// the enum no longer knows maps to the catch-all rather than
     /// failing the store's decode.
     @Test func oldAndUnknownGroupsLoadForward() throws {
-        let defaults = TestDefaults("quiver-test")
+        let defaults = TestDefaults("status-test")
         let store = CustomStatusServices(defaults: defaults)
         defaults.set(Data(#"[{"id":"custom-a","name":"A","pageURL":"https://a.test","group":"providers"},{"id":"custom-b","name":"B","pageURL":"https://b.test","group":"infrastructure"},{"id":"custom-c","name":"C","pageURL":"https://c.test","group":"bogus"},{"id":"custom-d","name":"D","pageURL":"https://status.python.org","group":"providers"}]"#.utf8),
                      forKey: CustomStatusServices.defaultsKey)
@@ -645,7 +645,7 @@ private func openGeminiIncident() throws -> Data {
     /// new layout survives a restart even when the page is a catalogue
     /// host the catalogue groups elsewhere.
     @Test func aChosenGroupSurvivesAReload() throws {
-        let defaults = TestDefaults("quiver-test")
+        let defaults = TestDefaults("status-test")
         let store = CustomStatusServices(defaults: defaults)
         let groq = StatusService(id: "custom-g", name: "Groq",
                                  pageURL: URL(string: "https://groqstatus.com")!,
