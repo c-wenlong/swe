@@ -121,12 +121,29 @@ class GrammarTest(unittest.TestCase):
 
 class PaneIntegrationTest(unittest.TestCase):
     def test_the_browser_colours_after_truncating(self):
-        """Read as source: colouring first would let the pane's own
-        truncation cut an escape in half."""
-        source = Path("src/swe/find/browser.py").read_text()
-        block = source[source.index("text = truncate(preview[row]"):]
-        block = block[:block.index("out.append")]
-        self.assertLess(block.index("truncate("), block.index("highlight("))
+        """Colouring first would let the pane's own truncation count the
+        escapes as text and cut the closing reset off, so the cell would
+        come out short and bleed colour into the next row."""
+        import io
+        from contextlib import redirect_stdout
+
+        from swe.console import strip_ansi
+        from swe.find.browser import _render
+        from swe.find.entries import Entry
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _render([], 0, [Entry("a")], 0, ["# " + "heading " * 40, "plain"],
+                    "T", "crumb", 0, 6, 120, (3, 9, 8), "markdown")
+        rows = buf.getvalue().split("\r\n")
+        long_cell = rows[1].split("\u2502\x1b[0m ")[-1]
+        short_cell = rows[2].split("\u2502\x1b[0m ")[-1]
+        # Truncated on visible text: the long line fills the pane exactly
+        # as wide as the padded short one, ends in the ellipsis, and its
+        # colour is closed.
+        self.assertEqual(len(strip_ansi(long_cell)), len(strip_ansi(short_cell)))
+        self.assertTrue(strip_ansi(long_cell).endswith("..."), long_cell)
+        self.assertTrue(long_cell.endswith("\x1b[0m"), repr(long_cell))
 
     def test_a_file_row_uses_a_different_bar_from_a_folder(self):
         """Blue reads as "there is more below this", and on a file there
