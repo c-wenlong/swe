@@ -29,7 +29,7 @@ import time
 
 from swe.paths import account_homes_for, session_status_cache_file_for
 from swe.sessions import opencode_store, parse_cache
-from swe.sessions.engines.common import sqlite_uri
+from swe.sessions.engines.common import read_tail_lines, sqlite_uri
 from swe.sessions.models import Session
 
 ACTIVE = "active"
@@ -142,15 +142,8 @@ class _TailRecords:
 
 def _tail_records(path: str, tail_bytes: int) -> tuple[_TailRecords, bool]:
     """(JSON objects from the file's tail in order, window-covers-file)."""
-    size = os.path.getsize(path)
-    with open(path, "rb") as fh:
-        start = max(0, size - tail_bytes)
-        fh.seek(start)
-        chunk = fh.read().decode("utf-8", errors="ignore")
-    lines = chunk.split("\n")
-    if start > 0 and lines:
-        lines = lines[1:]  # first line is a partial record
-    return _TailRecords(lines), start == 0
+    lines, complete = read_tail_lines(path, tail_bytes)
+    return _TailRecords(lines), complete
 
 
 def _walk_tail(path: str, walk):
@@ -923,7 +916,11 @@ def transcript_path(session: Session, ctx: dict) -> str:
 
 
 # Modules whose code decides a cached tail verdict.
-_TAIL_CACHE_MODULES = ("swe.sessions.parse_cache", "swe.sessions.status")
+_TAIL_CACHE_MODULES = (
+    "swe.sessions.parse_cache",
+    "swe.sessions.status",
+    "swe.sessions.engines.common",
+)
 _PHASES = (None, "error", "aborted", "midturn", "finished")
 
 
