@@ -288,7 +288,7 @@ actor NamesSource {
 @Suite struct SnapshotFileTests {
     func temporaryURL() -> URL {
         FileManager.default.temporaryDirectory
-            .appending(path: "quiver-snapshot-\(UUID().uuidString)/cache/names.json")
+            .appending(path: "swe-snapshot-\(UUID().uuidString)/cache/names.json")
     }
 
     @Test func aSnapshotRoundTripsThroughAPrivateFile() async throws {
