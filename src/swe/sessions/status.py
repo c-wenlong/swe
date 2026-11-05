@@ -29,6 +29,7 @@ import time
 
 from swe.paths import account_homes_for, session_status_cache_file_for
 from swe.sessions import opencode_store, parse_cache
+from swe.sessions.engines.common import sqlite_uri
 from swe.sessions.models import Session
 
 ACTIVE = "active"
@@ -1034,7 +1035,7 @@ def _claude_job_states() -> dict:
 def _open_devin_db() -> sqlite3.Connection | None:
     path = os.path.expanduser("~/.local/share/devin/cli/sessions.db")
     try:
-        return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        return sqlite3.connect(sqlite_uri(path), uri=True)
     except Exception:
         return None
 
@@ -1042,7 +1043,7 @@ def _open_devin_db() -> sqlite3.Connection | None:
 def _open_opencode_db() -> sqlite3.Connection | None:
     path = os.path.expanduser("~/.local/share/opencode/opencode.db")
     try:
-        return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        return sqlite3.connect(sqlite_uri(path), uri=True)
     except Exception:
         return None
 
@@ -1050,7 +1051,7 @@ def _open_opencode_db() -> sqlite3.Connection | None:
 def _open_kilo_db() -> sqlite3.Connection | None:
     path = os.path.expanduser("~/.local/share/kilo/kilo.db")
     try:
-        return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        return sqlite3.connect(sqlite_uri(path), uri=True)
     except Exception:
         return None
 
