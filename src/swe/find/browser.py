@@ -30,7 +30,7 @@ from swe.find.highlight import highlight
 MAX_PREVIEW_BYTES = 256 * 1024
 
 FOOTER = ("  ↑↓ move · → open · ← back · g/G top, bottom · "
-          "[ ] { } resize · q quit")
+          "[ ] { } resize · q/Esc quit")
 
 # Relative widths of parent, current and preview: 15%, 45% and 40%.
 # Kept as twentieths rather than percentages so one resize step is a
@@ -492,7 +492,10 @@ def browse(roots: list[Entry], title: str = "") -> int:
                                         preview, heading, crumb, drawn, height,
                                         width, ratio, language)
                 key = _read_key(fd)
-                if key == "cancel":
+                # A bare Esc quits, as in the multiselect and the session
+                # picker; read_key already told it apart from an arrow's
+                # escape sequence by the bytes queued behind it.
+                if key in ("cancel", "escape"):
                     return 0
                 if key == "back":
                     # At the top level there is nowhere to go, so this is a no-op
