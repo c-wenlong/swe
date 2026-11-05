@@ -22,8 +22,9 @@ struct HoverTip: ViewModifier {
     /// so the text it shows is still read.
     var replacesLabel = true
     /// Off for views where a click means something else (a draggable
-    /// row): the tip still opens on a resting hover but never pins, so
-    /// the first press is never spent dismissing it.
+    /// row, a mark inside a Button's label): the tip still opens on a
+    /// resting hover but never pins, and attaches no live tap, so the
+    /// click reaches the row or Button underneath.
     var pinsOnClick = true
     /// Off while the row is mid-drag: an open tip would cover the rows
     /// the pointer is choosing between. Gates behaviour only — the view
@@ -49,18 +50,12 @@ struct HoverTip: ViewModifier {
             .contentShape(.rect)
             // The tap pins the tip; a text selection would take it first.
             .textSelection(.disabled)
-            .onTapGesture {
-                guard enabled, pinsOnClick else { return }
-                rest?.cancel()
-                if open, !pinned {
-                    pinned = true
-                } else if pinned {
-                    open = false
-                } else {
-                    open = true
-                    pinned = true
-                }
-            }
+            // A tip that never pins attaches no live tap at all: even a
+            // tap that ignores the click claims it, so a tip inside a
+            // Button's label would leave the Button dead. Masking keeps
+            // the view tree one shape either way.
+            .gesture(TapGesture().onEnded { pinTap() },
+                     including: pinsOnClick ? .all : .subviews)
             .onHover { inside in
                 guard enabled, inside != hovering else { return }
                 hovering = inside
@@ -103,6 +98,19 @@ struct HoverTip: ViewModifier {
                 rest?.cancel()
                 if hovering, pinsOnClick { NSCursor.pop() }
             }
+    }
+
+    private func pinTap() {
+        guard enabled, pinsOnClick else { return }
+        rest?.cancel()
+        if open, !pinned {
+            pinned = true
+        } else if pinned {
+            open = false
+        } else {
+            open = true
+            pinned = true
+        }
     }
 
     /// Flags the tip's own popover window `ignoresMouseEvents` so it can

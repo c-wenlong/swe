@@ -234,6 +234,19 @@ class TestOpencodeServe(unittest.TestCase):
         self.assertIn("/permission/perm-1/reply", self.calls[-1][1])
         self.assertEqual(self.calls[-1][2], {"reply": "reject"})
 
+    def test_approval_request_id_stays_one_path_segment(self):
+        # The request id is the client's string: it must not climb to
+        # another serve route such as /session/<id>/abort.
+        session = _session()
+        supervise.mark(self.home, "k", _meta("serve", "opencode"))
+        self.routes["permissions"] = (404, b"")
+        self.routes["reply"] = (200, b"{}")
+        self._injector().approval(session, "../../ses_1/abort?x=1#", "deny")
+        paths = [path for _m, path, _p in self.calls[-2:]]
+        self.assertEqual(paths, [
+            "/session/ses_1/permissions/..%2F..%2Fses_1%2Fabort%3Fx%3D1%23",
+            "/permission/..%2F..%2Fses_1%2Fabort%3Fx%3D1%23/reply"])
+
     def test_approval_unknown_decision(self):
         res = self._injector().approval(_session(), "p1", "bogus")
         self.assertFalse(res.ok)
@@ -1124,6 +1137,42 @@ class TestCodexAppServerEdges(unittest.TestCase):
         self.assertEqual(server.turn_id, "")   # completed cleared it
         self.assertIn("42", server.approvals)  # tracked even without emit
         self.assertTrue(server.dead)           # EOF → marked dead
+
+    def test_read_loop_survives_a_malformed_message(self):
+        # List params on an approval and an unhashable id used to raise
+        # out of the loop, ending the reader while codex kept running.
+        proc = _FakeAppProc()
+        proc.stdout.close()  # the fake's pipe; this test reads BytesIO
+        self.addCleanup(proc.kill)
+        server = inject._AppServer(proc, "thr")
+        import queue as qmod
+        reply_q = qmod.Queue()
+        server.replies[9] = reply_q
+        proc.stdout = io.BytesIO(
+            json.dumps({"id": 1, "method": "x/requestApproval",
+                        "params": [1]}).encode() + b"\n"
+            + json.dumps({"id": [1], "result": {}}).encode() + b"\n"
+            + json.dumps({"id": 9, "result": {"ok": 1}}).encode() + b"\n")
+        inject._appserver_read_loop(server, "k", None, "m1")
+        self.assertIn("1", server.approvals)
+        self.assertEqual(reply_q.get_nowait()["id"], 9)
+
+    def test_server_for_replaces_a_server_whose_reader_died(self):
+        stale = _FakeAppProc()
+        self.addCleanup(stale.kill)
+        old = inject._AppServer(stale, "old-thread")
+        old.dead = True
+        inject.CodexAppServerInjector._servers["codex:k"] = old
+        proc = _FakeAppProc({
+            "initialize": {"result": {}},
+            "thread/resume": {"result": {"thread": {"id": "t-new"}}},
+        })
+        # Ends the fresh server's reader thread with its pipe.
+        self.addCleanup(proc.kill)
+        with self._spawn_patch(proc):
+            server = self._injector()._server_for(self.session)
+        self.assertIs(server.proc, proc)
+        self.assertTrue(stale.killed)
 
     def test_read_loop_stdout_error_marks_dead(self):
         class BadOut:

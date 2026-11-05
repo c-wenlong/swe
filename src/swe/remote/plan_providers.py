@@ -1,7 +1,7 @@
 """Coding plans as launch providers for Claude Code.
 
 A coding plan (``docs/coding-plans.md``) is an Anthropic-compatible
-endpoint sold with its own key. Quiver keeps that key in the keys file
+endpoint sold with its own key. swe keeps that key in the keys file
 under the plan's own variable (``GLM_CODING_PLAN_KEY``), never the
 vendor's pay-as-you-go name, so a plan key can't reach a pay-as-you-go
 endpoint. A launch with a plan's slug gives Claude Code

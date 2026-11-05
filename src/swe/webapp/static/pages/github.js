@@ -96,7 +96,7 @@ const GhUI = (() => {
         <code class="gh-command" id="gh-command">${esc(command)}</code>
         <button class="icon-button gh-copy" id="gh-copy" title="Copy the command" aria-label="Copy the command">${ico("copy")}</button>
         <span class="gh-spacer"></span>
-        <button class="gh-button" id="gh-setup-refresh">${ico("refresh")}<span>Refresh</span></button>
+        <button class="btn lg hairline gh-button" id="gh-setup-refresh">${ico("refresh")}<span>Refresh</span></button>
       </div>
       <p class="caption">The web app reads GitHub through the hub's own gh login${
         machine ? `, so run it on ${esc(machine)}` : ", so run it on the hub machine"}.</p>

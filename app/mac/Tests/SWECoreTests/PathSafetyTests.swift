@@ -15,7 +15,7 @@ import Testing
     @Test func anythingUnderTmpIsRejected() throws {
         // /tmp itself is other-writable, so a file that does not exist yet
         // is just as unsafe: another user can create it first.
-        #expect(PathSafety.rejection(of: "/tmp/quiver-safety-\(UUID().uuidString)") != nil)
+        #expect(PathSafety.rejection(of: "/tmp/swe-safety-\(UUID().uuidString)") != nil)
     }
 
     @Test func aSystemToolIsTrusted() {
@@ -23,7 +23,7 @@ import Testing
     }
 
     @Test func aMissingFileUnderHomeIsTrusted() {
-        let path = ("~/quiver-safety-\(UUID().uuidString)/file" as NSString)
+        let path = ("~/swe-safety-\(UUID().uuidString)/file" as NSString)
         #expect(PathSafety.rejection(of: path as String) == nil)
     }
 
