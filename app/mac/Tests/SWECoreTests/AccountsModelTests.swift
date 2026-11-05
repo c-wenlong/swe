@@ -383,9 +383,6 @@ final class FakeRunningInstances: RunningInstances {
         #expect(launcher.launched == [LaunchPlanner.terminal(.iterm, running: line)])
     }
 
-    /// The Add harness sheet builds a shell line (several words, each
-    /// quoted); it must reach the terminal untouched, not quoted again into
-    /// one command name.
     /// A chosen terminal that's gone says so, instead of passing
     /// LaunchServices' "Unable to find application" through.
     @Test func aMissingTerminalFailsWithAClearMessage() async throws {
@@ -396,6 +393,9 @@ final class FakeRunningInstances: RunningInstances {
         #expect(launcher.launched.isEmpty)
     }
 
+    /// The Add harness sheet builds a shell line (several words, each
+    /// quoted); it must reach the terminal untouched, not quoted again into
+    /// one command name.
     @Test func runInTerminalTypesTheLineAsIs() async throws {
         let model = model()
         let line = "'swe' 'install' 'gemini' '--via=npm'"

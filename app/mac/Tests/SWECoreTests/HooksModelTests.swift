@@ -137,15 +137,14 @@ import Testing
         #expect(inventory.checkError != nil)
     }
 
-    @Test(.timeLimit(.minutes(1))) func aFailedListCancelsTheCheck() async throws {
+    @Test func aFailedListCancelsTheCheck() async throws {
         let runner = CancelRecordingCheckRunner(
             list: CommandResult(status: 1, stdout: Data(), stderr: "list broke"))
         let model = HooksModel(checkTimeout: .seconds(3600))
         await model.load(swe: SweClient(runner: runner), for: "/bin/swe")
         guard case .failed = model.state else { Issue.record("\(model.state)"); return }
-        // The check sleeps until cancelled; the failed list must cancel it.
-        var cancels = runner.cancelled.makeAsyncIterator()
-        #expect(await cancels.next() != nil)
+        // The check hangs until cancelled; the failed list must cancel it.
+        #expect(await runner.cancels.reach(1))
     }
 
     @Test func aFindingSaysEachFactOnceWithHomePaths() {
@@ -339,27 +338,31 @@ import Testing
     }
 }
 
-/// Answers the list at once; a check sleeps until the run is cancelled,
-/// standing in for a wedged `swe hooks check`.
-/// `check` sleeps until cancelled and reports the cancel on `cancelled`.
+/// Answers the list at once; a check hangs on a gate that never opens,
+/// standing in for a wedged `swe hooks check`, and counts its cancel on
+/// `cancels`.
 final class CancelRecordingCheckRunner: CommandRunning, Sendable {
     let list: CommandResult
-    let (cancelled, signal) = AsyncStream<Void>.makeStream()
+    let cancels = CountGate()
+    private let hang = HoldGate()
     init(list: CommandResult) { self.list = list }
 
     func run(_ arguments: [String]) async throws -> CommandResult {
         guard arguments.contains("check") else { return list }
-        do { try await Task.sleep(for: .seconds(3600)) } catch { signal.yield() }
+        do { try await hang.pass() } catch { await cancels.bump() }
         return CommandResult(status: 1, stdout: Data(), stderr: "cancelled")
     }
 }
 
-struct SleepingCheckRunner: CommandRunning {
+/// Answers the list at once; a check hangs until cancelled.
+final class SleepingCheckRunner: CommandRunning, Sendable {
     let list: CommandResult
+    private let hang = HoldGate()
+    init(list: CommandResult) { self.list = list }
 
     func run(_ arguments: [String]) async throws -> CommandResult {
         if arguments.contains("check") {
-            try await Task.sleep(for: .seconds(3600))
+            try await hang.pass()
             return CommandResult(status: 1, stdout: Data(), stderr: "cancelled")
         }
         return list

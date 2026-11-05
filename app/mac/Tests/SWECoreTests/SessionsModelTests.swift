@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import SWECore
 
@@ -77,29 +78,35 @@ actor FakeSessionLedger: SessionUsageQuerying {
     var rows: [SessionUsage] = []
     var days: [DailyUsage] = []
     private(set) var ranges: [DateInterval] = []
-    /// The next `daily` call captures its rows, then waits for `releaseDaily`.
+    /// The next `daily` call captures its rows, then waits at `dailyGate`
+    /// until `releaseDaily` opens it.
     private var holdDaily = false
-    private var dailyGate: CheckedContinuation<Void, Never>?
-    /// Bumped once a held `daily` is parked, so a test waits for it without
-    /// spinning.
+    private var dailyGate: HoldGate?
+    /// Bumped once a held `daily` reaches its gate, so a test waits for it
+    /// without spinning. It can't pass until released.
     let dailyParks = CountGate()
     func set(_ rows: [SessionUsage]) { self.rows = rows }
     func setDaily(_ rows: [DailyUsage]) { self.days = rows }
-    func holdNextDaily() { holdDaily = true }
-    func releaseDaily() { dailyGate?.resume(); dailyGate = nil }
+    func holdNextDaily() {
+        holdDaily = true
+        dailyGate = HoldGate()
+    }
+    func releaseDaily() {
+        holdDaily = false
+        dailyGate?.open()
+        dailyGate = nil
+    }
     func bySession(in range: DateInterval, harness: String?) async -> [SessionUsage] {
         ranges.append(range)
         return rows
     }
     func daily(in range: DateInterval, calendar: Calendar) async -> [DailyUsage] {
         let result = days
-        if holdDaily {
+        if holdDaily, let gate = dailyGate {
             holdDaily = false
-            let parks = dailyParks
-            await withCheckedContinuation {
-                dailyGate = $0
-                Task { await parks.bump() }
-            }
+            await dailyParks.bump()
+            // A cancelled read stops waiting, as a cancelled query would.
+            try? await gate.pass()
         }
         return result
     }
@@ -108,32 +115,28 @@ actor FakeSessionLedger: SessionUsageQuerying {
 /// Holds the listing until released, to test what happens meanwhile.
 actor GatedSessionSource: SessionListing {
     let list: SessionList
-    private var gate: CheckedContinuation<Void, Never>?
+    /// Where each listing waits; `arrived` says one is parked.
+    nonisolated let gate = HoldGate()
     /// Whether anything asked for the listing.
     private(set) var waiting = false
-    /// Bumped once a listing is parked, so a test waits for it without
-    /// spinning.
-    let parks = CountGate()
     init(_ list: SessionList) { self.list = list }
     func sessions(days: Int?, limit: Int) async throws -> SessionList {
         waiting = true
-        let parks = self.parks
-        await withCheckedContinuation {
-            gate = $0
-            Task { await parks.bump() }
-        }
+        try await gate.pass()
         return list
     }
-    func release() { gate?.resume(); gate = nil }
+    nonisolated func release() { gate.open() }
 }
 
 /// Counts how often the session list was fetched.
-final class CountingSessionSource: SessionListing, @unchecked Sendable {
-    var list: SessionList
-    private(set) var calls = 0
+final class CountingSessionSource: SessionListing, Sendable {
+    let list: SessionList
+    private let count = Mutex(0)
+    /// Listings arrive off the test's actor, so the count is locked.
+    var calls: Int { count.withLock { $0 } }
     init(_ list: SessionList) { self.list = list }
     func sessions(days: Int?, limit: Int) async throws -> SessionList {
-        calls += 1
+        count.withLock { $0 += 1 }
         return list
     }
 }
@@ -491,9 +494,9 @@ final class CountingSessionSource: SessionListing, @unchecked Sendable {
         let source = GatedSessionSource(SessionList(sessions: [session("a", "claude", cwd: nil, at: 1_791_699_000)], failures: []))
         let model = SessionsModel(source: source, ledger: FakeSessionLedger(), now: { [now] in now }, calendar: calendar, searchIndexingEnabled: false)
         let load = Task { await model.load() }
-        try #require(await source.parks.reach(1))
+        try #require(await source.gate.arrived())
         await model.refreshUsage()
-        await source.release()
+        source.release()
         await load.value
         #expect(model.rows.map(\.id) == ["a"])
         #expect(!model.isLoading)
@@ -758,19 +761,18 @@ final class CountingSessionSource: SessionListing, @unchecked Sendable {
         await model.load()
         _ = model.summary
         // This read is a cache hit: it must still register what it reads.
-        final class Flag: @unchecked Sendable { var fired = false }
-        let flag = Flag()
+        let fired = Box(false)
         withObservationTracking {
             _ = model.summary
             _ = model.projects
-        } onChange: { flag.fired = true }
+        } onChange: { fired.value = true }
         model.filter.search = "nothing matches this"
-        #expect(flag.fired)
+        #expect(fired.value)
 
-        let rowsFlag = Flag()
-        withObservationTracking { _ = model.projects } onChange: { rowsFlag.fired = true }
+        let rowsFired = Box(false)
+        withObservationTracking { _ = model.projects } onChange: { rowsFired.value = true }
         await model.refreshUsage()
-        #expect(rowsFlag.fired)
+        #expect(rowsFired.value)
     }
 
     @Test func aRepeatVisitWithNoNewScanReadsNoUsage() async {

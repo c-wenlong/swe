@@ -193,14 +193,12 @@ import Testing
     }
 
     @Test func aMissingVendorCLIThrowsWithoutLaunching() async throws {
-        let m = try model()
         let root = scratch.url.appending(path: "guard-\(UUID().uuidString)")
         let store = ProfileStore(root: root.appending(path: ".swe/accounts"), userHome: root)
         let work = try store.add(vendor: .codex, name: "Work")
         let m2 = AccountsModel(store: store, usage: FakeUsage(), launcher: launcher,
                                terminal: { .terminal }, loginPath: { "" }, running: running)
         await m2.load(force: true)
-        _ = m
         await #expect(throws: LaunchError.self) { try await m2.signIn(work) }
         #expect(launcher.launched.isEmpty)
     }
@@ -213,7 +211,7 @@ import Testing
         let m = AccountsModel(store: store, usage: FakeUsage(), launcher: launcher,
                               terminal: { .terminal }, loginPath: { "" }, running: running)
         #expect(m.signInCLI(for: cursor) == nil)
-        #expect(m.signInCLI(for: codex) == LaunchPlanner.cliName(for: .codex))
+        #expect(m.signInCLI(for: codex) == "codex")
         #expect(AccountSignIn.action(cli: m.signInCLI(for: cursor), harness: "cursor", installed: false) == .signIn)
     }
 }

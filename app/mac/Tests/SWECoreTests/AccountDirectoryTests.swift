@@ -44,10 +44,9 @@ import Testing
     }
 
     @Test func theDirectoryRebuildsOnlyWhenProfilesChange() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appending(path: "dir-cache-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
+        let temp = try TempDir()
+        defer { withExtendedLifetime(temp) {} }
+        let root = temp.url
         let file = root.appending(path: "profiles.json")
         try "[]".write(to: file, atomically: true, encoding: .utf8)
         let store = ProfileStore(root: root, userHome: home)

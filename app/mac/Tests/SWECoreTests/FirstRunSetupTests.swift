@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import SWECore
 
@@ -14,7 +15,9 @@ private final class SetupRunner: CommandRunning, @unchecked Sendable {
     var cloned: String = "{}"
     var clonedStatus: Int32 = 0
     var cloneRefusal: String?
-    private(set) var calls: [[String]] = []
+    /// Locked: the model runs swe off the test's task.
+    private let recorded = Mutex<[[String]]>([])
+    var calls: [[String]] { recorded.withLock { $0 } }
 
     init(preview: String, applied: String = "{}") {
         self.preview = preview
@@ -22,7 +25,7 @@ private final class SetupRunner: CommandRunning, @unchecked Sendable {
     }
 
     func run(_ arguments: [String]) async throws -> CommandResult {
-        calls.append(arguments)
+        recorded.withLock { $0.append(arguments) }
         if arguments.contains(where: { $0.hasPrefix("--hub=") }) {
             if let cloneRefusal {
                 return CommandResult(status: 1, stdout: Data(), stderr: "  \(cloneRefusal)\n")
@@ -170,10 +173,17 @@ private func applied(leftAlone: Bool) -> String {
         await HarnessesModel.registryWrites.acquire()
         let leave = Task { await setup.next(order: ["claude"]) }
         // Either setup queues at the gate or, without it, reaches swe.
-        while HarnessesModel.registryWrites.waiters == 0,
-              !runner.calls.contains(where: { $0.contains("--apply") }) {
-            await Task.yield()
+        // The gate has no change stream to wait on, so this re-checks
+        // once per turn, bounded by `gateTimeout`.
+        let settled = await withinTimeout {
+            while HarnessesModel.registryWrites.waiters == 0,
+                  !runner.calls.contains(where: { $0.contains("--apply") }) {
+                if Task.isCancelled { return false }
+                await Task.yield()
+            }
+            return true
         }
+        #expect(settled, "setup neither queued at the gate nor reached swe")
         #expect(!runner.calls.contains { $0.contains("--apply") })
         HarnessesModel.registryWrites.release()
         await leave.value
@@ -270,7 +280,10 @@ private func applied(leftAlone: Bool) -> String {
         let fresh = model(SetupRunner(preview: hubPreviewJSON))
         await fresh.load()
         #expect(fresh.offersHub)
-        guard case .loaded(let preview) = fresh.preview else { return }
+        guard case .loaded(let preview) = fresh.preview else {
+            Issue.record("the preview never loaded: \(fresh.preview)")
+            return
+        }
         #expect(preview.hub?.demoUrl == nil)
 
         // An swe from before --hub sends no hub key: no field.

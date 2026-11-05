@@ -4,39 +4,39 @@ import Testing
 
 /// Holds a build on its background thread until the test lets it go.
 /// The build blocks a GCD thread, as the slow filesystem calls it stands
-/// in for do; the test side waits through a continuation, never polling.
-private final class BuildGate: @unchecked Sendable {
+/// in for do; the test side waits on a `CountGate`, never polling.
+private final class BuildGate: Sendable {
     private let release = DispatchSemaphore(value: 0)
-    private let lock = NSLock()
-    private var started: CheckedContinuation<Void, Never>?
-    private var didStart = false
+    private let starts = CountGate()
 
     /// Called by the build: says it has started, then waits for `open`.
+    /// A gate never opened lets go after twice `gateTimeout`, only so the
+    /// thread is not held for good: every test-side wait gives up first,
+    /// so the test has already failed by then.
     func hold() {
-        lock.lock()
-        didStart = true
-        let waiter = started
-        started = nil
-        lock.unlock()
-        waiter?.resume()
-        release.wait()
+        let starts = self.starts
+        Task { await starts.bump() }
+        let (seconds, _) = gateTimeout.components
+        _ = release.wait(timeout: .now() + .seconds(Int(seconds) * 2))
     }
 
-    /// Returns once the build is inside `hold`.
-    func waitForStart() async {
-        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            lock.lock()
-            if didStart {
-                lock.unlock()
-                done.resume()
-            } else {
-                started = done
-                lock.unlock()
-            }
-        }
-    }
+    /// True once the build is inside `hold`, false after `gateTimeout`.
+    func waitForStart() async -> Bool { await starts.reach(1) }
 
     func open() { release.signal() }
+}
+
+/// True once `task` finishes, false after `gateTimeout`. A task's value
+/// can't be cancelled out of, so the wait runs beside the test and the
+/// test waits on a gate.
+@MainActor
+private func finishes(_ task: Task<Void, Never>) async -> Bool {
+    let done = CountGate()
+    Task {
+        await task.value
+        await done.bump()
+    }
+    return await done.reach(1)
 }
 
 @MainActor
@@ -53,6 +53,11 @@ private final class BuildGate: @unchecked Sendable {
         return await drops.reach(1)
     }
 
+    /// True once `build.settled()` returns, false after `gateTimeout`.
+    private func settles(_ build: LatestBuild<some Sendable>) async -> Bool {
+        await finishes(Task { await build.settled() })
+    }
+
     @Test func theWorkRunsOffTheMainThreadAndPublishesOnIt() async {
         let build = LatestBuild<Bool>()
         var published: [Bool] = []
@@ -61,19 +66,19 @@ private final class BuildGate: @unchecked Sendable {
             published.append(value)
         }
         #expect(build.isRunning)
-        await build.settled()
+        #expect(await settles(build))
         #expect(published == [false])
         #expect(!build.isRunning)
     }
 
-    @Test(.timeLimit(.minutes(1))) func aSlowOlderBuildNeverOverwritesANewerOne() async {
+    @Test func aSlowOlderBuildNeverOverwritesANewerOne() async {
         let build = LatestBuild<String>()
         let gate = BuildGate()
         var published: [String] = []
         build.start({ gate.hold(); return "old" }) { published.append($0) }
-        await gate.waitForStart()
+        #expect(await gate.waitForStart())
         build.start({ "new" }) { published.append($0) }
-        await build.settled()
+        #expect(await settles(build))
         #expect(published == ["new"])
         // The old one finishes late, and is dropped.
         #expect(await openAndAwaitDrop(gate, on: build))
@@ -86,27 +91,27 @@ private final class BuildGate: @unchecked Sendable {
         let second = BuildGate()
         var published: [String] = []
         build.start({ gate.hold(); return "first" }) { published.append($0) }
-        await gate.waitForStart()
+        #expect(await gate.waitForStart())
         build.start({ second.hold(); return "second" }) { published.append($0) }
-        await second.waitForStart()
+        #expect(await second.waitForStart())
         // The first one finishing does not end the wait: the second is
         // the one on show next.
         gate.open()
         second.open()
-        await build.settled()
+        #expect(await settles(build))
         #expect(published == ["second"])
     }
 
-    /// Starts a `settled()` caller and returns once it is waiting.
+    /// Starts a `settled()` caller and returns it once it is waiting.
     private func parkedWaiter(on build: LatestBuild<String>) async -> Task<Void, Never> {
-        await withCheckedContinuation { (parked: CheckedContinuation<Task<Void, Never>, Never>) in
-            var waiter: Task<Void, Never>?
-            build.onWait = {
-                build.onWait = nil
-                parked.resume(returning: waiter!)
-            }
-            waiter = Task { await build.settled() }
+        let parked = CountGate()
+        build.onWait = {
+            build.onWait = nil
+            Task { await parked.bump() }
         }
+        let waiter = Task { await build.settled() }
+        #expect(await parked.reach(1), "settled() never started waiting")
+        return waiter
     }
 
     @Test func aWaiterGoesOnWhenANewerBuildPublishesWhileTheOldOneIsStuck() async {
@@ -114,11 +119,11 @@ private final class BuildGate: @unchecked Sendable {
         let stuck = BuildGate()
         var published: [String] = []
         build.start({ stuck.hold(); return "stuck" }) { published.append($0) }
-        await stuck.waitForStart()
+        #expect(await stuck.waitForStart())
         let waiter = await parkedWaiter(on: build)
         // Waiting on the stuck build's own task would never end.
         build.start({ "new" }) { published.append($0) }
-        await waiter.value
+        #expect(await finishes(waiter))
         #expect(published == ["new"])
         stuck.open()
     }
@@ -127,30 +132,30 @@ private final class BuildGate: @unchecked Sendable {
         let build = LatestBuild<String>()
         let stuck = BuildGate()
         build.start({ stuck.hold(); return "stuck" }) { _ in }
-        await stuck.waitForStart()
+        #expect(await stuck.waitForStart())
         let waiter = await parkedWaiter(on: build)
         build.cancel()
-        await waiter.value
+        #expect(await finishes(waiter))
         #expect(!build.isRunning)
         stuck.open()
     }
 
-    @Test(.timeLimit(.minutes(1))) func aCancelledBuildIsNeverPublished() async {
+    @Test func aCancelledBuildIsNeverPublished() async {
         let build = LatestBuild<Int>()
         let gate = BuildGate()
         var published: [Int] = []
         build.start({ gate.hold(); return 1 }) { published.append($0) }
-        await gate.waitForStart()
+        #expect(await gate.waitForStart())
         build.cancel()
         #expect(!build.isRunning)
         // Nothing left to wait for.
-        await build.settled()
+        #expect(await settles(build))
         // The cancelled build finishes and is dropped, unpublished.
         #expect(await openAndAwaitDrop(gate, on: build))
         #expect(published.isEmpty)
         // A new one after it is published as usual.
         build.start({ 2 }) { published.append($0) }
-        await build.settled()
+        #expect(await settles(build))
         #expect(published == [2])
     }
 }

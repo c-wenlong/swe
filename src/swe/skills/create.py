@@ -52,8 +52,10 @@ def create(name: str, description: str | None = None,
            home: Path | None = None) -> tuple[Path, bool]:
     """Write ~/.swe/skills/<name>/SKILL.md, atomically.
 
-    Returns (path, created_dir). Raises ValueError for anything the user
-    can fix; the command turns it into exit 1.
+    Returns (path, created_root): ``created_root`` is True when this call
+    had to make ``~/.swe/skills`` itself, so no harness links to it yet
+    and the caller should point at ``swe init``. Raises ValueError for
+    anything the user can fix; the command turns it into exit 1.
     """
     if problem := validate_name(name):
         raise ValueError(problem)
@@ -70,6 +72,7 @@ def create(name: str, description: str | None = None,
     )
 
     skills = paths.skills_dir_for(home)
+    created_root = False
     if not skills.is_dir():
         swe_dir = skills.parent
         if not swe_dir.is_dir():
@@ -77,6 +80,7 @@ def create(name: str, description: str | None = None,
                 f"{swe_dir} doesn't exist — run swe init or "
                 "swe setup --apply first")
         skills.mkdir()
+        created_root = True
     folder = skills / name
     if folder.exists() or folder.is_symlink():
         raise ValueError(f"{name} already exists at {folder}")
@@ -93,4 +97,4 @@ def create(name: str, description: str | None = None,
         # Leave nothing behind, or a retry would find the name taken.
         shutil.rmtree(folder, ignore_errors=True)
         raise
-    return target, False
+    return target, created_root

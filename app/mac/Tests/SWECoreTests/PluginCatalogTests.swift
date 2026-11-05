@@ -829,6 +829,9 @@ func decodedInventory() throws -> [Skill] {
             await model.run(PluginAction(verb: .disable, ref: "toolkit@kit", harness: "claude"), swe: swe)
         }
         await fixes.fix(finding, swe: SweClient(runner: held))
+        // The fix itself did run (so the hook fired), and the action it
+        // tried meanwhile did not.
+        #expect(held.calls.contains(["find", "plugins", "--fix=codex:stale:canva@openai-curated", "--json"]))
         #expect(!runner.calls.contains { $0.starts(with: ["plugins", "disable"]) })
         #expect(!work.isBusy)
     }
