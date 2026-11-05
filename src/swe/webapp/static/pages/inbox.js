@@ -77,7 +77,7 @@ const NeedsYou = (() => {
 (() => {
   const inbox = {
     data: null, status: 0, unreadOnly: true, loading: false,
-    busy: new Set(), confirmAll: false, actionError: null, writes: 0,
+    busy: new Set(), confirmAll: false, actionError: null, writes: 0, seq: 0,
   };
   /* Needs you: the hub's rows (null until the first answer), the last
    * read's or clear's error, and the dismissals still in flight. */
@@ -89,7 +89,7 @@ const NeedsYou = (() => {
     // GitHubModel.unreadCount > 0 shows the mark-all button, as in the app.
     const busyAll = inbox.busy.has("*");
     const markAll = !inbox.data || inbox.data.transport || !unreadCount() ? "" : `<button type="button"
-        class="gh-button" id="gh-read-all"
+        class="btn lg hairline gh-button" id="gh-read-all"
         title="Mark every notification read"${busyAll || inbox.confirmAll ? " disabled" : ""}>${
         GhUI.ico(busyAll ? "running" : "envelopeOpen", busyAll ? "gh-spin" : "")}<span>Mark all read</span></button>`;
     // The app's Unread / All Tabs: both sides of the filter are labelled.
@@ -107,11 +107,14 @@ const NeedsYou = (() => {
   async function render(_id, refresh = false) {
     const gen = routeGen;
     const writes = inbox.writes;
+    // A Refresh pressed while the minute poll's read is out: only the
+    // newest read's reply paints, so an older one can't land last.
+    const seq = ++inbox.seq;
     inbox.loading = true;
     paint();
     loadNeeds();
     const { status, data } = await api(`/v1/app/inbox${refresh ? "?refresh=1" : ""}`);
-    if (gen !== routeGen) return;
+    if (gen !== routeGen || seq !== inbox.seq) return;
     inbox.loading = false;
     if (status === 401) return GhUI.gate("inbox");
     // A mark-read landed while this read was in flight: its rows may be
@@ -158,7 +161,9 @@ const NeedsYou = (() => {
       const failed = data.failed || [];
       if (failed.length) inbox.actionError = failed.map((f) => `${f.id}: ${f.error}`).join(" · ");
     } else if (status === 401) {
-      if (onInbox()) renderGate();
+      // GhUI.gate also stops the minute poll, whose next read would
+      // paint the old rows over the pair form.
+      if (onInbox()) GhUI.gate("inbox");
       return;
     } else {
       inbox.actionError = GhUI.failMessage(status, data);
@@ -310,7 +315,7 @@ const NeedsYou = (() => {
     </div>`;
   }
 
-  const retry = '<button type="button" class="gh-button" id="gh-inbox-retry">Refresh</button>';
+  const retry = '<button type="button" class="btn lg hairline gh-button" id="gh-inbox-retry">Refresh</button>';
   const failCard = (msg) => `<div class="card"><div class="gh-error-row"><span class="error">${esc(msg)}</span>${retry}</div></div>`;
 
   /* Mark all read reaches past the rows on screen (every notification
@@ -322,8 +327,8 @@ const NeedsYou = (() => {
     return `<div class="card gh-confirm" role="group" aria-label="Confirm mark all read">
       <div class="gh-confirm-text">Mark every GitHub notification read, including the ${n} unread here? This can't be undone from here.</div>
       <div class="gh-confirm-buttons">
-        <button type="button" class="gh-button" id="gh-read-all-cancel"${busy ? " disabled" : ""}>Cancel</button>
-        <button type="button" class="gh-button gh-primary" id="gh-read-all-go"${busy ? " disabled" : ""}>${busy ? "Marking…" : "Mark all read"}</button>
+        <button type="button" class="btn lg hairline gh-button" id="gh-read-all-cancel"${busy ? " disabled" : ""}>Cancel</button>
+        <button type="button" class="btn lg hairline gh-button gh-primary" id="gh-read-all-go"${busy ? " disabled" : ""}>${busy ? "Marking…" : "Mark all read"}</button>
       </div></div>`;
   }
 

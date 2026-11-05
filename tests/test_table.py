@@ -443,6 +443,14 @@ class TableNumberKindsTest(unittest.TestCase):
         self.assertTrue(body.endswith("1,234,567"))
         self.assertEqual(visible_len(out[-1]), 10)
 
+    def test_an_infinite_count_renders_as_empty(self):
+        # int(float("inf")) raises OverflowError, not ValueError.
+        for kind in ("number", "count_threshold"):
+            t = Table()
+            t.add_column("n", "N", width=6, fit="fixed", kind=kind)
+            t.add_row({"n": float("inf")})
+            self.assertTrue(t.render()[-1].rstrip().endswith("-"))
+
     def test_count_threshold_green_when_above(self):
         t = Table()
         t.add_column("n", "N", width=6, fit="fixed",

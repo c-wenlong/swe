@@ -7,17 +7,10 @@
 .harness-icon { width: 32px; height: 32px; border-radius: 10px; color: var(--text-nav); }
 .harness-icon.starred { color: var(--warning); }
 .harness-icon.pressed { background: var(--selected); color: var(--text-primary); }
-.harness-icon:disabled, .harness-button:disabled { cursor: default; opacity: .45; }
-.harness-icon:focus-visible, .harness-button:focus-visible, .harness-archive .field:focus-visible {
+.harness-icon:disabled { cursor: default; opacity: .45; }
+.harness-icon:focus-visible, .harness-archive .field:focus-visible {
   outline: 1px solid var(--interactive); outline-offset: 2px;
 }
-.harness-button {
-  height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong);
-  background: var(--panel); color: var(--text-primary); font-size: 13px; cursor: pointer; white-space: nowrap;
-}
-.harness-button:hover:not(:disabled) { background: var(--hover); }
-.harness-button.primary { background: var(--text-primary); color: var(--card); border-color: var(--text-primary); }
-.harness-button.primary:hover:not(:disabled) { background: var(--text-primary); opacity: .9; }
 .harness-archive {
   grid-column: 2 / -1; display: flex; flex-direction: column; gap: 10px; margin-top: 4px;
   padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--subtle);
@@ -33,8 +26,6 @@
 
 /* Header buttons, the row editor's entry, and the three sheets (the
  * <dialog id="harness-sheet"> manage.js builds): editor, Detect, Add. */
-.harness-add { display: inline-flex; align-items: center; gap: 6px; }
-.harness-add svg { width: 14px; height: 14px; }
 .page-actions .harness-button { height: 36px; border-radius: 10px; }
 .harness-none { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .harness-none .empty { margin: 0; }
@@ -70,11 +61,6 @@ textarea.harness-input { height: auto; padding: 8px 10px; resize: vertical; line
 .harness-detect-row input { margin: 0; accent-color: var(--interactive); }
 .harness-detect-name { color: var(--text-primary); }
 .harness-detect-path { color: var(--text-muted); word-break: break-all; }
-.harness-scanning { display: flex; align-items: center; gap: 8px; margin: 0; }
-.harness-spinner {
-  width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border-strong);
-  border-top-color: var(--text-secondary); animation: spin 1s linear infinite; flex: none;
-}
 @media (max-width: 720px) {
   .harness-pair { grid-template-columns: minmax(0, 1fr); }
   /* Three header buttons don't fit beside the title on a phone: they go under it. */

@@ -18,7 +18,7 @@ import Testing
     ]
 
     @Test func theTableCoversEveryOrcaAgent() {
-        let agents = SearchTranscriptSource.table().map(\.agent)
+        let agents = SearchTranscriptSource.table(home: URL(fileURLWithPath: "/h")).map(\.agent)
         #expect(agents == Self.orcaAgents)
         // One row per agent — a duplicate would enumerate the same files twice.
         #expect(Set(agents).count == agents.count)
@@ -27,7 +27,7 @@ import Testing
     @Test func everyRowHasADecoder() {
         // Index-pure scan semantics: an enumerated file with no decoder
         // would mark its `files` row current with no session behind it.
-        for source in SearchTranscriptSource.table() {
+        for source in SearchTranscriptSource.table(home: URL(fileURLWithPath: "/h")) {
             let harness = try? #require(source.harness)
             #expect(harness?.rawValue == source.agent)
             #expect(!source.roots.isEmpty)
@@ -36,7 +36,7 @@ import Testing
     }
 
     @Test func cursorOnlyAcceptsAgentTranscripts() {
-        let cursor = SearchTranscriptSource.table().first { $0.agent == "cursor" }!
+        let cursor = SearchTranscriptSource.table(home: URL(fileURLWithPath: "/h")).first { $0.agent == "cursor" }!
         let transcript = URL(fileURLWithPath:
             "/h/.cursor/projects/-repo/agent-transcripts/abc/abc.jsonl")
         let stray = URL(fileURLWithPath: "/h/.cursor/projects/-repo/mcps/x.jsonl")
@@ -45,7 +45,7 @@ import Testing
     }
 
     @Test func clineOnlyAcceptsSessionManifests() {
-        let cline = SearchTranscriptSource.table().first { $0.agent == "cline" }!
+        let cline = SearchTranscriptSource.table(home: URL(fileURLWithPath: "/h")).first { $0.agent == "cline" }!
         let root = URL(fileURLWithPath: "/h/.cline/data/sessions")
         let manifest = root.appendingPathComponent("s1/s1.json")
         // The sibling is not a manifest — its stem carries `.messages`.
@@ -165,7 +165,7 @@ import Testing
     }
 
     @Test func pairedRowsDeriveSidecarsAndPathSessionIds() {
-        let table = SearchTranscriptSource.table()
+        let table = SearchTranscriptSource.table(home: URL(fileURLWithPath: "/h"))
         let rovo = table.first { $0.agent == "rovo" }!
         let metadata = URL(fileURLWithPath: "/h/.rovodev/sessions/sess-9/metadata.json")
         #expect(rovo.filePredicate?(metadata) == true)

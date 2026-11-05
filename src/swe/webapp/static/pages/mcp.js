@@ -172,8 +172,8 @@ function mcpHeader() {
   const busy = mcpPage.loading;
   return pageHeader("MCP servers",
     `Every server your harnesses configure${where}, where each is missing, and where two disagree.`,
-    `<button class="mcp-button" id="mcp-add"${mcpPage.data ? "" : " disabled"}>${mcpSvg("plus")}<span>Add server</span></button>
-     <button class="mcp-button" id="mcp-health" title="Run each server's command check and reach each URL"${
+    `<button class="btn secondary" id="mcp-add"${mcpPage.data ? "" : " disabled"}>${mcpSvg("plus")}<span>Add server</span></button>
+     <button class="btn secondary" id="mcp-health" title="Run each server's command check and reach each URL"${
       mcpPage.checking ? " disabled" : ""}>${mcpSvg("health")}<span>${mcpPage.checking ? "Checking…" : "Check health"}</span></button>
      <button class="icon-button${busy ? " spinning" : ""}" id="page-refresh" aria-label="Refresh" title="Read the configs again">${icon("rescan")}</button>`);
 }
@@ -521,7 +521,7 @@ async function mcpPreview(s, thenConfirm) {
   const { status, data } = await mcpPost("preview", request);
   if (mcpPage.sheet !== st) return;
   st.running = false;
-  if (status === 401) { renderGate(); return; }
+  if (status === 401) { if (mcpOnPage()) renderGate(); return; }
   if (status !== 200 || !data) {
     st.error = failText(status, data);
     st.preview = null;
@@ -547,7 +547,7 @@ async function mcpSync(s) {
   const { status, data } = await mcpPost("sync", request);
   st.running = false;
   st.confirming = false;
-  if (status === 401) { renderGate(); return; }
+  if (status === 401) { if (mcpOnPage()) renderGate(); return; }
   if (status !== 200 || !data) {
     st.error = failText(status, data);
     st.preview = null;
@@ -583,8 +583,8 @@ function mcpSecretsHtml(s, st) {
         <input class="field mcp-secret-input" type="password" autocomplete="new-password" spellcheck="false"
           data-mcp-secret-draft="${name}" placeholder="${x.set ? "New value" : "Paste the value"}" aria-label="Value for ${name}"
           value="${esc(st.drafts.get(x.name) || "")}"${saving ? " disabled" : ""}>
-        ${x.set ? `<button type="button" class="mcp-sheet-button" data-mcp-secret-cancel="${name}"${saving ? " disabled" : ""}>Cancel</button>` : ""}
-        <button type="button" class="mcp-sheet-button" data-mcp-secret-save="${name}"${
+        ${x.set ? `<button type="button" class="btn secondary mcp-sheet-button" data-mcp-secret-cancel="${name}"${saving ? " disabled" : ""}>Cancel</button>` : ""}
+        <button type="button" class="btn secondary mcp-sheet-button" data-mcp-secret-save="${name}"${
           saving || !(st.drafts.get(x.name) || "").trim() || st.savingSecret ? " disabled" : ""}>${saving ? "Saving…" : "Save"}</button></div>`;
     }
     const shown = st.revealed.get(x.name);
@@ -593,7 +593,7 @@ function mcpSecretsHtml(s, st) {
       <button type="button" class="icon-button mcp-secret-icon" data-mcp-secret-reveal="${name}"
         aria-label="${shown != null ? "Hide" : "Show"} the value" title="${shown != null ? "Hide" : "Show"} the value">${mcpSvg(shown != null ? "eyeOff" : "eye")}</button>
       <button type="button" class="icon-button mcp-secret-icon" data-mcp-secret-copy="${name}" aria-label="Copy the value" title="Copy the value">${mcpSvg("copy")}</button>
-      <button type="button" class="mcp-sheet-button" data-mcp-secret-replace="${name}">Replace</button></div>`;
+      <button type="button" class="btn secondary mcp-sheet-button" data-mcp-secret-replace="${name}">Replace</button></div>`;
   }).join("");
   return `<hr class="mcp-rule">
     <div class="card-title">${missing ? (missing === 1 ? "Needs a value" : "Needs values") : "Secrets"}</div>
@@ -606,6 +606,7 @@ function mcpSecretsHtml(s, st) {
 async function mcpSecretValue(name, st) {
   const { status, data } = await mcpPost("secret_value", { name });
   if (status === 200 && data && typeof data.value === "string") return data.value;
+  if (status === 401) { if (mcpOnPage()) renderGate(); return null; }
   st.secretError = failText(status, data);
   return null;
 }
@@ -709,8 +710,8 @@ function mcpRemoveConfirm(s) {
   return `<div class="mcp-confirm mcp-remove-confirm" role="group" aria-label="Remove ${esc(s.name)}?">
     <p>Remove ${esc(s.name)}? It goes from ${esc(names)} on ${esc(where)}.</p>
     <pre class="command">swe mcp remove ${esc(mcpShellQuote(s.name))} --from=${esc(mcpShellQuote(places.join(",")))}</pre>
-    <div class="sheet-actions"><button type="button" class="mcp-sheet-button" id="mcp-remove-cancel">Cancel</button>
-      <button type="button" class="mcp-sheet-button primary danger" id="mcp-remove-go">Remove</button></div></div>`;
+    <div class="sheet-actions"><button type="button" class="btn secondary mcp-sheet-button" id="mcp-remove-cancel">Cancel</button>
+      <button type="button" class="btn secondary mcp-sheet-button primary danger" id="mcp-remove-go">Remove</button></div></div>`;
 }
 
 /* swe mcp remove on the hub; the sheet closes on success, as the app's
@@ -806,8 +807,8 @@ function mcpConfirmHtml(s, st) {
       h.outcome === "replace" ? `replaces its own ${esc(s.name)}` : `adds ${esc(s.name)}`}${h.creates ? ", creates the file" : ""}</span></li>`).join("")}</ul>
     ${replacing.length ? `<p class="caption">${esc(mcpNames(replacing))} will get ${esc(mcpSourceName(st.source))}'s definition of ${esc(s.name)} instead of their own.</p>` : ""}
     <div class="sheet-actions">
-      <button type="button" class="mcp-sheet-button" id="mcp-confirm-cancel"${st.running ? " disabled" : ""}>Cancel</button>
-      <button type="button" class="mcp-sheet-button primary${replacing.length ? " danger" : ""}" id="mcp-confirm-go"${st.running ? " disabled" : ""}>${
+      <button type="button" class="btn secondary mcp-sheet-button" id="mcp-confirm-cancel"${st.running ? " disabled" : ""}>Cancel</button>
+      <button type="button" class="btn secondary mcp-sheet-button primary${replacing.length ? " danger" : ""}" id="mcp-confirm-go"${st.running ? " disabled" : ""}>${
         replacing.length ? "Replace" : `Write ${n === 1 ? "1 file" : `${n} files`}`}</button>
     </div></div>`;
 }
@@ -858,7 +859,7 @@ function mcpOpenSheet(s) {
       const m = Fmt.mark(h);
       const label = replaces ? `${m.name}, replaces its own definition` : m.name;
       return `<label class="mcp-target">${m.icon ? Fmt.logo(m.icon) : `<span class="mcp-logo-gap"></span>`}<span class="mcp-target-name">${esc(m.name)}</span>${
-        replaces ? `<span class="caption">replaces its own definition</span>` : ""}<input type="checkbox" class="mcp-switch" role="switch" data-mcp-target="${esc(h)}"${
+        replaces ? `<span class="caption">replaces its own definition</span>` : ""}<input type="checkbox" class="switch sm" role="switch" data-mcp-target="${esc(h)}"${
         replaces ? ` data-replaces="1"` : ""} aria-label="${esc(label)}"${st.chosen.has(h) ? " checked" : ""}${st.running || st.done ? " disabled" : ""}></label>`;
     };
     const rows = [...targets.missing.map((h) => toggle(h, false)), ...targets.differing.map((h) => toggle(h, true))];
@@ -875,13 +876,13 @@ function mcpOpenSheet(s) {
   const disabled = !chosenAny || st.running || blocked;
   const removeConfirm = st.removing && !st.running ? mcpRemoveConfirm(s) : "";
   const actions = `${removeConfirm}<div class="sheet-actions mcp-sync-actions">
-      ${st.done ? "" : `<button type="button" class="mcp-sheet-button mcp-remove" id="mcp-remove" aria-expanded="${st.removing}"${st.running ? " disabled" : ""}>Remove…</button>`}
+      ${st.done ? "" : `<button type="button" class="btn secondary mcp-sheet-button mcp-remove" id="mcp-remove" aria-expanded="${st.removing}"${st.running ? " disabled" : ""}>Remove…</button>`}
       ${st.running ? `<span class="caption">Working…</span>` : ""}
       ${blocked ? `<span class="caption warn">Set the values above first.</span>` : ""}
       <span class="mcp-spacer"></span>
-      <button class="mcp-sheet-button" value="close">${st.done ? "Close" : "Cancel"}</button>
-      ${!st.done && canSync ? `<button type="button" class="mcp-sheet-button" id="mcp-preview"${disabled ? " disabled" : ""}>Preview</button>
-      <button type="button" class="mcp-sheet-button primary" id="mcp-sync"${disabled || st.confirming ? " disabled" : ""}>Sync</button>` : ""}
+      <button class="btn secondary mcp-sheet-button" value="close">${st.done ? "Close" : "Cancel"}</button>
+      ${!st.done && canSync ? `<button type="button" class="btn secondary mcp-sheet-button" id="mcp-preview"${disabled ? " disabled" : ""}>Preview</button>
+      <button type="button" class="btn secondary mcp-sheet-button primary" id="mcp-sync"${disabled || st.confirming ? " disabled" : ""}>Sync</button>` : ""}
     </div>`;
 
   sheet.innerHTML = `<form method="dialog" class="sheet-body">
@@ -1123,27 +1124,27 @@ function mcpAddHtml() {
         <input class="field mono mcp-add-value" data-mcp-add-value="${v.id}" type="${hidden ? "password" : "text"}" autocomplete="${v.secret ? "new-password" : "off"}" spellcheck="false"
           placeholder="${v.secret ? "value" : "value or ${NAME}"}" aria-label="Value for ${esc(v.key || "this variable")}" value="${esc(v.value)}"${dis}>
         ${v.secret ? `<button type="button" class="icon-button mcp-secret-icon" data-mcp-add-show="${v.id}" aria-label="${v.show ? "Hide" : "Show"} the value" title="${v.show ? "Hide" : "Show"} the value">${mcpSvg(v.show ? "eyeOff" : "eye")}</button>` : ""}
-        <label class="mcp-add-secret caption">Secret<input type="checkbox" class="mcp-switch" role="switch" data-mcp-add-secret="${v.id}" aria-label="Secret"${v.secret ? " checked" : ""}${dis}></label>
+        <label class="mcp-add-secret caption">Secret<input type="checkbox" class="switch sm" role="switch" data-mcp-add-secret="${v.id}" aria-label="Secret"${v.secret ? " checked" : ""}${dis}></label>
         <button type="button" class="icon-button mcp-secret-icon" data-mcp-add-drop="${v.id}" aria-label="Remove" title="Remove"${dis}>${mcpSvg("minus")}</button>
       </div>${saved}</div>`;
   }).join("");
   const where = d.machine ? ` on ${esc(d.machine)}` : "";
   const variables = `<hr class="mcp-rule"><div class="card-title">${command ? "Env vars" : "Other headers"}</div>
     <div class="mcp-add-vars">${vars}</div>
-    <div><button type="button" class="mcp-sheet-button" id="mcp-add-var"${dis}>${mcpSvg("plus")}<span>${command ? "Add variable" : "Add header"}</span></button></div>
+    <div><button type="button" class="btn secondary mcp-sheet-button" id="mcp-add-var"${dis}>${mcpSvg("plus")}<span>${command ? "Add variable" : "Add header"}</span></button></div>
     <p class="caption mcp-muted">Secret values go to ~/.swe/secrets/mcp/.api_keys${where}. The SWE hub keeps a \${NAME} reference; the harnesses you add it to get the value, as a sync gives them.</p>`;
   const fits = (h) => mcpAddFits(a, h);
   const picked = d.harnesses.filter((h) => a.targets.has(h) && fits(h)).length;
   const face = `${picked} of ${d.harnesses.length} ${d.harnesses.length === 1 ? "harness" : "harnesses"}`;
   const checklist = a.picking ? `<div class="mcp-add-picker" role="group" aria-label="Add to">
-      <div class="mcp-add-picker-top"><button type="button" class="mcp-sheet-button" data-mcp-add-all="active">All active</button>
-        <button type="button" class="mcp-sheet-button" data-mcp-add-all="none">None</button></div>
+      <div class="mcp-add-picker-top"><button type="button" class="btn secondary mcp-sheet-button" data-mcp-add-all="active">All active</button>
+        <button type="button" class="btn secondary mcp-sheet-button" data-mcp-add-all="none">None</button></div>
       ${d.harnesses.map((h) => {
         const m = Fmt.mark(h);
         const why = mcpAddWhyNot(a, h);
         return `<label class="mcp-target">${m.icon ? Fmt.logo(m.icon) : `<span class="mcp-logo-gap"></span>`}<span class="mcp-target-name">${esc(m.name)}</span>
           ${why ? `<span class="caption">${esc(why)}</span>` : ""}
-          <span class="mcp-spacer"></span><input type="checkbox" class="mcp-switch" role="switch" data-mcp-add-target="${esc(h)}" aria-label="${esc(m.name)}"${
+          <span class="mcp-spacer"></span><input type="checkbox" class="switch sm" role="switch" data-mcp-add-target="${esc(h)}" aria-label="${esc(m.name)}"${
             a.targets.has(h) && !why ? " checked" : ""}${dis || why ? " disabled" : ""}></label>`;
       }).join("")}</div>` : "";
   const left = d.harnesses.filter((h) => mcpAddWhyNot(a, h));
@@ -1154,14 +1155,14 @@ function mcpAddHtml() {
       <button type="button" class="field mcp-add-face" id="mcp-add-pick" aria-expanded="${a.picking}"${dis}>${esc(face)} ${mcpSvg(a.picking ? "up" : "down")}</button></div>
     ${checklist}${leftNote}
     <label class="mcp-add-where"><span>Replace if it already exists</span>
-      <input type="checkbox" class="mcp-switch" role="switch" id="mcp-add-force" aria-label="Replace if it already exists"${a.force ? " checked" : ""}${dis}></label>`;
+      <input type="checkbox" class="switch sm" role="switch" id="mcp-add-force" aria-label="Replace if it already exists"${a.force ? " checked" : ""}${dis}></label>`;
   return `<form method="dialog" class="sheet-body">
     <div class="sheet-title" id="mcp-add-title">Add a server</div>
     ${server}${variables}${placesHtml}
     ${a.error ? `<p class="error" role="alert">${esc(a.error)}</p>` : ""}
     <div class="sheet-actions mcp-sync-actions"><span class="mcp-spacer"></span>
-      <button type="button" class="mcp-sheet-button" id="mcp-add-cancel"${dis}>Cancel</button>
-      <button type="submit" class="mcp-sheet-button primary" id="mcp-add-go"${mcpAddReady(a) ? "" : " disabled"}>${a.working ? "Adding…" : "Add server"}</button></div>
+      <button type="button" class="btn secondary mcp-sheet-button" id="mcp-add-cancel"${dis}>Cancel</button>
+      <button type="submit" class="btn secondary mcp-sheet-button primary" id="mcp-add-go"${mcpAddReady(a) ? "" : " disabled"}>${a.working ? "Adding…" : "Add server"}</button></div>
   </form>`;
 }
 

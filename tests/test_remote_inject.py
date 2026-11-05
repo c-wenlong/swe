@@ -277,8 +277,24 @@ class TestTmuxInjector(unittest.TestCase):
         # A second answer cannot even capture the pane until the first
         # walk's keys have all landed — interleaved arrows would select
         # a row nobody asked for.
-        lock = inject.TmuxInjector._pane_locks.setdefault(
-            self.key, threading.Lock())
+        class Lock:
+            """The pane lock, signalling when another thread asks for it."""
+
+            def __init__(self):
+                self.real, self.asked = threading.Lock(), threading.Event()
+
+            def __enter__(self):
+                if threading.current_thread() is not threading.main_thread():
+                    self.asked.set()
+                self.real.acquire()
+                return self
+
+            def __exit__(self, *exc):
+                self.real.release()
+
+        lock = Lock()
+        self.enterContext(patch.dict(inject.TmuxInjector._pane_locks,
+                                     {self.key: lock}))
         sent = []
 
         def _key(_name, key):
@@ -286,16 +302,21 @@ class TestTmuxInjector(unittest.TestCase):
             return True
 
         with patch.object(supervise, "capture_pane",
-                          return_value=self.DEVIN_QUESTION), \
+                          return_value=self.DEVIN_QUESTION) as capture, \
              patch.object(supervise, "send_key", side_effect=_key):
             with lock:
                 t = threading.Thread(
                     target=self.inj.approval,
                     args=(self.session, "r1", "2"))
                 t.start()
-                time.sleep(0.1)
-                self.assertEqual(sent, [])  # parked on the lock
+                # Wait until the walk is at the lock, then check it is
+                # parked there: nothing captured, nothing sent.
+                self.assertTrue(lock.asked.wait(5))
+                self.assertTrue(t.is_alive())
+                capture.assert_not_called()
+                self.assertEqual(sent, [])
             t.join(2)
+        self.assertFalse(t.is_alive())
         self.assertEqual(sent, ["Down", "Enter"])
 
     def test_approval_choice_unreachable_mid_walk(self):
@@ -373,6 +394,25 @@ class TestTmuxInjector(unittest.TestCase):
             out = self.inj.control(self.session, "compact", "")
         self.assertTrue(out.ok)
         self.assertEqual(st.call_args[0][1], "/compact")
+
+    def test_model_and_effort_only_where_the_tui_takes_them(self):
+        # Typed into a TUI without /model or /effort, the line would be
+        # sent to the model as a prompt.
+        import dataclasses
+        for tool, op, ok in (("claude", "model", True),
+                             ("claude", "effort", True),
+                             ("codex", "model", True),
+                             ("codex", "effort", False),
+                             ("opencode", "model", False),
+                             ("gemini", "model", False)):
+            session = dataclasses.replace(self.session, tool_name=tool)
+            with patch.object(supervise, "send_text",
+                              return_value=True) as st:
+                out = self.inj.control(session, op, "x")
+            self.assertEqual(out.ok, ok, (tool, op))
+            self.assertEqual(st.called, ok, (tool, op))
+            if not ok:
+                self.assertTrue(out.note.startswith("unsupported_control:"))
 
     def test_send_empty_and_unreachable(self):
         out = self.inj.send(self.session, {"text": "", "mode": "steer"}, "done")
@@ -953,10 +993,6 @@ class TestHubWrites(unittest.TestCase):
         self.assertIn("shot.png", sent)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestAttachmentCapability(unittest.TestCase):
     """``capabilities.attachments`` over ``ATTACH_FALLBACK``."""
 
@@ -1024,3 +1060,7 @@ class TestAttachmentCapability(unittest.TestCase):
         with patch.object(registry, "load_registry_readonly",
                           side_effect=ValueError):
             self.assertTrue(attachments.at_refs("claude"))
+
+
+if __name__ == "__main__":
+    unittest.main()

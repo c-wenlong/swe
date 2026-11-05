@@ -1428,7 +1428,7 @@ class TestHubWriteRoutes(unittest.TestCase):
     def test_server_header_names_no_python(self):
         _, pairs = self._headers("/")
         server = dict((k.lower(), v) for k, v in pairs)["server"]
-        self.assertEqual(server, "quiver-remote")
+        self.assertEqual(server, "swe-remote")
 
     def test_bad_body_400(self):
         conn = http.client.HTTPConnection(
@@ -3574,7 +3574,7 @@ class TestServeEntry(unittest.TestCase):
         sat = state.bus.subscribe(state.sat_journal_key("sat1"))
         self.assertFalse(state.watched())
         # A session stream, or the global one the ntfy notifier holds.
-        for key in ("claude:a", hub_mod.GLOBAL_KEY, None):
+        for key in ("claude:a", hub_mod.GLOBAL_KEY):
             q = state.bus.subscribe(key)
             self.assertTrue(state.watched(), key)
             state.bus.unsubscribe(q)

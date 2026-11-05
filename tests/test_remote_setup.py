@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import plistlib
+import ssl
 import subprocess
 import time
 import unittest
@@ -373,6 +374,15 @@ class CertCheckTest(unittest.TestCase):
         setup.check_cert("/ts", NAME, self.home, self.tailscale(1, "no"), now=time.time() - 3600, fresh=True)
         self.assertIsNone(setup._cached_cert(self.home, NAME), "a failure an hour old is stale")
 
+    def test_a_malformed_cache_reads_as_no_cache(self):
+        # Status reads the same cache check_cert does: neither may raise.
+        cache = setup._cert_cache(self.home)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        for raw in ('{"name": "%s", "ok": true, "at": null}' % NAME,
+                    '[1]', '{"name": "%s", "at": "x"}' % NAME, '{bad'):
+            cache.write_text(raw, encoding="utf-8")
+            self.assertIsNone(setup._cached_cert(self.home, NAME), raw)
+
     def test_advice_names_the_cause(self):
         self.assertIn("DNS server", setup.cert_advice("lookup acme-v02: i/o timeout"))
         self.assertIn("HTTPS certificates are off", setup.cert_advice("your tailnet does not have HTTPS enabled; not enabled"))
@@ -461,9 +471,22 @@ class GatherTest(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *a): return False
 
-        with patch.object(agent, "_urlopen", lambda req, timeout: seen.append(req.full_url) or Resp()):
+        ctx = object()
+
+        def urlopen(req, timeout=None, context=None):
+            seen.append((req.full_url, context))
+            if context is None:
+                # Python's own store has no CA for the cert.
+                raise urllib.error.URLError(ssl.SSLCertVerificationError("no CA"))
+            return Resp()
+
+        # _fallback_ctx is sticky module state: start clean, restore after.
+        with patch.object(agent, "_fallback_ctx", None), \
+                patch("urllib.request.urlopen", urlopen), \
+                patch("swe.harness.rate_limits._verified_context", return_value=ctx):
             self.assertEqual(setup._get(URL + "/v1/status", 5), (True, ""))
-        self.assertEqual(seen, [URL + "/v1/status"])
+        self.assertEqual(seen, [(URL + "/v1/status", None),
+                                (URL + "/v1/status", ctx)])
 
 
 class DefaultActionsTest(unittest.TestCase):
