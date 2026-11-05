@@ -47,9 +47,10 @@ final class IssuesDecodingTests: XCTestCase {
         XCTAssertEqual(five.labels, ["bug"])
         XCTAssertEqual(five.assignees, ["bob"])
         XCTAssertEqual(five.comments, 3)
-        XCTAssertEqual(five.updatedDate, GitHubTime.date("2026-01-02T03:04:05Z"))
-        XCTAssertEqual(repo.issues![1].updatedDate,
-                       GitHubTime.date("2026-01-02T03:04:05.123Z"))
+        // Fixed instants, so two parses that both fail can't pass.
+        XCTAssertEqual(five.updatedDate, Date(timeIntervalSince1970: 1_767_323_045))
+        XCTAssertEqual(try XCTUnwrap(repo.issues![1].updatedDate).timeIntervalSince1970,
+                       1_767_323_045.123, accuracy: 0.001)
 
         let failed = body.repos[1]
         XCTAssertEqual(failed.status, "upstream-error")

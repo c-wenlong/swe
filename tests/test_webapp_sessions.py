@@ -798,6 +798,32 @@ return div.innerHTML;
             " T.heading('#'), T.heading('###')];")
         self.assertEqual(out, [[2, "C#"], [2, "#123"], [2, "Title"], None, None])
 
+    def test_long_agent_text_parses_in_linear_time(self):
+        """A prompt-injected agent can print one huge line or block. Each
+        of these took seconds when a regex rescanned to the end from every
+        position; together they now take a blink, and read the same."""
+        out = self.run_js(r"""
+const n = 40000, t0 = Date.now();
+const head = T.heading("# a" + " ".repeat(n) + "b ##");
+T.inline("[".repeat(n));
+const view = T.mdBlocks("<json-render>\n" + "x".repeat(100).concat("\n").repeat(10000));
+const html = T.hl("-".repeat(n), "html");
+T.hl("${".repeat(n / 2), "bash");
+const ms = Date.now() - t0;
+return { ms, head, view: view.map((b) => b.t), tail: html.endsWith("-".repeat(100)),
+  link: T.inline("[[x](https://a.test)"), hash: T.heading("## a  ###"),
+  // A cut inside a long comment leaves no comment open for the next row.
+  after: (() => { const st = { s: null }; T.hl("/*" + "c".repeat(9000) + "*/", "js", st);
+    return T.hl("let x = 1", "js", st).includes("tk-c"); })() };
+""")
+        self.assertLess(out["ms"], 2000)
+        self.assertEqual(out["head"], [1, "a" + " " * 40000 + "b"])
+        self.assertEqual(out["view"], ["rendered"])
+        self.assertTrue(out["tail"])
+        self.assertEqual(out["link"], '[<a href="https://a.test" target="_blank" rel="noopener">x</a>')
+        self.assertEqual(out["hash"], [2, "a"])
+        self.assertFalse(out["after"])
+
     def test_blocks_indented_under_a_list_item(self):
         """A fence or table indented under a list item parses as its own
         block, and a fence's lines lose the fence's indent."""
