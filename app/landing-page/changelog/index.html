@@ -126,6 +126,12 @@ comments in <code>--json</code> gain <code>association</code>.</li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>A status feed with a <code>NaN</code> or out-of-range time no longer blanks
+the web Status page.</strong> Python's JSON reader takes <code>NaN</code>, <code>Infinity</code>
+and <code>1e400</code>, and the incident time went back out as bare <code>NaN</code>, which
+the browser refuses to parse. Such a time now reads as unknown, as it
+does in the Mac app.</p>
+</li>
 <li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
 The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its
 command, but sessions carry the registry id <code>qwen-code</code>, so a file

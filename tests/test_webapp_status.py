@@ -70,6 +70,19 @@ class TestStatuspageParser(unittest.TestCase):
         self.assertEqual(incident.url, "https://stspg.io/sjkw7njwf0mt")
         self.assertFalse(incident.maintenance)
 
+    def test_non_finite_times_read_as_unknown(self):
+        # json.loads takes NaN, Infinity and 1e400; served back they
+        # break the page's JSON.parse, so they read as no time and the
+        # incident falls back to its next known one.
+        for raw in ("NaN", "Infinity", "-Infinity", "1e400"):
+            feed = json.loads(fixture("statuspage-claude"))
+            for key in ("started_at", "updated_at"):
+                feed["incidents"][0][key] = "__T__"
+            text = json.dumps(feed).replace('"__T__"', raw)
+            report = parsers.statuspage(text.encode())
+            self.assertEqual(len(report.incidents), 1, raw)
+            json.dumps(report.to_dict(), allow_nan=False)
+
     def test_incident_io_flavour(self):
         """OpenAI's page is incident.io serving the Statuspage shape, without
         `started_at`, incident components or a maintenance list."""

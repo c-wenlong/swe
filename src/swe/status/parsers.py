@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -130,6 +131,11 @@ def _date(value: Any) -> float | None:
             return None
         return parsed.timestamp() if parsed.tzinfo is not None else None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    # json.loads reads NaN, Infinity and 1e400 (inf); served back they
+    # break the client's JSON.parse. Swift's JSONSerialization refuses
+    # them when it reads the feed, so this matches it.
+    if not math.isfinite(value):
         return None
     return float(value) / 1000 if value > 100_000_000_000 else float(value)
 
