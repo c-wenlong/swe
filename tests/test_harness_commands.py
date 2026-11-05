@@ -894,10 +894,11 @@ class CmdCheckStatusColumnTest(unittest.TestCase):
             live_versions={"claude": "2.1.126"},
         )
         output = _run_cmd_check()
-        plain = strip_ansi(output)
-        self.assertIn("claude", plain)
-        self.assertIn("2.1.126", plain)
-        self.assertIn("cl", plain)  # alias
+        row = _row_for_tool(output, "claude")
+        # The version is drawn dim and the alias cyan, in the claude row
+        # itself (a bare "cl" would match inside "claude").
+        self.assertIn("\033[2m2.1.126", row)
+        self.assertIn("\033[36mcl ", row)
 
     def test_non_installed_row_uses_dim_not_installed_text(self):
         _setup_check_patches(self, installed_cmds=())
@@ -1571,8 +1572,10 @@ class CmdTagsMigrationTest(unittest.TestCase):
 
     def test_dim_tool_list_color(self):
         output = _run_cmd_tags()
-        # TOOLS column uses kind="list" + color="dim" — emits dim ANSI.
-        self.assertIn("\033[2m", output)
+        # TOOLS column uses kind="list" + color="dim". The header labels are
+        # dim too, so the check is on the cell itself, not anywhere.
+        row = _row_for_tool(output, "claude, codex")
+        self.assertIn("\033[2mclaude, codex", row)
 
     def test_alphabetical_tool_list_per_row(self):
         output = _run_cmd_tags()
