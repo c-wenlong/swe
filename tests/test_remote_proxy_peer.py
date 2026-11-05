@@ -65,9 +65,27 @@ class TestForgedForwardedFor(_Owner):
                          "the OS peer check covers macOS and Linux")
     def test_local_process_cannot_claim_the_phone(self):
         # No stub: the real OS check sees this test process, not
-        # tailscaled, on the far end of the loopback connection.
-        status, _ = self.get()
+        # tailscaled, on the far end of the loopback connection. The
+        # socket-owner lookup is wrapped only to record its answer: a
+        # lookup that fails also reads as "not the proxy" (fail closed),
+        # so a 401 alone would not show the check works on this host.
+        if sys.platform == "darwin":
+            lookup, expected = "netstat_pid", os.getpid()
+        else:
+            lookup, expected = "linux_uid", os.getuid()
+        real = getattr(peer, lookup)
+        answers = []
+
+        def recorded(*args, **kwargs):
+            answers.append(real(*args, **kwargs))
+            return answers[-1]
+
+        with patch.object(peer, lookup, recorded):
+            status, _ = self.get()
         self.assertEqual(status, 401)
+        # The lookup found the connection and named this process (macOS)
+        # or this user (Linux) as its owner.
+        self.assertEqual(answers, [expected])
         self.assertNotIn(_PHONE_IP, self.asked)
 
     def test_non_proxy_peer_reads_as_loopback(self):

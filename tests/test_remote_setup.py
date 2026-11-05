@@ -373,6 +373,15 @@ class CertCheckTest(unittest.TestCase):
         setup.check_cert("/ts", NAME, self.home, self.tailscale(1, "no"), now=time.time() - 3600, fresh=True)
         self.assertIsNone(setup._cached_cert(self.home, NAME), "a failure an hour old is stale")
 
+    def test_a_malformed_cache_reads_as_no_cache(self):
+        # Status reads the same cache check_cert does: neither may raise.
+        cache = setup._cert_cache(self.home)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        for raw in ('{"name": "%s", "ok": true, "at": null}' % NAME,
+                    '[1]', '{"name": "%s", "at": "x"}' % NAME, '{bad'):
+            cache.write_text(raw, encoding="utf-8")
+            self.assertIsNone(setup._cached_cert(self.home, NAME), raw)
+
     def test_advice_names_the_cause(self):
         self.assertIn("DNS server", setup.cert_advice("lookup acme-v02: i/o timeout"))
         self.assertIn("HTTPS certificates are off", setup.cert_advice("your tailnet does not have HTTPS enabled; not enabled"))

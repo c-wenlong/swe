@@ -739,15 +739,19 @@ public final class SearchStore: @unchecked Sendable {
             // lowered it, leaving its messages until some later delete.
             try db.execute("BEGIN IMMEDIATE")
             do {
-                // Scoped: an unfinalized statement that read a row keeps a cursor on
-                // messages open, which locks the deletes below with SQLITE_LOCKED.
+                // Reset once read: the probe is cached, never finalized, and a
+                // statement left on a row keeps a read cursor on messages open
+                // past the commit, which holds the WAL checkpoint back (and,
+                // when the batch limit ends the drain, until the next scan).
                 let orphan: Int64? = try {
                     let probe = try cachedStatement("""
                         SELECT session_row_id FROM messages
                         WHERE session_row_id NOT IN (SELECT id FROM sessions) LIMIT 1
                         """)
                     probe.bind([])
-                    return try probe.step() ? probe.int(0) : nil
+                    let id: Int64? = try probe.step() ? probe.int(0) : nil
+                    probe.bind([])
+                    return id
                 }()
                 guard let orphan else {
                     try setMeta("orphans_pending", "0")
