@@ -19,8 +19,8 @@ from swe.sessions.models import SessionRow
 from swe.sessions.models_analytics import classify_provider, collect_model_usage
 from swe.sessions.picker import pick_session
 from swe.sessions.resume import (
-    ACCOUNT_HOME_ENV,
     LIMITED_RESUME,
+    account_env,
     RESUME_FLAGS,
     codex_resume_args,
     launch_tool_name,
@@ -316,26 +316,6 @@ def _hit_evidence(hit) -> dict:
     return {"snippet": hit.snippet, "role": hit.role, "ts": hit.ts}
 
 
-def _filter_search(sessions, search: str | None):
-    if not search:
-        return sessions
-    needle = search.lower()
-    out = []
-    for s in sessions:
-        hay = " ".join(
-            [
-                s.agent or "",
-                s.tool_name or "",
-                s.path or "",
-                s.title or "",
-                s.session_id or "",
-            ]
-        ).lower()
-        if needle in hay:
-            out.append(s)
-    return out
-
-
 def _display_title(session, width: int) -> str:
     # Titles live in harness-owned files, so they are untrusted: a stored
     # title carrying an OSC link or a BEL must not reach the terminal.
@@ -605,11 +585,7 @@ def _resume_session(session) -> int:
 
     # A session in an SWE account home only resumes when its harness
     # looks there, not in the default home.
-    env = None
-    variable = ACCOUNT_HOME_ENV.get(session.tool_name)
-    if variable and session.account_home:
-        env = {variable: session.account_home}
-    return cmd_use(cmd_args, env=env)
+    return cmd_use(cmd_args, env=account_env(session))
 
 
 _INDEX_FLAGS = {"--on", "--off", "--status", "--json"}

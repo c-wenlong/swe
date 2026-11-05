@@ -436,8 +436,11 @@ class EditJsonTest(unittest.TestCase):
         self.assertEqual(data["harness"]["display_name"], "Cursor")
 
     def test_display_name_keeps_commas_and_unicode(self):
-        data = decode(self.edit("claude", "--display-name=Claude, the Code"))["data"]
-        self.assertEqual(data["harness"]["display_name"], "Claude, the Code")
+        name = "Claude, the Code \u00e9\u4ee3\u7801 \U0001f916"
+        data = decode(self.edit("claude", f"--display-name={name}"))["data"]
+        self.assertEqual(data["harness"]["display_name"], name)
+        # Saved as given too, not just echoed back.
+        self.assertEqual(self.saved("claude")["display_name"], name)
 
     def test_a_valueless_display_name_flag_is_refused(self):
         self.assertRefused(self.edit("claude", "--display-name"), "--display-name")

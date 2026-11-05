@@ -6,6 +6,8 @@ import sys
 import tempfile
 import unittest
 
+from swe.console import strip_ansi
+
 # The MCP subsystem is invoked as a module so the test exercises the installed
 # package exactly the way `swe mcp ...` does at runtime.
 MCP_MODULE = "swe.mcp"
@@ -449,13 +451,16 @@ class McpSyncCodexPeerTest(unittest.TestCase):
 
     def test_write_to_codex_dry_run_keeps_file_unchanged(self):
         # --dry-run yields a preview without modifying the codex.toml.
+        before = self.codex_path.read_bytes()
         r = self._run("sync", "opencode", "codex",
-                      "--only=notion", "--no-interactive", "--force")
-        # The general sync does not default to dry-run (only sync-codex did),
-        # so this WILL write. Document the change.
-        self.assertEqual(r.returncode, 0)
-        text = self.codex_path.read_text()
-        self.assertIn("[mcp_servers.notion]", text)
+                      "--only=notion", "--no-interactive", "--force",
+                      "--dry-run")
+        self.assertEqual(r.returncode, 0, msg=r.stdout + r.stderr)
+        self.assertEqual(self.codex_path.read_bytes(), before)
+        self.assertNotIn("[mcp_servers.notion]", self.codex_path.read_text())
+        out = strip_ansi(r.stdout)
+        self.assertIn("Dry-run mode: no files will be modified.", out)
+        self.assertIn("codex: 1 would add", out)
 
     def test_edit_codex_preserves_scalar_extras(self):
         """Regression: `swe mcp edit codex node_repl` must NOT strip codex-specific
@@ -790,11 +795,19 @@ class McpSyncUnverifiedHarnessTest(unittest.TestCase):
         self.assertNotIn("hermes", r.stdout)
 
     def test_list_with_explicit_target_shows_unverified(self):
+        # Plain `list` hides hermes (no config yet); naming it reads it.
+        r = self._run("list", "hermes", "--json")
+        self.assertEqual(r.returncode, 0, msg=r.stdout + r.stderr)
+        self.assertEqual(json.loads(r.stdout)["data"],
+                         {"harnesses": ["hermes"], "servers": []})
+        # Once hermes has a config, its server shows under its column.
+        self.hermes_path.parent.mkdir(parents=True)
+        self.hermes_path.write_text(json.dumps(
+            {"mcpServers": {"hermes-only": {"command": "node"}}}))
         r = self._run("list", "hermes")
         self.assertEqual(r.returncode, 0, msg=r.stdout + r.stderr)
-        # Explicitly naming hermes surfaces it (with "No MCP servers found"
-        # since the file doesn't exist yet).
-        self.assertEqual(r.returncode, 0)
+        self.assertIn("hermes-only", r.stdout)
+        self.assertIn("✓", r.stdout)
 
     def test_all_does_not_broadcast_to_unverified_without_config(self):
         r = self._run("sync", "opencode", "--all", "--only=notion",

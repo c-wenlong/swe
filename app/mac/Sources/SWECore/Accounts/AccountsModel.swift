@@ -302,8 +302,12 @@ public final class AccountsModel {
         return profile
     }
 
+    /// The profile's folder can hold a whole Chromium `--user-data-dir`
+    /// (caches, IndexedDB: tens of thousands of files), so the delete runs
+    /// off the main actor; on it, Remove froze the window for seconds.
     public func remove(_ profile: Profile) async throws {
-        try store.remove(id: profile.id)
+        let store = store, id = profile.id
+        try await offMain { Result { try store.remove(id: id) } }.get()
         await load(force: false)
     }
 

@@ -282,14 +282,17 @@ class ApprovalTokens:
     def drop(self, key: str, request_id: str) -> None:
         """Retire the tokens answering ``request_id`` on ``key`` — that
         approval resolved, so its buttons are dead either way. Other
-        pending requests on the session keep working."""
+        pending requests on the session keep working. An empty
+        ``request_id`` is a resolve naming no request, which clears
+        every approval on the session, so it retires all their tokens."""
         with self._lock:
-            self._drop(key, request_id)
+            self._drop(key, request_id, every=not request_id)
 
-    def _drop(self, key: str, request_id: str) -> None:
+    def _drop(self, key: str, request_id: str, every: bool = False) -> None:
         self._tokens = {
             t: e for t, e in self._tokens.items()
-            if not (e["key"] == key and e["request_id"] == request_id)
+            if not (e["key"] == key
+                    and (every or e["request_id"] == request_id))
         }
 
     def _prune(self, now: float) -> None:

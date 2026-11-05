@@ -268,23 +268,34 @@ class CodexTomlEditTest(_ActionHome, unittest.TestCase):
     def test_edits_wait_for_another_swe_holding_the_lock(self):
         import fcntl
         import threading
-        import time
 
         from swe.paths import cache_dir_for
 
         self.write('[plugins."tool@mk"]\nenabled = true\n')
         lock = cache_dir_for(self.home) / "codex-config.lock"
         lock.parent.mkdir(parents=True, exist_ok=True)
-        with open(lock, "a") as held:
-            fcntl.flock(held.fileno(), fcntl.LOCK_EX)
-            worker = threading.Thread(target=set_codex_enabled,
-                                      args=(self.home, "tool@mk", False))
+        # The worker signals as it asks for the lock, instead of the test
+        # guessing how long it takes to get there; an edit that skips the
+        # lock never signals and fails the wait.
+        real_flock = fcntl.flock
+        asking = threading.Event()
+
+        def flock(fd, op):
+            if threading.current_thread() is worker and op == fcntl.LOCK_EX:
+                asking.set()
+            return real_flock(fd, op)
+
+        worker = threading.Thread(target=set_codex_enabled,
+                                  args=(self.home, "tool@mk", False))
+        with open(lock, "a") as held, \
+                unittest.mock.patch.object(fcntl, "flock", flock):
+            real_flock(held.fileno(), fcntl.LOCK_EX)
             worker.start()
-            time.sleep(0.3)
+            self.assertTrue(asking.wait(5))
             self.assertTrue(worker.is_alive())
             self.assertIn("enabled = true", self.config().read_text())
-            fcntl.flock(held.fileno(), fcntl.LOCK_UN)
-        worker.join(5)
+            real_flock(held.fileno(), fcntl.LOCK_UN)
+            worker.join(5)
         self.assertFalse(worker.is_alive())
         self.assertIn("enabled = false", self.config().read_text())
 

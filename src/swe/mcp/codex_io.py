@@ -208,9 +208,16 @@ def parse_codex_mcp_region(region: str) -> dict[str, dict]:
 # ── TOML writer primitives ───────────────────────────────────────────
 
 
+def _toml_string(s: str) -> str:
+    """A TOML basic string. JSON's escapes are TOML's, except that JSON
+    leaves DEL (U+007F) raw and TOML forbids it: one in a server value
+    wrote a config.toml that every later read refused as corrupt."""
+    return json.dumps(s, ensure_ascii=False).replace("\x7f", "\\u007F")
+
+
 def _toml_key(k: str) -> str:
     """Quote keys that are not TOML bare-keys (ASCII letters/digits/underscore/hyphen only)."""
-    return k if re.match(r"^[A-Za-z0-9_-]+$", k) else json.dumps(k, ensure_ascii=False)
+    return k if re.match(r"^[A-Za-z0-9_-]+$", k) else _toml_string(k)
 
 
 def _toml_value(v) -> str:
@@ -236,7 +243,7 @@ def _toml_value(v) -> str:
             f"{_toml_key(k)} = {_toml_value(val)}" for k, val in v.items()
         ) + " }"
     if isinstance(v, str):
-        return json.dumps(v, ensure_ascii=False)
+        return _toml_string(v)
     # TOML date/time literals are bare ISO strings — tomllib hands them
     # back as datetime/date/time objects, which must round-trip.
     if isinstance(v, (datetime, date, time)):
