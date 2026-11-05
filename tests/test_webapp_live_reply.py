@@ -8,6 +8,7 @@ drawing a bubble, and an idle session or a reconnect drops what no final
 claimed."""
 
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -413,10 +414,20 @@ class TestStreamingMarkdown(ChatScript):
         self.assertTrue(out["idle"], "a paint with no new text touches nothing")
 
     def test_the_log_is_no_live_region_and_a_final_is_announced(self):
+        # The shell's markup is a template in paintShell, which the page
+        # does not export, so its two tags are read from the source: each
+        # whole opening tag, whatever its attribute order or line breaks.
         source = CHAT_JS.read_text(encoding="utf-8")
-        log_tag = next(line for line in source.splitlines() if 'id="chat-log"' in line)
-        self.assertNotIn("aria-live", log_tag)
-        self.assertIn('id="chat-announce" role="status" aria-live="polite"', source)
+
+        def tag(element_id):
+            tags = re.findall(r'<[a-z]+\b[^>]*\bid="%s"[^>]*>' % element_id, source)
+            self.assertEqual(len(tags), 1, element_id)
+            return tags[0]
+
+        self.assertNotIn("aria-live", tag("chat-log"))
+        announce = tag("chat-announce")
+        self.assertIn('role="status"', announce)
+        self.assertIn('aria-live="polite"', announce)
         out = self.run_js("""
             const say = ids['chat-announce'] = el('div');
             const settle = () => new Promise((r) => setImmediate(r));
