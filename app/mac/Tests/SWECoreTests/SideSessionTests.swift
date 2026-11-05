@@ -148,7 +148,7 @@ private let worktree = "/Users/k/ai-engineering/.claude/worktrees/jovial"
                                                                    info("cli-side", "codex"),
                                                                    info("other", "claude")], failures: [])),
             ledger: FakeSessionLedger(),
-            parents: { ["cli-side": parent] }, now: { now })
+            parents: { ["cli-side": parent] }, now: { now }, searchIndexingEnabled: false)
         await model.load()
         let byKey = Dictionary(uniqueKeysWithValues: model.rows.map { ("\($0.session.harness)|\($0.id)", $0) })
         #expect(byKey["claude|cli-side"]?.parent == parent)
@@ -169,7 +169,7 @@ private let worktree = "/Users/k/ai-engineering/.claude/worktrees/jovial"
         let parent = SessionParent(id: "local_parent", title: "design-systems-repo", kind: .side)
         let source = FakeSessionSource(list: SessionList(sessions: [], failures: []))
         let model = SessionsModel(source: source, ledger: FakeSessionLedger(), snapshots: file,
-                                  parents: { ["cli-side": parent] }, now: { now })
+                                  parents: { ["cli-side": parent] }, now: { now }, searchIndexingEnabled: false)
         await model.restore()
         // The saved list is fresh, so no listing runs after it.
         await model.loadIfStale(for: "/bin/swe")
