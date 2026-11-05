@@ -204,7 +204,10 @@ import Testing
         let overlapped = AsyncStream<Void>.makeStream()
         await service.setOnFindsInFlight { overlapped.continuation.yield() }
         let forced = Task { await service.usage(for: claudeKey, force: true) }
-        for await _ in overlapped.stream { break }
+        #expect(await withinTimeout {
+            for await _ in overlapped.stream { return true }
+            return false
+        })
         secrets.open()
 
         #expect(await background.value.fetchedAt == usageEpoch)
@@ -336,7 +339,10 @@ import Testing
         let overlapped = AsyncStream<Void>.makeStream()
         await service.setOnFindsInFlight { overlapped.continuation.yield() }
         let b = Task { await service.usage(for: codexKey, force: true) }
-        for await _ in overlapped.stream { break }
+        #expect(await withinTimeout {
+            for await _ in overlapped.stream { return true }
+            return false
+        })
         slow.gate.open()
         let (first, second) = await (a.value, b.value)
 
@@ -465,40 +471,32 @@ private final class HeldUsageTransport: HTTPTransport {
 }
 
 /// Holds every keychain lookup while closed, then answers from `inner`.
-final class GatedSecrets: SecretReading, @unchecked Sendable {
+final class GatedSecrets: SecretReading, Sendable {
     private let inner: FakeSecrets
-    private let lock = NSLock()
-    private var closed = false
-    private var waiting: [CheckedContinuation<Void, Never>] = []
+    /// The gate lookups wait at while closed; nil while open.
+    private let gate = Mutex<HoldGate?>(nil)
 
     init(_ inner: FakeSecrets) { self.inner = inner }
 
-    /// Bumped each time a lookup parks, so the test awaits the park.
+    /// Bumped each time a lookup reaches the closed gate, so the test
+    /// awaits the park. It can't pass until `open`.
     let parks = CountGate()
 
-    func close() { lock.withLock { closed = true } }
+    func close() { gate.withLock { $0 = HoldGate() } }
 
     func open() {
-        let parked = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
-            closed = false
-            defer { waiting = [] }
-            return waiting
+        let held = gate.withLock { g -> HoldGate? in
+            defer { g = nil }
+            return g
         }
-        parked.forEach { $0.resume() }
+        held?.open()
     }
 
     func genericPassword(service: String, account: String) async -> String? {
-        await withCheckedContinuation { continuation in
-            let park = lock.withLock { () -> Bool in
-                if closed { waiting.append(continuation) }
-                return closed
-            }
-            if park {
-                let parks = self.parks
-                Task { await parks.bump() }
-            } else {
-                continuation.resume()
-            }
+        if let held = gate.withLock({ $0 }) {
+            await parks.bump()
+            // A cancelled lookup stops waiting, as a cancelled read would.
+            try? await held.pass()
         }
         return await inner.genericPassword(service: service, account: account)
     }
