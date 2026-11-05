@@ -116,8 +116,9 @@ public struct ProcessRunner: CommandRunning {
         defer { if let activity { ProcessInfo.processInfo.endActivity(activity) } }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = [executable] + arguments
+        let launch = Self.launchPlan(executable: executable, arguments: arguments)
+        process.executableURL = launch.url
+        process.arguments = launch.arguments
         process.environment = env
         let inputPipe = Pipe()
         process.standardInput = input != nil ? inputPipe : FileHandle.nullDevice
@@ -158,10 +159,13 @@ public struct ProcessRunner: CommandRunning {
                 // No child started: close our write ends so the readers see
                 // EOF and finish, and leave the exit entry the termination
                 // handler will never leave, so the group does not leak.
-                func abandon(_ error: any Error) {
+                func abandonQuietly() {
                     group.leave()
                     try? out.fileHandleForWriting.close()
                     try? err.fileHandleForWriting.close()
+                }
+                func abandon(_ error: any Error) {
+                    abandonQuietly()
                     once.resume(throwing: error)
                 }
                 // Set below, before anything can call it: a cancel
@@ -171,6 +175,14 @@ public struct ProcessRunner: CommandRunning {
                     guard try gate.launch(onCancel: { stopper.run() }) else {
                         return abandon(CancellationError())
                     }
+                } catch let error as NSError where launch.isDirect && Self.isMissingFile(error) {
+                    // A path started without env answers the way env
+                    // would have: exit 127 naming it, which SweClient
+                    // reports as "not installed".
+                    abandonQuietly()
+                    return once.resume(CommandResult(
+                        status: 127, stdout: Data(),
+                        stderr: "env: \(executable): No such file or directory\n"))
                 } catch let error as NSError {
                     // env(1) itself failed to spawn — the box is out of
                     // processes or env is broken — which is a system
@@ -284,6 +296,24 @@ public struct ProcessRunner: CommandRunning {
             // it, and neither should anything it started.
             gate.cancel()
         }
+    }
+
+    /// How a run starts. `/usr/bin/env` finds a bare name on the login
+    /// PATH, but it reads a leading `NAME=value` word as an assignment,
+    /// so a swe path holding `=` (a folder named `a=b`) never started
+    /// through it. Such a path is launched directly.
+    static func launchPlan(executable: String, arguments: [String])
+        -> (url: URL, arguments: [String], isDirect: Bool) {
+        if executable.contains("/") && executable.contains("=") {
+            return (URL(fileURLWithPath: executable), arguments, true)
+        }
+        return (URL(fileURLWithPath: "/usr/bin/env"), [executable] + arguments, false)
+    }
+
+    /// Whether a launch failed because the executable is not there.
+    static func isMissingFile(_ error: NSError) -> Bool {
+        (error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError)
+            || (error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT))
     }
 
     /// Sends `signal` to every process under `pid`, walking the tree with
