@@ -340,7 +340,9 @@ extension HubStubbed {
         let release = DispatchSemaphore(value: 0)
         HubStub.handler = { _ in
             Task { await reading.bump() }
-            release.wait()
+            // Bounded so a test that fails before the signal never leaves
+            // the loading thread blocked for good.
+            _ = release.wait(timeout: .now() + .seconds(Int(gateTimeout.components.seconds)))
             return (200, rows)
         }
         async let refresh: Void = local.refreshKeys()
@@ -869,6 +871,9 @@ extension HubStubbed {
     /// This test's own folder, removed with its contents when the test ends.
     let scratch: TempDir
     init() throws { scratch = try TempDir() }
+    /// Opens chats in another suite's folder, which that suite keeps for
+    /// as long as its test runs.
+    init(scratch: TempDir) { self.scratch = scratch }
     var dir: URL { scratch.url }
 
     /// A chat opened on an attached (or observed) session whose `POST
@@ -1025,9 +1030,15 @@ extension HubStubbed {
 extension HubStubbed {
 @MainActor
 @Suite struct SessionChatAttachTests {
+    /// This test's own folder: the chat's hub keeps its device file here,
+    /// so it has to outlive every chat the test opens.
+    let scratch: TempDir
+    init() throws { scratch = try TempDir() }
+
     func opened(ownership: String = "observed", control: (Int, Data) = (200, Data(#"{"ok": true}"#.utf8)),
                 approval: (Int, Data) = (200, Data(#"{"ok": true}"#.utf8))) async throws -> SessionChatModel {
-        try await HubStubbed.SessionChatSendTests().opened(ownership: ownership, control: control, approval: approval)
+        try await HubStubbed.SessionChatSendTests(scratch: scratch)
+            .opened(ownership: ownership, control: control, approval: approval)
     }
 
     func event(_ type: String, _ data: String) -> HubEnvelope {

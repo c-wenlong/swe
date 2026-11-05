@@ -95,6 +95,19 @@ class JsonlNestedEdgesTest(_FailuresClean):
         self.assertEqual([(s.session_id, s.path) for s in sessions], [("new", "/new")])
         self.assertEqual(sessions[0].timestamp, 1_700_000_100_000)
 
+    def test_invalid_utf8_in_the_head_costs_only_that_line(self):
+        # A text-mode read raised UnicodeDecodeError on the bad byte, losing
+        # the path and title on every later line, and the empty scan was
+        # what got cached.
+        fp = self.base / "p" / "a.jsonl"
+        fp.parent.mkdir(parents=True)
+        fp.write_bytes(b'{"note": "bad \xff byte"}\n'
+                       + json.dumps({"cwd": "/w"}).encode() + b"\n"
+                       + json.dumps({"role": "user", "content": "q"}).encode() + b"\n")
+        with parse_cache.activate(self.tmp):
+            sessions = parse_jsonl_projects(self._config())
+        self.assertEqual([(s.path, s.title) for s in sessions], [("/w", "q")])
+
     def test_base_that_is_a_file_is_recorded_as_a_failure(self):
         self.base.write_text("not a folder")
         self.assertEqual(parse_jsonl_projects(self._config()), [])
@@ -284,6 +297,14 @@ class JsonlIndexEdgesTest(_FailuresClean):
         ))
         # "raises" has no path left and require_path drops it.
         self.assertEqual([(s.session_id, s.path) for s in sessions], [("k1", "/from/keep")])
+
+    def test_invalid_utf8_in_the_index_costs_only_that_entry(self):
+        idx = self.base / "p" / "index.jsonl"
+        idx.parent.mkdir(parents=True)
+        idx.write_bytes(b'{"id": "a", "cwd": "/a\xff"}\n{"id": "b", "cwd": "/b"}\n')
+        sessions = parse_jsonl_projects(self._config())
+        self.assertEqual([(s.session_id, s.path) for s in sessions],
+                         [("a", "/a\ufffd"), ("b", "/b")])
 
     def test_non_string_cwd_is_missing_not_a_path(self):
         """A wrongly typed cwd must not slip past require_path.

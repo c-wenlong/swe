@@ -217,14 +217,21 @@ private final class GatedRunner: CommandRunning, Sendable {
     }
 }
 
-/// Answers each run from a queue, then repeats the last reply.
-final class QueueRunner: CommandRunning, @unchecked Sendable {
-    private var replies: [CommandResult]
-    private(set) var calls: [[String]] = []
-    init(_ replies: [CommandResult]) { self.replies = replies }
+/// Answers each run from a queue, then repeats the last reply. Runs
+/// arrive off the test's actor, so the queue and the record are locked.
+final class QueueRunner: CommandRunning, Sendable {
+    private struct State {
+        var replies: [CommandResult]
+        var calls: [[String]] = []
+    }
+    private let state: Mutex<State>
+    var calls: [[String]] { state.withLock { $0.calls } }
+    init(_ replies: [CommandResult]) { state = Mutex(State(replies: replies)) }
     func run(_ arguments: [String]) async throws -> CommandResult {
-        calls.append(arguments)
-        return replies.count > 1 ? replies.removeFirst() : replies[0]
+        state.withLock { s in
+            s.calls.append(arguments)
+            return s.replies.count > 1 ? s.replies.removeFirst() : s.replies[0]
+        }
     }
 }
 
@@ -324,12 +331,6 @@ final class QueueRunner: CommandRunning, @unchecked Sendable {
 
 @MainActor
 @Suite struct HarnessAccountNameModelTests {
-    func tempNamesFile() -> URL {
-        usageScratch
-            .appendingPathComponent("names-\(UUID().uuidString)")
-            .appendingPathComponent("harness-names.json")
-    }
-
     let body = Data(#"""
     {"schema": 1, "data": {"harnesses": [
       {"name": "cursor", "display_name": "Cursor IDE", "command": "cursor-agent", "description": "", "version": null, "aliases": [], "tags": [], "state": "starred", "sessions_100d": 1,
@@ -337,9 +338,9 @@ final class QueueRunner: CommandRunning, @unchecked Sendable {
     ]}}
     """#.utf8)
 
-    @Test func accountNameWinsOverDisplayNameAndBrand() async {
-        let names = HarnessAccountNameStore(file: tempNamesFile())
-        try? names.setName("Cortex", for: "cursor")
+    @Test func accountNameWinsOverDisplayNameAndBrand() async throws {
+        let names = tempNamesStore()
+        try names.setName("Cortex", for: "cursor")
         let model = OtherLimitsModel(
             swe: SweClient(runner: FakeRunner(.init(status: 0, stdout: body, stderr: ""))),
             snapshotFile: tempSnapshotFile(), names: names)
@@ -356,7 +357,7 @@ final class QueueRunner: CommandRunning, @unchecked Sendable {
         let model = OtherLimitsModel(
             swe: SweClient(runner: FakeRunner(.init(status: 0, stdout: body, stderr: ""))),
             snapshotFile: tempSnapshotFile(),
-            names: HarnessAccountNameStore(file: tempNamesFile()))
+            names: tempNamesStore())
         await model.load()
         #expect(model.cards[0].title == "Cursor IDE")
         #expect(model.cards[0].harnessTitle == "Cursor IDE")
@@ -366,7 +367,7 @@ final class QueueRunner: CommandRunning, @unchecked Sendable {
 
     @Test func renameWritesTheNamesFileAndNeverCallsSwe() async throws {
         let file = tempSnapshotFile()
-        let names = HarnessAccountNameStore(file: tempNamesFile())
+        let names = tempNamesStore()
         let runner = FakeRunner(.init(status: 0, stdout: body, stderr: ""))
         let model = OtherLimitsModel(swe: SweClient(runner: runner),
                                      snapshotFile: file, names: names)
@@ -407,7 +408,7 @@ final class QueueRunner: CommandRunning, @unchecked Sendable {
         try json.write(to: file, atomically: true, encoding: .utf8)
         let revived = OtherLimitsModel(
             swe: SweClient(runner: FakeRunner(.init(status: 2, stdout: Data(), stderr: "down"))),
-            snapshotFile: file, names: HarnessAccountNameStore(file: tempNamesFile()))
+            snapshotFile: file, names: tempNamesStore())
         #expect(revived.rows.map(\.name) == ["devin"])
         #expect(revived.rows[0].accountName == nil)
         #expect(revived.rows[0].title == "Devin Teams")
@@ -415,7 +416,7 @@ final class QueueRunner: CommandRunning, @unchecked Sendable {
 
     @Test func hydrateStampsARenameMadeAfterTheSnapshot() async throws {
         let file = tempSnapshotFile()
-        let names = HarnessAccountNameStore(file: tempNamesFile())
+        let names = tempNamesStore()
         let model = OtherLimitsModel(
             swe: SweClient(runner: FakeRunner(.init(status: 0, stdout: body, stderr: ""))),
             snapshotFile: file, names: names)
