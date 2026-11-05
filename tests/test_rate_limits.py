@@ -194,6 +194,29 @@ class RateLimitInfoTest(unittest.TestCase):
 
 
 class RateLimitCacheTest(unittest.TestCase):
+    def test_cache_writes_are_atomic_and_private(self):
+        """Several swe processes write these files at once. An in-place
+        write let a reader see a half-written file; a new file now lands
+        whole, by rename, at 0600."""
+        import stat
+        from swe.harness import rate_limits as rl
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_file = Path(tmp) / "rate_limits_cache.json"
+            with patch("swe.harness.rate_limits.RATE_LIMITS_CACHE_FILE", cache_file), \
+                 patch("swe.harness.rate_limits.atomic_write_text",
+                       wraps=rl.atomic_write_text) as atomic:
+                rl._save_cached({"codex": {"tool_name": "codex", "used_percent": 1}})
+                rl._save_claude_state(None, retry_at=5.0)
+            self.assertEqual(
+                [call.args[0] for call in atomic.call_args_list],
+                [cache_file, cache_file.with_name("claude_usage_cache.json")])
+            for path in (cache_file, cache_file.with_name("claude_usage_cache.json")):
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path)
+                json.loads(path.read_text())
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()),
+                             ["claude_usage_cache.json", "rate_limits_cache.json"])
+
     def test_cache_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             cache_file = Path(tmp) / "rate_limits_cache.json"
@@ -1483,6 +1506,32 @@ class CodexFetcherTest(unittest.TestCase):
                 self.assertEqual(info.plan_type, "—")
                 info.format_column()          # renders without raising
 
+    def test_fetch_codex_drops_a_non_finite_reset_at(self):
+        """JSON ``1e999`` and ``NaN`` parse to inf and nan. Stored as is,
+        the reset column raised ValueError out of `swe list` and to_json
+        wrote Infinity/NaN, which the Mac app's decoder rejects."""
+        from swe.harness.rate_limits import _fetch_codex
+
+        auth_data = {"tokens": {"access_token": "fake-token"}}
+        for raw in (b"1e999", b"-1e999", b"NaN"):
+            body = (b'{"plan_type": "plus", "rate_limit": {"primary_window": '
+                    b'{"used_percent": 10, "reset_at": ' + raw + b'}}}')
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = body
+            mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            with self.subTest(raw=raw), tempfile.TemporaryDirectory() as tmp:
+                auth_path = Path(tmp) / "auth.json"
+                auth_path.write_text(json.dumps(auth_data))
+                with patch("swe.harness.rate_limits.os.path.expanduser",
+                           side_effect=lambda p: str(auth_path) if p == "~/.codex/auth.json" else p), \
+                     patch("swe.harness.rate_limits.urllib.request.urlopen",
+                           return_value=mock_resp):
+                    info = _fetch_codex()
+                self.assertEqual(info.reset_at, 0.0)
+                info.format_column()          # renders without raising
+                json.dumps(info.to_json(), allow_nan=False)
+
     def test_fetch_codex_reads_the_email_off_the_id_token(self):
         """The sign-in's address is an ``id_token`` claim, as the app
         reads it; a missing or un-JWT id_token just means no email."""
@@ -1852,6 +1901,28 @@ class GitHubCopilotFetcherTest(unittest.TestCase):
         ):
             info = _fetch_github_copilot()
         self.assertIsNone(info)
+
+    def test_fetch_copilot_non_dict_bodies(self):
+        """A JSON list body, or quota_snapshots / premium_interactions that
+        are not objects, raised AttributeError instead of reading as no
+        data like the other fetchers."""
+        from swe.harness.rate_limits import _fetch_github_copilot
+
+        for body, expect_info in (
+            ([1, 2], False),
+            ({"copilot_plan": "individual", "quota_snapshots": [1]}, True),
+            ({"copilot_plan": "individual",
+              "quota_snapshots": {"premium_interactions": "x"}}, True),
+        ):
+            with self.subTest(body=body), self._patch_token(), patch(
+                "swe.harness.rate_limits.urllib.request.urlopen",
+                return_value=self._mock_response(body),
+            ):
+                info = _fetch_github_copilot()
+            if expect_info:
+                self.assertEqual((info.used_percent, info.limit_reached), (0, False))
+            else:
+                self.assertIsNone(info)
 
     def test_fetch_copilot_malformed_json(self):
         """Invalid JSON response → return None."""
@@ -3177,6 +3248,22 @@ class DroidFetcherTest(unittest.TestCase):
         self.assertTrue(started.is_set())
         self.assertIsNone(info)
         self.assertLess(time.monotonic() - began, 0.5)
+
+    def test_droid_fetch_carries_a_401_back_to_the_caller_thread(self):
+        """``_fetch_json`` notes failure kinds on the thread it runs on. The
+        Droid worker thread kept the 401's "auth" to itself, so fetch_one
+        saw no kinds and reported an outage instead of auth-required."""
+        from swe.harness import rate_limits as rl
+
+        def fail_401(*args, **kwargs):
+            rl._note_json_failure("auth")
+            return None
+
+        rl._reset_json_failures()
+        with patch("swe.harness.rate_limits._fetch_json", side_effect=fail_401):
+            self.assertIsNone(rl._droid_fetch(MagicMock()))
+        self.assertEqual(rl._json_failure_kinds(), ["auth"])
+        rl._reset_json_failures()
 
     # 1. Env var priority — bypasses decryption + keychain entirely.
     def test_factory_key_env_var_takes_priority(self):
@@ -4521,6 +4608,14 @@ class CursorFetcherTest(unittest.TestCase):
             {"usagePercent": float("nan")}, {"hasNonZeroIncludedLimit": True},
         ):
             self.assertIsNone(grok(reply), reply)
+
+    def test_grok_bot_huge_integer_percent_has_no_window(self):
+        """math.isfinite converts to float, so a 400-digit int raised
+        OverflowError and lost the whole Cursor reading."""
+        from swe.harness.rate_limits import _cursor_grok_bot_window as grok
+
+        self.assertIsNone(grok({"usagePercent": 10 ** 400}))
+        self.assertIsNone(grok({"usagePercent": float("inf")}))
 
     def test_fetch_adds_grok_bot_with_the_bearer_token(self):
         from swe.harness.rate_limits import _CURSOR_GROK_BOT_URL, _CURSOR_USAGE_URL, _fetch_cursor

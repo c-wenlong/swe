@@ -98,7 +98,8 @@
 .status-confirm-button.danger:hover { border-color: var(--danger); }
 .status-cat-add:disabled { opacity: .55; cursor: default; }
 
-.status-catalogue { width: min(680px, calc(100vw - 32px)); }
+/* dialog. outranks styles.css's dialog.sheet width. */
+dialog.status-catalogue { width: min(680px, calc(100vw - 32px)); }
 .status-catalogue::backdrop { background: rgb(0 0 0 / .4); }
 .status-cat-body { display: flex; flex-direction: column; gap: 12px; max-height: min(560px, calc(100vh - 96px)); }
 .status-cat-tabs { flex: none; }
