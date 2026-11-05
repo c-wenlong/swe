@@ -7,7 +7,9 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from swe.configuration import CONFIG_FILE
 from swe.console import strip_ansi
+from swe.paths import HARNESS_FILE, MCP_SOURCE_FILE
 from swe.mcp.discover import MergeResult, McpFinding
 from swe.harness.discover import HarnessFinding
 from swe.setup.commands import cmd_setup
@@ -108,6 +110,8 @@ class SetupWizardTest(unittest.TestCase):
         discover.assert_called_once_with(include_registered=True, include_missing=True)
         apply.assert_called_once()
         self.assertEqual(outcome.backups, ("/tmp/tools.json.bak",))
+        # The backup goes under the wizard's home, not whatever $HOME is.
+        backup.assert_called_once_with(HARNESS_FILE, home=Path("/Users/test"))
 
     def test_full_wizard_runs_sections_in_order(self):
         calls = []
@@ -213,7 +217,7 @@ class SetupWizardTest(unittest.TestCase):
     return_value=MergeResult(added=["notion"], updated=[], orphaned=[], pruned=[]),
 )
     @patch("swe.setup.wizard.discover_mcp_servers")
-    def test_mcp_stage_applies_confirmed_findings(self, discover, apply, _backup):
+    def test_mcp_stage_applies_confirmed_findings(self, discover, apply, backup):
         finding = McpFinding(
             name="notion",
             tools=("claude",),
@@ -230,6 +234,7 @@ class SetupWizardTest(unittest.TestCase):
         self.assertEqual(outcome.status, "changed")
         self.assertEqual(outcome.changed, ("notion",))
         apply.assert_called_once_with([finding])
+        backup.assert_called_once_with(MCP_SOURCE_FILE, home=Path("/tmp/home"))
 
     @patch("swe.setup.wizard.apply_skills_symlink_hints", return_value=["symlink codex"])
     @patch("swe.setup.wizard.skills_symlink_hints")
@@ -249,6 +254,24 @@ class SetupWizardTest(unittest.TestCase):
 
         self.assertEqual(outcome.status, "changed")
         apply.assert_called_once_with([safe], home=Path("/tmp/home"))
+
+    @patch("swe.setup.wizard.save_config")
+    @patch("swe.setup.wizard.backup_file", return_value=Path("/tmp/config.json.bak"))
+    @patch("swe.setup.wizard.interactive_report_setup", return_value={})
+    @patch("swe.setup.wizard.load_config", return_value={})
+    @patch("swe.setup.wizard.report_setup_complete", return_value=False)
+    @patch("swe.setup.wizard.load_resolved_config", return_value={})
+    def test_report_stage_backs_up_under_the_wizard_home(
+        self, _resolved, _complete, _load, _setup, backup, save
+    ):
+        with redirect_stdout(io.StringIO()):
+            outcome = _stage_report(
+                1, 1, input_fn=lambda _prompt: "", home=Path("/tmp/home"), quick=False
+            )
+
+        backup.assert_called_once_with(CONFIG_FILE, home=Path("/tmp/home"))
+        save.assert_called_once_with({})
+        self.assertEqual(outcome.backups, ("/tmp/config.json.bak",))
 
     @patch("swe.setup.wizard.report_setup_complete", return_value=True)
     @patch("swe.setup.wizard.load_resolved_config", return_value={})
@@ -538,9 +561,9 @@ class WizardReportStageTest(unittest.TestCase):
             patcher = patch(target, self.config)
             patcher.start()
             self.addCleanup(patcher.stop)
-        real_backup = backup_file
-        patcher = patch("swe.setup.wizard.backup_file",
-                        side_effect=lambda path: real_backup(path, home=self.home))
+        # A spy over the real thing: the stage itself has to pass its home,
+        # or the backup lands under whatever $HOME is.
+        patcher = patch("swe.setup.wizard.backup_file", wraps=backup_file)
         self.backup = patcher.start()
         self.addCleanup(patcher.stop)
 

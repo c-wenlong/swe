@@ -92,6 +92,8 @@ final class LimitsMonitor {
     /// The timeline's own reads keep the widgets fresh between pushes.
     static let reloadFloor: TimeInterval = 15 * 60
     @ObservationIgnored private var lastWidgetReloadAt: Date?
+    /// Asks WidgetKit to redraw; a test counts the calls instead.
+    @ObservationIgnored var reloadTimelines: () -> Void = { WidgetCenter.shared.reloadAllTimelines() }
 
     /// Whether a write should also ask WidgetKit to redraw: on the first
     /// write, on a forced one (a settings change the user just made), or
@@ -118,7 +120,7 @@ final class LimitsMonitor {
             try widgets.write(snapshot)
             lastWidgetSnapshot = snapshot
             if shouldPushWidgets(force: force, now: now) {
-                WidgetCenter.shared.reloadAllTimelines()
+                reloadTimelines()
                 lastWidgetReloadAt = now
             }
         } catch {

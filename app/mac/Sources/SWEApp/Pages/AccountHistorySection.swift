@@ -18,9 +18,6 @@ struct AccountHistorySection: View {
     /// The card's Sign in action, for a Codex account that isn't signed in.
     var signIn: (() -> Void)?
 
-    static let accountColor = Color(light: "#3565c9", dark: "#5b8def")
-    static let macColor = Color(light: "#a1a1aa", dark: "#8a8a92")
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Rectangle().fill(Theme.border).frame(height: Theme.hairline)
@@ -123,14 +120,14 @@ struct HistoryPoint: Equatable {
 /// One line per series with no axis: the account total in blue where the
 /// vendor shares one, this Mac in grey. The running week or month is the
 /// dashed last stretch, and hovering a period reads out its figures.
-private struct HistoryChart: View {
+struct HistoryChart: View {
     var periods: [HistoryPoint]
     var monthly: Bool
     private static let height: CGFloat = 56
 
     /// One plotted point. `series` keeps lines apart; a dashed point
     /// belongs to the running period's stretch, drawn as its own series.
-    private struct Point: Identifiable {
+    struct Point: Identifiable {
         var series: String
         var color: Color
         var index: Int
@@ -139,24 +136,23 @@ private struct HistoryChart: View {
     }
 
     /// Account total (where shared) then this Mac, as plain token arrays.
-    private var lines: [(name: String, color: Color, values: [Int])] {
+    private static func lines(_ periods: [HistoryPoint]) -> [(name: String, color: Color, values: [Int])] {
         var lines: [(name: String, color: Color, values: [Int])] = []
         if periods.contains(where: { $0.account != nil }) {
-            lines.append(("Account", AccountHistorySection.accountColor, periods.map { $0.account ?? 0 }))
+            lines.append(("Account", Theme.historyAccount, periods.map { $0.account ?? 0 }))
         }
-        lines.append(("This Mac", AccountHistorySection.macColor, periods.map(\.mac)))
+        lines.append(("This Mac", Theme.historyMac, periods.map(\.mac)))
         return lines
     }
 
-    /// Index of the running period, or `periods.count` when none is running.
-    private var running: Int {
-        periods.last?.inProgress == true ? periods.count - 1 : periods.count
-    }
-
-    private var points: (all: [Point], solid: [Point], dashed: [Point], ends: [Point]) {
+    /// Every series' points, split into the solid finished stretch, the
+    /// running period's dashed stretch (from the last finished point) and
+    /// each line's end.
+    static func points(_ periods: [HistoryPoint]) -> (all: [Point], solid: [Point], dashed: [Point], ends: [Point]) {
         var all: [Point] = [], solid: [Point] = [], dashed: [Point] = [], ends: [Point] = []
-        let running = running
-        for line in lines {
+        // The running period's index, or `periods.count` when none runs.
+        let running = periods.last?.inProgress == true ? periods.count - 1 : periods.count
+        for line in lines(periods) {
             for (index, tokens) in line.values.enumerated() {
                 let point = Point(series: line.name, color: line.color, index: index, tokens: tokens)
                 all.append(point)
@@ -173,7 +169,7 @@ private struct HistoryChart: View {
     }
 
     var body: some View {
-        let points = points
+        let points = Self.points(periods)
         let peak = max(1, points.all.map(\.tokens).max() ?? 1)
         Chart {
             areas(points.all)
