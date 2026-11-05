@@ -17,19 +17,14 @@ import Testing
         #expect(LegacyDefaults.legacyDomain != "com.cwenlong.swe")
     }
 
-    @Test func defaultsCopyFromTheLegacyDomain() throws {
-        let legacy = "test.legacy.\(UUID().uuidString)"
-        let target = "test.target.\(UUID().uuidString)"
-        let old = try #require(UserDefaults(suiteName: legacy))
-        let new = try #require(UserDefaults(suiteName: target))
-        defer {
-            old.removePersistentDomain(forName: legacy)
-            new.removePersistentDomain(forName: target)
-        }
+    @Test func defaultsCopyFromTheLegacyDomain() {
+        // Scratch suites under the temp folder, never ~/Library/Preferences.
+        let old = TestDefaults("legacy")
+        let new = TestDefaults("target")
         old.set("/opt/swe", forKey: "swePath")
         old.set("old", forKey: "kept")
         new.set("new", forKey: "kept")
-        LegacyDefaults.migrate(into: new, from: legacy)
+        LegacyDefaults.migrate(into: new, from: old.suite)
         #expect(new.string(forKey: "swePath") == "/opt/swe")
         #expect(new.string(forKey: "kept") == "new")
         #expect(new.bool(forKey: LegacyDefaults.flagKey))
