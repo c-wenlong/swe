@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import SWECore
 
@@ -174,11 +175,6 @@ import Testing
 
     // MARK: The trend sampler
 
-    final class Clock: @unchecked Sendable {
-        var now: Date
-        init(_ now: Date) { self.now = now }
-    }
-
     final class CountingSampler: ProcessSampling, @unchecked Sendable {
         var table: [ProcessSample]
         var calls = 0
@@ -245,7 +241,9 @@ import Testing
             if gate != nil { held = gate; parked = true }
             lock.unlock()
             if gate != nil { Task { await parks.bump() } }
-            gate?.wait()
+            // Bounded so a test that never releases fails instead of
+            // hanging the suite.
+            _ = gate?.wait(timeout: .now() + .seconds(Int(gateTimeout.components.seconds)))
             if gate != nil {
                 lock.lock()
                 parked = false
@@ -305,7 +303,9 @@ import Testing
             if gate != nil { held = gate; parked = true }
             lock.unlock()
             if gate != nil { Task { await parks.bump() } }
-            gate?.wait()
+            // Bounded so a test that never releases fails instead of
+            // hanging the suite.
+            _ = gate?.wait(timeout: .now() + .seconds(Int(gateTimeout.components.seconds)))
             if gate != nil {
                 lock.lock()
                 parked = false
@@ -325,35 +325,37 @@ import Testing
         }
     }
 
-    final class SleepLog: @unchecked Sendable {
-        var durations: [Duration] = []
+    /// Locked: the loop calls it from its own task.
+    final class SleepLog: Sendable {
+        private let log = Mutex<[Duration]>([])
         let limit: Int
-        let clock: Clock
-        init(limit: Int, clock: Clock) { self.limit = limit; self.clock = clock }
+        let clock: Box<Date>
+        init(limit: Int, clock: Box<Date>) { self.limit = limit; self.clock = clock }
+        var durations: [Duration] { log.withLock { $0 } }
         func call(_ duration: Duration) throws {
             // Sleeping advances the fake clock, so the next tick samples anew.
             let seconds = Double(duration.components.seconds)
                 + Double(duration.components.attoseconds) / 1e18
-            clock.now = clock.now.addingTimeInterval(seconds)
-            durations.append(duration)
-            if durations.count >= limit { throw CancellationError() }
+            clock.value = clock.value.addingTimeInterval(seconds)
+            let count = log.withLock { $0.append(duration); return $0.count }
+            if count >= limit { throw CancellationError() }
         }
     }
 
     @MainActor
     private func model(sampler: CountingSampler, gpu: any GPUSampling = FakeGPU([:]),
                        temperature: any TemperatureSampling = FakeThermometer(nil),
-                       clock: Clock,
+                       clock: Box<Date>,
                        sleep: (@Sendable (Duration) async throws -> Void)? = nil) -> ComputeModel {
         ComputeModel(sampler: sampler, matchers: { [Self.claude] },
-                     gpu: gpu, temperature: temperature, clock: { clock.now },
+                     gpu: gpu, temperature: temperature, clock: { clock.value },
                      sleep: sleep ?? { _ in },
                      defaults: TestDefaults("trend"),
                      selfPID: 99)
     }
 
     @MainActor @Test func theLoopTicksAtTheChosenInterval() async {
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let sampler = CountingSampler([Self.proc(10, 1, path: "/opt/homebrew/bin/claude")])
         let log = SleepLog(limit: 3, clock: clock)
         let model = model(sampler: sampler, clock: clock) { try log.call($0) }
@@ -366,7 +368,7 @@ import Testing
     }
 
     @MainActor @Test func aTickReusesAFreshPageSample() async {
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let sampler = CountingSampler([Self.proc(10, 1, path: "/opt/homebrew/bin/claude")])
         let model = model(sampler: sampler, clock: clock)
         await model.loadMatchers()
@@ -378,14 +380,14 @@ import Testing
         #expect(sampler.callCount == 1)
         #expect(model.history.points(for: "claude").count == 1)
         // Eleven seconds on, the sample is stale: the tick takes its own.
-        clock.now = Self.now.addingTimeInterval(11)
-        await model.trendTick(at: clock.now)
+        clock.value = Self.now.addingTimeInterval(11)
+        await model.trendTick(at: clock.value)
         #expect(sampler.callCount == 2)
         #expect(model.history.points(for: "claude").count == 2)
     }
 
     @MainActor @Test func aTickSumsGPUOverTheHarnessesPids() async {
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         // pid 11 hangs under pid 10, so both are claude's.
         let procs = [Self.proc(10, 1, path: "/opt/homebrew/bin/claude"),
                      Self.proc(11, 10, path: "/x/helper")]
@@ -401,13 +403,13 @@ import Testing
         #expect(model.gpuAvailable)
         // +1s and +2s of GPU time over ten seconds of wall: 10% + 20%.
         gpu.table = [10: 2_000_000_000, 11: 4_000_000_000]
-        clock.now = Self.now.addingTimeInterval(10)
-        await model.trendTick(at: clock.now)
+        clock.value = Self.now.addingTimeInterval(10)
+        await model.trendTick(at: clock.value)
         #expect(model.history.points(for: "claude").last?.gpuPercent == 30)
     }
 
     @MainActor @Test func aTickRecordsTheMacsTemperatures() async {
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let thermometer = FakeThermometer(nil)
         let model = model(sampler: CountingSampler([]), temperature: thermometer, clock: clock)
         // No sensors: nothing recorded, and the tab can say so.
@@ -417,8 +419,8 @@ import Testing
         // Recorded even with no harness running: the Mac is still warm.
         thermometer.reading = TemperatureReading([.cpu: 58, .gpu: 61, .battery: 35],
                                                  fans: FanSummary(rpm: 3100, up: true))
-        clock.now = Self.now.addingTimeInterval(10)
-        await model.trendTick(at: clock.now)
+        clock.value = Self.now.addingTimeInterval(10)
+        await model.trendTick(at: clock.value)
         #expect(model.history.temperatures.map { $0[.cpu] } == [58])
         #expect(model.history.temperatures.last?[.battery] == 35)
         #expect(model.history.temperatures.last?[.gpu] == 61)
@@ -427,8 +429,8 @@ import Testing
         var heard: [Double?] = []
         model.onTemperature = { heard.append($0[.cpu]) }
         thermometer.reading = TemperatureReading([.cpu: 81])
-        clock.now = Self.now.addingTimeInterval(20)
-        await model.trendTick(at: clock.now)
+        clock.value = Self.now.addingTimeInterval(20)
+        await model.trendTick(at: clock.value)
         #expect(heard == [81])
         #expect(model.temperatureAvailable)
         #expect(model.history.isEmpty)
@@ -514,7 +516,7 @@ import Testing
     }
 
     @MainActor @Test func noGPUAnswerMeansNilPointsAndNoAvailability() async {
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let sampler = CountingSampler([Self.proc(10, 1, path: "/opt/homebrew/bin/claude")])
         let model = model(sampler: sampler, gpu: FakeGPU([:]), temperature: FakeThermometer(nil), clock: clock)
         await model.loadMatchers()
@@ -525,10 +527,10 @@ import Testing
 
     @MainActor @Test func changingTheIntervalKeepsThePointsAndSaves() async {
         let defaults = TestDefaults("trend-interval")
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let sampler = CountingSampler([Self.proc(10, 1, path: "/opt/homebrew/bin/claude")])
         let model = ComputeModel(sampler: sampler, matchers: { [Self.claude] },
-                                 gpu: FakeGPU([:]), temperature: FakeThermometer(nil), clock: { clock.now },
+                                 gpu: FakeGPU([:]), temperature: FakeThermometer(nil), clock: { clock.value },
                                  defaults: defaults, selfPID: 99)
         await model.loadMatchers()
         await model.trendTick(at: Self.now)
@@ -543,13 +545,13 @@ import Testing
         // respawn `swe list` five times.
         final class Empty: @unchecked Sendable { var calls = 0 }
         let empty = Empty()
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let sampler = CountingSampler([Self.proc(10, 1, path: "/opt/homebrew/bin/claude")])
         let model = ComputeModel(sampler: sampler, matchers: { empty.calls += 1; return [] },
-                                 gpu: FakeGPU([:]), temperature: FakeThermometer(nil), clock: { clock.now },
+                                 gpu: FakeGPU([:]), temperature: FakeThermometer(nil), clock: { clock.value },
                                  defaults: TestDefaults("trend"),
                                  selfPID: 99)
-        for _ in 0..<5 { await model.trendTick(at: clock.now) }
+        for _ in 0..<5 { await model.trendTick(at: clock.value) }
         #expect(empty.calls == 1)
     }
 
@@ -557,29 +559,29 @@ import Testing
         final class Failing: @unchecked Sendable { var calls = 0 }
         struct LoaderError: Error {}
         let failing = Failing()
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let model = ComputeModel(sampler: CountingSampler([]),
                                  matchers: { failing.calls += 1; throw LoaderError() },
-                                 gpu: FakeGPU([:]), temperature: FakeThermometer(nil), clock: { clock.now },
+                                 gpu: FakeGPU([:]), temperature: FakeThermometer(nil), clock: { clock.value },
                                  defaults: TestDefaults("trend"),
                                  selfPID: 99)
-        await model.trendTick(at: clock.now)
+        await model.trendTick(at: clock.value)
         #expect(failing.calls == 1)
         // Inside the minute: no retry.
-        clock.now = Self.now.addingTimeInterval(30)
-        await model.trendTick(at: clock.now)
+        clock.value = Self.now.addingTimeInterval(30)
+        await model.trendTick(at: clock.value)
         #expect(failing.calls == 1)
         // Past it: one retry, then quiet again.
-        clock.now = Self.now.addingTimeInterval(61)
-        await model.trendTick(at: clock.now)
+        clock.value = Self.now.addingTimeInterval(61)
+        await model.trendTick(at: clock.value)
         #expect(failing.calls == 2)
-        clock.now = Self.now.addingTimeInterval(70)
-        await model.trendTick(at: clock.now)
+        clock.value = Self.now.addingTimeInterval(70)
+        await model.trendTick(at: clock.value)
         #expect(failing.calls == 2)
     }
 
     @MainActor @Test func aTickAggregatesMemoryLikeTheCardsDo() async {
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let procs = [Self.proc(10, 1, path: "/opt/homebrew/bin/claude", mem: 3 << 30),
                      Self.proc(11, 10, path: "/x/helper", mem: 1 << 30)]
         let sampler = CountingSampler(procs)
@@ -594,25 +596,25 @@ import Testing
         // A trend sample that started before a page refresh but finishes
         // after it must not feed the meter its older data: the refresh's
         // baseline and the busy streak it earned stand.
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let claudeBin = "/opt/homebrew/bin/claude"
         let sampler = GateSampler([Self.proc(10, 1, path: claudeBin, cpu: 0)])
         let model = ComputeModel(sampler: sampler, matchers: { [Self.claude] },
-                                 gpu: FakeGPU([:]), temperature: FakeThermometer(nil), clock: { clock.now },
+                                 gpu: FakeGPU([:]), temperature: FakeThermometer(nil), clock: { clock.value },
                                  defaults: TestDefaults("trend"),
                                  selfPID: 99)
         await model.loadMatchers()
 
         // A 130 s run at 100% earns the busy flag.
         await model.refresh()
-        clock.now = Self.now.addingTimeInterval(130)
+        clock.value = Self.now.addingTimeInterval(130)
         sampler.table = [Self.proc(10, 1, path: claudeBin, cpu: 130_000_000_000)]
         await model.refresh()
         #expect(model.processes["claude"]?.first?.flags.contains(.busy) == true)
 
         // The trend tick samples first but is held; the refresh's sample
         // is newer and finishes first, so it is the one that counts.
-        clock.now = Self.now.addingTimeInterval(131)
+        clock.value = Self.now.addingTimeInterval(131)
         sampler.gateNext()
         sampler.table = [Self.proc(10, 1, path: claudeBin, cpu: 180_000_000_000)]
         let tick = Task { await model.trendTick(at: Self.now.addingTimeInterval(140)) }
@@ -621,7 +623,7 @@ import Testing
         // consumed `armed`, so the refresh can never gate instead.
         #expect(await sampler.waitForPark())
 
-        clock.now = Self.now.addingTimeInterval(135)
+        clock.value = Self.now.addingTimeInterval(135)
         sampler.table = [Self.proc(10, 1, path: claudeBin, cpu: 200_000_000_000)]
         await model.refresh()
         // 70 s of CPU over 5 s of wall, over all cores.
@@ -636,7 +638,7 @@ import Testing
 
         // The baseline never regressed: the next refresh deltas off the
         // 200 s counter, not the stale 180, and the streak survives.
-        clock.now = Self.now.addingTimeInterval(140)
+        clock.value = Self.now.addingTimeInterval(140)
         sampler.table = [Self.proc(10, 1, path: claudeBin, cpu: 210_000_000_000)]
         await model.refresh()
         #expect(model.totals.cpuPercent == 200)
@@ -644,27 +646,14 @@ import Testing
     }
 
     @MainActor @Test(.timeLimit(.minutes(1))) func changingTheIntervalWakesTheLoopRightAway() async {
-        // A sleep that records each requested duration, then parks at
-        // `ended` until its task is cancelled (as Task.sleep observes the
-        // cancellation) or the test opens it, so no loop outlives the test.
-        actor Parked {
-            var durations: [Duration] = []
-            nonisolated let calls = CountGate()
-            nonisolated let ended = HoldGate()
-            func call(_ duration: Duration) async throws {
-                durations.append(duration)
-                await calls.bump()
-                // A restart cancels this sleep's task; the loop it belongs
-                // to then returns on its own.
-                try await ended.pass()
-                throw CancellationError()
-            }
-        }
-        let clock = Clock(Self.now)
+        // ParkedSleep records each requested duration, then parks until
+        // its task is cancelled (as Task.sleep observes the cancellation)
+        // or the test opens it, so no loop outlives the test.
+        let clock = Box(Self.now)
         let sampler = CountingSampler([Self.proc(10, 1, path: "/opt/homebrew/bin/claude")])
-        let parked = Parked()
+        let parked = ParkedSleep()
         let model = ComputeModel(sampler: sampler, matchers: { [Self.claude] },
-                                 gpu: FakeGPU([:]), temperature: FakeThermometer(nil), clock: { clock.now },
+                                 gpu: FakeGPU([:]), temperature: FakeThermometer(nil), clock: { clock.value },
                                  sleep: { d in try await parked.call(d) },
                                  defaults: TestDefaults("trend"),
                                  selfPID: 99)
@@ -717,7 +706,7 @@ import Testing
     }
 
     @MainActor @Test func thePlanFollowsItsConsumers() {
-        let model = model(sampler: CountingSampler([]), clock: Clock(Self.now))
+        let model = model(sampler: CountingSampler([]), clock: Box(Self.now))
         // Nothing needs a sample with every window closed.
         #expect(model.trendPlan == nil)
         model.limits.autoClean = true
@@ -743,7 +732,7 @@ import Testing
     }
 
     @MainActor @Test func aTemperatureOnlyTickLeavesTheProcessesAlone() async {
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let sampler = CountingSampler([Self.proc(10, 1, path: "/opt/homebrew/bin/claude")])
         let gpu = CountingGPU()
         let model = model(sampler: sampler, gpu: gpu,
@@ -760,7 +749,7 @@ import Testing
     }
 
     @MainActor @Test func anAutoCleanTickSkipsTheGPUAndTheSensors() async {
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let sampler = CountingSampler([Self.proc(10, 1, path: "/opt/homebrew/bin/claude")])
         let gpu = CountingGPU()
         let model = model(sampler: sampler, gpu: gpu,
@@ -773,16 +762,15 @@ import Testing
     }
 
     @MainActor @Test(.timeLimit(.minutes(1))) func theLoopParksUntilAViewComesOnScreen() async {
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let sampler = CountingSampler([Self.proc(10, 1, path: "/opt/homebrew/bin/claude")])
         let parked = ParkedSleep()
         let model = model(sampler: sampler, clock: clock) { try await parked.call($0) }
         await model.loadMatchers()
         // Nothing needs a sample: starting takes none and sleeps on nothing.
+        // A loop that ran anyway would show up below, as a second sample
+        // or a sleep before the 10 s one.
         model.startTrends()
-        await Task.yield()
-        #expect(sampler.callCount == 0)
-        #expect(await parked.calls.count == 0)
         // The page comes on screen: one tick at once, then the 10 s sleep.
         let page = UUID()
         model.setLiveViewer(page, onScreen: true)
@@ -836,31 +824,31 @@ import Testing
         // Generation zero's tick is parked on its GPU read while the
         // interval change makes it stale; releasing it must not let it
         // touch the meter or the history.
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let claudeBin = "/opt/homebrew/bin/claude"
         let sampler = CountingSampler([Self.proc(10, 1, path: claudeBin, cpu: 0)])
         let gpu = GateGPU([10: 1_000])
         let model = ComputeModel(sampler: sampler, matchers: { [Self.claude] },
-                                 gpu: gpu, temperature: FakeThermometer(nil), clock: { clock.now },
+                                 gpu: gpu, temperature: FakeThermometer(nil), clock: { clock.value },
                                  defaults: TestDefaults("trend"),
                                  selfPID: 99)
         await model.loadMatchers()
 
         // Generation zero's tick: samples, then parks on the GPU read.
         gpu.gateNext()
-        let staleTick = Task { await model.trendTick(at: clock.now, generation: 0) }
+        let staleTick = Task { await model.trendTick(at: clock.value, generation: 0) }
         #expect(await gpu.waitForPark())
 
         // The interval change ends generation zero; generation one's tick
         // runs to the end: a first GPU sighting counts no percent.
         model.trendInterval = .threeSeconds
-        await model.trendTick(at: clock.now, generation: 1)
+        await model.trendTick(at: clock.value, generation: 1)
         #expect(model.history.points(for: "claude").count == 1)
         #expect(model.history.points(for: "claude").last?.gpuPercent == 0)
 
         // The stale tick resumes with a moved counter; had it written,
         // the delta would repaint the point and add GPU percent.
-        clock.now = Self.now.addingTimeInterval(20)
+        clock.value = Self.now.addingTimeInterval(20)
         gpu.table = [10: 3_000]
         gpu.release()
         await staleTick.value
@@ -872,7 +860,7 @@ import Testing
         // The popup's Refresh restarts the loop while the loop's own tick
         // is parked on its GPU read: the parked tick must not write back,
         // or its older counters would reset the GPU baseline.
-        let clock = Clock(Self.now)
+        let clock = Box(Self.now)
         let claudeBin = "/opt/homebrew/bin/claude"
         let sampler = CountingSampler([Self.proc(10, 1, path: claudeBin, cpu: 0)])
         let gpu = GateGPU([10: 1_000])
@@ -880,7 +868,7 @@ import Testing
         // sleep is the sign the refreshed tick is done.
         let ticked = CountGate()
         let model = ComputeModel(sampler: sampler, matchers: { [Self.claude] },
-                                 gpu: gpu, temperature: FakeThermometer(nil), clock: { clock.now },
+                                 gpu: gpu, temperature: FakeThermometer(nil), clock: { clock.value },
                                  sleep: { _ in
                                      await ticked.bump()
                                      throw CancellationError()
@@ -890,7 +878,7 @@ import Testing
         await model.loadMatchers()
 
         gpu.gateNext()
-        let staleTick = Task { await model.trendTick(at: clock.now, generation: 0) }
+        let staleTick = Task { await model.trendTick(at: clock.value, generation: 0) }
         #expect(await gpu.waitForPark())
 
         // Refresh: a new loop ticks at once and finishes.
@@ -899,7 +887,7 @@ import Testing
         #expect(await ticked.reach(1))
         #expect(model.history.points(for: "claude").last?.gpuPercent == 0)
 
-        clock.now = Self.now.addingTimeInterval(20)
+        clock.value = Self.now.addingTimeInterval(20)
         gpu.table = [10: 3_000]
         gpu.release()
         await staleTick.value

@@ -339,14 +339,23 @@ struct GitHubNotifierTests {
     /// it, and it looks at once since the last look is over a minute old.
     @Test func theWindowComingBackWakesThePoll() async throws {
         final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 1_800_000_000) }
-        /// Yields once per `swe` run, so the test waits on runs, not time.
+        /// Counts each finished `swe` run, so the test waits on runs, not
+        /// time. `reach` is bounded by `gateTimeout`, well under the 15
+        /// minute nap, so a wake that never comes fails instead of
+        /// sleeping the nap out.
         final class Counted: CommandRunning, @unchecked Sendable {
             let inner: Router
-            let runs: AsyncStream<Void>.Continuation
-            init(_ inner: Router, _ runs: AsyncStream<Void>.Continuation) { self.inner = inner; self.runs = runs }
+            let runs = CountGate()
+            init(_ inner: Router) { self.inner = inner }
             func run(_ arguments: [String]) async throws -> CommandResult {
-                defer { runs.yield() }
-                return try await inner.run(arguments)
+                do {
+                    let result = try await inner.run(arguments)
+                    await runs.bump()
+                    return result
+                } catch {
+                    await runs.bump()
+                    throw error
+                }
             }
             func run(_ arguments: [String], input: Data?) async throws -> CommandResult {
                 try await run(arguments)
@@ -356,11 +365,11 @@ struct GitHubNotifierTests {
         let notifier = GitHubNotifier(swe: quiverDir(), model: GitHubModel(), interval: 60,
                                       defaults: TestDefaults()) { _ in }
         notifier.now = { clock.now }
-        let (runs, continuation) = AsyncStream<Void>.makeStream()
-        let swe = SweClient(runner: Counted(Router([inboxKey: inbox([note("a")])]), continuation))
-        var seen = runs.makeAsyncIterator()
+        let counted = Counted(Router([inboxKey: inbox([note("a")])]))
+        let swe = SweClient(runner: counted)
         let task = Task { await notifier.keepFresh(swe: { swe }) }
-        _ = await seen.next()
+        defer { task.cancel() }
+        try #require(await counted.runs.reach(1), "the first poll never ran")
         // The first poll done and the loop asleep on the slow pace.
         for _ in 0..<10_000 where !notifier.isNapping { await Task.yield() }
         try #require(notifier.isNapping)
@@ -369,7 +378,7 @@ struct GitHubNotifierTests {
         // the minute pace says it is due.
         clock.now = clock.now.addingTimeInterval(120)
         notifier.windowVisible = true
-        _ = await seen.next()
+        #expect(await counted.runs.reach(2), "the window coming back did not wake the poll")
         task.cancel()
         await task.value
     }
