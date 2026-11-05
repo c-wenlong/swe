@@ -86,6 +86,29 @@ class TranscriptReaderTest(_HomeCase):
         self.assertIn("python3 -m unittest", transcript.messages[1].text)
         self.assertNotIn('{"command"', transcript.messages[1].text)
 
+    def test_an_archived_rollout_still_reads(self):
+        # Archiving moves the rollout flat into archived_sessions/; the
+        # session stays previewable.
+        self._jsonl(
+            ".codex/archived_sessions/rollout-2026-10-30T17-40-45-codex-old.jsonl",
+            [
+                {"type": "session_meta", "payload": {"id": "codex-old", "cwd": "/work/project"}},
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "shelved for later"}],
+                    },
+                },
+            ],
+        )
+        transcript = read_transcript(
+            _session("codex", "rollout-2026-10-30T17-40-45-codex-old")
+        )
+        self.assertTrue(transcript.readable)
+        self.assertIn("shelved for later", transcript.messages[0].text)
+
     def test_terminal_escapes_in_messages_never_reach_the_preview(self):
         # A stored message that paints, links, writes the clipboard, or
         # clears the screen would run inside the picker's alternate screen.
