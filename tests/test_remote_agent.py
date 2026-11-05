@@ -1721,6 +1721,48 @@ class TestAgentRouteValidation(unittest.TestCase):
         status, _ = self._raw("POST", "/v1/agent/register", b"{bad")
         self.assertIn(status, (400, 422))
 
+    def test_register_machine_must_be_an_object(self):
+        for machine in ("sat-m1", ["sat-m1"], 7, True):
+            status, _ = self.srv.request(
+                "POST", "/v1/agent/register", {"machine": machine},
+                headers=self.srv.sat_auth)
+            self.assertEqual(status, 422, machine)
+
+    def test_non_finite_numbers_are_an_unreadable_body(self):
+        # Stored and served back, NaN/Infinity break every client's
+        # JSON parser, so the hub refuses them at the door.
+        for raw in (b'{"machine_id": "sat-m1", "rows": [{"key": "c:1",'
+                    b' "last_active_at": NaN}]}',
+                    b'{"machine_id": "sat-m1", "rows": [{"key": "c:1",'
+                    b' "last_active_at": -Infinity}]}',
+                    b'{"machine_id": "sat-m1", "rows": [{"key": "c:1",'
+                    b' "last_active_at": 1e400}]}'):
+            status, _ = self._raw("POST", "/v1/agent/catalog", raw)
+            self.assertEqual(status, 400, raw)
+        status, _ = self._raw(
+            "POST", "/v1/agent/catalog",
+            b'{"machine_id": "sat-m1", "rows": [{"key": "c:1",'
+            b' "last_active_at": 1.5e9}]}')
+        self.assertEqual(status, 200)
+
+    def test_an_event_whose_data_is_not_an_object_is_skipped(self):
+        status, data = self.srv.request(
+            "POST", "/v1/agent/events",
+            {"machine_id": self.mid, "events": [
+                {"type": "approval.requested", "session": "claude:r1",
+                 "data": [1]},
+                {"type": "session.launched", "data": "x"},
+                protocol.event(
+                    "message.appended", "claude:r1", self.mid,
+                    protocol.message("user", "still lands")),
+            ]},
+            headers=self.srv.sat_auth)
+        self.assertEqual(status, 200, data)
+        events, _ = self.srv.state.journal.read_since(
+            "claude:r1@sat-m1", 0)
+        self.assertEqual([e["type"] for e in events],
+                         ["message.appended"])
+
     def test_catalog_bad_body_and_missing_mid(self):
         status, _ = self._raw("POST", "/v1/agent/catalog", b"{bad")
         self.assertEqual(status, 400)

@@ -65,13 +65,15 @@ class ElideWidthTest(unittest.TestCase):
     def test_it_lives_in_console_not_behind_a_private_name(self):
         """Two packages render paths this way; neither should reach into
         the other for a private helper."""
+        import swe.console as console
         import swe.find.commands as find_cmds
         import swe.skills.commands as skills_cmds
 
         self.assertNotIn("_elide", find_cmds.__dict__)
+        # Both bind the very function console defines, not a copy or a
+        # re-export of another package's helper.
         for mod in (find_cmds, skills_cmds):
-            src = Path(mod.__file__).read_text()
-            self.assertNotIn("from swe.find.commands import _elide", src)
+            self.assertIs(mod.elide, console.elide, mod.__name__)
 
 
 class SkillNameMatchTest(unittest.TestCase):

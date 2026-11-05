@@ -18,6 +18,25 @@ from swe.sessions.models import Session
 from tests._tempdir import temp_dir
 
 
+class _FakeClock:
+    """Stands in for ``inject.time``: ``sleep`` moves the clock on at once,
+    so a readiness deadline runs out without the test waiting for it."""
+
+    def __init__(self):
+        self.now = 1000.0
+        self.slept = []
+
+    def monotonic(self):
+        return self.now
+
+    def time(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.slept.append(seconds)
+        self.now += seconds
+
+
 def _session(tool="opencode", sid="ses_1", cwd="/tmp/proj"):
     return Session(
         timestamp=0, agent=tool, path=cwd, title="t",
@@ -70,6 +89,9 @@ class TestOpencodeServe(unittest.TestCase):
                 staticmethod(lambda *a, **k: proc),
             ),
             patch.object(inject, "_serve_call", fake_call),
+            # The spawned serve's event reader would dial a real local
+            # port; the scripted replies above stand in for the serve.
+            patch.object(inject, "_serve_event_loop", lambda serve: None),
         ]
         for p in self._patchers:
             p.start()
@@ -176,15 +198,19 @@ class TestOpencodeServe(unittest.TestCase):
         self.assertIn("detached", res.note)
 
     def test_send_spawn_failure(self):
+        spawn = MagicMock(side_effect=OSError("no opencode"))
         with patch.object(
-            inject.OpencodeServeInjector, "_spawn",
-            staticmethod(lambda cwd, port: (_ for _ in ()).throw(OSError())),
+            inject.OpencodeServeInjector, "_spawn", staticmethod(spawn),
         ):
-            supervise.mark(self.home, "k2", _meta("serve", "opencode"))
+            # Marked under the injector's own key, so the send gets past
+            # the supervision check and reaches the spawn.
+            supervise.mark(self.home, "opencode:s1", _meta("serve", "opencode"))
             res = self._injector().send(
                 _session(), {"text": "x", "mode": "queue"}, "idle")
-            # unsupervised sessions refuse before spawning
-            self.assertFalse(res.ok)
+        self.assertFalse(res.ok)
+        self.assertEqual(res.note, "opencode serve failed to start")
+        spawn.assert_called_once()
+        self.assertEqual(inject.OpencodeServeInjector._serves, {})
 
     def test_approval_posts_mapped_decision(self):
         session = _session()
@@ -351,7 +377,7 @@ class TestOpencodeServe(unittest.TestCase):
         cwd = os.path.realpath("/tmp/proj")
         inject.OpencodeServeInjector._serves[cwd] = held
         self.routes = {"session": (0, b"")}
-        with patch.object(inject, "_SERVE_READY_S", 0.3):
+        with patch.object(inject, "time", _FakeClock()):
             res = self._injector().send(
                 _session(), {"text": "x", "mode": "queue"}, "idle")
         self.assertFalse(res.ok)
@@ -361,7 +387,7 @@ class TestOpencodeServe(unittest.TestCase):
     def test_kill_failure_on_timeout_still_unregisters(self):
         supervise.mark(self.home, "opencode:s1", _meta("serve", "opencode"))
         self.routes = {"session": (0, b"")}
-        with patch.object(inject, "_SERVE_READY_S", 0.3), \
+        with patch.object(inject, "time", _FakeClock()), \
              patch.object(self.proc, "kill", side_effect=OSError("gone")):
             res = self._injector().send(
                 _session(), {"text": "x", "mode": "queue"}, "idle")
@@ -371,7 +397,7 @@ class TestOpencodeServe(unittest.TestCase):
     def test_serve_that_never_gets_ready_is_killed(self):
         supervise.mark(self.home, "opencode:s1", _meta("serve", "opencode"))
         self.routes = {"session": (0, b"")}  # never answers
-        with patch.object(inject, "_SERVE_READY_S", 0.3):
+        with patch.object(inject, "time", _FakeClock()):
             res = self._injector().send(
                 _session(), {"text": "x", "mode": "queue"}, "idle")
         self.assertFalse(res.ok)
@@ -589,8 +615,14 @@ class TestCodexAppServer(unittest.TestCase):
 
     def test_server_approval_request_surfaces_and_answers(self):
         events = []
+        asked = threading.Event()
+
+        def emit(_key, ev):
+            events.append(ev)
+            asked.set()
+
         supervise.mark(self.home, "codex:k", _meta("appserver", "codex"))
-        inj = self._injector(emit=lambda k, ev: events.append(ev))
+        inj = self._injector(emit=emit)
         res = inj.send(self.session, {"text": "go", "mode": "steer"}, "idle")
         self.assertTrue(res.ok)
         proc = self.procs[0]
@@ -600,11 +632,8 @@ class TestCodexAppServer(unittest.TestCase):
             "method": "item/commandExecution/requestApproval",
             "params": {"reason": "wants to run rm -rf", "command": "rm -rf"},
         })
-        for _ in range(100):
-            if events:
-                break
-            import time as _t
-            _t.sleep(0.05)
+        # The reader thread emits it; wait on that instead of polling.
+        self.assertTrue(asked.wait(5))
         self.assertEqual(len(events), 1)
         ev = events[0]
         self.assertEqual(ev["type"], "approval.requested")
@@ -785,10 +814,16 @@ class TestOpencodeServeEdges(unittest.TestCase):
                              (500, b""))
 
     def test_event_loop_urlopen_failure_returns(self):
-        with patch("urllib.request.urlopen", side_effect=OSError("down")):
+        serve = inject._ServeProc(_FakeServeProc(), "http://x")
+        deltas = MagicMock()
+        serve.subs["ses_1"] = ("k", None, "m")
+        serve.deltas["ses_1"] = deltas
+        with patch("urllib.request.urlopen", side_effect=OSError("down")) as urlopen:
             # must return quietly, not raise
-            inject._serve_event_loop(
-                inject._ServeProc(_FakeServeProc(), "http://x"))
+            inject._serve_event_loop(serve)
+        self.assertEqual(urlopen.call_args[0][0].full_url, "http://x/event")
+        # No stream ever opened, so nothing was mid-stream to close.
+        deltas.finish_all.assert_not_called()
 
     def test_event_loop_read_error_swallowed(self):
         class BadResp:
@@ -801,9 +836,14 @@ class TestOpencodeServeEdges(unittest.TestCase):
             def __iter__(self):
                 raise OSError("reset")
 
+        serve = inject._ServeProc(_FakeServeProc(), "http://x")
+        deltas = MagicMock()
+        serve.subs["ses_1"] = ("k", None, "m")
+        serve.deltas["ses_1"] = deltas
         with patch("urllib.request.urlopen", return_value=BadResp()):
-            inject._serve_event_loop(
-                inject._ServeProc(_FakeServeProc(), "http://x"))
+            inject._serve_event_loop(serve)
+        # The dropped stream closes what each session had mid-stream.
+        deltas.finish_all.assert_called_once_with("k")
 
     def test_event_loop_parses_sse_frames(self):
         events = []
@@ -863,11 +903,17 @@ class TestOpencodeServeEdges(unittest.TestCase):
             raise OSError("no opencode")
 
         inj = self._injector()
+        old = inject.OpencodeServeInjector._serves[cwd]
+        spawn = MagicMock(side_effect=spawn_fail)
         with patch.object(
             inject.OpencodeServeInjector, "_spawn",
-            staticmethod(spawn_fail),
+            staticmethod(spawn),
         ):
             self.assertIsNone(inj._serve_for(_session()))
+        # The dead serve was dropped and marked, and a fresh spawn tried.
+        self.assertTrue(old.dead)
+        self.assertNotIn(cwd, inject.OpencodeServeInjector._serves)
+        spawn.assert_called_once()
 
     def test_serve_for_proc_dies_during_readiness(self):
         proc = _FakeServeProc()
@@ -886,19 +932,30 @@ class TestOpencodeServeEdges(unittest.TestCase):
             staticmethod(lambda *a, **k: proc),
         ), patch.object(
             inject, "_serve_call", kill_then_serve
-        ), patch.object(inject, "_SERVE_READY_S", 0.6):
+        ), patch.object(inject, "time", _FakeClock()), \
+                patch.object(inject, "_serve_event_loop", lambda serve: None):
             self.assertIsNone(inj._serve_for(_session()))
+        # One probe, then the next pass saw the exit and evicted it.
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(inject.OpencodeServeInjector._serves, {})
 
     def test_serve_for_readiness_timeout(self):
         proc = _FakeServeProc()
         inj = self._injector()
+        clock = _FakeClock()
         with patch.object(
             inject.OpencodeServeInjector, "_spawn",
             staticmethod(lambda *a, **k: proc),
         ), patch.object(
             inject, "_serve_call", lambda *a, **k: (0, b"")
-        ), patch.object(inject, "_SERVE_READY_S", 0.3):
+        ), patch.object(inject, "time", clock), \
+                patch.object(inject, "_serve_event_loop", lambda serve: None):
             self.assertIsNone(inj._serve_for(_session()))
+        # It probed until the whole readiness window had passed, then
+        # killed the proc nobody else holds rather than leak it.
+        self.assertGreaterEqual(sum(clock.slept), inject._SERVE_READY_S)
+        self.assertTrue(proc.killed)
+        self.assertEqual(inject.OpencodeServeInjector._serves, {})
 
     def test_release_without_and_with_refs(self):
         cwd = os.path.realpath("/tmp/proj")

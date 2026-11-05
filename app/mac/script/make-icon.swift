@@ -27,7 +27,7 @@ func render(_ size: Int) -> Data {
     return rep.representation(using: .png, properties: [:])!
 }
 
-let iconset = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "quiver-\(UUID().uuidString).iconset")
+let iconset = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "swe-\(UUID().uuidString).iconset")
 try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
 for base in [16, 32, 128, 256, 512] {
     try render(base).write(to: iconset.appending(path: "icon_\(base)x\(base).png"))

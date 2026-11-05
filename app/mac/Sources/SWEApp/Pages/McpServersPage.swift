@@ -114,7 +114,7 @@ struct McpServersPage: View {
             app.mcpRepo.root = repoRoot
             await app.mcpRepo.load()
         }
-        .quiverSheet(item: $selected) { server in
+        .cardSheet(item: $selected) { server in
             if case .loaded(let inventory) = model.state {
                 ServerSheet(initial: server, harnesses: inventory.harnesses,
                             active: inventory.activeHarnesses.filter { !hidden.contains($0) }, model: model) {
@@ -122,7 +122,7 @@ struct McpServersPage: View {
                 }
             }
         }
-        .quiverSheet(isPresented: $adding) {
+        .cardSheet(isPresented: $adding) {
             McpAddServerSheet(hidden: hidden) {
                 await model.load(swe: app.swe, for: app.swePath, health: model.hasHealth)
             }

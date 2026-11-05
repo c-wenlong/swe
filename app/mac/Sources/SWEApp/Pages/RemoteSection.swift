@@ -66,10 +66,10 @@ struct RemoteSection: View {
             app.pendingRemoteSetup = false
             showsSetup = true
         }
-        .quiverSheet(isPresented: showTicket, onDismiss: { model?.dismissTicket() }) {
+        .cardSheet(isPresented: showTicket, onDismiss: { model?.dismissTicket() }) {
             if let model { PairSheet(model: model, target: $target) }
         }
-        .quiverSheet(isPresented: showSetupSheet, onDismiss: reload) {
+        .cardSheet(isPresented: showSetupSheet, onDismiss: reload) {
             if let model { RemoteSetupSheet(setup: setup, remote: model) }
         }
     }
