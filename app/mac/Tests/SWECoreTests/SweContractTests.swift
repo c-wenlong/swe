@@ -66,18 +66,18 @@ import Testing
         #expect(session.id == "fixture-session")
         #expect(session.harness == "claude")
         #expect(session.agent == "Claude Code")
-        #expect(session.cwd == "/tmp/quiver-fixture")
+        #expect(session.cwd == "/tmp/swe-fixture")
         #expect(session.title == "first fixture message")
         #expect(session.titleSource == nil)
         #expect(session.status == "done")
         #expect(session.resume?.argv == ["claude", "--resume", "fixture-session"])
-        #expect(session.resume?.cwd == "/tmp/quiver-fixture")
+        #expect(session.resume?.cwd == "/tmp/swe-fixture")
     }
 
     @Test func skillsDecodeRootsAndSkills() async throws {
         let (swe, _) = try client("swe-skills")
         let inventory = try await swe.skills()
-        #expect(inventory.sharedDir == "/tmp/quiver-fixture-home/.swe/skills")
+        #expect(inventory.sharedDir == "/tmp/swe-fixture-home/.swe/skills")
         let claude = try #require(inventory.harnesses.first)
         #expect(claude.name == "claude")
         #expect(claude.state == "linked")
@@ -93,10 +93,10 @@ import Testing
 
     @Test func skillsLinkRepliesDecode() async throws {
         let (swe, _) = try client("swe-skills-link")
-        try await swe.link(SkillRoot(name: "claude", path: "/tmp/quiver-fixture-home/.claude/skills",
+        try await swe.link(SkillRoot(name: "claude", path: "/tmp/swe-fixture-home/.claude/skills",
                                    state: "create"))
         let (swe2, _) = try client("swe-skills-unlink")
-        try await swe2.unlink(SkillRoot(name: "claude", path: "/tmp/quiver-fixture-home/.claude/skills",
+        try await swe2.unlink(SkillRoot(name: "claude", path: "/tmp/swe-fixture-home/.claude/skills",
                                       state: "linked"))
     }
 
@@ -148,7 +148,7 @@ import Testing
         let market = try #require(catalog.marketplaces.first)
         #expect(market.name == "fixture-market")
         #expect(market.hub == true)
-        #expect(market.path == "/tmp/quiver-fixture-home/.swe/plugins/fixture-market")
+        #expect(market.path == "/tmp/swe-fixture-home/.swe/plugins/fixture-market")
 
         let plugin = try #require(market.plugins.first)
         #expect(plugin.name == "fixture-plugin")
@@ -160,7 +160,7 @@ import Testing
         #expect(plugin.skills.map(\.name) == ["fixture-plugin-skill"])
         #expect(plugin.harnesses["claude"]?.installed == false)
         #expect(plugin.drift?["claude"]?.state == .unregistered)
-        #expect(plugin.drift?["claude"]?.id == "claude:unregistered:/tmp/quiver-fixture-home/.swe/plugins/fixture-market")
+        #expect(plugin.drift?["claude"]?.id == "claude:unregistered:/tmp/swe-fixture-home/.swe/plugins/fixture-market")
     }
 
     @Test func pluginActionReplyDecodes() async throws {
@@ -179,7 +179,7 @@ import Testing
         #expect(report.sources == 1)
         #expect(report.drift.count == 2)
         let finding = try #require(report.drift.first)
-        #expect(finding.id == "claude:unregistered:/tmp/quiver-fixture-home/.swe/plugins/fixture-market")
+        #expect(finding.id == "claude:unregistered:/tmp/swe-fixture-home/.swe/plugins/fixture-market")
         #expect(finding.harness == "claude")
         #expect(finding.marketplace == "fixture-market")
         #expect(finding.plugin == nil)
@@ -190,7 +190,7 @@ import Testing
 
     @Test func pluginFixReplyDecodes() async throws {
         let (swe, _) = try client("swe-find-plugins-fix")
-        try await swe.fixPluginDrift(id: "claude:unregistered:/tmp/quiver-fixture-home/.swe/plugins/fixture-market")
+        try await swe.fixPluginDrift(id: "claude:unregistered:/tmp/swe-fixture-home/.swe/plugins/fixture-market")
     }
 
     @Test func doctorDecodesFindings() async throws {
@@ -211,7 +211,7 @@ import Testing
     @Test func initCheckDecodesLinkStates() async throws {
         let (swe, _) = try client("swe-init-check")
         let check = try await swe.initCheck()
-        #expect(check.agentsFile == "/tmp/quiver-fixture-home/.swe/AGENTS.md")
+        #expect(check.agentsFile == "/tmp/swe-fixture-home/.swe/AGENTS.md")
         #expect(check.agentsFileExists == true)
         let claude = try #require(check.harnesses.first)
         #expect(claude.instructions?.state == .linked)
@@ -273,8 +273,8 @@ import Testing
         let beacon = try #require(inventory.hooks.first)
         #expect(beacon.script == "beacon.py")
         #expect(beacon.harness == "claude")
-        #expect(beacon.source == "/tmp/quiver-fixture-home/.swe/hooks/claude/beacon.py")
-        #expect(beacon.destination == "/tmp/quiver-fixture-home/.claude/hooks/beacon.py")
+        #expect(beacon.source == "/tmp/swe-fixture-home/.swe/hooks/claude/beacon.py")
+        #expect(beacon.destination == "/tmp/swe-fixture-home/.claude/hooks/beacon.py")
         #expect(beacon.state == .linked)
         #expect(beacon.tier == .harness)
         #expect(beacon.enabled == true)
@@ -286,7 +286,7 @@ import Testing
         #expect(declared.label == "PreToolUse:Bash")
         #expect(declared.timeout == nil)
         #expect(declared.command == "")
-        #expect(declared.settings == "/tmp/quiver-fixture-home/.claude/settings.json")
+        #expect(declared.settings == "/tmp/swe-fixture-home/.claude/settings.json")
 
         let block = try #require(inventory.hooks.first { $0.script == "block-rm.py" })
         #expect(block.declared.first?.label == "SessionStart")
@@ -318,7 +318,7 @@ import Testing
         #expect(declared.label == "PreToolUse:Bash")
         #expect(declared.timeout == 10)
         #expect(declared.command == "~/.claude/hooks/prose-guard.py")
-        #expect(declared.settings == "/tmp/quiver-fixture-home/.claude/settings.json")
+        #expect(declared.settings == "/tmp/swe-fixture-home/.claude/settings.json")
 
         let block = try #require(inventory.hooks.first { $0.script == "block-rm.py" })
         #expect(block.declared.first?.label == "SessionStart")
@@ -357,14 +357,14 @@ import Testing
         let claude = try #require(info.harnesses.first)
         #expect(claude.harness == "claude")
         #expect(claude.state == .linked)
-        #expect(claude.source == "/tmp/quiver-fixture-home/.swe/hooks/claude/prose-guard.py")
-        #expect(claude.destination == "/tmp/quiver-fixture-home/.claude/hooks/prose-guard.py")
+        #expect(claude.source == "/tmp/swe-fixture-home/.swe/hooks/claude/prose-guard.py")
+        #expect(claude.destination == "/tmp/swe-fixture-home/.claude/hooks/prose-guard.py")
         #expect(claude.summary == "Blocks prompt submissions that ask for edits to prose files.")
         let declared = try #require(claude.declared.first)
         #expect(declared.label == "PreToolUse:Bash")
         #expect(declared.timeout == 10)
         #expect(declared.command == "~/.claude/hooks/prose-guard.py")
-        #expect(declared.settings == "/tmp/quiver-fixture-home/.claude/settings.json")
+        #expect(declared.settings == "/tmp/swe-fixture-home/.claude/settings.json")
     }
 
     /// `swe hooks info` before #787 still decodes.
@@ -373,8 +373,8 @@ import Testing
         let info = try await swe.hookInfo(name: "prose-guard")
         let claude = try #require(info.harnesses.first)
         #expect(claude.state == .linked)
-        #expect(claude.destination == "/tmp/quiver-fixture-home/.claude/hooks/prose-guard.py")
-        #expect(claude.declared.first?.settings == "/tmp/quiver-fixture-home/.claude/settings.json")
+        #expect(claude.destination == "/tmp/swe-fixture-home/.claude/hooks/prose-guard.py")
+        #expect(claude.declared.first?.settings == "/tmp/swe-fixture-home/.claude/settings.json")
     }
 
     /// Captured from `swe hooks new claude guard --json`: the script, the
@@ -385,7 +385,7 @@ import Testing
         #expect(runner.calls.last == ["hooks", "new", "claude", "guard", "--json"])
         #expect(reply.path.hasSuffix(".swe/hooks/claude/guard.py"))
         #expect(reply.command == "~/.claude/hooks/guard.py")
-        #expect(reply.settings == ["/tmp/quiver-fixture-home/.claude/settings.json"])
+        #expect(reply.settings == ["/tmp/swe-fixture-home/.claude/settings.json"])
         #expect(reply.stanza.contains("PreToolUse"))
     }
 

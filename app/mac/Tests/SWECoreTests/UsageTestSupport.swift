@@ -171,7 +171,7 @@ func claudeCredentialsJSON(
 /// could remove its file without racing that write.
 let usageScratch: URL = {
     let folder = FileManager.default.temporaryDirectory
-        .appending(path: "quiver-usage-tests-\(getpid())", directoryHint: .isDirectory)
+        .appending(path: "swe-usage-tests-\(getpid())", directoryHint: .isDirectory)
     atexit { try? FileManager.default.removeItem(at: usageScratch) }
     return folder
 }()

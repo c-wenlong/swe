@@ -833,6 +833,128 @@ class CommandTest(SyncTestBase):
         self.assertIn("swe init", err)
 
 
+class PresentationTest(unittest.TestCase):
+    """The text views over documents ``status``/``sync`` return, for the
+    states the real-repo tests above cannot easily reach: device mode, a
+    failed fetch or push, a long change list, files held back."""
+
+    def show(self, printer, doc):
+        from swe.console import strip_ansi
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            printer(doc)
+        return strip_ansi(out.getvalue())
+
+    def test_status_of_a_device_branch_with_everything_to_say(self):
+        from swe.sync.commands import _print_status
+        changes = [{"status": "M", "path": f"skills/s{i}/SKILL.md"}
+                   for i in range(14)]
+        out = self.show(_print_status, {
+            "path": "/h/.swe", "mode": "device", "branch": "device/mac",
+            "base": "origin/main", "base_behind": 3, "remote": "git@x:hub",
+            "upstream": "origin/device/mac", "ahead": 1, "behind": 2,
+            "changes": changes, "groups": {"skills": 14},
+            "held_back": [f"secrets/k{i}" for i in range(7)],
+            "problem": "a merge is in progress", "fetch_error": "timed out",
+            "fetched": False,
+        })
+        self.assertIn("device branch device/mac, merges origin/main, "
+                      "pushes only device/mac", out)
+        self.assertIn("1 ahead, 2 behind origin/device/mac", out)
+        self.assertIn("3 new commit(s) on origin/main", out)
+        self.assertIn("14 file(s): skills 14", out)
+        # Twelve files, then a count of the rest.
+        self.assertIn("skills/s11/SKILL.md", out)
+        self.assertNotIn("skills/s12/SKILL.md", out)
+        self.assertIn("... and 2 more", out)
+        # Held-back paths: the count is all of them, the list only five.
+        self.assertIn("7 changed file(s) under paths that never sync", out)
+        self.assertIn("secrets/k4", out)
+        self.assertNotIn("secrets/k5", out)
+        self.assertIn("a merge is in progress", out)
+        # A failed fetch says so instead of the stale-counts hint.
+        self.assertIn("fetch failed: timed out", out)
+        self.assertNotIn("--fetch checks now", out)
+
+    def test_status_before_the_first_push_and_without_a_fetch(self):
+        from swe.sync.commands import _print_status
+        out = self.show(_print_status, {
+            "path": "/h/.swe", "mode": "device", "branch": "device/mac",
+            "base": None, "remote": None, "upstream": None, "changes": [],
+            "fetched": False,
+        })
+        self.assertIn("origin/main (not on the remote yet)", out)
+        self.assertIn("remote   none", out)
+        self.assertIn("not on the remote yet, swe sync pushes it", out)
+        self.assertIn("changes  none", out)
+        self.assertIn("--fetch checks now", out)
+
+    def test_status_without_a_mode_prints_only_the_problem(self):
+        from swe.sync.commands import _print_status
+        out = self.show(_print_status, {"path": "/h/.swe", "mode": None,
+                                        "problem": "not a git repo"})
+        self.assertIn("not a git repo", out)
+        self.assertNotIn("branch", out)
+
+    def test_a_failed_push_keeps_the_work_and_says_how_to_retry(self):
+        from swe.sync.commands import _print_sync
+        out = self.show(_print_sync, {
+            "mode": "single", "branch": "main", "dry_run": False,
+            "result": "push-failed", "pushed": False,
+            "push_error": "rejected", "commit": None, "merges": [],
+        })
+        self.assertIn("push failed: rejected", out)
+        self.assertIn("sync again to retry", out)
+
+    def test_a_dry_run_that_would_push_and_relinked_marketplaces(self):
+        from swe.sync.commands import _print_sync
+        out = self.show(_print_sync, {
+            "mode": "single", "branch": "main", "dry_run": True,
+            "result": "would-sync", "would_push": True,
+            "commit": {"files": [{"status": "A", "path": "x"}],
+                       "message": "sync: mac"},
+            "merges": [{"ref": "origin/main", "commits": 2,
+                        "resolved": ["config/harness.json"]}],
+            "relinked": {"changed": 3, "notes": ["codex: not installed"],
+                         "marketplaces": [
+                             {"marketplace": "mk", "harness": "claude",
+                              "error": ""},
+                             {"marketplace": "mk", "harness": "codex",
+                              "error": "no CLI"}]},
+        })
+        self.assertIn("(dry run, nothing written)", out)
+        self.assertIn("would commit 1 file(s): sync: mac", out)
+        self.assertIn("would merge 2 commit(s) from origin/main", out)
+        self.assertIn("config/harness.json: both sides changed it", out)
+        self.assertIn("would push main", out)
+        self.assertIn("re-linked 3 incoming file(s)", out)
+        self.assertIn("✓ mk in claude", out)
+        self.assertIn("! mk in codex: no CLI", out)
+        self.assertIn("! codex: not installed", out)
+
+    def test_up_to_date(self):
+        from swe.sync.commands import _print_sync
+        out = self.show(_print_sync, {"mode": "single", "branch": "main",
+                                      "dry_run": False, "result": "up-to-date"})
+        self.assertIn("Already in sync.", out)
+
+    def test_help_and_a_refused_sync(self):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(cmd_sync(["status", "--help"], home=Path("/nope")), 0)
+        self.assertIn("swe sync", out.getvalue())
+        # A status flag on a plain sync is refused, and the other way round.
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cmd_sync(["--fetch"], home=Path("/nope")), 1)
+            self.assertEqual(cmd_sync(["status", "--dry-run"],
+                                      home=Path("/nope")), 1)
+        with mock.patch("swe.sync.commands.sync",
+                        side_effect=repo.SyncError("another sync is running")), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(cmd_sync(["--json"], home=Path("/nope")), 1)
+        self.assertIn("swe sync: another sync is running", err.getvalue())
+
+
 class MachineNameTest(unittest.TestCase):
     """What sync's commit messages call this machine."""
 
