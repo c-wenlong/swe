@@ -126,6 +126,12 @@ comments in <code>--json</code> gain <code>association</code>.</li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong><code>swe skills new</code> says when it had to make <code>~/.swe/skills</code>.</strong>
+<code>create()</code> promised to report whether it made the hub skills root but
+always answered no, so a skill written into a brand-new root (one no
+harness links to yet) printed only &quot;Created&quot;. It now adds a line
+saying to run <code>swe init</code> to link the root into your harnesses.</p>
+</li>
 <li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
 The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its
 command, but sessions carry the registry id <code>qwen-code</code>, so a file
