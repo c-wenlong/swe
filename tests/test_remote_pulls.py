@@ -297,6 +297,13 @@ class TestDetail(_Base):
         self.assertIn("> Title: Fix the thing",
                       body["pr"]["suggested_prompt"])
         self.assertEqual([a[0] for a in self.calls], ["api"])
+        # A reopen inside the cache's TTL reuses the association read.
+        with self._stubs(view=gh.GhResult("upstream-error",
+                                          error="must not be read"),
+                         association="NONE"):
+            _status, again = self._get("/v1/pulls/o/r/5")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(again["pr"]["association"], "COLLABORATOR")
 
 
 class TestDropRepo(_Base):

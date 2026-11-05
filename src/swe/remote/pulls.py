@@ -172,15 +172,21 @@ def detail(state, owner: str, name: str, number_raw: str,
     # its merge/rerun invalidation (_drop_repo) covers us too. A
     # page-populated entry lacks the fields only this route adds, so
     # they're filled in on the way out: the worktree and prompt are
-    # pure, the author's association one small REST read.
+    # pure, the author's association one small REST read with its own
+    # cache entry, so a reopen or a second phone inside the TTL reuses
+    # it (the per-key lock folds concurrent reads into one).
     value, at = G.CACHE.get(
         ("pr", G.home_key(state.home), pinned, str(number)), fetch,
         refresh=_refresh(args), ok=lambda v: v["status"] == "ok")
     pr = value.get("pr")
     if isinstance(pr, dict) and "worktree" not in pr:
         worktree = gh_pulls.worktree_path(pinned, number, state.home)
-        pr = {**pr, "worktree": worktree,
-              "association": gh_pulls.author_association(pinned, number)}
+        association, _at = G.CACHE.get(
+            ("pr-association", G.home_key(state.home), pinned,
+             str(number)),
+            lambda: gh_pulls.author_association(pinned, number),
+            refresh=_refresh(args), ok=bool)
+        pr = {**pr, "worktree": worktree, "association": association}
         pr = {**pr, "suggested_prompt": gh_pulls.build_prompt(
             pinned, pr, worktree, limit=protocol.MAX_LAUNCH_PROMPT)}
         value = {**value, "pr": pr}
