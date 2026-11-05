@@ -475,6 +475,14 @@ class SessionWindowTest(unittest.TestCase):
         self.store["list"] = {"session_window": "soon"}
         self.assertEqual(C.load_window(), C.DEFAULT_WINDOW)
 
+    def test_a_non_finite_stored_window_falls_back(self):
+        # config.json's 1e999 parses to inf; int(inf) raised OverflowError
+        # out of every `swe list`.
+        for value in (float("inf"), float("-inf"), float("nan")):
+            with self.subTest(value=value):
+                self.store["list"] = {"session_window": value}
+                self.assertEqual(C.load_window(), C.DEFAULT_WINDOW)
+
     def test_saving_the_window_keeps_the_columns(self):
         C.save_columns(["name", "sess"])
         C.save_window(30)
