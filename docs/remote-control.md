@@ -1059,7 +1059,13 @@ while the others answer; a missing or signed-out `gh` answers
 plus `body`, `comments`, `branch` (`quiver/issue-<n>`), `worktree`
 (where a resolve puts the checkout) and `suggested_prompt` (the resolve
 brief `github/issues.build_prompt` writes — what the resolve sheet
-prefills). `400 bad_repo` for a malformed owner/repo, `422 bad_issue`
+prefills). Anyone can write on a public issue, so the brief quotes the
+issue's title, body and comments line by line (`> `) behind a note that
+they are untrusted data the agent must not take instructions from, and
+it keeps only comments whose `association` (gh's `authorAssociation`)
+is `OWNER`, `MEMBER` or `COLLABORATOR`; the rest become one line, "N
+comments from others, not included". Every client prefills this brief
+rather than building its own. `400 bad_repo` for a malformed owner/repo, `422 bad_issue`
 for a non-number, `404 not_pinned` for a repo the hub doesn't pin; a
 `gh` failure answers `200 {status, issue: null, error}` — the row's
 `status` carries `gh`'s word (`not-found`, `upstream-error`), so the
