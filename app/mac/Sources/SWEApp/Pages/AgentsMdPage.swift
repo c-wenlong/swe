@@ -853,6 +853,11 @@ final class ChapterRailDrag {
     }
 }
 
+private struct OpenChapter: Equatable {
+    var name: String?
+    var status: Loadable<InstructionsCheck>
+}
+
 /// Chapter mode: the indented AGENTS_MD outline beside the selected
 /// chapter's editor. The rail only navigates and creates — what compiles
 /// into AGENTS.md is the Compile page's job.
@@ -867,6 +872,9 @@ private struct ChaptersEditor: View {
     @State private var moveError: String?
     /// The live file drag: targets, gaps and the dragged row's travel.
     @State private var railDrag = ChapterRailDrag()
+    /// The selected chapter's document once its path is checked off the
+    /// main actor; nil `document` means the path leaves AGENTS_MD.
+    @State private var opened: (name: String, document: InstructionDocument?)?
 
     var body: some View {
         let chapters = app.chapters
@@ -874,10 +882,8 @@ private struct ChaptersEditor: View {
             rail
             VStack(alignment: .leading, spacing: 12) {
                 if let name = chapters.selected {
-                    let chapter = InstructionsCheck.Chapter(
-                        name: name, path: check.directory + "/" + name,
-                        exists: true)
-                    if let document = chapters.document(for: chapter) {
+                    if let document = chapters.openDocument(named: name)
+                        ?? (opened?.name == name ? opened?.document : nil) {
                         InstructionEditor(
                             document: document,
                             title: name,
@@ -885,7 +891,7 @@ private struct ChaptersEditor: View {
                             Task { await chapters.build(swe: app.swe) }
                         }
                         .id(name)
-                    } else {
+                    } else if opened?.name == name {
                         Card(title: name, subtitle: "The path leaves AGENTS_MD") {
                             EmptyView()
                         } content: {
@@ -905,6 +911,16 @@ private struct ChaptersEditor: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxHeight: .infinity)
+        // A pick, or a reload that may have dropped the document (a move
+        // or rename): an open document comes back without a disk call.
+        .task(id: OpenChapter(name: chapters.selected, status: chapters.status)) {
+            guard let name = chapters.selected else { opened = nil; return }
+            let chapter = InstructionsCheck.Chapter(name: name, path: check.directory + "/" + name,
+                                                    exists: true)
+            let document = await chapters.opening(chapter)
+            guard !Task.isCancelled else { return }
+            opened = (name, document)
+        }
         .cardSheet(item: $creating) { initial in
             NewChapterSheet(initial: initial)
         }
@@ -2028,7 +2044,7 @@ private struct ProjectInstructions: View {
                    let opened, opened.file == file {
                     InstructionEditor(document: opened.document, title: file.name,
                                       subtitle: subtitle(file, opened.document)) {
-                        model.rescanProject()
+                        Task { await model.rescanProject() }
                     }
                     .id(file.name)
                 }
@@ -2093,7 +2109,7 @@ private struct ProjectInstructions: View {
     }
 
     private func open(_ folder: URL) {
-        app.agentsMd.openProject(folder)
+        Task { await app.agentsMd.openProject(folder) }
         UserDefaults.standard.set(folder.path, forKey: Self.folderKey)
     }
 
@@ -2107,7 +2123,7 @@ private struct ProjectInstructions: View {
             return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
         }
         if isFolder, app.agentsMd.projectFolder == nil {
-            app.agentsMd.openProject(URL(fileURLWithPath: path))
+            await app.agentsMd.openProject(URL(fileURLWithPath: path))
         }
     }
 }
