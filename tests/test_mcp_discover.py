@@ -68,11 +68,16 @@ class McpDiscoverTest(unittest.TestCase):
             p1, p2, p3, p4, p5, p6 = _registry_patches(config_dir, registry_file, mcp_file)
             with p1, p2, p3, p4, p5, p6, patch(
                 "swe.mcp.cli.MCP_CONFIG_MAP", mcp_map
-            ), patch("swe.mcp.discover.get_mcp_tools") as mock_tools:
+            ), patch("swe.mcp.discover.get_mcp_tools") as mock_tools, patch(
+                # The disk scan walks the real HOME; stub it so only the
+                # fixture configs above are seen.
+                "swe.mcp.discover._scanned_servers", return_value={}
+            ):
                 # discover_mcp_servers calls get_mcp_tools through its own
                 # module binding, so the patch lives on mcp.discover.
                 mock_tools.return_value = {"opencode": mcp_map["opencode"], "claude": mcp_map["claude"]}
                 findings = discover_mcp_servers()
+                self.assertEqual([f.name for f in findings], ["notion"])
                 notion = [f for f in findings if f.name == "notion"]
                 self.assertEqual(len(notion), 1)
                 self.assertEqual(notion[0].status, "new")
@@ -117,13 +122,18 @@ class McpDiscoverTest(unittest.TestCase):
             p1, p2, p3, p4, p5, p6 = _registry_patches(config_dir, registry_file, mcp_file)
             with p1, p2, p3, p4, p5, p6, patch(
                 "swe.mcp.cli.MCP_CONFIG_MAP", mcp_map
-            ), patch("swe.mcp.discover.get_mcp_tools") as mock_tools:
+            ), patch("swe.mcp.discover.get_mcp_tools") as mock_tools, patch(
+                # Unstubbed, the disk scan would find the real HOME's servers
+                # and apply would write them (and their secrets) here.
+                "swe.mcp.discover._scanned_servers", return_value={}
+            ):
                 mock_tools.return_value = {"opencode": mcp_map["opencode"]}
                 findings = discover_mcp_servers()
                 added = apply_mcp_findings(findings).added
-                self.assertIn("linear", added)
+                self.assertEqual(list(added), ["linear"])
                 data = json.loads(mcp_file.read_text())
-                self.assertIn("linear", data["mcpServers"])
+                self.assertEqual(list(data["mcpServers"]), ["linear"])
+                self.assertEqual(data["mcpServers"]["linear"]["command"], "npx")
 
 
 if __name__ == "__main__":

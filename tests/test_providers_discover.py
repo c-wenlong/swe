@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from swe.console import strip_ansi
 from swe.providers.commands import cmd_add, cmd_info, cmd_list, cmd_remove
 from swe.providers.defaults import DEFAULT_PROVIDERS
 from swe.providers.discover import discover_provider_keys
@@ -78,7 +79,13 @@ class CommandsSmokeTest(unittest.TestCase):
             keys_dir.mkdir()
         return config_dir, registry_file, keys_dir
 
-    def test_cmd_list_does_not_raise(self):
+    def _list(self, args):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = cmd_list(args)
+        return code, strip_ansi(buf.getvalue())
+
+    def test_cmd_list_filter_and_desc(self):
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             config_dir, registry_file, keys_dir = self._setup(tmp_path)
@@ -87,9 +94,18 @@ class CommandsSmokeTest(unittest.TestCase):
                 "swe.providers.commands.default_keys_dir",
                 return_value=keys_dir,
             ):
-                cmd_list([])
-                cmd_list(["openai"])  # filter
-                cmd_list(["-d", "openai"])  # with desc
+                code, every = self._list([])
+                self.assertEqual(code, 0)
+                self.assertIn("anthropic", every)
+                self.assertIn("openai", every)
+                code, one = self._list(["openai"])  # filter
+                self.assertEqual(code, 0)
+                self.assertIn("openai", one)
+                self.assertNotIn("anthropic", one)
+                self.assertNotIn("OpenAI API (ChatGPT", one)
+                code, desc = self._list(["-d", "openai"])  # with desc
+                self.assertEqual(code, 0)
+                self.assertIn("OpenAI API (ChatGPT", desc)
 
     def test_cmd_list_with_one_key_present(self):
         with TemporaryDirectory() as tmp:
@@ -101,7 +117,10 @@ class CommandsSmokeTest(unittest.TestCase):
                 "swe.providers.commands.default_keys_dir",
                 return_value=keys_dir,
             ):
-                cmd_list([])
+                code, out = self._list([])
+            self.assertEqual(code, 0)
+            self.assertIn("sk-proj-***2345 (27)", out)
+            self.assertRegex(out, r"\b1/\d+ providers with keys")
 
     def test_cmd_info_for_known_provider(self):
         with TemporaryDirectory() as tmp:
@@ -195,10 +214,16 @@ class CommandsSmokeTest(unittest.TestCase):
             with p1, p2, patch(
                 "swe.providers.commands.default_keys_dir",
                 return_value=keys_dir,
-            ):
-                cmd_add(["myprov", "--env=MY_KEY"])
-                cmd_remove(["myprov"])
-                cmd_remove(["myprov"])  # second remove: should report not found
+            ), redirect_stdout(io.StringIO()) as out:
+                from swe.providers.registry import load_registry
+
+                self.assertEqual(cmd_add(["myprov", "--env=MY_KEY"]), 0)
+                self.assertIn("myprov", load_registry())
+                self.assertEqual(cmd_remove(["myprov"]), 0)
+                self.assertNotIn("myprov", load_registry())
+                # A second remove reports the provider as not found.
+                self.assertEqual(cmd_remove(["myprov"]), 1)
+            self.assertIn("Provider 'myprov' not found", out.getvalue())
 
     def test_cmd_remove_unknown_returns_1(self):
         with TemporaryDirectory() as tmp:
@@ -252,7 +277,11 @@ class CommandsSmokeTest(unittest.TestCase):
                 "swe.providers.commands.default_keys_dir",
                 return_value=keys_dir,
             ):
-                cmd_list([f"--api-keys-dir={other_dir}"])
+                code, out = self._list([f"--api-keys-dir={other_dir}"])
+            self.assertEqual(code, 0)
+            # The key comes from the override, not the default dir.
+            self.assertIn("sk-proj-***4567 (27)", out)
+            self.assertIn(f"dir: {other_dir}", out)
 
     def test_cmd_list_masks_keys_in_stdout_and_never_leaks_raw(self):
         """Regression test: ensure raw key never appears in list output."""
@@ -279,8 +308,11 @@ class CommandsSmokeTest(unittest.TestCase):
             self.assertNotIn("SuperSecretRawValue", output)
             self.assertNotIn(raw_key, output)
             self.assertNotIn("sk-proj-SuperSecretRawValue", output)
-            # Missing keys render as the dash placeholder.
-            self.assertRegex(output, r"\b-\b")
+            # Missing keys render as the dash placeholder in the API KEY
+            # column ("sk-proj-" has a hyphen too, so look at that cell).
+            anthropic = next(line for line in strip_ansi(output).splitlines()
+                             if line.strip().startswith("anthropic"))
+            self.assertEqual(anthropic.split("│")[3].strip(), "-")
 
     def test_cmd_info_masks_key_in_stdout(self):
         from contextlib import redirect_stdout
@@ -374,7 +406,8 @@ class CommandsSmokeTest(unittest.TestCase):
         """Direct unit test for the helper."""
         from swe.providers.commands import _display_keys_dir
 
-        home = Path.home()
+        home = Path("/Users/someone")
+        self.enterContext(patch.object(Path, "home", return_value=home))
         # Inside $HOME → tilde.
         self.assertEqual(_display_keys_dir(home / ".api_keys"), "~/.api_keys")
         # Nested under $HOME (one level deeper).
