@@ -5420,9 +5420,15 @@ service / model layering, tests with an 84% coverage floor).
 - Stdlib-only core; optional FastMCP server extra for session history MCP tool
 - Test suite (15 unit tests) with isolated `$HOME` fixtures
 
+[Unreleased]: https://github.com/c-wenlong/swe/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/c-wenlong/swe/releases/tag/v1.2.2
 [1.2.1]: https://github.com/c-wenlong/swe/releases/tag/v1.2.1
 [1.2.0]: https://github.com/c-wenlong/swe/releases/tag/v1.2.0
 [1.1.1]: https://github.com/c-wenlong/swe/releases/tag/v1.1.1
-[1.1.0]: https://github.com/c-wenlong/swe/releases/tag/v1.1.0
 [1.0.0]: https://github.com/c-wenlong/swe/releases/tag/v1.0.0
+[0.2.9]: https://github.com/c-wenlong/swe/releases/tag/v0.2.9
+[0.2.8]: https://github.com/c-wenlong/swe/releases/tag/v0.2.8
+[0.2.7]: https://github.com/c-wenlong/swe/releases/tag/v0.2.7
+[0.2.5]: https://github.com/c-wenlong/swe/releases/tag/v0.2.5
+[0.2.2]: https://github.com/c-wenlong/swe/releases/tag/v0.2.2
 [0.1.0]: https://github.com/c-wenlong/swe/releases/tag/v0.1.0
