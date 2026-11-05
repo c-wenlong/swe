@@ -50,6 +50,7 @@ from pathlib import Path
 from swe.paths import locked_beside, swe_dir_for, search_index_for
 from swe.sessions import search_containers as containers
 from swe.sessions import search_decode as decode
+from swe.sessions.engines.common import sqlite_uri
 
 try:  # POSIX only; without it a second Python pass is not excluded.
     import fcntl
@@ -208,7 +209,7 @@ def _empty_database(path: Path) -> None:
     if not path.exists():
         return
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=rw", uri=True)
+        conn = sqlite3.connect(sqlite_uri(path, "rw"), uri=True)
         try:
             # FTS5 shadow tables (…_data/_idx/_config/…) clear through the
             # virtual table: a DELETE on the virtual table empties them all.
@@ -1465,7 +1466,7 @@ def status(home: Path | None = None) -> dict:
     if not path.exists():
         return body
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        conn = sqlite3.connect(sqlite_uri(path), uri=True)
     except sqlite3.Error as error:
         body["error"] = str(error)
         return body
