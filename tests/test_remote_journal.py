@@ -150,9 +150,12 @@ class TestJournal(unittest.TestCase):
     def test_append_oserror_returns_event(self):
         from unittest.mock import patch
         j = Journal(Path(self.tmp) / "nowhere")
-        with patch("builtins.open", side_effect=OSError("read-only")):
+        with patch("swe.remote.journal.os.open",
+                   side_effect=OSError("read-only")) as opened:
             ev = j.append("k", protocol.event("t", "k", "m", {}))
         self.assertEqual(ev["seq"], 1)
+        opened.assert_called_once()
+        self.assertFalse(j._file("k").exists())
 
     def test_read_since_runs_under_the_lock(self):
         # The read holds the file's lock like appends and trims do, so
