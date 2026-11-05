@@ -187,6 +187,18 @@ import Testing
 
     /// A second save waits for the first and writes on top of it with no
     /// false conflict; text typed while the first ran stays unsaved.
+    /// A save's outcome, or nil once `gateTimeout` passes; a stuck save
+    /// is cancelled rather than left behind.
+    private func finishes(_ save: Task<InstructionDocument.SaveOutcome, Never>) async -> InstructionDocument.SaveOutcome? {
+        let outcome = Box<InstructionDocument.SaveOutcome?>(nil)
+        let done = await withinTimeout {
+            outcome.value = await save.value
+            return true
+        }
+        if !done { save.cancel() }
+        return outcome.value
+    }
+
     @Test func overlappingSavesQueueAndKeepNewerTyping() async throws {
         let folder = try TempDir()
         let file = try folder.write("AGENTS.md", "v0\n")
@@ -215,8 +227,11 @@ import Testing
         // b is queued, not writing: only a has reached the write.
         #expect(await gate.arrivalCount == 1)
         gate.open()
-        #expect(await a.value == .saved)
-        #expect(await b.value == .saved)
+        // Bounded: a save queue that stalls once the gate opens fails here.
+        #expect(await finishes(a) == .saved)
+        #expect(await finishes(b) == .saved)
+        // The arrival count bumps in a task of its own: wait for it.
+        #expect(await gate.arrived(2))
         #expect(await gate.arrivalCount == 2)
         #expect(try String(contentsOf: file, encoding: .utf8) == "two\n")
         #expect(!doc.isDirty)
@@ -230,7 +245,7 @@ import Testing
         #expect(await gate2.arrived(1))
         doc.text = "four\n"
         gate2.open()
-        #expect(await c.value == .saved)
+        #expect(await finishes(c) == .saved)
         #expect(try String(contentsOf: file, encoding: .utf8) == "three\n")
         #expect(doc.isDirty)
         #expect(doc.text == "four\n")

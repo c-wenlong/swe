@@ -257,6 +257,7 @@ struct HangingRunner: CommandRunning {
 @Suite struct LocalFilesTests {
     @Test func readsAFileOrNilWhenMissing() throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let url = dir.path("local.json")
         try Data("{}".utf8).write(to: url)
         #expect(LocalFiles().read(url.path) == Data("{}".utf8))

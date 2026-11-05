@@ -33,6 +33,8 @@ actor HangingSource: SessionListing {
 /// returns, cancelled or not.
 struct StubbornSource: SessionListing {
     private let hang = HoldGate()
+    /// Lets the parked listing finish once its test is done with it.
+    func release() { hang.open() }
     func sessions(days: Int?, limit: Int) async throws -> SessionList {
         // The wait runs in a task of its own, which the caller's
         // cancellation never reaches, and a task's value can't be
@@ -140,7 +142,9 @@ struct StubbornSource: SessionListing {
     }
 
     @Test func aListingThatIgnoresCancellationStillTimesOutOnTime() async throws {
-        let model = SessionsModel(source: StubbornSource(), ledger: FakeSessionLedger(),
+        let source = StubbornSource()
+        defer { source.release() }
+        let model = SessionsModel(source: source, ledger: FakeSessionLedger(),
                                   snapshots: MemorySnapshotStore<SessionSnapshot>(), listTimeout: .milliseconds(50),
                                   now: { [start] in start }, searchIndexingEnabled: false)
         // The source never returns, so a load that waited on it would

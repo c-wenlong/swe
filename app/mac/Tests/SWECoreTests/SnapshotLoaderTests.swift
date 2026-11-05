@@ -281,6 +281,7 @@ actor NamesSource {
 
     @Test func aSnapshotRoundTripsThroughAPrivateFile() async throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let url = snapshotURL(in: dir)
         let file = SnapshotFile<Snapshot<Names>>(url: url)
         let snapshot = Snapshot(source: "/bin/swe", savedAt: Date(timeIntervalSince1970: 1_791_700_000.25),
@@ -295,6 +296,7 @@ actor NamesSource {
 
     @Test func aSnapshotOfAnotherShapeIsIgnored() async throws {
         let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
         let url = snapshotURL(in: dir)
         let file = SnapshotFile<Snapshot<Names>>(url: url)
         #expect(await file.load() == nil)
