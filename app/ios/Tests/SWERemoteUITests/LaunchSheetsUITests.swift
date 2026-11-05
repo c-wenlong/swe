@@ -9,7 +9,7 @@ import XCTest
 /// can't take a pick.
 ///
 /// Needs a paired hub in the simulator's store (pair once with
-/// `simctl openurl <device> 'quiver://pair?…'` before running); the
+/// `simctl openurl <device> 'swe://pair?…'` before running); the
 /// assertions wait rather than assume, so a slow hub still passes.
 /// The default cases also need real ledger data on that hub — a harness
 /// that has never launched has no recent model to start on — and the
