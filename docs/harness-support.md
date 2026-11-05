@@ -6,8 +6,9 @@ per harness, what actually works today. **Yes** means fully supported.
 each table. **No** means not implemented, usually because the harness writes
 no data SWE can read.
 
-Only harnesses `swe discover` can find are listed, plus Jules and Mastracode,
-which `swe install` knows but discovery does not.
+Only harnesses `swe discover` can find are listed (Kimi, Grok, Antigravity,
+Command Code and Qoder are missing, see Known gaps), plus Jules and
+Mastracode, which `swe install` knows but discovery does not.
 
 ## Setup
 
@@ -184,9 +185,10 @@ Notes:
   file exists to link.
 - **Devin extra profiles are not counted in the ledger**, so their spend is
   invisible even though their limits show.
-- **Grok** has a session reader, but no discovery or install entry. Its
-  sessions appear in `swe session` output and the app's Sessions page,
-  but discovery cannot add it to the harness list.
+- **Kimi, Grok, Antigravity, Command Code and Qoder (both editions)** are
+  discoverable and installable, but the tables above do not list them yet.
+  Grok also has a session reader, so its sessions appear in `swe session`
+  output and the app's Sessions page.
 - **Mistral Vibe, Goose, Aider, Augment, Kiro and Blackbox** are
   discoverable and installable but have no instructions, skills, sessions
   or usage support yet.

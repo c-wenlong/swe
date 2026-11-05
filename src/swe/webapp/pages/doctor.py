@@ -44,12 +44,12 @@ page runs the same two inits through ``run_init_now``.
 from __future__ import annotations
 
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from functools import partial
 from pathlib import Path
 
 from swe.harness import doctor_fix
-from swe.webapp.pages import PageError, home_path, tilde
+from swe.webapp.pages import CONFIG_LOCK, PageError, home_path, tilde
 from swe.webapp.pages.harness import REGISTRY_LOCK
 
 TEXT_MAX = 4000
@@ -128,7 +128,7 @@ def post(ctx, action: str, body: dict) -> dict:
                                 "That fix isn't in the report any more. Refresh to see the current one.")
             run = partial(run, in_file=in_file, cli=cli)
         home = home_path(ctx)
-        error = _guarded(run, home)
+        error = _guarded(run, home, config=action_name != "install")
         # Setup and init link files, and leave a real one in the way alone.
         blocked = blocked_now(home) if action_name in ("setup", "init") else []
         return {"ran": action_name, "error": error, "blocked": blocked, "report": _report(ctx)}
@@ -146,7 +146,7 @@ def _fix_all(home: Path) -> dict:
         if action == "plugin-fix":
             ran_plugins.append(action)
             return _with_plugin_lock(lambda: _guarded(lambda h: run(), home))
-        return _guarded(lambda h: run(), home)
+        return _guarded(lambda h: run(), home, config=action != "install")
 
     try:
         return doctor_fix.run_fixes(
@@ -168,11 +168,16 @@ def _one_at_a_time():
         _RUN_LOCK.release()
 
 
-def _guarded(run, home: Path) -> str | None:
+def _guarded(run, home: Path, *, config: bool = True) -> str | None:
+    """``run(home)`` behind the locks the pages writing the same files
+    hold. Fixes rewrite harness.json, so they wait for the Harnesses
+    page (``REGISTRY_LOCK``); setup, init, replace and an MCP sync also
+    rewrite mcp.json, harness MCP configs and skill links, so they wait
+    for the MCP, Skills and Setup pages (``CONFIG_LOCK``), in Setup's
+    order. An install (``config=False``) touches none of those and can
+    run for minutes, so it leaves those pages free."""
     try:
-        # These rewrite harness.json too: wait for the Harnesses page's
-        # writes, which hold the same lock.
-        with REGISTRY_LOCK:
+        with REGISTRY_LOCK, (CONFIG_LOCK if config else nullcontext()):
             return run(home)
     except Exception as exc:  # noqa: BLE001 - the row shows it, as the app does
         return str(exc) or type(exc).__name__
@@ -182,7 +187,7 @@ def install_now(home: Path, name: str, via: str) -> str | None:
     """``swe install <name> --via=<via>`` as a Doctor fix, one at a time
     with the others. Returns what went wrong."""
     with _one_at_a_time():
-        return _guarded(partial(_run_install, name=name, via=via), home)
+        return _guarded(partial(_run_install, name=name, via=via), home, config=False)
 
 
 def run_init_now(home: Path, *, force: bool = False) -> str | None:
@@ -298,9 +303,10 @@ def _run_dangling_link(home: Path, finding: dict, remedy: dict | None) -> str | 
 
 
 def _run_mcp_sync(home: Path, finding: dict, remedy: dict | None) -> str | None:
-    """Behind the MCP page's lock (``CONFIG_LOCK``, the Plugins page's
-    too): both rewrite the harness MCP configs, and two read-modify-write
-    passes at once would drop one's change."""
+    """Behind the Plugins page's lock as well as ``_guarded``'s
+    ``CONFIG_LOCK`` (the MCP page's): all three rewrite the harness MCP
+    configs, and two read-modify-write passes at once would drop one's
+    change."""
     return _with_plugin_lock(lambda: doctor_fix.RUNNERS["mcp-sync"](home, finding, remedy))
 
 
