@@ -40,7 +40,7 @@ struct ExperimentalSection: View {
             }
             SettingsDivider()
             PathRow(title: "Source checkout",
-                    placeholder: "~/code/quiver",
+                    placeholder: "~/code/swe",
                     stored: app.updates.checkoutOverride,
                     draft: $sourceCheckout,
                     running: app.updates.checkout ?? "",

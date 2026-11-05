@@ -124,7 +124,7 @@ struct InferenceSection: View {
         }
         .task(id: model.path) { await model.load() }
         .onDisappear { revealed.removeAll() }
-        .quiverSheet(isPresented: $cataloguing) {
+        .cardSheet(isPresented: $cataloguing) {
             ProviderCatalogueSheet(entries: InferenceCatalogue.entries(keys: model.rows)) { entry in
                 switch entry.target {
                 case .plan(let plan):
@@ -135,7 +135,7 @@ struct InferenceSection: View {
                 }
             }
         }
-        .quiverSheet(item: $editing) { draft in
+        .cardSheet(item: $editing) { draft in
             KeyEditor(draft: draft, providers: model.providers, rows: model.rows,
                       pickPlan: { plan in
                 editingPlan = planItem(plan)
@@ -162,7 +162,7 @@ struct InferenceSection: View {
                 revealed.remove(name)
             })
         }
-        .quiverSheet(item: $editingPlan) { item in
+        .cardSheet(item: $editingPlan) { item in
             if let plan = item.plan {
                 PlanKeyEditor(plan: plan, current: item.key?.value ?? "", exists: item.key != nil, save: { value in
                     try await model.set(name: plan.keyName, value: value,
@@ -1006,7 +1006,7 @@ private struct KeyEditor: View {
         .background(Theme.panel)
         .onDisappear { saveTask?.cancel() }
         .task(id: fetchSeed) { await loadModels() }
-        .quiverSheet(isPresented: $browsing) {
+        .cardSheet(isPresented: $browsing) {
             ProviderCatalogueSheet(entries: InferenceCatalogue.entries(keys: rows)) { entry in
                 switch entry.target {
                 case .provider(let provider): providerChoice = provider.id

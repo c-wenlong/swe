@@ -48,7 +48,7 @@ struct HooksPage: View {
         .task(id: app.swePath) { await model.loadIfStale(swe: app.swe, for: app.swePath) }
         // Modal: a dismiss mid-create would still write the script but
         // lose the stanza the reply carries, so only its buttons close it.
-        .quiverSheet(isPresented: $adding, modal: true) {
+        .cardSheet(isPresented: $adding, modal: true) {
             NewHookSheet()
         }
     }
