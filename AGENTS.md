@@ -136,7 +136,7 @@ If it works with `PYTHONPATH=src python3 -m swe.cli` but not with `swe`, the ins
 Each entry records a trap that already shipped as a bug or cost a long debug. Before changing a file below, read its entry in [docs/backend-architecture.md](docs/backend-architecture.md#gotchas) (Python) or [docs/app-architecture.md](docs/app-architecture.md#gotchas) (macOS app). The one-line versions:
 
 - **Session titles** (`sessions/parsers.py`): only harnesses with an on-disk marker emit `rename`. Never invent heuristics for opencode, Forge, Continue or Cursor. A false "rename" is worse than a missed one.
-- **Codex threads**: names live in sidecars (`state_<n>.sqlite`, `session_index.jsonl`), not the rollout. An empty `preview` is the only reason to drop a thread.
+- **Codex threads**: names live in sidecars (`state_<n>.sqlite`, `session_index.jsonl`), not the rollout. Empty `preview` only drops a thread when `tokens_used` is also 0 — spawned threads (subagents, automations) run with no preview at all. `archived_sessions/` is scanned too; archived rollouts sit flat there, not dated.
 - **Claude handoffs**: a `continued-in` marker supersedes a session only when nothing follows it and the successor is on disk.
 - **Parse and status caches** (`sessions/parse_cache.py`, `sessions/status.py`): only values derived from the file's own bytes may be cached. A new module feeding a cached value joins `_FINGERPRINT_MODULES`.
 - **Search index** (`sessions/search_writer.py`): two writers, swe and the app. Keep the DDL, schema version and stat arithmetic in step with Swift; never delete an index at another schema version.

@@ -689,8 +689,8 @@ def _codex_state_db(home: str = "") -> str:
     return best
 
 
-def _codex_thread_store(home: str = "") -> dict[str, tuple[str, str]]:
-    """Thread id -> ``(name, preview)`` from codex's own thread store.
+def _codex_thread_store(home: str = "") -> dict[str, tuple[str, str, bool, str]]:
+    """Thread id -> ``(name, preview, worked, label)`` from the thread store.
 
     ``name`` is the thread's display name, whatever wrote it. ``preview`` is
     codex's record of the first message the *user* actually sent, which beats
@@ -698,10 +698,17 @@ def _codex_thread_store(home: str = "") -> dict[str, tuple[str, str]]:
     often injected context (a plugin roster, an AGENTS.md) that the user
     never typed, and codex knows which was which.
 
-    An empty ``preview`` means codex considers the thread empty, and its own
-    listing hides those (there are partial indexes named
-    ``idx_threads_visible_*`` filtering on ``preview <> ''``). They are
-    threads opened and never typed into, so there is no title to salvage.
+    An empty ``preview`` alone does not prove a thread was never used: codex
+    leaves it blank on spawned threads — subagents, automations — no matter
+    how much work they did, because no user ever typed into them. ``worked``
+    is the store's own ``tokens_used > 0``, codex's record that the thread
+    ran; the only threads its listing hides (the ``idx_threads_visible_*``
+    partial indexes filter ``preview <> ''``) *and* that earned nothing are
+    ones opened and abandoned, and those are the only ones dropped.
+
+    ``label`` names a spawned thread that has no prompt to name it by: the
+    leaf of its ``agent_path`` (``/root/backend`` -> ``backend``), else its
+    ``agent_nickname``.
 
     An unreadable or absent store yields an empty map, which turns both the
     naming and the hiding back off.
@@ -714,22 +721,34 @@ def _codex_thread_store(home: str = "") -> dict[str, tuple[str, str]]:
     conn = open_sqlite_ro(db_path)
     if conn is None:
         return {}
-    out: dict[str, tuple[str, str]] = {}
+    out: dict[str, tuple[str, str, bool, str]] = {}
     try:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(threads)")}
         if not {"id", "name", "preview"} <= cols:
             return {}
-        for tid, name, preview in conn.execute(
-            "SELECT id, name, COALESCE(NULLIF(preview, ''), first_user_message) "
-            "FROM threads"
-            if "first_user_message" in cols
-            else "SELECT id, name, preview FROM threads"
+        preview_sql = (
+            "COALESCE(NULLIF(preview, ''), first_user_message)"
+            if "first_user_message" in cols else "preview"
+        )
+        tokens_sql = "tokens_used" if "tokens_used" in cols else "0"
+        path_sql = "agent_path" if "agent_path" in cols else "NULL"
+        nick_sql = "agent_nickname" if "agent_nickname" in cols else "NULL"
+        for tid, name, preview, tokens, apath, nick in conn.execute(
+            f"SELECT id, name, {preview_sql}, {tokens_sql}, "
+            f"{path_sql}, {nick_sql} FROM threads"
         ):
             if not isinstance(tid, str) or not tid.strip():
                 continue
+            label = ""
+            if isinstance(apath, str) and apath.strip("/"):
+                label = apath.rstrip("/").rsplit("/", 1)[-1]
+            elif isinstance(nick, str):
+                label = nick.strip()
             out[tid.strip().lower()] = (
                 name.strip() if isinstance(name, str) else "",
                 preview.strip() if isinstance(preview, str) else "",
+                bool(tokens) if isinstance(tokens, (int, float)) else False,
+                label,
             )
     except Exception:
         return {}
@@ -870,19 +889,30 @@ def parse_codex():
 
     # Like claude, every SWE account home holds its own dated rollout
     # tree; sessions from one are tagged with it as their account home.
-    roots = [(os.path.expanduser("~/.codex/sessions/"), "")]
+    # ``archived_sessions`` keeps archived threads flat rather than dated —
+    # codex moves the rollout there, it does not delete it, and an archived
+    # thread is still a session that ran.
+    roots = [
+        (os.path.expanduser("~/.codex/sessions/"), "", "*/*/*/*.jsonl"),
+        (os.path.expanduser("~/.codex/archived_sessions/"), "", "*.jsonl"),
+    ]
     roots += [
-        (os.path.join(home, "sessions"), home) for home in _account_homes("codex")
+        (os.path.join(home, "sessions"), home, "*/*/*/*.jsonl")
+        for home in _account_homes("codex")
+    ]
+    roots += [
+        (os.path.join(home, "archived_sessions"), home, "*.jsonl")
+        for home in _account_homes("codex")
     ]
     sessions: list[Session] = []
-    for base, account_home in roots:
+    for base, account_home, pattern in roots:
         batch = parse_jsonl_projects(
             JsonlParserConfig(
                 tool_name="codex",
                 agent="Codex CLI",
                 base_dir=base,
                 mode="glob",
-                session_glob="*/*/*/*.jsonl",
+                session_glob=pattern,
                 path_from_event=path_from_event,
                 title_from_event=title_from_event,
                 title_max_len=80,
@@ -933,19 +963,27 @@ def parse_codex():
     kept: list[Session] = []
     for tid, sess in paired:
         store, history = by_home.get(sess.account_home, ({}, {}))
-        stored_name, preview = store.get(tid, ("", ""))
+        stored_name, preview, worked, label = store.get(
+            tid, ("", "", False, "")
+        )
         # Only the store can say a thread was never used, so a thread it has
-        # never heard of is kept rather than guessed at.
-        if tid in store and not preview:
+        # never heard of is kept rather than guessed at. "Never used" takes
+        # the token ledger agreeing: a spawned thread runs with no user ever
+        # typing into it, so an empty preview alone would hide every
+        # subagent and automation codex ran.
+        if tid in store and not preview and not worked:
             continue
         names, span_ms = _codex_index_state(history.get(tid, []), sess.timestamp)
         # The store holds the live name; the index is the audit trail behind
-        # it and stands in when the store has none. With no name at all,
+        # it and stands in when the store has none. Next the spawned label —
+        # a subagent has no prompt to title from. With no name at all,
         # codex's own note of the first user message still beats the
         # transcript scan, which cannot tell a typed prompt from injected
         # context. That fallback is nobody's chosen title, so it stays
         # unmarked however the name above it was written.
-        title = clean_title(stored_name or (names[-1] if names else ""), 80)
+        title = clean_title(
+            stored_name or (names[-1] if names else "") or label, 80
+        )
         if title:
             sess.title = title
             if _codex_is_rename(names, span_ms, preview):

@@ -168,6 +168,30 @@ class ModelsAnalyticsTest(unittest.TestCase):
 
             self.assertEqual(usage["codex"][("", "gpt-5-codex")], 1)
 
+    def test_collects_codex_models_from_archived_sessions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            live = root / "codex" / "sessions"
+            archived = root / "codex" / "archived_sessions"
+            archived.mkdir(parents=True)
+            (archived / "rollout-old.jsonl").write_text(
+                '{"model":"gpt-5-codex"}\n', encoding="utf-8"
+            )
+
+            with mock.patch(
+                "swe.sessions.models_analytics.os.path.expanduser",
+                side_effect=self._expand_for(
+                    root,
+                    {
+                        "~/.codex/sessions/": live,
+                        "~/.codex/archived_sessions/": archived,
+                    },
+                ),
+            ):
+                usage = collect_model_usage()
+
+            self.assertEqual(usage["codex"][("", "gpt-5-codex")], 1)
+
     def test_collects_freebuff_models_from_chat_logs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

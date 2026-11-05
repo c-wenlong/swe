@@ -436,7 +436,8 @@ def _find_session_file(root: Path, session_id: str, patterns: tuple[str, ...] = 
 
 # The transcript subdir each account-aware harness keeps inside its home,
 # so a session in an SWE account home resolves there, not the default.
-_ACCOUNT_SUBDIRS = {"claude": "projects", "codex": "sessions"}
+# Codex is absent: its account homes resolve through `_codex_rollout_path`.
+_ACCOUNT_SUBDIRS = {"claude": "projects"}
 
 
 def _jsonl_reader(root: str, patterns: tuple[str, ...] = ("*.jsonl",)) -> Reader:
@@ -458,11 +459,30 @@ def _jsonl_reader(root: str, patterns: tuple[str, ...] = ("*.jsonl",)) -> Reader
 for _name, _root, _patterns in (
     ("claude", "~/.claude/projects", ("*.jsonl",)),
     ("droid", "~/.factory/sessions", ("*.jsonl",)),
-    ("codex", "~/.codex/sessions", ("*.jsonl",)),
     ("pi", "~/.pi/agent/sessions", ("*.jsonl",)),
     ("cursor", "~/.cursor/projects", ("*.jsonl",)),
 ):
     READER_REGISTRY[_name] = _jsonl_reader(_root, _patterns)
+
+
+@register_reader("codex")
+def _read_codex(session: Session) -> NormalizedTranscript:
+    # `_codex_rollout_path` is the one resolver for rollout files: it finds
+    # the dated path, the flat spot archiving moved it to, and any home a
+    # profile keeps, so an archived thread reads back like a live one.
+    from swe.sessions.status import _codex_rollout_path
+
+    direct = expand_user(session.session_id) if session.session_id else None
+    if direct is not None and direct.is_file():
+        found = str(direct)
+    else:
+        found = _codex_rollout_path(session.session_id, session.account_home)
+    if not found:
+        return _unreadable(session, "transcript file not found")
+    path = Path(found)
+    transcript = _new(session, [path])
+    transcript.messages = _read_jsonl(path)
+    return transcript
 
 
 @register_reader("freebuff")

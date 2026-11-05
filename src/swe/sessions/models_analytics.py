@@ -177,16 +177,19 @@ def collect_model_usage() -> dict[str, dict[tuple[str, str], int]]:
             pass
 
     codex_dir = os.path.expanduser("~/.codex/sessions/")
-    if os.path.exists(codex_dir):
-        try:
-            seen: dict[tuple[str, str], int] = {}
-            for jsonl in glob.glob(os.path.join(codex_dir, "*", "*", "*", "*.jsonl")):
-                for key, cnt in _scan_jsonl_models(jsonl, 20).items():
-                    seen[key] = seen.get(key, 0) + cnt
-            if seen:
-                raw["codex"] = seen
-        except Exception:
-            pass
+    codex_archived = os.path.expanduser("~/.codex/archived_sessions/")
+    try:
+        seen: dict[tuple[str, str], int] = {}
+        # Live rollouts are dated under sessions/; archived ones sit flat.
+        files = glob.glob(os.path.join(codex_dir, "*", "*", "*", "*.jsonl"))
+        files += glob.glob(os.path.join(codex_archived, "*.jsonl"))
+        for jsonl in files:
+            for key, cnt in _scan_jsonl_models(jsonl, 20).items():
+                seen[key] = seen.get(key, 0) + cnt
+        if seen:
+            raw["codex"] = seen
+    except Exception:
+        pass
 
     freebuff_dir = os.path.expanduser("~/.config/manicode/projects/")
     if os.path.exists(freebuff_dir):

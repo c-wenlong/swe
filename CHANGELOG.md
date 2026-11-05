@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Codex sessions were undercounted when codex ran subagents.**
+  `parse_codex` dropped every thread whose store `preview` was empty,
+  treating it as opened and never typed into — but codex also leaves
+  `preview` blank on spawned threads (subagents, automations) no matter
+  how much work they did. On a machine running codex's multi-agent
+  feature that hid almost every session. A thread now drops only when
+  `preview` is empty *and* `tokens_used` is zero — the store's own record
+  that it never ran — and kept spawned threads are titled from
+  `agent_path`'s leaf or `agent_nickname` rather than their transcript's
+  injected-context first line. `swe session` and the session counts on
+  `swe list` also pick up `~/.codex/archived_sessions/` now: archiving a
+  thread moves its rollout there, and an archived session still ran.
+
 ### Added
 
 - **Muse shows Meta's logo.** The `muse` harness id is aliased to the

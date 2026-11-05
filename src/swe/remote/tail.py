@@ -603,7 +603,8 @@ _JSONL_ROOTS: dict[str, tuple[str, tuple[str, ...]]] = {
 
 # The transcript subdir each account-aware harness keeps inside its home,
 # so a session in an SWE account home resolves there, not the default.
-_ACCOUNT_SUBDIRS = {"claude": "projects", "codex": "sessions"}
+# Codex is absent: its account homes resolve through `_codex_rollout_path`.
+_ACCOUNT_SUBDIRS = {"claude": "projects"}
 
 _OPENCODE_DBS = {
     "opencode": "~/.local/share/opencode/opencode.db",
@@ -619,6 +620,13 @@ def resolve_jsonl_path(session: Session) -> Path | None:
         direct = expand_user(session.session_id)
         if direct.is_file():
             return direct
+    if session.tool_name == "codex":
+        # `_codex_rollout_path` is the one rollout resolver: it finds the
+        # dated path and the flat spot archiving moved the file to.
+        from swe.sessions.status import _codex_rollout_path
+
+        found = _codex_rollout_path(session.session_id, session.account_home)
+        return Path(found) if found else None
     root, patterns = entry
     root = expand_user(root)
     subdir = _ACCOUNT_SUBDIRS.get(session.tool_name)
