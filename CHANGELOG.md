@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An opencode approval's request id can no longer reach another serve
+  route.** The hub put the client's request id into the opencode serve
+  URL as typed, so an id like `../../<session>/abort` posted to a
+  different route; ids and session ids are now one quoted path segment.
+
 - **A wildcard hub bind no longer turns off the Host check, and a
   second `swe remote serve` on a taken port no longer disturbs the
   running hub.** `--host=0.0.0.0 --unsafe-bind-any` left the hub's
