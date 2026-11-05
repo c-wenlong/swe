@@ -51,7 +51,9 @@ private final class ManualSleep {
 }
 
 @MainActor
-@Suite struct ChartHoverTests {
+/// `settle()` waits on the hover's own task; a sleep parked past the ones a
+/// test fires would leave it waiting, so the suite is bounded.
+@Suite(.timeLimit(.minutes(1))) struct ChartHoverTests {
     private func make() -> (ChartHover, ManualSleep) {
         let sleep = ManualSleep()
         return (ChartHover(sleep: { try await sleep.sleep($0) }), sleep)

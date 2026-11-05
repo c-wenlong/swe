@@ -1163,7 +1163,10 @@ import Testing
         func hold() {
             guard armed else { return }
             Task { await parks.bump() }
-            _ = release.wait(timeout: .now() + .seconds(Int(gateTimeout.components.seconds)))
+            // A timed-out hold must not pass as a release.
+            if release.wait(timeout: .now() + .seconds(Int(gateTimeout.components.seconds))) == .timedOut {
+                preconditionFailure("a held fan read was never released")
+            }
         }
         /// True once an armed read is parked, false after `gateTimeout`.
         func parked() async -> Bool { await parks.reach(1) }

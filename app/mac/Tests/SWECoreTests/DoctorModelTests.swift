@@ -444,7 +444,14 @@ final class SequencedRunner: CommandRunning, @unchecked Sendable {
             inFlight.cancel()
             return
         }
-        await inFlight.value
+        // A run that asked swe for more than its two replies parks past
+        // the last one: bound the wait and stop it rather than hang.
+        let finished = await withinTimeout {
+            await inFlight.value
+            return true
+        }
+        if !finished { inFlight.cancel() }
+        #expect(finished, "the first run asked swe for more than its replies")
         #expect(model.running.isEmpty)
     }
 

@@ -242,8 +242,11 @@ import Testing
             lock.unlock()
             if gate != nil { Task { await parks.bump() } }
             // Bounded so a test that never releases fails instead of
-            // hanging the suite.
-            _ = gate?.wait(timeout: .now() + .seconds(Int(gateTimeout.components.seconds)))
+            // hanging the suite. A timed-out hold must not pass as a
+            // release, or an ordering test could lose its overlap and pass.
+            if let gate, gate.wait(timeout: .now() + .seconds(Int(gateTimeout.components.seconds))) == .timedOut {
+                preconditionFailure("a held read was never released")
+            }
             if gate != nil {
                 lock.lock()
                 parked = false
@@ -304,8 +307,11 @@ import Testing
             lock.unlock()
             if gate != nil { Task { await parks.bump() } }
             // Bounded so a test that never releases fails instead of
-            // hanging the suite.
-            _ = gate?.wait(timeout: .now() + .seconds(Int(gateTimeout.components.seconds)))
+            // hanging the suite. A timed-out hold must not pass as a
+            // release, or an ordering test could lose its overlap and pass.
+            if let gate, gate.wait(timeout: .now() + .seconds(Int(gateTimeout.components.seconds))) == .timedOut {
+                preconditionFailure("a held read was never released")
+            }
             if gate != nil {
                 lock.lock()
                 parked = false

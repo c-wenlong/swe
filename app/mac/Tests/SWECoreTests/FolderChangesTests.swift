@@ -25,8 +25,14 @@ import Testing
                         filter: @escaping @Sendable (String) -> Bool) async throws -> Task<Void, Never> {
         let stream = FolderChanges.stream(root: scratch.url, latency: 0.1, matches: probe.filter(filter))
         let consumer = probe.consume(stream, busyAfterFirst: busyAfterFirst)
-        try write(Probe.prime)
-        try #require(await probe.wake(after: Probe.prime), "the stream never woke for its first write")
+        do {
+            try write(Probe.prime)
+            try #require(await probe.wake(after: Probe.prime), "the stream never woke for its first write")
+        } catch {
+            // The caller never gets the task to cancel, so stop the watch here.
+            consumer.cancel()
+            throw error
+        }
         return consumer
     }
 
@@ -75,6 +81,11 @@ import Testing
             try write("AGENTS_MD/\(index).md")
             try #require(await probe.saw("AGENTS_MD/\(index).md"))
         }
+        // The filter answering for 9.md comes before that delivery's wake
+        // is buffered. FSEvents calls back one delivery at a time, so once
+        // a later (rejected) write reaches the filter, 9.md's wake is in.
+        try write("after-burst.txt")
+        try #require(await probe.saw("after-burst.txt"))
         probe.busy.open()
         #expect(await probe.wake(after: "AGENTS_MD/9.md"))
         try write(Probe.fence)
