@@ -125,6 +125,18 @@ the secret that collects a new device's credential could land in
 proxy and access logs. Both now send it in an <code>X-Pair-Secret</code> header;
 the hub still reads <code>?secret=</code> for iPhone builds already out.</p>
 </li>
+<li><p><strong>An Open in session prompt no longer carries a stranger's PR text.</strong>
+Anyone can open a pull request on a public repo, and its title, body
+and failing check names (which a fork's own workflow can name) went
+word for word into the first prompt of the agent reviewing it. The
+brief now follows the resolve prompt's rule: it quotes the title and
+body line by line behind a note that they are untrusted data, only
+when the author's <code>author_association</code> is <code>OWNER</code>, <code>MEMBER</code> or
+<code>COLLABORATOR</code>, and otherwise says in one line that they were left
+out. Failing check names are always quoted, and the web's Open in
+session sheet no longer puts the title in the prompt it prefills.
+The hub's PR detail gains <code>association</code>.</p>
+</li>
 <li><p><strong>A resolve prompt no longer carries strangers' comments.</strong> Anyone can
 comment on a public issue, and every comment went word for word into
 the first prompt of the agent resolving it. The prompt now quotes the
@@ -287,6 +299,12 @@ Safe Storage item.</p>
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>A stored Linear task's refresh no longer downloads its
+description.</strong> The hub asked Linear for each issue's full body on
+every task read and never used it. The unused Notion page-body
+renderer, built for a resolve route that never shipped, is gone
+too.</p>
+</li>
 <li><p><strong>Cursor's limit meters read &quot;Cursor models&quot; and &quot;Other models&quot;, and
 reset times show two units.</strong> The rows the Cursor accounts and harness
 cards listed as &quot;Included&quot; and &quot;API&quot; now say what they count; any

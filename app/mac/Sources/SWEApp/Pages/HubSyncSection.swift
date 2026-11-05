@@ -9,6 +9,13 @@ struct HubSyncSection: View {
     @State private var status: HubSyncStatus?
     @State private var loadError: String?
     @State private var loading = false
+    /// Bumped by each read, so a slower earlier one (the watcher's, the
+    /// Refresh button's) can't land over a newer one or end its spinner.
+    @State private var reads = 0
+    /// A "Fetch and check again" is running. The fetch moves remote refs,
+    /// which wakes the watcher; its read must not supersede the fetch's
+    /// own, or a fetch error would vanish under a plain status.
+    @State private var fetching = false
     @State private var syncing = false
     @State private var result: HubSyncResult?
     @State private var syncError: String?
@@ -34,7 +41,8 @@ struct HubSyncSection: View {
         // more; the Sync button's own run rereads when it ends.
         .task {
             let swe = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".swe")
-            for await _ in FolderChanges.stream(root: swe, matches: HubSyncStatus.affects) where !syncing {
+            for await _ in FolderChanges.stream(root: swe, matches: HubSyncStatus.affects)
+            where !syncing && !fetching {
                 await load(fetch: false)
             }
         }
@@ -83,13 +91,22 @@ struct HubSyncSection: View {
     }
 
     private func load(fetch: Bool) async {
+        reads += 1
+        let mine = reads
         loading = true
-        defer { loading = false }
+        if fetch { fetching = true }
+        defer {
+            if fetch { fetching = false }
+            if mine == reads { loading = false }
+        }
         do {
-            status = try await app.swe.hubSyncStatus(fetch: fetch)
+            let next = try await app.swe.hubSyncStatus(fetch: fetch)
+            guard mine == reads else { return }
+            status = next
             loadError = nil
         } catch is CancellationError {
         } catch {
+            guard mine == reads else { return }
             loadError = error.localizedDescription
         }
     }
