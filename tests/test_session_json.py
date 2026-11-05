@@ -227,10 +227,6 @@ class RefusalJsonTest(SessionJsonTestBase):
         self.assertRefused("--json", "-i")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ParserFailureJsonTest(SessionJsonTestBase):
     def test_a_crashed_parser_is_named_not_mistaken_for_no_history(self):
         add_claude_session(self.home)
@@ -248,3 +244,7 @@ class ParserFailureJsonTest(SessionJsonTestBase):
         add_claude_session(self.home)
         data = decode(run_swe(self.home, "session", "--json"))["data"]
         self.assertEqual(data["failures"], [])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -12,12 +12,24 @@ import Foundation
 enum AppRelauncher {
 
     /// The detached script. $1 = our pid, $2 = built app path, $3 = the
-    /// installed app's path (Bundle.main.bundleURL).
-    private static let script = """
+    /// installed app's path (Bundle.main.bundleURL). Internal so tests can
+    /// run it against a scratch HOME.
+    static let script = """
         #!/bin/sh
         pid="$1"; src="$2"; dest="$3"
         # sh already has this file open; nothing reads it again.
         rm -f "$0"
+        # Only ever swap one app bundle for another. Run unbundled, the
+        # "bundle" is the folder holding the binary, and moving that to
+        # the Trash would take everything next to it.
+        case "$dest" in
+          /*.app) ;;
+          *) echo "swe relauncher: $dest is not an app bundle" >&2; exit 1 ;;
+        esac
+        case "$src" in
+          /*.app) ;;
+          *) echo "swe relauncher: $src is not an app bundle" >&2; open "$dest"; exit 1 ;;
+        esac
         i=0
         while kill -0 "$pid" 2>/dev/null; do
           i=$((i + 1))
@@ -33,7 +45,7 @@ enum AppRelauncher {
         case "$src_dir" in
           "$HOME/.swe/cache/rebuild/"*)
             case "${src_dir#"$HOME/.swe/cache/rebuild/"}" in
-              ""|*/*) ;;
+              ""|*/*|.|..) ;;
               *) echo $$ > "$src_dir/owner.pid" ;;
             esac ;;
         esac
@@ -67,11 +79,12 @@ enum AppRelauncher {
         fi
         /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$trash"
         # The build came from a per-build folder under the rebuild cache;
-        # remove it, but only ever a direct child of that cache.
+        # remove it, but only ever a direct child of that cache ("." and
+        # ".." name the cache itself and its parent).
         case "$src_dir" in
           "$HOME/.swe/cache/rebuild/"*)
             case "${src_dir#"$HOME/.swe/cache/rebuild/"}" in
-              ""|*/*) ;;
+              ""|*/*|.|..) ;;
               *) rm -rf "$src_dir" ;;
             esac ;;
         esac
@@ -88,7 +101,7 @@ enum AppRelauncher {
         try? fm.createDirectory(at: log.deletingLastPathComponent(),
                                 withIntermediateDirectories: true)
         let scriptURL = fm.temporaryDirectory
-            .appending(path: "quiver-relaunch-\(UUID().uuidString).sh")
+            .appending(path: "swe-relaunch-\(UUID().uuidString).sh")
         do {
             try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         } catch {
