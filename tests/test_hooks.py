@@ -205,6 +205,9 @@ class BasenamesTest(unittest.TestCase):
         self.assertIsNone(
             expand_command_path("$SUPERSET_HOME_DIR/hooks/x.sh", home))
         self.assertIsNone(expand_command_path("hooks/x.sh", home))
+        # Another account's home: unverifiable, not <home>root/x.py.
+        self.assertIsNone(expand_command_path("~root/x.py", home))
+        self.assertEqual(expand_command_path("~/x.py", home), home / "x.py")
 
 
 class ListCommandTest(unittest.TestCase):

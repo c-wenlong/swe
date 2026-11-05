@@ -110,6 +110,10 @@ extension SweClient {
     func runPlain(_ arguments: [String]) async throws -> String {
         let result = try await runner.run(arguments)
         let out = Self.plain(String(decoding: result.stdout, as: UTF8.self))
+        // A missing swe gets the same "fix the path" message as `call`.
+        if result.status == 127, let missing = Self.envNotFoundName(result.stderr) {
+            throw SweError.notInstalled(missing)
+        }
         guard result.status == 0 else {
             let err = Self.plain(result.stderr)
             throw SweError.commandFailed(status: result.status, message: err.isEmpty ? out : err)
