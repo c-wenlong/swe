@@ -200,6 +200,10 @@ function closeRouteSheets() {
 function renderGate(message = CREDENTIAL_REFUSED, always = false) {
   // A page's open sheet would stay modal above the gate.
   closeRouteSheets();
+  // The gate is the view now: a page's read or poll still out compares
+  // routeGen before it paints, so it drops its reply instead of drawing
+  // over the pair form.
+  routeGen++;
   const lead = credential() || always ? message
     : "This device isn't signed in to the hub owner's Tailscale account, so it needs pairing.";
   document.getElementById("panel").innerHTML = `<div class="page"><div class="card gate">

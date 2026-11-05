@@ -185,7 +185,12 @@ def _pin_columns(test):
         lambda *_: list(_columns.DEFAULT_COLUMNS))
     patch2.start()
     test.addCleanup(patch2.stop)
-
+    # cmd_list reads config.json's list section once and hands it to
+    # load_window too, so the session window (the "100d" label) also has
+    # to come from the defaults rather than the developer's config.
+    patch3 = mock.patch("swe.harness.commands.list_section", lambda: {})
+    patch3.start()
+    test.addCleanup(patch3.stop)
 
 
 class CmdListGhostRowTest(unittest.TestCase):
@@ -492,12 +497,11 @@ class CmdListSessColumnTest(unittest.TestCase):
     """SESS column shows the three documented visual states."""
 
     def setUp(self):
+        # The header reads the developer's saved session window and column
+        # set; pin both so the column really is "100d" and is shown,
+        # whatever ~/.swe/config.json says.
+        _pin_columns(self)
         _setup_patches(self)
-        # The header reads the developer's saved session window; pin it so
-        # the column really is "100d" whatever ~/.swe/config.json says.
-        p = patch("swe.harness.commands.load_window", return_value=100)
-        p.start()
-        self.addCleanup(p.stop)
 
     def test_sess_three_states_shift_colors(self):
         output = _run_cmd_list()
@@ -894,10 +898,11 @@ class CmdCheckStatusColumnTest(unittest.TestCase):
             live_versions={"claude": "2.1.126"},
         )
         output = _run_cmd_check()
-        plain = strip_ansi(output)
-        self.assertIn("claude", plain)
-        self.assertIn("2.1.126", plain)
-        self.assertIn("cl", plain)  # alias
+        row = _row_for_tool(output, "claude")
+        # The version is drawn dim and the alias cyan, in the claude row
+        # itself (a bare "cl" would match inside "claude").
+        self.assertIn("\033[2m2.1.126", row)
+        self.assertIn("\033[36mcl ", row)
 
     def test_non_installed_row_uses_dim_not_installed_text(self):
         _setup_check_patches(self, installed_cmds=())
@@ -1571,8 +1576,10 @@ class CmdTagsMigrationTest(unittest.TestCase):
 
     def test_dim_tool_list_color(self):
         output = _run_cmd_tags()
-        # TOOLS column uses kind="list" + color="dim" — emits dim ANSI.
-        self.assertIn("\033[2m", output)
+        # TOOLS column uses kind="list" + color="dim". The header labels are
+        # dim too, so the check is on the cell itself, not anywhere.
+        row = _row_for_tool(output, "claude, codex")
+        self.assertIn("\033[2mclaude, codex", row)
 
     def test_alphabetical_tool_list_per_row(self):
         output = _run_cmd_tags()

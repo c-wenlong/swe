@@ -120,15 +120,25 @@ NODE_REPL_NODE_PATH = "/Applications/Codex.app/..."
         self.assertEqual(node_repl["startup_timeout_sec"], 120)
         self.assertEqual(node_repl["env"]["NODE_REPL_NODE_PATH"], "/Applications/Codex.app/...")
 
-    def test_parser_returns_deep_copies(self):
-        """Caller mutating nested dicts must not affect parse internals."""
-        servers = parse_codex_mcp_region(SAMPLE_CODEX_MCP_BLOCK)
-        servers["fathom"]["args"].append("EXTRA")
-        # Re-parse from a fresh region parse: called regions must be independent.
-        servers2 = parse_codex_mcp_region(SAMPLE_CODEX_MCP_BLOCK)
-        self.assertEqual(servers2["fathom"]["args"], [
-            "--directory", "/tmp/fathom", "run", "python3", "server.py"
-        ])
+    def test_each_parse_returns_its_own_objects(self):
+        """Mutating one parse's nested values leaves the next parse alone.
+
+        The parser keeps no cache, so this holds by construction today; it
+        guards against one being added that hands out shared dicts.
+        """
+        # A server with an [env] table, so the dict mutated below is one
+        # the parser itself built.
+        region = ('[mcp_servers.svc]\ncommand = "node"\nargs = ["a"]\n\n'
+                  '[mcp_servers.svc.env]\nTOKEN = "orig"\n')
+        servers = parse_codex_mcp_region(region)
+        servers["svc"]["args"].append("EXTRA")
+        servers["svc"]["env"]["TOKEN"] = "changed"
+        servers2 = parse_codex_mcp_region(region)
+        self.assertIsNot(servers2["svc"], servers["svc"])
+        self.assertIsNot(servers2["svc"]["args"], servers["svc"]["args"])
+        self.assertIsNot(servers2["svc"]["env"], servers["svc"]["env"])
+        self.assertEqual(servers2["svc"], {"command": "node", "args": ["a"],
+                                           "env": {"TOKEN": "orig"}})
 
 
 # ── renderer ─────────────────────────────────────────────────────────

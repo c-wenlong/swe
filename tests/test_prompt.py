@@ -9,10 +9,6 @@ from swe.prompt import read_line
 
 class ReadLineTest(unittest.TestCase):
     def test_non_tty_accepts_lf(self):
-        with patch("sys.stdin", io.StringIO("description\n")):
-            with patch("sys.stdin.isatty", return_value=False):
-                # re-bind isatty on the StringIO
-                pass
         fake = io.StringIO("description\n")
         fake.isatty = lambda: False  # type: ignore[method-assign]
         with patch("sys.stdin", fake):
@@ -179,15 +175,20 @@ class ByteReaderTest(unittest.TestCase):
 
         from swe import prompt
 
-        for tty_echo in (False, True):
+        # Without TTY echo the reader echoes "x" itself, then the newline;
+        # with it, the TTY drew "x" and only the newline is missing.
+        # An LF means the line end already moved the cursor: no newline.
+        cases = [(b"x\r", False, "x\n"), (b"x\r", True, "\n"),
+                 (b"x\n", False, "x"), (b"x\r\n", True, "")]
+        for payload, tty_echo, written in cases:
             out = io.StringIO()
-            fd2 = self._pipe(b"x\r")
+            fd2 = self._pipe(payload)
             try:
                 with patch("sys.stdout", out), \
                      patch.object(prompt, "_tty_echo_on",
                                   return_value=tty_echo):
                     self.assertEqual(prompt._read_line_bytes(fd2), "x")
-                self.assertIn("\n", out.getvalue())
+                self.assertEqual(out.getvalue(), written, (payload, tty_echo))
             finally:
                 os.close(fd2)
 
