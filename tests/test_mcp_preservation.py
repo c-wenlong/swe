@@ -19,6 +19,7 @@
 """
 
 import io
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -270,11 +271,22 @@ class UnverifiedNameSafetyTest(unittest.TestCase):
         """`mcp list hub` resolves to the hub label, which mcp_tools does
         not carry — the subscript used to raise KeyError."""
         buf = io.StringIO()
-        with patch.object(mcp_cli, "load_registry", lambda: {}), \
-                patch.object(mcp_cli, "get_tool_servers", lambda t: {}), \
+        asked = []
+
+        def servers(tool):
+            asked.append(tool)
+            return {"github": {"command": "gh-mcp"}} if tool == mcp_cli.HUB_LABEL else {}
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(mcp_cli, "MCP_SOURCE_FILE", Path(tmp) / "mcp.json"), \
+                patch.object(mcp_cli, "load_registry", lambda: {}), \
+                patch.object(mcp_cli, "get_tool_servers", servers), \
                 redirect_stdout(buf):
             rc = mcp_cli.cmd_list(["hub"])
         self.assertEqual(rc, 0)
+        self.assertEqual(asked, [mcp_cli.HUB_LABEL])
+        self.assertIn("github", buf.getvalue())
+        self.assertIn("✓", buf.getvalue())
 
 
 if __name__ == "__main__":
