@@ -1007,10 +1007,17 @@ public final class GitHubModel {
     /// optimistically, then lets the CLI rewrite `github.json`; on
     /// failure the reply's authoritative list (or a reload) restores
     /// whatever the store actually holds.
+    /// Pins by name. `github.json` is hand-editable and swe does not
+    /// dedupe it, so the same repo can be listed twice; the first wins
+    /// rather than trapping the first drag.
+    static func pinLookup(_ pins: [PinnedRepo]) -> [String: PinnedRepo] {
+        Dictionary(pins.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
     public func reorderPins(_ order: [String], swe: SweClient) async {
         if mutating.contains("<reorder>") {
             queuedReorder = order
-            let lookup = Dictionary(uniqueKeysWithValues: pins.map { ($0.name, $0) })
+            let lookup = Self.pinLookup(pins)
             pins = order.compactMap { lookup[$0] }
             return
         }
@@ -1022,7 +1029,7 @@ public final class GitHubModel {
             // The pre-apply order is this attempt's restore point — a
             // failed save puts back what the list showed before it.
             let current = pins
-            let lookup = Dictionary(uniqueKeysWithValues: current.map { ($0.name, $0) })
+            let lookup = Self.pinLookup(current)
             pins = next.compactMap { lookup[$0] }
             do {
                 let reply = try await swe.ghReorderRepos(next)

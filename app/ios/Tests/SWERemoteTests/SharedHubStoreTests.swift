@@ -61,7 +61,7 @@ final class SharedHubStoreTests: XCTestCase {
     }
 
     private func freshDefaults() -> UserDefaults {
-        let suite = "quiver.tests.\(UUID().uuidString)"
+        let suite = "swe.tests.\(UUID().uuidString)"
         suites.append(suite)
         return UserDefaults(suiteName: suite)!
     }

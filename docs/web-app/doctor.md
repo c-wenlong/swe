@@ -49,7 +49,7 @@ machine name, `home` (the home the findings are about, the launch's
 `POST /v1/sessions` can start on the hub, for the agent picker's chips):
 
 ```json
-{"ok": true, "machine": "home-server", "home": "/Users/kai",
+{"ok": true, "machine": "home-server", "home": "/Users/me",
  "launchable": [{"name": "claude", "display_name": "Claude",
                  "launch_model": true, "launch_effort": false,
                  "launch_yolo": true, "last_model": "",

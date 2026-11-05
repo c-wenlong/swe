@@ -54,7 +54,7 @@ _preparing_lock = threading.Lock()
 
 # The same path and query readers as ``/v1/issues``: an owner/repo
 # pair, a canonical number of at most nine digits, ``refresh=1``.
-_refresh = issues_mod._refresh
+_refresh = G.refresh_asked
 _repo_arg = issues_mod._repo_arg
 _number_arg = issues_mod._number_arg
 

@@ -32,19 +32,6 @@ from swe.sessions.commands import cmd_models, cmd_session
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class _ModelFixture:
-    """Shape that mirrors ``models_analytics.collect_model_usage`` output.
-
-    The real function returns ``{tool: {(provider, model): count}}``;
-    tests pin the same shape so cmd_models' tuple-unpack on
-    ``entries.items()`` works at module level.
-    """
-
-    def __init__(self, raw):
-        self.raw = raw
-
-
 def _models_fixture():
     # Three tools, mixed counts so the ``count_threshold`` colour
     # decision and the by-tool mode both have something to render.
@@ -208,13 +195,7 @@ class CmdModelsMigrationTest(unittest.TestCase):
         # We check that the green escape sequence is NOT immediately
         # before "60" in the rendered output.
         plain = strip_ansi(output)
-        self.assertIn("60", plain)
-        # Split by escape codes (sentinel) to avoid colour-bleed false
-        # negative when the plain text happens to contain "60".
-        chunks = output.replace("\033[32m", "<GREEN>").split("<GREEN>")
-        for chunk in chunks:
-            # Each non-coloured chunk must not have a digit count next to 60.
-            pass  # the simpler test: there's no "\033[32m      60" substring.
+        self.assertIn("      60", plain)
         self.assertNotIn("\033[32m      60", output)
 
     def test_summary_footer_print_total_messages_and_tool_count(self):
@@ -355,21 +336,26 @@ class CmdSessionMigrationTest(unittest.TestCase):
             )
 
     def test_idx_cell_wraps_idx_in_brackets_and_pads_short_digits(self):
-        # Migration renders the IDX cell inline as
-        # ``f"[{c('bold', str(idx))}]{pad}"`` where ``pad`` fills out
-        # the column to width=4 for single-digit indices ("[1] ").
-        # ``trust_cell_width=True`` means the Table doesn't re-pad, so
-        # we manually pad here. Pin the visible length per digit width
-        # so column-grid alignment is preserved.
-        from swe.sessions.commands import cmd_session as _cs
-        # Inject our fixture + a deterministic now via the patches.
-        from swe.console import c as _c
-        for digit_idx in (1, 12):
-            bold = _c("bold", str(digit_idx))
-            cell = f"[{bold}]" + " " * max(0, 4 - len(str(digit_idx)) - 2)
-            # Both single- and double-digit indices fit width=4 — real
-            # session counts are bounded so 3+ digit indices don't apply.
-            self.assertEqual(4, visible_len(cell))
+        # The IDX cell is ``[<bold N>]`` padded by hand to the column
+        # (``trust_cell_width`` skips the table's own pad), and the column
+        # is as wide as the largest index: with twelve rows "[1]" pads to
+        # "[12]"'s four, so LAST ACTIVE starts in the same place on every
+        # row.
+        from swe.sessions.commands import _build_session_table
+
+        now_ms = 1_700_000_000_000
+        with patch.dict(os.environ, {"HOME": _FIXTURE_HOME}):
+            sessions = _sessions_fixture(now_ms) * 3
+        with patch("swe.sessions.commands.time.time", return_value=now_ms / 1000.0):
+            lines = _build_session_table(sessions, statuses=[""] * len(sessions)).render()
+        header, rows = strip_ansi(lines[0]), lines[2:]
+        self.assertEqual(len(rows), 12)
+        time_col = header.index("LAST ACTIVE")
+        for idx, row in enumerate(rows, start=1):
+            plain = strip_ansi(row)
+            self.assertIn(f"[{c('bold', str(idx))}]", row)
+            self.assertEqual(plain[:time_col], f"[{idx}]".ljust(time_col), plain)
+            self.assertNotEqual(plain[time_col], " ", plain)
 
     def test_relative_time_branches(self):
         output, _ = _run_cmd_session([])
@@ -385,14 +371,10 @@ class CmdSessionMigrationTest(unittest.TestCase):
 
     def test_agent_color_is_green(self):
         output, _ = _run_cmd_session([])
-        # Agent column uses preformatted+trust with c("green", agent).
-        # The ANSI escape for green is \033[32m.
-        self.assertTrue(
-            "\033[32mclaude" in output
-            or "\033[32mcodex" in output
-            or "\033[32mdroid" in output
-            or "\033[32mcline" in output,
-        )
+        # Agent column uses preformatted+trust with c("green", agent):
+        # every row's agent carries the green escape.
+        for agent in ("claude", "codex", "droid", "cline"):
+            self.assertIn("\033[32m" + agent, output, agent)
 
     def test_time_color_is_cyan(self):
         output, _ = _run_cmd_session([])
