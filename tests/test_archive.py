@@ -110,6 +110,61 @@ class ArchiveStoreTest(unittest.TestCase):
         self.mod.archive("mimo", "b")
         self.assertEqual(set(self.mod.load_archive()), {"kiro", "mimo"})
 
+    def test_save_archive_replaces_the_archived_set_wholesale(self):
+        self.file.write_text(json.dumps({
+            # Archived, then left out of the new set: restored, and its
+            # other fields stay.
+            "kiro": {"command": "kiro", "state": "archived",
+                     "archived": {"reason": "old"}},
+            # Archived with nothing else on the row: the row goes.
+            "ghost": {"state": "archived", "archived": {"reason": "gone"}},
+            # Starred: archiving it drops the pin.
+            "mimo": {"command": "mimo", "pin": True},
+        }))
+        self.mod.save_archive({
+            "mimo": {"reason": "too slow", "archived_at": "2026-01-02T03:04:05",
+                     "usage": "HEAVY"},
+            "fresh": {"usage": "not-a-level"},
+        })
+        reg = json.loads(self.file.read_text())
+        self.assertEqual(reg["kiro"], {"command": "kiro"})
+        self.assertNotIn("ghost", reg)
+        self.assertNotIn("pin", reg["mimo"])
+        self.assertEqual(reg["mimo"]["state"], "archived")
+        self.assertEqual(reg["mimo"]["archived"],
+                         {"reason": "too slow",
+                          "archived_at": "2026-01-02T03:04:05",
+                          "usage": "heavy"})
+        # A name new to the registry gets a row; a bad level reads unknown.
+        self.assertEqual(reg["fresh"]["archived"],
+                         {"reason": "", "archived_at": "", "usage": "unknown"})
+        self.assertEqual(set(self.mod.load_archive()), {"mimo", "fresh"})
+
+    def test_save_archive_with_nothing_restores_everything(self):
+        self.mod.archive("kiro", "a", usage="trial")
+        self.mod.save_archive({})
+        self.assertEqual(self.mod.load_archive(), {})
+
+    def test_a_stored_usage_wins_over_the_session_count(self):
+        self.file.write_text(json.dumps(
+            {"kiro": {"state": "archived",
+                      "archived": {"reason": "r", "usage": "Used"}}}))
+        with mock.patch.object(self.mod, "_derive_usage",
+                               side_effect=AssertionError("not consulted")):
+            self.assertEqual(self.mod.load_archive()["kiro"]["usage"], "used")
+
+    def test_usage_levels_follow_the_session_count(self):
+        cases = {None: "unknown", -1: "none", 0: "none", 1: "trial",
+                 9: "trial", 10: "used", 49: "used", 50: "heavy"}
+        for count, level in cases.items():
+            with self.subTest(count=count):
+                self.assertEqual(self.mod.usage_from_sessions(count), level)
+
+    def test_a_history_read_failure_reads_as_unknown(self):
+        with mock.patch("swe.sessions.usage.session_counts",
+                        side_effect=RuntimeError("boom")):
+            self.assertEqual(_REAL_DERIVE_USAGE("kiro"), "unknown")
+
 
 class ListScopeTest(unittest.TestCase):
     """--scope mirrors swe find: active by default, archived, or all."""
