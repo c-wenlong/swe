@@ -41,6 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unless the harness's TUI is known to run the command, the rule the
   session's `model_modes` and a launch already follow.
 
+- **A status feed with a `NaN` or out-of-range time no longer blanks
+  the web Status page.** Python's JSON reader takes `NaN`, `Infinity`
+  and `1e400`, and the incident time went back out as bare `NaN`, which
+  the browser refuses to parse. Such a time now reads as unknown, as it
+  does in the Mac app.
+
 - **Qwen Code sessions get `@` file references for attachments again.**
   The hub's attachment fallback table keyed Qwen Code as `qwen`, its
   command, but sessions carry the registry id `qwen-code`, so a file
