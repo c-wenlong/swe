@@ -1349,39 +1349,77 @@ private struct KeyEditor: View {
         let prefix = customPrefix
         let modelID = model.trimmingCharacters(in: .whitespaces)
         let testable = canTest
-        saveTask = Task {
-            defer { working = false }
-            var result = currentTest
-            // A move to another provider alone keeps the key it had, so
-            // it asks the provider nothing.
-            if testable, result == nil {
+        let flow = KeySaveFlow(
+            test: {
                 testing = true
-                if custom {
-                    result = await testCustom(value, base)
-                } else {
-                    result = await test(name, value)
-                }
-                testing = false
-                testResult = result
-                testedFor = (name, value, custom ? base : "")
-            }
-            guard !Task.isCancelled else { return }
-            if case .rejected = result, !saveAnyway {
-                saveAnyway = true
-                return
-            }
-            do {
+                defer { testing = false }
+                return custom ? await testCustom(value, base) : await test(name, value)
+            },
+            save: { verdict in
                 if custom {
                     let entries = CustomProvider.entries(
                         prefix: prefix, baseURL: base, key: value, model: modelID)
-                    try await saveCustom(provider, entries, value.isEmpty ? nil : result, name)
+                    try await saveCustom(provider, entries, verdict, name)
                 } else {
-                    try await save(provider, name, value, value.isEmpty ? nil : result)
+                    try await save(provider, name, value, verdict)
                 }
-                dismiss()
-            } catch {
-                self.error = error.localizedDescription
+            })
+        let current = currentTest
+        let anyway = saveAnyway
+        saveTask = Task {
+            defer { working = false }
+            let outcome = await flow.run(value: value, testable: testable, current: current,
+                                         saveAnyway: anyway) { result in
+                testResult = result
+                testedFor = (name, value, custom ? base : "")
             }
+            switch outcome {
+            case .saved: dismiss()
+            case .confirmAnyway: saveAnyway = true
+            case .failed(let message): self.error = message
+            case .cancelled: break
+            }
+        }
+    }
+}
+
+/// What a key editor's Save does, apart from the sheet: test the value
+/// first when it is worth a test and has no verdict yet, stop once on a
+/// rejection so the button can turn into "Save anyway", then save with the
+/// verdict. An empty value (a provider move that keeps its key) saves with
+/// no verdict. Pure apart from its two closures, so tests drive it.
+@MainActor
+struct KeySaveFlow {
+    enum Outcome: Equatable {
+        case saved
+        /// The provider refused the key: ask before saving it anyway.
+        case confirmAnyway
+        case failed(String)
+        /// The sheet went away mid-test; nothing was saved.
+        case cancelled
+    }
+
+    var test: () async -> APIKeyCheckResult?
+    var save: (_ verdict: APIKeyCheckResult?) async throws -> Void
+
+    /// `current` is the verdict that still matches the fields; `tested`
+    /// hears a fresh one so the sheet can show it.
+    func run(value: String, testable: Bool, current: APIKeyCheckResult?, saveAnyway: Bool,
+             tested: (APIKeyCheckResult?) -> Void) async -> Outcome {
+        var result = current
+        // A move to another provider alone keeps the key it had, so it
+        // asks the provider nothing.
+        if testable, result == nil {
+            result = await test()
+            tested(result)
+        }
+        guard !Task.isCancelled else { return .cancelled }
+        if case .rejected = result, !saveAnyway { return .confirmAnyway }
+        do {
+            try await save(value.isEmpty ? nil : result)
+            return .saved
+        } catch {
+            return .failed(error.localizedDescription)
         }
     }
 }
