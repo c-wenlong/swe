@@ -67,6 +67,35 @@ def _seed_registry(test, names=("claude",)):
     return registry
 
 
+def _isolate_list(test):
+    """Keep `swe list` off the developer's own state.
+
+    Beyond the registry and columns, cmd_list reads the archive, stars,
+    config.json's list section and session counts, and --links inspects
+    the harness folders under the home. All of them are pinned here, and
+    the home is a throwaway folder.
+    """
+    from unittest import mock
+
+    from tests._tempdir import temp_dir
+
+    home = temp_dir(test)
+    for p in (
+        mock.patch.object(Path, "home", return_value=home),
+        mock.patch("swe.harness.archive.load_archive", lambda: {}),
+        mock.patch("swe.harness.commands.list_section", lambda: {}),
+        mock.patch("swe.harness.commands.load_stars", lambda: []),
+        mock.patch("swe.harness.commands._session_counts", lambda *_: {}),
+        mock.patch("swe.harness.commands._broken_tools", lambda: set()),
+        # --refresh clears the session caches. Their paths were fixed when
+        # swe.paths was imported, so the home patch does not redirect them.
+        mock.patch("swe.sessions.aggregator.invalidate_cache"),
+        mock.patch("swe.sessions.usage.invalidate_counts_cache"),
+    ):
+        p.start()
+        test.addCleanup(p.stop)
+
+
 class InspectTest(unittest.TestCase):
     def test_skips_harness_that_is_not_installed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -375,6 +404,7 @@ class ListLinksViewTest(unittest.TestCase):
     def setUp(self):
         _pin_columns(self)
         _seed_registry(self)
+        _isolate_list(self)
 
     def test_links_flag_skips_the_rate_limit_fetch(self):
         from swe.harness import commands as harness_commands
@@ -416,6 +446,7 @@ class ListUsageOptInTest(unittest.TestCase):
     def setUp(self):
         _pin_columns(self)
         _seed_registry(self)
+        _isolate_list(self)
 
     def _run(self, args):
         from swe.harness import commands as harness_commands

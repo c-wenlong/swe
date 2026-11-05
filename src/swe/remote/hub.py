@@ -1202,6 +1202,22 @@ class HubState:
 _UNSET = object()
 
 
+def _no_constant(name: str):
+    """``json.loads``'s hook for ``NaN``/``Infinity``: a request body
+    holding one is unreadable. Stored and served back, a non-finite
+    number breaks every client's ``JSON.parse`` and ``JSONDecoder``."""
+    raise ValueError(f"{name} is not a JSON number")
+
+
+def _finite_float(text: str) -> float:
+    """``json.loads``'s float hook: ``1e400`` parses to ``inf``, which
+    would serve back as ``Infinity``, so it is refused like ``NaN``."""
+    value = float(text)
+    if value != value or value in (float("inf"), float("-inf")):
+        raise ValueError(f"{text} is out of range")
+    return value
+
+
 def _json_bytes(payload) -> bytes:
     return json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
 
@@ -1408,7 +1424,9 @@ class _Handler(BaseHTTPRequestHandler):
             if not raw:
                 data: object = {}
             else:
-                data = json.loads(raw.decode("utf-8", errors="replace"))
+                data = json.loads(raw.decode("utf-8", errors="replace"),
+                                  parse_constant=_no_constant,
+                                  parse_float=_finite_float)
         except (ValueError, UnicodeError):
             data = None
         result = data if isinstance(data, dict) else None
@@ -2478,7 +2496,9 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._require_satellite():
                 return
             body = self._read_body()
-            machine = (body or {}).get("machine") or {}
+            machine = (body or {}).get("machine")
+            if not isinstance(machine, dict):
+                machine = {}
             mid = str(machine.get("id") or "")
             if not mid:
                 self._send_error(
@@ -3135,9 +3155,14 @@ class _Handler(BaseHTTPRequestHandler):
             etype = ev.get("type")
             if not isinstance(etype, str) or etype not in _SAT_EVENT_TYPES:
                 continue
+            data = ev.get("data")
+            if data is not None and not isinstance(data, dict):
+                # emit() and the clients read data as an object; one
+                # bad event would 500 the batch, and the agent resends a
+                # refused batch whole, journaling its good events again.
+                continue
             kinds = _SAT_KIND_SETS.get(etype)
             if kinds is not None:
-                data = ev.get("data")
                 kind = data.get("kind") if isinstance(data, dict) else None
                 if not isinstance(kind, str) or kind not in kinds:
                     continue
