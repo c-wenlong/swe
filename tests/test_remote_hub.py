@@ -1428,7 +1428,7 @@ class TestHubWriteRoutes(unittest.TestCase):
     def test_server_header_names_no_python(self):
         _, pairs = self._headers("/")
         server = dict((k.lower(), v) for k, v in pairs)["server"]
-        self.assertEqual(server, "quiver-remote")
+        self.assertEqual(server, "swe-remote")
 
     def test_bad_body_400(self):
         conn = http.client.HTTPConnection(
