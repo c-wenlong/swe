@@ -20,6 +20,13 @@ final class SessionSearch {
 
     var isActive: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
+    /// The pause that waits out typing; tests swap in their own.
+    @ObservationIgnored var pause: (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+    /// The hub's search; tests swap in a stub.
+    @ObservationIgnored var lookup: (HubClient, String) async throws -> SearchResponse = { client, q in
+        try await client.search(q)
+    }
+
     func run(app: AppModel) async {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else {
@@ -29,12 +36,12 @@ final class SessionSearch {
             return
         }
         // Wait for a pause in typing; a newer keystroke cancels this task.
-        try? await Task.sleep(for: .milliseconds(250))
+        await pause(.milliseconds(250))
         guard !Task.isCancelled, let client = app.client else { return }
         searching = true
         defer { searching = false }
         do {
-            let body = try await client.search(q)
+            let body = try await lookup(client, q)
             guard !Task.isCancelled else { return }
             results = body.results
             indexed = body.indexed ?? false

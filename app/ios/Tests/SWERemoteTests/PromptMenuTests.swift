@@ -425,20 +425,25 @@ final class CommandMenuTests: XCTestCase {
     func testACancelledRefreshLeavesANewerLoadsSpinner() async {
         let menu = CommandMenu()
         let firstGate = Gate(), secondGate = Gate()
+        // Each fetch says when it has started, so the test never runs on
+        // a guess about task timing.
+        let firstStarted = Gate(), secondStarted = Gate()
         var calls = 0
         menu.fetch = {
             calls += 1
             if calls == 1 {
+                firstStarted.release()
                 await firstGate.wait()
                 throw CancellationError()
             }
+            secondStarted.release()
             await secondGate.wait()
             return CommandsResponse(commands: [SlashCommand(name: "review")])
         }
         let first = Task { await menu.refresh() }
-        for _ in 0..<100 where calls < 1 { await Task.yield() }
+        await firstStarted.wait()
         let second = Task { await menu.refresh() }
-        for _ in 0..<100 where calls < 2 { await Task.yield() }
+        await secondStarted.wait()
         XCTAssertEqual(calls, 2)
         firstGate.release()
         await first.value
