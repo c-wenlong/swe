@@ -25,7 +25,7 @@ app's saved value does).
 | Providers | Harnesses tab: Provider visibility is Mac app only, with a link to the Harnesses page. Inference tab: the API keys file, with Add key, the provider Catalogue, edit, delete, reveal and copy (below). |
 | Services | Mac app only (keys in the Mac's Keychain). |
 | Integrations | GitHub: gh's login (with the app's warnings and a re-check button) and the synced repo catalog with Sync now. Remote: the setup checklist until it's done, the hub, paired devices, Pair a device, and pair requests waiting for approval (below). |
-| Files | The hub's swe, API keys file and MCP servers folder, read only. Editor: Mac app only. |
+| Files | The hub's swe, API keys file and MCP servers folder, read only. Editor: Mac app only. Hub sync: the status of the hub's `~/.swe` git repo (mode, changes, ahead/behind, held-back files), a refresh that fetches, and a Sync button (below). |
 | Doctor | A link to the Doctor page (`#/doctor`); the app draws Doctor inside Settings. |
 | Experimental | Session index: a switch for the hub's transcript index (`swe session index --on`/`--off`), its status underneath, and while it is on a resync button and Clear search data (below). |
 
@@ -201,6 +201,10 @@ working. `url` is only ever an http(s) link.
 | null}}`, through the Repositories page's cached `gh auth status` probe.
 It is separate because that probe can take a second or two.
 
+`GET /v1/app/settings?part=hub_sync[&fetch=1]` answers `{"hub_sync":
+<swe sync status --json data>}` for the hub's `~/.swe` repo; `fetch=1`
+fetches the remote first. It is separate because a fetch can take seconds.
+
 `GET /v1/app/settings?part=remote_setup` answers `{"remote_setup":
 <swe remote setup --json data>}` for the hub machine (see
 `docs/json-contracts.md`). It is separate because it calls tailscale and
@@ -243,6 +247,14 @@ missing or signed-out `gh` a 409 `gh_unavailable` / `gh_auth_required`
 in the setup words, and an account with no login or orgs a 502
 `sync_failed`.
 
+`POST /v1/app/settings/hub_sync`, body `{}` (or `{"dry_run": true}`,
+which changes nothing): Files › Hub sync › Sync, `swe sync --json` in
+process for the hub's `~/.swe`. One runs at a time, outside the write
+lock (a second is a 409 `busy`). A conflict or a refused push is still a
+200: the answer is `{"result", "hub_sync"}`, the sync's own document and
+the card read again. A repo sync can't work with at all is a 409
+`sync_failed` with swe's reason.
+
 `POST /v1/app/settings/key_set`, body `{"name", "value", "stamp"}`,
 plus `"provider"` (a catalog id) for a variable not in the file yet:
 replaces the line in place, or adds the key where Add key says above.
@@ -282,7 +294,7 @@ asks. Values are trimmed; error messages name variables, never values.
 | 404 | `unknown_device` | no paired device or tailnet sign-in has that id |
 | 409 | `already_revoked` | the device is already signed out |
 | 409 | `confirm_this_device` | revoking the sender's own device without `confirm_this_device: true` |
-| 404 | `unknown_action` | any action but `pair`, `revoke`, `session_search`, `sync` and the `key_` ones |
+| 404 | `unknown_action` | any action but `pair`, `revoke`, `session_search`, `sync`, `hub_sync` and the `key_` ones |
 | 403 | `bad_origin` | a cross-site POST |
 | 401 | `unauthorized` | neither a paired device nor the owner's tailnet device |
 

@@ -18,6 +18,8 @@ from swe.webapp.pages import inbox
 from tests.test_remote_hub import HubBase
 from tests.test_webapp_repositories import FakeGh
 
+from tests._tempdir import temp_dir
+
 NOTE = {"id": "1", "repo": "o/a", "title": "CI failed", "type": "CheckSuite",
         "reason": "ci_activity", "unread": True, "updated_at": "2026-10-23T18:29:12Z",
         "url": "https://github.com/o/a"}
@@ -84,7 +86,7 @@ class TestMarkRead(unittest.TestCase):
         p = patch.object(G, "CACHE", G.TtlCache())
         p.start()
         self.addCleanup(p.stop)
-        self.ctx = SimpleNamespace(home=Path(tempfile.mkdtemp()), machine={"name": "hub-box"})
+        self.ctx = SimpleNamespace(home=temp_dir(self), machine={"name": "hub-box"})
         self.gh = FakeGh(self, notes=[_raw("1"), _raw("2"), _raw("3", unread=False)])
         inbox.get(self.ctx, {})  # what the page lists
 

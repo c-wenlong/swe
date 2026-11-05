@@ -3,7 +3,6 @@ session-total files (the ``SessionFileParsers.swift`` readers), their
 scan wiring, and the store's authoritative upsert."""
 
 import json
-import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +11,8 @@ from swe.ledger import parsers
 from swe.ledger.models import LedgerRecord, UsageEvent
 from swe.ledger.scan import scan
 from swe.ledger.store import LedgerStore, ledger_path_for
+
+from tests._tempdir import temp_dir
 
 
 def _pi_message(mid, ts_ms, usage, role="assistant", model="pi-model"):
@@ -26,7 +27,7 @@ def _pi_usage(inp=100, out=50, **kw):
 
 class TestPi(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.sessions = self.home / ".pi" / "agent" / "sessions" / "work-proj"
         self.sessions.mkdir(parents=True)
         self.path = self.sessions / "2026-10-01T10-00-00_deadbeef.jsonl"
@@ -92,7 +93,7 @@ def _droid_settings(usage=None, model="gpt-5.1-codex", **kw):
 
 class TestDroid(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.folder = self.home / ".factory" / "sessions" / "proj"
         self.folder.mkdir(parents=True)
         self.settings = self.folder / "u-u-i-d.settings.json"
@@ -155,7 +156,7 @@ def _cline_manifest(tokens=True, cost=None, **kw):
 
 class TestCline(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.folder = self.home / ".cline" / "data" / "sessions" / "s1"
         self.folder.mkdir(parents=True)
         self.path = self.folder / "s1.json"
@@ -217,7 +218,7 @@ class TestSessionScan(unittest.TestCase):
     authoritative re-read, watched-sibling stamps and deletion."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.store = LedgerStore(ledger_path_for(self.home))
         self.addCleanup(self.store.close)
 
@@ -328,7 +329,7 @@ class TestSessionTotalsInStore(unittest.TestCase):
     """``session_total`` rows never count toward long-context surcharges."""
 
     def setUp(self):
-        self.store = LedgerStore(Path(tempfile.mkdtemp()) / "l.sqlite")
+        self.store = LedgerStore(temp_dir(self) / "l.sqlite")
         self.addCleanup(self.store.close)
 
     def test_groups_marks_session_totals_not_long(self):
@@ -344,7 +345,7 @@ class TestSessionTotalsInStore(unittest.TestCase):
 
 class TestAuthoritativeUpsert(unittest.TestCase):
     def setUp(self):
-        self.store = LedgerStore(Path(tempfile.mkdtemp()) / "l.sqlite")
+        self.store = LedgerStore(temp_dir(self) / "l.sqlite")
         self.addCleanup(self.store.close)
 
     def _ev(self, tokens, ts=1000.0):

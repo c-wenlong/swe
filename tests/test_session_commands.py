@@ -18,6 +18,8 @@ from swe.sessions.commands import (
 from swe.console import strip_ansi
 from swe.sessions.models import Session
 
+from tests._tempdir import temp_dir
+
 
 class SessionCommandsTest(unittest.TestCase):
     def test_launch_tool_defaults_to_tool_name(self):
@@ -237,7 +239,7 @@ class SessionCommandsTest(unittest.TestCase):
 
 class SessionInteractiveTest(unittest.TestCase):
     def setUp(self):
-        self._tmpdirs = [tempfile.mkdtemp() for _ in range(3)]
+        self._tmpdirs = [str(temp_dir(self)) for _ in range(3)]
         self.sessions = [
             Session(
                 timestamp=1000.0 * (i + 1),

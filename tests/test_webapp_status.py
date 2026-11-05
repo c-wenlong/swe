@@ -15,7 +15,6 @@ import re
 import shutil
 import ssl
 import subprocess
-import tempfile
 import threading
 import time
 import unittest
@@ -30,6 +29,8 @@ from swe.webapp.pages import status as status_page
 
 from tests.test_remote_hub import HubBase
 from tests.test_webapp import app_js_function
+
+from tests._tempdir import temp_dir
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "status"
 EPOCH = 1_791_720_000.0  # the Swift tests' usageEpoch, 2026-10-11
@@ -264,7 +265,7 @@ class Clock:
 
 class PollerBase(unittest.TestCase):
     def setUp(self):
-        self.dir = Path(tempfile.mkdtemp())
+        self.dir = temp_dir(self)
         self.clock = Clock()
         self.transport = FakeTransport()
 
@@ -487,7 +488,7 @@ class TestPoller(PollerBase):
         self.assertIsNone(self.make().cached([catalog.service("claude")])[0].report)
 
     def test_poller_for_is_one_per_home(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         self.assertIs(poller.poller_for(home), poller.poller_for(home))
         self.assertEqual(poller.poller_for(home).cache_path, home / ".swe" / "cache" / "web-service-status.json")
 
@@ -683,7 +684,7 @@ class TestCatalogue(unittest.TestCase):
 
 class TestTracked(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.path = tracked.tracked_file_for(self.home)
 
     def test_path_is_under_the_quiver_data_dir(self):

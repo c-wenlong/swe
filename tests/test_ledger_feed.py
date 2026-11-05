@@ -3,7 +3,6 @@ record mapping, per-account windows and progress, and the lookalike
 cleanup an authoritative write performs."""
 
 import json
-import tempfile
 import threading
 import time
 import unittest
@@ -14,6 +13,8 @@ from swe.ledger import feed
 from swe.ledger.models import LedgerRecord, UsageEvent
 from swe.ledger.scan import scan
 from swe.ledger.store import LedgerStore, ledger_path_for
+
+from tests._tempdir import temp_dir
 
 T0 = 1_760_000_000.0
 
@@ -65,7 +66,7 @@ class TestFeedRecord(unittest.TestCase):
 
 class TestFeedPoll(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.store = LedgerStore(ledger_path_for(self.home))
         self.addCleanup(self.store.close)
         # The default sign-in's user-data dir exists: one account.
@@ -289,7 +290,7 @@ class TestFeedScheduling(unittest.TestCase):
     """``WebApp`` runs the poll off the page lock (``keepFresh``)."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         (self.home / "Library" / "Application Support" / "Cursor").mkdir(parents=True)
         from swe.webapp.api import WebApp
         self.webapp = WebApp(self.home, download_prices=False)
@@ -347,7 +348,7 @@ class TestLookalikeCleanup(unittest.TestCase):
     """``selectSameEvent``/``selectSameEventAnyProfile`` through upsert."""
 
     def setUp(self):
-        self.store = LedgerStore(Path(tempfile.mkdtemp()) / "l.sqlite")
+        self.store = LedgerStore(temp_dir(self) / "l.sqlite")
         self.addCleanup(self.store.close)
 
     def _feed_rec(self, key_account, row_account, conv="conv-1", ts=T0):
@@ -416,7 +417,7 @@ class TestPageReadsAndTheFeedConnection(unittest.TestCase):
 
     def setUp(self):
         from swe.webapp.api import WebApp
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.webapp = WebApp(self.home, download_prices=False)
         self.addCleanup(self.webapp.close)
 

@@ -1,7 +1,6 @@
 """The Pricing page's data: per-model rows, sources, billing and brands."""
 
 import json
-import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +15,8 @@ from swe.webapp.pages import _brands, pricing
 from swe.webapp.static import STATIC_DIR
 
 from tests.test_remote_hub import HubBase
+
+from tests._tempdir import temp_dir
 
 SG = ZoneInfo("Asia/Singapore")
 NOW = datetime(2026, 10, 23, 12, 0, tzinfo=SG).timestamp()
@@ -40,7 +41,7 @@ def catalog():
 
 class _Store(unittest.TestCase):
     def setUp(self):
-        self.store = LedgerStore(Path(tempfile.mkdtemp()) / "l.sqlite")
+        self.store = LedgerStore(temp_dir(self) / "l.sqlite")
         self.addCleanup(self.store.close)
         self.n = 0
 
@@ -67,7 +68,7 @@ class TestCatalogSources(unittest.TestCase):
         self.assertEqual((status, rates.input, tier), ("priced", 5e-06, "fast"))
 
     def test_load_catalog_marks_user_prices(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         (home / ".swe" / "config").mkdir(parents=True)
         (home / ".swe" / "config" / "pricing.json").write_text(
             json.dumps({"models": {"my-model": {"input": 1, "output": 2}}}))
@@ -81,7 +82,7 @@ class TestOverrideWriter(unittest.TestCase):
     """config/pricing.json as the Mac app's PricingOverrides writes it."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.file = self.home / ".swe" / "config" / "pricing.json"
 
     def doc(self):

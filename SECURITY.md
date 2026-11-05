@@ -7,7 +7,8 @@ branch — upgrading is `pipx install --force git+https://github.com/c-wenlong/s
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.1.x   | :white_check_mark: |
+| 1.2.x   | :white_check_mark: |
+| 1.1.x   | :x:                |
 | 1.0.x   | :x:                |
 | 0.2.x   | :x:                |
 | 0.1.x   | :x:                |

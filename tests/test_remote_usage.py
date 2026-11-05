@@ -2,7 +2,6 @@
 
 import http.client
 import json
-import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -13,6 +12,8 @@ from swe.remote import agent as agent_mod
 from swe.remote import pairing, usage
 
 from tests.test_remote_hub import HubBase
+
+from tests._tempdir import temp_dir
 
 
 def _limit(tool="codex", used=40):
@@ -155,7 +156,7 @@ class TestUsageRoute(HubBase):
 
 class TestSatelliteStore(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def test_round_trip_newest_first(self):
         with patch("swe.remote.usage.time.time", return_value=100.0):
@@ -382,7 +383,7 @@ class TestAgentUsageRoute(HubBase):
 class TestAgentPushesUsage(unittest.TestCase):
     def test_push_sends_machine_and_snapshot(self):
         agent = agent_mod.RemoteAgent(
-            "http://hub", "cred", home=Path(tempfile.mkdtemp())
+            "http://hub", "cred", home=temp_dir(self)
         )
         snap = {"harnesses": [{"name": "claude"}], "window_days": 100,
                 "server_time": 5.0}
@@ -397,7 +398,7 @@ class TestAgentPushesUsage(unittest.TestCase):
 
     def test_push_carries_daily_usage_when_the_ledger_reads(self):
         agent = agent_mod.RemoteAgent(
-            "http://hub", "cred", home=Path(tempfile.mkdtemp())
+            "http://hub", "cred", home=temp_dir(self)
         )
         daily = {"time_zone": "UTC", "days": [{"date": "2026-10-01", "tokens": 5}]}
         for value, expected in ((daily, daily), (None, "absent")):
@@ -409,14 +410,14 @@ class TestAgentPushesUsage(unittest.TestCase):
             self.assertEqual(payload.get("daily_usage", "absent"), expected)
 
     def test_daily_usage_reads_this_machines_ledger(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         out = usage.daily_usage(home)
         self.assertEqual(out["days"], [])
         self.assertIn("time_zone", out)
 
     def test_failed_push_reports_false(self):
         agent = agent_mod.RemoteAgent(
-            "http://hub", "cred", home=Path(tempfile.mkdtemp())
+            "http://hub", "cred", home=temp_dir(self)
         )
         with patch.object(usage, "snapshot", return_value={"harnesses": []}), \
                 patch.object(agent_mod, "_post", return_value=(0, {})):
@@ -426,7 +427,7 @@ class TestAgentPushesUsage(unittest.TestCase):
 class TestUsageLoop(unittest.TestCase):
     def _waits(self, push):
         agent = agent_mod.RemoteAgent(
-            "http://hub", "cred", home=Path(tempfile.mkdtemp())
+            "http://hub", "cred", home=temp_dir(self)
         )
         agent._stop = MagicMock()
         agent._stop.is_set.side_effect = [False, True]
