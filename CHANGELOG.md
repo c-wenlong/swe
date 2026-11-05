@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Qwen Code sessions get `@` file references for attachments again.**
+  The hub's attachment fallback table keyed Qwen Code as `qwen`, its
+  command, but sessions carry the registry id `qwen-code`, so a file
+  sent from a phone arrived as an `[Attached file: …]` line instead of
+  an `@` reference.
+
 - **A wildcard hub bind no longer turns off the Host check, and a
   second `swe remote serve` on a taken port no longer disturbs the
   running hub.** `--host=0.0.0.0 --unsafe-bind-any` left the hub's
