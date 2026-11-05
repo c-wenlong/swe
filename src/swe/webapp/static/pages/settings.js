@@ -724,6 +724,7 @@ async function settingsLoadSetup() {
   let status = 0, data = null;
   try { ({ status, data } = await api("/v1/app/settings?part=remote_setup")); } catch { status = 0; }
   p.setupBusy = false;
+  if (gen === routeGen && settingsSignedOut(status)) return;
   p.setup = status === 200 && data
     ? data.remote_setup
     : { error: failText(status, data, null) };
@@ -1083,6 +1084,7 @@ async function settingsSetSearch(on) {
   const { status, data } = await apiPost("/v1/app/settings/session_search", { enabled: on });
   p.searchBusy = false;
   if (gen !== p.searchGen) return;
+  if (settingsSignedOut(status)) return;
   if (status === 200 && data && data.session_search) {
     if (p.data) p.data.session_search = data.session_search;
   } else {
@@ -1104,6 +1106,7 @@ async function settingsSearchAction(body, focus) {
   const { status, data } = await apiPost("/v1/app/settings/session_search", body);
   p.searchBusy = false;
   if (gen !== p.searchGen) return;
+  if (settingsSignedOut(status)) return;
   if (status === 200 && data && data.session_search) {
     if (p.data) p.data.session_search = data.session_search;
   } else {
@@ -1519,6 +1522,7 @@ async function settingsLoadGithub(refresh) {
   if (onSettingsPage() && settingsSection() === "integrations") settingsRepaintRemote();
   const { status, data } = await api(`/v1/app/settings?part=github${refresh ? "&refresh=1" : ""}`);
   p.githubBusy = false;
+  if (gen === routeGen && settingsSignedOut(status)) return;
   if (status === 200 && data) p.github = data.github;
   else p.github = { error: failText(status, data, null) };
   if (gen === routeGen && onSettingsPage() && settingsSection() === "integrations") settingsRepaintRemote();

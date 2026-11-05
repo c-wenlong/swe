@@ -158,7 +158,9 @@ const NeedsYou = (() => {
       const failed = data.failed || [];
       if (failed.length) inbox.actionError = failed.map((f) => `${f.id}: ${f.error}`).join(" · ");
     } else if (status === 401) {
-      if (onInbox()) renderGate();
+      // GhUI.gate also stops the minute poll, whose next read would
+      // paint the old rows over the pair form.
+      if (onInbox()) GhUI.gate("inbox");
       return;
     } else {
       inbox.actionError = GhUI.failMessage(status, data);

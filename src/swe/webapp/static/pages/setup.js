@@ -139,8 +139,9 @@ function needsReading(outcome) {
   return leftAlone(outcome).length > 0 || unstarred(outcome).length > 0;
 }
 
+/* False when the hub refused this browser (the gate is up instead). */
 async function apply() {
-  if (page.applying) return;
+  if (page.applying) return true;
   page.applying = true;
   page.applyError = null;
   paint();
@@ -150,6 +151,10 @@ async function apply() {
   const picks = new Set(page.selected);
   const { status, data } = await apiPost("/v1/app/setup/apply", { starred: starredList(), adopt });
   page.applying = false;
+  if (status === 401) {
+    if (onPage()) renderGate();
+    return false;
+  }
   if (status === 200 && data && data.applied) {
     const outcome = data.applied;
     page.outcome = outcome;
@@ -165,6 +170,7 @@ async function apply() {
   } else {
     page.applyError = failText(status, data);
   }
+  return true;
 }
 
 /* next(order:): leaving the links step runs setup; a failure, or files
@@ -172,8 +178,7 @@ async function apply() {
 async function next() {
   if (STEPS[page.step] === "links") {
     if (needsApply()) {
-      await apply();
-      if (!onPage()) return;
+      if (!(await apply()) || !onPage()) return;
       if (page.applyError || needsReading(page.outcome)) return paint();
     }
   }
@@ -601,7 +606,7 @@ async function cloneHub() {
   const { status, data } = await apiPost("/v1/app/setup/hub", { url });
   page.hubPosting = false;
   if (status === 401) {
-    if (onPage()) renderGate("The hub doesn't know this browser's credential. It may have been revoked.");
+    if (onPage()) renderGate();
     return;
   }
   if (status === 200 && data && data.hub) {

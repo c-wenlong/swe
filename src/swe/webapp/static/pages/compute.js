@@ -856,6 +856,11 @@ function openComputeLimits() {
     drawAutoclean();
     apiPost("/v1/app/compute/settings", body).then(({ status, data }) => {
       p.acBusy = false;
+      if (status === 401) {
+        if (dialog.open) dialog.close();
+        if (currentRoute() === "compute") renderGate();
+        return;
+      }
       if (status === 200 && data && data.autoclean) {
         if (p.data) p.data.autoclean = data.autoclean;
         // An age typed while the request was out never reached the hub
