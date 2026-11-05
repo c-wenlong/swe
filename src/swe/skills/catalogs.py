@@ -131,7 +131,9 @@ def add_skill_catalog(path: str | Path, label: str | None = None) -> dict:
 
     replaced = False
     for i, existing in enumerate(catalogs):
-        if existing.get("label") == entry_label or Path(existing.get("path", "")).resolve() == resolved:
+        # _same_path expands ``~``: a hand-written "~/x/skills" is the same
+        # catalog, not a second one to append beside it.
+        if existing.get("label") == entry_label or _same_path(existing.get("path", ""), resolved):
             new_entry["added"] = existing.get("added", now)
             catalogs[i] = new_entry
             replaced = True
@@ -233,4 +235,6 @@ def _prune_nested_catalogs(paths: list[Path]) -> list[Path]:
         if any(path.is_relative_to(parent) for parent in kept):
             continue
         kept.append(path)
-    return kept
+    # Shallowest first finds the parents; the caller's order is the answer.
+    keep = set(kept)
+    return [path for path in paths if path in keep]

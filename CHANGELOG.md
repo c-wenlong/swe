@@ -68,6 +68,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The reader now skips such a message, and a server whose reader did
   die is replaced on the next send.
 
+- **Archiving Qwen Code stops its shared hooks, and its hook settings
+  count.** The hook contract table keyed Qwen Code as `qwen`, its
+  command, while harness.json calls it `qwen-code`. Archiving qwen-code
+  still deployed shared-hook wrappers into `~/.qwen/hooks`, and a
+  `capabilities.hooks` entry on qwen-code was never read. The row is now
+  `qwen-code`, and `swe init` (or `swe hooks sync`) moves an existing
+  `~/.swe/hooks/qwen/` to `hooks/qwen-code/` once and relinks it; a hub
+  that already has both folders is told to merge them by hand. The move
+  waits while a link to the old folder could not be relinked (qwen-code
+  archived, or the link in `.linkignore`) or a settings file names the
+  old folder, so no hook stops running.
+
 - **Qwen Code sessions get `@` file references for attachments again.**
   The hub's attachment fallback table keyed Qwen Code as `qwen`, its
   command, but sessions carry the registry id `qwen-code`, so a file
