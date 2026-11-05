@@ -144,7 +144,10 @@ struct EllipsisMenu<Content: View>: View {
         .plainButton()
         .menuIndicator(.hidden)
         .fixedSize()
-        .hoverTip("More", pinsOnClick: false)
+        // `.help` on the Menu itself shows; a tip's popover could stay
+        // up over the open menu.
+        .help("More")
+        .accessibilityLabel("More")
     }
 }
 
