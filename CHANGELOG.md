@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Chapters drag between folders in the AGENTS.md rail.** A file row
+  drops onto a folder row to move the chapter on disk; its index.txt
+  entry keeps its slot (an off comment follows it) and any targets.json
+  rule is re-keyed, so a move never widens the chapter's harness set.
+  The folder row glows and grows as the drag crosses it, and a drop on
+  empty rail space moves the file to the top level.
+
 - **Muse shows Meta's logo.** The `muse` harness id is aliased to the
   bundled `meta` mark (`harness-meta-color.svg`) on the Mac, iPhone and
   web apps, so its limit card carries Meta's logo and brand colour
