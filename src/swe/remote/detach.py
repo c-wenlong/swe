@@ -18,10 +18,11 @@ import threading
 import time
 from typing import Callable
 
-# Same cadence and cap as a queue-mode send's wait for idle
-# (``hub.QUEUE_POLL_S`` / ``hub.QUEUE_WAIT_MAX_S``).
-WHEN_IDLE_POLL_S = 2.0
-WHEN_IDLE_MAX_S = 1800
+from swe.remote import protocol
+
+# Same cadence and cap as a queue-mode send's wait for idle.
+WHEN_IDLE_POLL_S = protocol.IDLE_POLL_S
+WHEN_IDLE_MAX_S = protocol.IDLE_WAIT_MAX_S
 
 # How long a cancel waits for a detach that is already running.
 _FIRING_WAIT_S = 15.0
