@@ -43,7 +43,7 @@ def issue_number(ref) -> int | None:
     text = str(ref or "").strip()
     if text.startswith("#"):
         text = text[1:]
-    if text.isdigit():
+    if gh.digits(text):
         return int(text) or None
     match = _ISSUE_URL_RE.search(text)
     return int(match.group(1)) if match else None
