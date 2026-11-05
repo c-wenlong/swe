@@ -51,7 +51,7 @@ struct ServiceStatusPage: View {
                 .foregroundStyle(Theme.textMuted)
         }
         .task { await model.load(force: false) }
-        .quiverSheet(isPresented: $adding) {
+        .cardSheet(isPresented: $adding) {
             ServiceEditorSheet(
                 check: { await model.probe($0) },
                 save: { name, pageURL, feedURL, group in
@@ -59,7 +59,7 @@ struct ServiceStatusPage: View {
                 },
                 browse: { browsing = true })
         }
-        .quiverSheet(item: $editing) { service in
+        .cardSheet(item: $editing) { service in
             ServiceEditorSheet(editing: service,
                                check: { await model.probe($0) },
                                save: { name, pageURL, feedURL, group in
@@ -67,7 +67,7 @@ struct ServiceStatusPage: View {
                                                              feedURL: feedURL, group: group) }
                                })
         }
-        .quiverSheet(isPresented: $browsing) {
+        .cardSheet(isPresented: $browsing) {
             StatusCatalogueSheet(model: model)
         }
     }
@@ -413,7 +413,7 @@ private struct ServiceCard: View {
         .accessibilityAddTraits(status.hasDetails ? .isButton : [])
         .accessibilityAction(.default) { _ = showDetails() }
         .animation(.easeOut(duration: Theme.fadeDuration), value: hovering)
-        .quiverSheet(isPresented: $showingDetails) { ServiceDetailsSheet(status: status) }
+        .cardSheet(isPresented: $showingDetails) { ServiceDetailsSheet(status: status) }
     }
 
     private func showDetails() -> KeyPress.Result {

@@ -174,59 +174,20 @@ struct SessionForkSheet: View {
             Text("The fork starts from this session's history and leaves the original as it is. It needs a first message: the harness writes nothing until it gets one.")
                 .font(Theme.caption).foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            status
+            LaunchStatus(flow: flow)
             HStack(spacing: 10) {
                 Text("Runs under tmux in \(folder). The chat opens once the fork shows up.")
                     .font(Theme.caption).foregroundStyle(Theme.textMuted)
                     .lineLimit(2)
                 Spacer(minLength: 12)
-                Button(flow.cancelTitle) {
-                    launchTask?.cancel()
-                    dismiss()
-                }
-                .secondaryButton()
-                .fixedSize()
-                .keyboardShortcut(.cancelAction)
-                Button {
-                    launchTask = Task { await start() }
-                } label: {
-                    HStack(spacing: 6) {
-                        if flow.busy {
-                            ProgressView().controlSize(.small).tint(Theme.primaryForeground)
-                        }
-                        Text(flow.busy ? "Starting" : "Start")
-                    }
-                }
-                .primaryButton()
-                .fixedSize()
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(!ready || flow.busy)
-                .hoverTip("Start the fork (⌘↩)")
+                LaunchFormButtons(flow: flow, ready: ready, startTip: "Start the fork",
+                              cancel: { launchTask?.cancel(); dismiss() },
+                              start: { launchTask = Task { await start() } })
             }
         }
         .sheetScaffold(width: 560)
         .onSheetDismissRequest { if !flow.busy { dismiss() } }
         .onDisappear { launchTask?.cancel() }
-    }
-
-    @ViewBuilder private var status: some View {
-        switch flow.phase {
-        case .failed(let message):
-            Text(message).font(Theme.caption).foregroundStyle(Theme.dangerText)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-        case .unconfirmed(let message):
-            Text(message).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        default:
-            if let note = flow.note {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(note).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                        .lineLimit(2)
-                }
-            }
-        }
     }
 
     private func start() async {

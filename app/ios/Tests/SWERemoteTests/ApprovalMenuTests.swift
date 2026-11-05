@@ -2,10 +2,6 @@ import XCTest
 @testable import SWERemote
 
 final class ApprovalMenuTests: XCTestCase {
-    private func env(_ json: String) -> Envelope {
-        try! Hub.decoder.decode(Envelope.self, from: Data(json.utf8))
-    }
-
     @MainActor func testTheEventsMenuRowsReachTheCard() {
         let chat = ChatModel(key: "devin:1", app: AppModel(hub: nil))
         chat.apply(env(#"""

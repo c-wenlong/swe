@@ -1,16 +1,6 @@
 /* MCP servers page (pages/mcp.js). Every rule is scoped under .mcp or
  * .mcp-sheet, since page stylesheets share one bundle. */
 
-/* A secondary button: 32 tall, hairline, 12px medium (SecondaryButtonStyle). */
-.mcp .mcp-button {
-  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
-  border: 1px solid var(--border-strong); border-radius: 8px; background: var(--subtle);
-  color: var(--text-primary); font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap;
-}
-.mcp .mcp-button:hover:not(:disabled) { background: var(--hover); }
-.mcp .mcp-button:disabled { opacity: .45; cursor: default; }
-.mcp .mcp-button svg { width: 14px; height: 14px; flex: none; }
-
 .mcp .mcp-body-small { font-size: 13px; margin: 0; }
 .mcp .mcp-label { display: flex; align-items: center; gap: 8px; margin: 0; }
 .mcp .mcp-label svg { width: 15px; height: 15px; flex: none; }
@@ -104,19 +94,10 @@
 .mcp-sheet .caption { margin: 0; }
 .mcp-sheet .warn { color: var(--warning-text); }
 
-/* The sheet's Sync: buttons (SecondaryButtonStyle / PrimaryButtonStyle),
- * target switches (GreenSwitchStyle), the plan and the inline confirm. */
+/* The sheet's Sync: buttons (the shared secondary one, a size up),
+ * target switches (the shared compact switch), the plan and the inline confirm. */
 .mcp-sheet { max-height: calc(100vh - 32px); overflow: auto; }
-.mcp-sheet .mcp-sheet-button {
-  height: 32px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border-strong);
-  background: var(--subtle); color: var(--text-primary); font: inherit; font-size: 13px; font-weight: 500;
-  cursor: pointer; white-space: nowrap;
-}
-.mcp-sheet .mcp-sheet-button:hover:not(:disabled) { background: var(--hover); }
-.mcp-sheet .mcp-sheet-button.primary { background: var(--text-primary); color: var(--card); border-color: var(--text-primary); }
-.mcp-sheet .mcp-sheet-button.primary:hover:not(:disabled) { background: var(--text-primary); opacity: .9; }
-.mcp-sheet .mcp-sheet-button.primary.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
-.mcp-sheet .mcp-sheet-button:disabled { opacity: .45; cursor: default; }
+.mcp-sheet .mcp-sheet-button { padding: 0 14px; font-size: 13px; }
 .mcp-sheet .mcp-sync-actions { align-items: center; }
 .mcp-sheet .mcp-spacer { flex: 1; }
 .mcp-sheet .mcp-muted { color: var(--text-muted); }
@@ -128,18 +109,7 @@
 .mcp-sheet .mcp-target .logo, .mcp-sheet .mcp-logo-gap { width: 16px; height: 16px; flex: none; }
 .mcp-sheet .mcp-target-name { color: var(--text-primary); white-space: nowrap; }
 .mcp-sheet .mcp-target .caption { color: var(--text-muted); min-width: 0; }
-.mcp-sheet .mcp-switch {
-  appearance: none; -webkit-appearance: none; margin: 0 0 0 auto; flex: none; position: relative;
-  width: 32px; height: 18px; border-radius: 9px; background: var(--border-strong); cursor: pointer;
-  transition: background .15s;
-}
-.mcp-sheet .mcp-switch::after {
-  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
-  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s;
-}
-.mcp-sheet .mcp-switch:checked { background: var(--interactive); }
-.mcp-sheet .mcp-switch:checked::after { transform: translateX(14px); }
-.mcp-sheet .mcp-switch:disabled { opacity: .45; cursor: default; }
+.mcp-sheet .switch { margin-left: auto; }
 
 .mcp-sheet .mcp-result { display: flex; flex-direction: column; gap: 10px; }
 .mcp-sheet .mcp-sentence { display: flex; align-items: flex-start; gap: 6px; margin: 0; font-size: 13px; }
@@ -227,7 +197,6 @@ dialog.mcp-add-sheet { width: min(640px, calc(100vw - 32px)); }
 .mcp-add-sheet .mcp-add-picker { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
 .mcp-add-sheet .mcp-add-picker-top { display: flex; gap: 6px; }
 .mcp-add-sheet .mcp-sheet-button svg { width: 12px; height: 12px; }
-.mcp-add-sheet .mcp-sheet-button { display: inline-flex; align-items: center; gap: 6px; }
 .mcp .mcp-checkout { font-size: 10px; padding: 0 5px; }
 .mcp-add-sheet .mcp-add-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .mcp-add-sheet .mcp-add-kind-card {

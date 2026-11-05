@@ -905,7 +905,7 @@ private struct ChaptersEditor: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxHeight: .infinity)
-        .quiverSheet(item: $creating) { initial in
+        .cardSheet(item: $creating) { initial in
             NewChapterSheet(initial: initial)
         }
     }
@@ -1697,7 +1697,7 @@ private struct ViewCompiledButton: View {
         }
         .secondaryButton()
         .hoverTip(stateText, replacesLabel: false)
-        .quiverSheet(isPresented: $showing) {
+        .cardSheet(isPresented: $showing) {
             CompiledOutputSheet(path: outputPath, onOpenChapter: onOpenChapter)
         }
     }

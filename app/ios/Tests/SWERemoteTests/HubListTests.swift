@@ -2,11 +2,6 @@ import XCTest
 @testable import SWERemote
 
 final class HubListTests: XCTestCase {
-    private func hub(_ host: String, _ cred: String = "c") -> PairedHub {
-        PairedHub(baseURL: URL(string: "http://\(host):8477")!,
-                  credential: Credential(deviceId: "d-\(host)", credential: cred, name: nil))
-    }
-
     func testPairingAnotherHubAddsItAndShowsIt() {
         var list = HubList()
         list.adopt(hub("mac"))
