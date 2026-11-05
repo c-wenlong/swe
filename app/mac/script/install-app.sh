@@ -161,7 +161,7 @@ mv "$staged" "$dest"
 # were com.cwenlong.quiver.* while the app was Quiver.app: an old plist is
 # moved onto the new label, repointing it at this bundle when it ran an
 # app-bundle swe. The old job keeps running until the new one loads —
-# a refused bootstrap drops the copy and leaves the service alone —
+# a refused bootstrap drops the copy and leaves a running service alone —
 # and its plist goes only once launchd has really let it go.
 uid="gui/$(id -u)"
 for pair in \
@@ -185,9 +185,14 @@ for pair in \
     done
     if launchctl bootstrap "$uid" "$plist" >/dev/null 2>&1; then
       echo "install-app: moved $old_label to $new_label"
-    else
+    elif launchctl print "$uid/$old_label" >/dev/null 2>&1; then
+      # Refused while the old job still runs: drop the copy and let the
+      # old one keep serving.
       rm -f "$plist"
     fi
+    # Refused with no old job loaded, there is nothing to keep serving:
+    # the copy stays, so the old plist below is not removed with no
+    # replacement, and the next step tries to load it again.
   fi
   # Retire the old job once the new label carries it (or the machine
   # never had it); keep it running when the move did not take.
