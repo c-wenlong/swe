@@ -644,7 +644,8 @@ class TestPin(_Base):
         self.assertFalse(any(c[:2] == ["search", "repos"] for c in fake.calls()))
         # A "-" after the first word is GitHub's own "not" and stays.
         R.get(self.ctx, {"search": "swe -fork"})
-        self.assertIn(["search", "repos", "swe -fork"], [c[:3] for c in fake.calls()])
+        self.assertIn(["--", "swe -fork"],
+                      [c[-2:] for c in fake.calls() if c[:2] == ["search", "repos"]])
 
     def test_add_pins_githubs_spelling_and_answers_the_pins(self):
         _pin(self.home, "o/a")
