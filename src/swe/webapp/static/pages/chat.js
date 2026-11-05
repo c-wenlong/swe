@@ -243,9 +243,13 @@ const SessionChat = (() => {
       if (trimmed.startsWith("<json-render>")) {
         flush();
         let body = trimmed;
-        while (!body.includes("</json-render>") && i + 1 < lines.length) {
+        // Only the line just added can hold the tag: asking the whole
+        // body each line made an unclosed view quadratic in its length.
+        let closed = trimmed.includes("</json-render>");
+        while (!closed && i + 1 < lines.length) {
           i += 1;
           body += "\n" + lines[i];
+          closed = lines[i].includes("</json-render>");
         }
         const close = body.indexOf("</json-render>");
         if (close >= 0) {
@@ -386,10 +390,12 @@ const SessionChat = (() => {
     if (!m || line[m[0].length] !== " ") return null;
     let text = line.slice(m[0].length).trim();
     // An optional closing run ("## Title ##") goes only when a space
-    // sets it apart, so "C#" and "#123" keep their hashes.
-    const run = text.match(/\s+#+$/);
-    if (run) text = text.slice(0, run.index);
-    else if (/^#+$/.test(text)) text = "";
+    // sets it apart, so "C#" and "#123" keep their hashes. Walked by
+    // hand: a /\s+#+$/ restarts at every space, quadratic on agent text.
+    let j = text.length;
+    while (j > 0 && text[j - 1] === "#") j -= 1;
+    if (j === 0) text = "";
+    else if (j < text.length && /\s/.test(text[j - 1])) text = text.slice(0, j).trimEnd();
     return [m[0].length, text];
   }
 
@@ -501,7 +507,8 @@ const SessionChat = (() => {
     const escaped = [];
     t = t.replace(ESCAPED, (_m, ch) => `\u0004${escaped.push(ch) - 1}\u0004`);
     t = esc(t);
-    t = t.replace(new RegExp(`\\[([^\\]]*)\\]\\(${URL_PART}(?:\\s+&quot;.*?&quot;)?\\)`, "g"), (m, label, url) => {
+    // A label holds no "[": a run of them would each scan to the line's end.
+    t = t.replace(new RegExp(`\\[([^\\][]*)\\]\\(${URL_PART}(?:\\s+&quot;.*?&quot;)?\\)`, "g"), (m, label, url) => {
       // Code spans bind tighter than links (CommonMark): a target holding
       // one is no link, just text with code in it.
       if (url.includes("\u0001")) return m;
@@ -1312,8 +1319,20 @@ const SessionChat = (() => {
   /* Escaped, span-wrapped HTML for `code` in `lang` (a fence tag or a
    * language id); unknown and empty langs stay plain. `diff` colours by
    * line sigil the way the patch view does. `ctx` threads multiline
-   * state between calls (the diff rows below). */
+   * state between calls (the diff rows below). The scanner's patterns
+   * can retry from every position, so only the first HL_MAX characters
+   * are coloured and the rest of a huge block shows plain; the tool
+   * cards already cut their text there. */
+  const HL_MAX = 8000;
   function hl(code, lang, ctx) {
+    if (code.length > HL_MAX) {
+      const head = hl(code.slice(0, HL_MAX), lang, ctx);
+      // The plain rest wasn't scanned, so a comment or string open at the
+      // cut is not known to close: the next diff row starts afresh rather
+      // than wearing a state that may have ended in the skipped text.
+      if (ctx) ctx.s = null;
+      return head + esc(code.slice(HL_MAX));
+    }
     const name = langName(lang);
     if (!name || name === "text" || name === "diff") {
       if (ctx) ctx.s = null;
@@ -2154,7 +2173,8 @@ const SessionChat = (() => {
   /* -------------------------------------------------------- preview sheet */
 
   const preview = { targets: [], i: 0, gen: 0, view: "page", page: null, error: "" };
-  /* The Source view highlights at most this much of the file. */
+  /* The Source view shows at most this much of the file (hl colours
+   * its first HL_MAX characters). */
   const PREVIEW_SOURCE_MAX = 200000;
 
   /* A tool card's Preview button. An absolute path needs the session's
