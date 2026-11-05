@@ -7,7 +7,7 @@ final class KeychainHubStoreTests: XCTestCase {
     private var store = KeychainHubStore()
 
     override func setUp() {
-        suite = "quiver.tests.\(UUID().uuidString)"
+        suite = "swe.tests.\(UUID().uuidString)"
         store = KeychainHubStore(keychain: SystemKeychain(service: "com.swe.remote.tests.\(UUID().uuidString)"),
                                  sharedGroup: nil, defaults: UserDefaults(suiteName: suite)!, legacyDefaults: nil)
     }
