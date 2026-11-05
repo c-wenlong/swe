@@ -1573,6 +1573,17 @@ final class LaunchFlowTests: XCTestCase {
         XCTAssertEqual(flow.phase, .started("claude:new"))
     }
 
+    /// Every launch sheet words its Start button through the one button;
+    /// the fork sheet only names its own idle and waiting steps.
+    func testStartButtonWordsEachPhase() {
+        let phases: [LaunchFlow.Phase] = [.idle, .starting, .waiting, .started("k"), .failed("no"), .unconfirmed("slow")]
+        XCTAssertEqual(phases.map { LaunchStartButton.title($0) },
+                       ["Start session", "Starting", "Waiting for the session", "Opening the chat",
+                        "Start session", "Start session"])
+        XCTAssertEqual(phases.map { LaunchStartButton.title($0, idle: "Start", waiting: "Waiting for the fork") },
+                       ["Start", "Starting", "Waiting for the fork", "Opening the chat", "Start", "Start"])
+    }
+
     func testTheLastPollIsStillRead() async {
         let flow = LaunchFlow()
         let key = await flow.run(post: { self.status("pending") },
