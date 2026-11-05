@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -32,18 +31,6 @@ def stable_follow_up_id(text: str, project_root: str) -> str:
 
 def _merge_unique(existing: list[str], incoming: list[str]) -> list[str]:
     return list(dict.fromkeys([*existing, *incoming]))
-
-
-def _project_root(value: str) -> str:
-    """``value`` as the absolute folder `followup work` will launch in.
-
-    Stored as typed, ``--project=.`` or ``--project=sub`` was resolved
-    later against whatever folder `followup work` ran from, so the agent
-    started in the wrong place.
-    """
-    if not str(value).strip():
-        raise ValueError("follow-up project must not be empty")
-    return os.path.abspath(expand_user(value))
 
 
 class FollowUpLedger:
@@ -96,7 +83,7 @@ class FollowUpLedger:
         if status is not None:
             items = (item for item in items if item.status == status)
         if project_root is not None:
-            wanted = os.path.abspath(expand_user(project_root))
+            wanted = str(expand_user(project_root))
             items = (item for item in items if item.project_root == wanted)
         return sorted(items, key=lambda item: (item.status != "open", item.created_at, item.id))
 
@@ -114,7 +101,7 @@ class FollowUpLedger:
         clean_text = text.strip()
         if not clean_text:
             raise ValueError("follow-up text must not be empty")
-        clean_root = _project_root(project_root)
+        clean_root = str(expand_user(project_root))
         follow_up_id = stable_follow_up_id(clean_text, clean_root)
         index = self._load_index()
         existing = index.get(follow_up_id)
@@ -175,7 +162,7 @@ class FollowUpLedger:
             item,
             text=text.strip() if text is not None else item.text,
             project_root=(
-                _project_root(project_root) if project_root is not None else item.project_root
+                str(expand_user(project_root)) if project_root is not None else item.project_root
             ),
             context=context if context is not None else item.context,
             blockers=list(dict.fromkeys(blockers)) if blockers is not None else item.blockers,

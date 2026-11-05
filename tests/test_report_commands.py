@@ -319,6 +319,22 @@ class ReportCommandsTest(unittest.TestCase):
             self.assertEqual(final.text, "Ship the tested fix")
             self.assertEqual(final.status, "dismissed")
 
+    def test_followup_add_stores_a_relative_project_absolute(self):
+        # Stored as typed, `--project=.` was later resolved against the
+        # folder `followup work` ran from and launched in the wrong place.
+        import contextlib
+        import io
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = FollowUpLedger(root=tmp, clock=lambda: "2026-08-01T00:00:00+00:00")
+            with patch("swe.reports.commands.FollowUpLedger", return_value=ledger), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(_followup(["add", "Rel", "--project=sub"]), 0)
+                self.assertEqual(_followup(["add", "Empty", "--project="]), 1)
+            self.assertEqual([i.project_root for i in ledger.list()],
+                             [os.path.join(os.getcwd(), "sub")])
+
     def test_followup_work_rejects_conflicting_modes_before_launch(self):
         item = FollowUp(id="fu_test", text="Finish", project_root="/tmp")
         ledger = Mock()
