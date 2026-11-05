@@ -430,10 +430,6 @@ class LegacyGuardTest(unittest.TestCase):
             self.assertFalse(picker.called)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class NotHarnessTest(unittest.TestCase):
     """Known apps with a skills/ dir are ignored, never offered or linked."""
 
@@ -485,3 +481,7 @@ class NotHarnessTest(unittest.TestCase):
             root.mkdir(parents=True)
             _init(home, ["--full"], supported=False)
             self.assertTrue(root.is_symlink())
+
+
+if __name__ == "__main__":
+    unittest.main()
