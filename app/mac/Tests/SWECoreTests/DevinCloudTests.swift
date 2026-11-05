@@ -460,22 +460,29 @@ private final class Changes: Sendable {
 
     /// A sessions.json the app can't read (locked, corrupt) is the only
     /// copy of sessions Devin no longer lists: a sync never writes over it.
-    @Test(skippedAsRoot) func anUnreadableStoreIsNeverOverwritten() async throws {
-        for locked in [true, false] {
-            let dir = try TempDir()
-            let file = dir.url.appending(path: "sessions.json")
-            let bytes = Data(locked ? #"{"sessions":[]}"#.utf8 : "not json".utf8)
-            try bytes.write(to: file)
-            if locked { try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: file.path) }
-            defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path) }
-            let api = FakeDevinAPI()
-            standardRoutes(api)
-            let sync = sync(api, dir: dir, token: "cog_test")
-            await sync.sync()
-            #expect(await sync.sessions.map(\.id) == ["s1", "s2"])
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-            #expect(try Data(contentsOf: file) == bytes, "locked: \(locked)")
-        }
+    private func syncLeavesTheStoreAlone(locked: Bool) async throws {
+        let dir = try TempDir()
+        let file = dir.url.appending(path: "sessions.json")
+        let bytes = Data(locked ? #"{"sessions":[]}"#.utf8 : "not json".utf8)
+        try bytes.write(to: file)
+        if locked { try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: file.path) }
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path) }
+        let api = FakeDevinAPI()
+        standardRoutes(api)
+        let sync = sync(api, dir: dir, token: "cog_test")
+        await sync.sync()
+        #expect(await sync.sessions.map(\.id) == ["s1", "s2"])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        #expect(try Data(contentsOf: file) == bytes, "locked: \(locked)")
+    }
+
+    @Test func aCorruptStoreIsNeverOverwritten() async throws {
+        try await syncLeavesTheStoreAlone(locked: false)
+    }
+
+    /// Root reads a mode-0 file anyway, so only a user run can lock it.
+    @Test(skippedAsRoot) func aLockedStoreIsNeverOverwritten() async throws {
+        try await syncLeavesTheStoreAlone(locked: true)
     }
 
     @Test func noTokenMeansNoRequests() async throws {

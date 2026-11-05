@@ -125,7 +125,7 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
         #expect(PricingOverrides(url: url).models.keys.sorted() == ["from-app", "from-web"])
     }
 
-    @Test(skippedAsRoot) func `a failed write leaves the in-memory prices alone`() throws {
+    @Test func `a failed write leaves the in-memory prices alone`() throws {
         let temp = try TempDir()
         defer { withExtendedLifetime(temp) {} }
         // A regular file where the config directory would go blocks the
@@ -136,8 +136,13 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
             try blocked.set("swe-2", prices: .init(input: 1, output: 1))
         }
         #expect(blocked.models.isEmpty)
+    }
 
-        // The same for remove: a read-only directory fails the write, the
+    /// Root ignores the folder's mode, so only a user run can make it read-only.
+    @Test(skippedAsRoot) func `a failed remove leaves the price saved until it can write`() throws {
+        let temp = try TempDir()
+        defer { withExtendedLifetime(temp) {} }
+        // A read-only directory fails the write, the
         // price stays saved, and a retry once writable lands.
         let url = temp.path("config/pricing.json")
         var overrides = PricingOverrides(url: url)
