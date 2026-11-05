@@ -287,6 +287,18 @@ class TmuxInjector:
                 supervise.detach(self.home, self.key),
                 "supervisor stopped; session is observed again",
             )
+        if op in {"model", "effort"}:
+            from swe.remote import slash_builtins
+
+            # Only a TUI verified to run /<op> <value> gets it typed: in
+            # any other, the line would reach the model as a prompt. The
+            # same rule model_modes advertises and launch_tuning_error
+            # applies at launch and attach.
+            if not slash_builtins.launch_op_ok(session.tool_name, op):
+                return InjectResult(
+                    False, f"unsupported_control: "
+                           f"{session.tool_name or 'this harness'}'s TUI "
+                           f"has no /{op} that takes a value")
         text = control_text(op, value)
         if not text:
             return InjectResult(False, f"unsupported control {op}")

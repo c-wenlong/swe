@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A model or effort switch is no longer typed into a TUI that can't
+  take it.** On a tmux session the hub typed `/model <v>` or `/effort
+  <v>` into any harness's pane, so opencode or codex (for effort) got the
+  line as a prompt to the model. It now refuses with `unsupported_control`
+  unless the harness's TUI is known to run the command, the rule the
+  session's `model_modes` and a launch already follow.
+
 - **Qwen Code sessions get `@` file references for attachments again.**
   The hub's attachment fallback table keyed Qwen Code as `qwen`, its
   command, but sessions carry the registry id `qwen-code`, so a file

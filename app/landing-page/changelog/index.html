@@ -126,6 +126,12 @@ comments in <code>--json</code> gain <code>association</code>.</li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>A model or effort switch is no longer typed into a TUI that can't
+take it.</strong> On a tmux session the hub typed <code>/model &lt;v&gt;</code> or <code>/effort &lt;v&gt;</code> into any harness's pane, so opencode or codex (for effort) got the
+line as a prompt to the model. It now refuses with <code>unsupported_control</code>
+unless the harness's TUI is known to run the command, the rule the
+session's <code>model_modes</code> and a launch already follow.</p>
+</li>
 <li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
 The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its
 command, but sessions carry the registry id <code>qwen-code</code>, so a file
