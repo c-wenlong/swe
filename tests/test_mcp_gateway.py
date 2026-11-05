@@ -858,12 +858,13 @@ class GatewayBackendEdgeTest(unittest.TestCase):
             "    if m.get('method') == 'notifications/cancelled':\n"
             "        sys.exit(0)\n"))
         backend = self.backend("slow", spec)
+        # Taken before the call: the cancel makes the server exit, and the
+        # reader thread then clears _child, possibly before call returns.
+        child, _ = backend.ready("2025-06-18")
         sent = []
         body = backend.call({"jsonrpc": "2.0", "id": 8, "method": "tools/call",
                              "params": {"name": "x"}}, "2025-06-18",
                             on_sent=sent.append, timeout=0.2)
-        # Taken now: the reader clears _child once the server exits.
-        child = backend._child
         self.assertEqual(body["id"], 8)
         self.assertIn("did not answer in 0s", body["error"]["message"])
         self.assertNotIn(sent[0], child.pending)
