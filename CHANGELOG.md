@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **A resolve prompt no longer carries strangers' comments.** Anyone can
+  comment on a public issue, and every comment went word for word into
+  the first prompt of the agent resolving it. The prompt now quotes the
+  issue's title, body and comments line by line behind a note that they
+  are untrusted data the agent must not take instructions from, keeps
+  only comments whose `authorAssociation` is `OWNER`, `MEMBER` or
+  `COLLABORATOR`, and replaces the rest with "N comments from others,
+  not included". Every client prefills the hub's `suggested_prompt`, so
+  the Mac, iPhone and web resolve sheets all get the new prompt; issue
+  comments in `--json` gain `association`.
+
 ### Fixed
 
 - **A wildcard hub bind no longer turns off the Host check, and a
