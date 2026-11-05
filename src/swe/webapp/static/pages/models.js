@@ -30,7 +30,9 @@
     if (status !== 200 || !data) return pageError(header(false), status, data, () => render("models"));
     state.data = data;
     state.harness = data.harness_filter || [];
-    paint();
+    // Through repaintKeepingFocus: a box shown while this read was out
+    // may hold focus or an IME word mid-composition.
+    repaintKeepingFocus();
     // New rows change which keys the search leaves out: ask again.
     if (normalized(state.query)) runSearch(gen);
   }
