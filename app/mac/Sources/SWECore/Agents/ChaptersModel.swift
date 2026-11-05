@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -567,9 +568,13 @@ public struct ChapterNode: Identifiable, Equatable, Sendable {
 /// AGENTS_MD, built from relative paths so it stays testable.
 public enum ChapterTree {
     /// `files` and `folders` are AGENTS_MD-relative paths ("" not allowed;
-    /// a folder is implied by any deeper path anyway). Result is folders
-    /// first, each level case-insensitively alphabetical.
-    public static func build(files: [String], folders: [String]) -> [ChapterNode] {
+    /// a folder is implied by any deeper path anyway). `order` is the
+    /// index's chapter order: each level lists its indexed files in that
+    /// order — so a drag up or down the rail means an index reorder —
+    /// then its unindexed files, case-insensitively alphabetical like the
+    /// folders, which always come first.
+    public static func build(files: [String], folders: [String],
+                             order: [String] = []) -> [ChapterNode] {
         var fileSet = Set(files)
         var folderSet = Set(folders)
         for file in files {
@@ -578,6 +583,10 @@ public enum ChapterTree {
                 folderSet.insert(parent)
                 parent = (parent as NSString).deletingLastPathComponent
             }
+        }
+        var rank: [String: Int] = [:]
+        for (index, name) in order.enumerated() where rank[name] == nil {
+            rank[name] = index
         }
         func children(of prefix: String) -> [ChapterNode] {
             var out: [ChapterNode] = []
@@ -594,9 +603,10 @@ public enum ChapterTree {
                     path: file, isFolder: false))
             }
             out.sort {
-                ($0.isFolder && !$1.isFolder)
-                    || ($0.isFolder == $1.isFolder
-                        && $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending)
+                if $0.isFolder != $1.isFolder { return $0.isFolder }
+                let first = rank[$0.path] ?? .max, second = rank[$1.path] ?? .max
+                if first != second { return first < second }
+                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
             }
             return out
         }
@@ -697,7 +707,9 @@ public final class ChaptersModel {
             targetsDocument = document
             Task { await document.load() }
         }
-        await refreshTree(under: check.directory)
+        await refreshTree(under: check.directory,
+                          order: check.entries?.map(\.name)
+                              ?? check.uniqueChapters.map(\.name))
         // The walk above is awaited: a newer load may have finished while
         // it ran. If so, this result is stale and must not move selection.
         guard mine == generation else { return }
@@ -741,7 +753,7 @@ public final class ChaptersModel {
     /// skipped, and nothing followed outside the folder. Runs off the
     /// main actor; a folder that vanished between load and walk just
     /// empties the rail.
-    private func refreshTree(under directory: String) async {
+    private func refreshTree(under directory: String, order: [String]) async {
         let root = directory
         let found: (files: [String], folders: [String]) = await offMain {
             var files: [String] = []
@@ -775,7 +787,8 @@ public final class ChaptersModel {
             return (files, folders)
         }
         let confined = found.files.filter { Self.inside($0, under: root) != nil }
-        tree = ChapterTree.build(files: confined, folders: found.folders)
+        tree = ChapterTree.build(files: confined, folders: found.folders,
+                                 order: order)
         files = confined.sorted {
             $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
         }
@@ -832,43 +845,158 @@ public final class ChaptersModel {
         for document in outputDocuments.values { await document.checkDisk() }
     }
 
+    /// The window's UndoManager chapter moves register on, so ⌘Z walks
+    /// them back alongside text edits. The page hands over its
+    /// `\.undoManager`; the key window's manager is the fallback.
+    public weak var undoManager: UndoManager?
+    private var movesUndoManager: UndoManager? {
+        if let undoManager { return undoManager }
+        // No NSApplication under `swift test`: NSApp is nil there.
+        guard NSApp != nil else { return nil }
+        return NSApp.keyWindow?.undoManager ?? NSApp.mainWindow?.undoManager
+    }
+
+    /// ⌘Z / ⇧⌘Z from the Edit menu: pops whatever the window's manager
+    /// holds — a chapter move or a text edit, whichever came later.
+    public func undoMove() { movesUndoManager?.undo() }
+    public func redoMove() { movesUndoManager?.redo() }
+
+    /// Puts a finished move on the window's UndoManager. `backward` runs
+    /// on ⌘Z; `forward` is parked on the redo stack first, while the undo
+    /// is still executing — registering it inside the async work would
+    /// land on the undo stack again, so ⌘Z would ping-pong instead of
+    /// walking back. The work closures run the raw op and never register.
+    private func registerMoveUndo(
+        forward: @escaping @MainActor () async -> Void,
+        backward: @escaping @MainActor () async -> Void
+    ) {
+        guard let manager = movesUndoManager else { return }
+        manager.registerUndo(withTarget: self) { _ in
+            if let manager = self.movesUndoManager {
+                manager.registerUndo(withTarget: self) { _ in
+                    self.registerMoveUndo(forward: forward, backward: backward)
+                    Task { await forward() }
+                }
+                manager.setActionName("Redo Move Chapter")
+            }
+            Task { await backward() }
+        }
+        manager.setActionName("Undo Move Chapter")
+    }
+
     /// Drag `name` to just before `before` in the index (end when nil),
-    /// then rebuild.
+    /// then rebuild. Registers undo so ⌘Z puts it back.
     public func move(chapter name: String, before: String?, swe: SweClient) async {
-        guard let document = await readyIndex() else { return }
+        let (moved, after) = await applyChapterMove(name: name, before: before, swe: swe)
+        guard moved else { return }
+        registerMoveUndo(
+            forward: { _ = await self.applyChapterMove(name: name, before: before, swe: swe) },
+            backward: { _ = await self.applyChapterMove(name: name, before: after, swe: swe) })
+    }
+
+    /// The reorder itself: `name` to just before `before` (end when nil),
+    /// then rebuild. Returns whether the index changed and which entry
+    /// followed `name` beforehand — the undo's landing spot.
+    private func applyChapterMove(name: String, before: String?,
+                                  swe: SweClient) async -> (moved: Bool, after: String?) {
+        guard let document = await readyIndex() else { return (false, nil) }
+        let entries = ChapterIndex.entries(document.text)
+        let after = entries.firstIndex(where: { ChapterIndex.names($0, name) })
+            .flatMap { $0 + 1 < entries.count ? entries[$0 + 1] : nil }
         let text = ChapterIndex.move(document.text, name: name, before: before)
-        guard text != document.text else { return }
+        guard text != document.text else { return (false, nil) }
         document.text = text
         if await document.save() == .saved {
             await build(swe: swe)
-        } else {
-            // Drop the rejected edit and resync: index.txt has no editor of
-            // its own, so a dirty flag nobody can clear must not wedge ops.
-            await document.load()
-            buildError = "index.txt changed on disk; drag again."
+            return (true, after)
         }
+        // Drop the rejected edit and resync: index.txt has no editor of
+        // its own, so a dirty flag nobody can clear must not wedge ops.
+        await document.load()
+        buildError = "index.txt changed on disk; drag again."
+        return (false, nil)
     }
+
+    /// Where a file move drops the chapter's index entry.
+    private enum MovePlacement {
+        /// Keep the index slot it had — a drop on a folder or the top level.
+        case keep
+        /// Move it before `anchor` (the end when nil): a drop in a row gap.
+        case before(String?)
+    }
+
+    /// How a completed file move is walked back: the file and its entry
+    /// go to `folder`, and its index slot before `after` (the end when
+    /// nil — `keep` when it was never indexed).
+    private typealias MoveInverse = (name: String, folder: String, placement: MovePlacement)
 
     /// Drop `name` into `folder` ("" is the top level): the file moves on
     /// disk and its index line and targets rule follow, so the chapter
-    /// keeps its slot and its harness scope. Returns why it was refused.
+    /// keeps its slot and its harness scope. Registers undo so ⌘Z puts
+    /// the file back. Returns why it was refused.
     @discardableResult
     public func move(file name: String, toFolder folder: String,
                      swe: SweClient) async -> String? {
-        guard case .loaded(let check) = status else { return "The chapters aren't loaded yet." }
+        await move(file: name, toFolder: folder, placement: .keep, swe: swe)
+    }
+
+    /// The same, with the moved chapter's index entry landing before
+    /// `anchor` (at the end when nil): the rail's drop-into-a-gap move.
+    @discardableResult
+    public func move(file name: String, toFolder folder: String, before anchor: String?,
+                     swe: SweClient) async -> String? {
+        await move(file: name, toFolder: folder, placement: .before(anchor), swe: swe)
+    }
+
+    private func move(file name: String, toFolder folder: String,
+                      placement: MovePlacement, swe: SweClient) async -> String? {
+        let (problem, inverse) = await applyFileMove(
+            name: name, toFolder: folder, placement: placement, swe: swe)
+        if let inverse {
+            registerMoveUndo(
+                forward: {
+                    _ = await self.applyFileMove(name: name, toFolder: folder,
+                                                 placement: placement, swe: swe)
+                },
+                backward: {
+                    _ = await self.applyFileMove(name: inverse.name,
+                                                 toFolder: inverse.folder,
+                                                 placement: inverse.placement, swe: swe)
+                })
+        }
+        return problem
+    }
+
+    private func applyFileMove(name: String, toFolder folder: String,
+                               placement: MovePlacement,
+                               swe: SweClient) async -> (String?, MoveInverse?) {
+        guard case .loaded(let check) = status else {
+            return ("The chapters aren't loaded yet.", nil)
+        }
         let base = (name as NSString).lastPathComponent
         let newName = folder.isEmpty ? base : folder + "/" + base
-        guard newName != name else { return nil }
+        guard newName != name else {
+            // Same folder: only the index gap can still matter.
+            guard case .before(let anchor) = placement else { return (nil, nil) }
+            let (moved, after) = await applyChapterMove(
+                name: name, before: anchor, swe: swe)
+            return moved ? (nil, (name, folder, .before(after))) : (nil, nil)
+        }
         if documents[name]?.isDirty == true {
-            return "Save or revert \(name) before moving it."
+            return ("Save or revert \(name) before moving it.", nil)
         }
         if let problem = ChapterIndex.folderProblem(folder)
-            ?? ChapterIndex.nameProblem(newName) { return problem }
+            ?? ChapterIndex.nameProblem(newName) { return (problem, nil) }
         guard let from = Self.inside(name, under: check.directory),
               let to = Self.inside(newName, under: check.directory) else {
-            return "The path cannot leave AGENTS_MD."
+            return ("The path cannot leave AGENTS_MD.", nil)
         }
-        return await queuedCompile { () -> String? in
+        // The undo's landing spot, filled inside the queue where the
+        // index is current: the entry that followed the chapter, or
+        // `keep` when it was never indexed.
+        var indexed = false
+        var successor: String?
+        let problem = await queuedCompile { () -> String? in
             // Checked again inside the queue: the draft may have gone
             // dirty while earlier work ran, and dropping it loses edits.
             if self.documents[name]?.isDirty == true {
@@ -877,6 +1005,13 @@ public final class ChaptersModel {
             guard let index = await self.readyIndex(),
                   let targetsDocument = await self.readyTargets() else {
                 return "The chapter files haven't been read."
+            }
+            let oldEntries = ChapterIndex.entries(index.text)
+            if let at = oldEntries.firstIndex(where: {
+                ChapterIndex.names($0, name)
+            }) {
+                indexed = true
+                successor = at + 1 < oldEntries.count ? oldEntries[at + 1] : nil
             }
             let rules: [String: [String: [String]]]
             if targetsDocument.existsOnDisk {
@@ -887,7 +1022,7 @@ public final class ChaptersModel {
             } else {
                 rules = [:]
             }
-            guard !ChapterIndex.entries(index.text).contains(where: {
+            guard !oldEntries.contains(where: {
                 ChapterIndex.names($0, newName)
             }) else { return "\(newName) is already in the index." }
             // A stale rule under the destination name would silently
@@ -934,7 +1069,10 @@ public final class ChaptersModel {
                     return "targets.json changed on disk; try again."
                 }
             }
-            let renamed = ChapterIndex.renaming(index.text, from: name, to: newName)
+            var renamed = ChapterIndex.renaming(index.text, from: name, to: newName)
+            if case .before(let anchor) = placement {
+                renamed = ChapterIndex.move(renamed, name: newName, before: anchor)
+            }
             let indexChanged = renamed != index.text
             if indexChanged {
                 index.text = renamed
@@ -968,10 +1106,15 @@ public final class ChaptersModel {
                 }
             }
             if self.selected == name { self.selected = newName }
-            await self.refreshTree(under: check.directory)
+            await self.refreshTree(under: check.directory,
+                                   order: ChapterIndex.entries(index.text))
             if indexChanged { await self.build(swe: swe) }
             return nil
         }
+        guard problem == nil else { return (problem, nil) }
+        let sourceFolder = name.contains("/")
+            ? (name as NSString).deletingLastPathComponent : ""
+        return (nil, (newName, sourceFolder, indexed ? .before(successor) : .keep))
     }
 
     /// A new chapter named for `raw` (with `.md` added when missing):
@@ -1050,6 +1193,7 @@ public final class ChaptersModel {
             return (try? handle.write(contentsOf: Data(starter.utf8))) != nil
         }
         guard created else { return "Couldn't create \(name)." }
+        var order = check.entries?.map(\.name) ?? check.uniqueChapters.map(\.name)
         if include {
             // The file this attempt created goes back out when the index
             // can't be updated — but only while it still holds exactly
@@ -1070,10 +1214,11 @@ public final class ChaptersModel {
                     ? "index.txt changed on disk; try again."
                     : "index.txt changed on disk. The new file was left in place, unlisted; try again."
             }
+            order = ChapterIndex.entries(document.text)
         }
         if documents[name]?.isDirty != true { documents[name] = nil }
         selected = name
-        await refreshTree(under: check.directory)
+        await refreshTree(under: check.directory, order: order)
         if include { await build(swe: swe) }
         return nil
     }
@@ -1096,7 +1241,9 @@ public final class ChaptersModel {
             } catch { return false }
         }
         guard made else { return "Couldn't create \(path)." }
-        await refreshTree(under: check.directory)
+        await refreshTree(under: check.directory,
+                          order: check.entries?.map(\.name)
+                              ?? check.uniqueChapters.map(\.name))
         return nil
     }
 

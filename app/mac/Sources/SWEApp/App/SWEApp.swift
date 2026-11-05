@@ -62,6 +62,15 @@ struct SWEApp: App {
                     .disabled(SheetOverlayRegistry.shared.anyCovered)
                 }
             }
+            // Chapter moves and editor text live on the window's one undo
+            // manager, so these walk back whatever came last — the rail's
+            // drag or the last edit, in order.
+            CommandGroup(replacing: .undoRedo) {
+                Button("Undo") { model.chapters.undoMove() }
+                    .keyboardShortcut("z")
+                Button("Redo") { model.chapters.redoMove() }
+                    .keyboardShortcut("Z")
+            }
             // macOS keeps its own search field at the top of Help; this
             // replaces only the "SWE Help" item, which had no help book.
             CommandGroup(replacing: .help) {
