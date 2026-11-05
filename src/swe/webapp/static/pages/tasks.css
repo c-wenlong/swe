@@ -13,6 +13,8 @@
 .tk-step.done { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, var(--border)); }
 .tk-step-check { width: 16px; height: 16px; }
 .tk-step.at { color: var(--text-primary); font-weight: 500; border-color: var(--border-strong); }
+/* A closed task's ticks are muted: it got there by hand, not by merging. */
+.tk-steps.closed .tk-step.done { color: var(--text-muted); border-color: var(--border); }
 .tk-line { flex: 1 1 12px; min-width: 10px; max-width: 28px; border-top: 1px solid var(--border-strong); }
 
 /* The running chip on a row and in the tab strip. */
