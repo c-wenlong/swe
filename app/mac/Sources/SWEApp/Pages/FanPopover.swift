@@ -79,8 +79,14 @@ struct FanPopover: View {
     private var thresholdPick: Binding<Double> {
         Binding(get: { fans.thresholdEnabled ? fans.threshold : 0 },
                 set: { pick in
-                    if pick != 0 { fans.threshold = pick }
-                    thresholdOn.wrappedValue = pick != 0
+                    if pick == 0 {
+                        fans.thresholdEnabled = false
+                    } else {
+                        fans.threshold = pick
+                        // Only an off rule switches on (and may install
+                        // the helper); an on one just moves its line.
+                        if !fans.thresholdEnabled { thresholdOn.wrappedValue = true }
+                    }
                 })
     }
 
