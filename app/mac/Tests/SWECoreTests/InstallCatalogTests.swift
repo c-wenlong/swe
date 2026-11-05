@@ -155,8 +155,9 @@ private let oldInstallJSON = #"""
         ])
         await model.load()
         let failure = await model.register(try #require(model.harness("jules")))
-        #expect(failure != nil)
-        #expect(model.actionError != nil)
+        // swe's own refusal, word for word, both returned and shown.
+        #expect(failure == "Usage: swe add")
+        #expect(model.actionError == "Usage: swe add")
     }
 
     /// The line is typed into a login shell as-is, so every token is quoted

@@ -51,13 +51,18 @@ def cmd_skills_new(args):
               file=refusal)
         return 1
     try:
-        path, _ = create(positional[0], description)
+        path, created_root = create(positional[0], description)
     except ValueError as exc:
         print(c("red", f"  {exc}"), file=refusal)
         return 1
     if json_view:
         return emit({"name": positional[0], "path": str(path)})
     print(c("green", f"  ✓ Created {positional[0]}: {path}"))
+    if created_root:
+        # The hub skills root is brand new, so no harness links to it and
+        # the skill is invisible until swe init points them at it.
+        print(c("dim", f"  {path.parent.parent} is new: run swe init to "
+                       "link it into your harnesses"))
     return 0
 
 

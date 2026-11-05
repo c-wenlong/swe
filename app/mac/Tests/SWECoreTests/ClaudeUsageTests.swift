@@ -126,6 +126,55 @@ import Testing
         #expect(await h.makeService().usage(for: custom, force: false).email == "work@example.com")
     }
 
+    /// A sign-in made before the ~/.quiver -> ~/.swe move sits under the
+    /// hash of the old path: 9aacfa57 is the new spelling's, 314c8bc6
+    /// "/Users/test/.quiver/accounts/claude-work"'s.
+    @Test func aSignInFromBeforeTheSweMoveIsReadUnderItsOldName() async throws {
+        let h = UsageHarness()
+        let key = AccountKey(provider: .claude, configHome: "/Users/test/.swe/accounts/claude-work",
+                             isDefault: false)
+        h.secrets.set(service: "Claude Code-credentials-314c8bc6", account: user,
+                      claudeCredentialsJSON(accessToken: "legacy-SECRET"))
+        h.transport.reply(200, body: try fixture("claude-usage"))
+
+        let usage = await h.makeService().usage(for: key, force: false)
+
+        #expect(h.secrets.lookups == ["Claude Code-credentials-9aacfa57|\(user)",
+                                      "Claude Code-credentials-314c8bc6|\(user)"])
+        #expect(usage.status == .ok)
+        #expect(h.transport.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer legacy-SECRET")
+    }
+
+    /// The old name is only a fallback: a current item stops the lookup.
+    @Test func theCurrentKeychainItemIsReadFirstAndAlone() async throws {
+        let h = UsageHarness()
+        let key = AccountKey(provider: .claude, configHome: "/Users/test/.swe/accounts/claude-work",
+                             isDefault: false)
+        h.secrets.set(service: "Claude Code-credentials-9aacfa57", account: user,
+                      claudeCredentialsJSON(accessToken: "current-SECRET"))
+        h.secrets.set(service: "Claude Code-credentials-314c8bc6", account: user,
+                      claudeCredentialsJSON(accessToken: "legacy-SECRET"))
+        h.transport.reply(200, body: try fixture("claude-usage"))
+
+        _ = await h.makeService().usage(for: key, force: false)
+
+        #expect(h.secrets.lookups == ["Claude Code-credentials-9aacfa57|\(user)"])
+        #expect(h.transport.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer current-SECRET")
+    }
+
+    /// Something is stored but none of it parses: an error that says so
+    /// (never quoting the item), not "signed out", and no request.
+    @Test func unreadableCredentialsAreAnErrorNotSignedOut() async {
+        let h = UsageHarness()
+        h.secrets.set(service: "Claude Code-credentials", account: user, "not-json-SECRET")
+        h.files.set("\(claudeHome)/.credentials.json", #"{"claudeAiOauth": {"refreshToken": "r-SECRET"}}"#)
+
+        let usage = await h.makeService().usage(for: claudeKey, force: true)
+
+        #expect(usage == AccountUsage(status: .error("Claude Code's credentials could not be read")))
+        #expect(h.transport.requests.isEmpty)
+    }
+
     @Test func noCredentialAnywhereIsSignedOut() async {
         let h = UsageHarness()
         let usage = await h.makeService().usage(for: claudeKey, force: true)

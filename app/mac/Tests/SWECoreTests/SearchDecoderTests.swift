@@ -62,21 +62,32 @@ import Testing
         #expect(auto.hints.title == "Auto title")
     }
 
-    @Test func messageTextIsCappedAt256KBOnCharacterBoundaries() {
+    @Test func messageTextIsCappedAt256KBOnCharacterBoundaries() throws {
         let blob = String(repeating: "a", count: 300_000)
         let out = SearchDecoder.decode(agent: .claude, line: line(
             #"{"type":"user","sessionId":"s1","message":{"role":"user","content":"\#(blob)"}}"#))
-        let message = try? #require(out.messages.first)
-        #expect(message?.text.utf16.count == SearchText.messageLimit)
+        let message = try #require(out.messages.first)
+        #expect(message.text.utf16.count == SearchText.messageLimit)
+        #expect(message.text == String(repeating: "a", count: SearchText.messageLimit))
     }
 
-    @Test func toolCallArgumentsAreCappedAt2000() {
+    /// A non-BMP emoji is two UTF-16 units; one straddling the limit is
+    /// dropped whole rather than split into a lone surrogate.
+    @Test func theCapNeverSplitsASurrogatePair() throws {
+        let head = String(repeating: "a", count: SearchText.messageLimit - 1)
+        let out = SearchDecoder.decode(agent: .claude, line: line(
+            #"{"type":"user","sessionId":"s1","message":{"role":"user","content":"\#(head)😀tail"}}"#))
+        let message = try #require(out.messages.first)
+        #expect(message.text.utf16.count == SearchText.messageLimit - 1)
+        #expect(message.text == head)
+    }
+
+    @Test func toolCallArgumentsAreCappedAt2000() throws {
         let command = String(repeating: "x", count: 3000)
         let out = SearchDecoder.decode(agent: .claude, line: line(
             #"{"type":"assistant","sessionId":"s1","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"\#(command)"}}]}}"#))
-        let tool = try? #require(out.messages.first)
-        #expect(tool?.text.hasPrefix("Bash: ") == true)
-        #expect(tool?.text.utf16.count == "Bash: ".utf16.count + 2000)
+        let tool = try #require(out.messages.first)
+        #expect(tool.text == "Bash: " + String(repeating: "x", count: 2000))
     }
 
     // MARK: - codex
