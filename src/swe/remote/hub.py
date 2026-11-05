@@ -17,6 +17,7 @@ full-power credential.
 from __future__ import annotations
 
 import email.message
+import ipaddress
 import json
 import os
 import queue
@@ -427,6 +428,11 @@ class HubState:
         # these (filled by serve() from the bind host + whois); empty
         # disables both checks.
         self.allowed_hosts: set[str] = set()
+        # Set for a wildcard bind, which answers on every interface:
+        # any IP-literal Host on ``allowed_port`` passes too. A rebound
+        # page always arrives under its own domain name, never an IP,
+        # so this keeps LAN addresses working without a name check gap.
+        self.allowed_ip_port: int | None = None
         # The hub's reachable base — set by serve() before start() so
         # ntfy action buttons can point back at this host.
         self.base_url = ""
@@ -1687,10 +1693,7 @@ class _Handler(BaseHTTPRequestHandler):
         this hub actually answers (DNS-rebinding check)."""
         if (self.headers.get("X-Quiver-Pair") or "") != "1":
             return False
-        allowed = self._state.allowed_hosts
-        if allowed and (self.headers.get("Host") or "") not in allowed:
-            return False
-        return True
+        return self._local_host_ok()
 
     def _pair_meta(self, body: dict | None, node_name: str = "") -> dict:
         """kind/model/client/os for the pairing device: the body's own
@@ -1729,8 +1732,7 @@ class _Handler(BaseHTTPRequestHandler):
         this hub's — a page that rebound its domain to this address.
         Browsers can't forge Host, so the check is quiet for clients
         that dialed the hub's own address."""
-        allowed = self._state.allowed_hosts
-        return not allowed or (self.headers.get("Host") or "") in allowed
+        return _host_allowed(self._state, self.headers.get("Host") or "")
 
     def _attempt_ok(self, bucket: dict[str, list[float]]) -> bool:
         """The per-source attempt cap on the unauthenticated pair
@@ -4231,6 +4233,28 @@ def make_server(
 WILDCARD_HOSTS = frozenset({"0.0.0.0", "::", ""})
 
 
+def _host_allowed(state: HubState, host: str) -> bool:
+    """Whether a request's Host names this hub: anything while
+    ``allowed_hosts`` is empty (a state ``configure`` never filled), a
+    listed name, or, on a wildcard bind, an IP literal on its port."""
+    allowed = state.allowed_hosts
+    if not allowed or host in allowed:
+        return True
+    port = state.allowed_ip_port
+    if port is None:
+        return False
+    name, sep, tail = host.rpartition(":")
+    if not sep or tail != str(port):
+        return False
+    if name.startswith("[") and name.endswith("]"):
+        name = name[1:-1]
+    try:
+        ipaddress.ip_address(name)
+    except ValueError:
+        return False
+    return True
+
+
 def _advertise_url(host: str, port: int) -> str:
     """The base URL handed to phones/ntfy — never a wildcard bind."""
     advertised = host
@@ -4355,6 +4379,7 @@ def configure(state: HubState, host: str, port: int,
     # a wildcard bind without --unsafe-bind-any; _advertise_url still
     # turns one into something reachable.)
     state.base_url = public_url or _advertise_url(host, port)
+    state.allowed_ip_port = None
     # Owner identity for pair-request approval: the tailnet login that
     # owns this node. A plain loopback bind and tagged nodes get none;
     # behind serve the node is looked up by its own tailnet IP.
@@ -4407,7 +4432,9 @@ def configure(state: HubState, host: str, port: int,
             # tagged; a tag only means there is no owner login.
             if wildcard:
                 # Loopback, and the hostname _advertise_url falls back
-                # to off the tailnet, next to the tailnet names below.
+                # to off the tailnet, next to the tailnet names below;
+                # a LAN address dialed directly passes as an IP literal.
+                state.allowed_ip_port = port
                 state.allowed_hosts = _loopback_hosts(port)
                 if socket.gethostname():
                     state.allowed_hosts.add(

@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allowed Host names empty, which lets any Host through, so a page that
   rebound its name to the hub could pass as the owner's own tailnet
   device; `::` was not even read as a wildcard. Both now answer this
-  node's loopback, hostname and tailnet names. `serve` also binds before
+  node's loopback, hostname and tailnet names, plus any IP address on
+  the hub's port (a LAN pairing link), since a rebound page always
+  arrives under its own domain name. `serve` also binds before
   it starts the hub's loops, so a copy that can't get the port exits
   before it registers the machine, settles kept sessions or retires
   ntfy credentials under the running hub.

@@ -119,7 +119,9 @@ running hub.</strong> <code>--host=0.0.0.0 --unsafe-bind-any</code> left the hub
 allowed Host names empty, which lets any Host through, so a page that
 rebound its name to the hub could pass as the owner's own tailnet
 device; <code>::</code> was not even read as a wildcard. Both now answer this
-node's loopback, hostname and tailnet names. <code>serve</code> also binds before
+node's loopback, hostname and tailnet names, plus any IP address on
+the hub's port (a LAN pairing link), since a rebound page always
+arrives under its own domain name. <code>serve</code> also binds before
 it starts the hub's loops, so a copy that can't get the port exits
 before it registers the machine, settles kept sessions or retires
 ntfy credentials under the running hub.</p>
