@@ -10,9 +10,10 @@ import json
 import os
 import stat
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
-from swe.sessions import failures
+from swe.sessions import failures, parse_cache
 from swe.sessions.engines.json_engine import (
     JsonParserConfig,
     _valid_fields,
@@ -476,18 +477,40 @@ class JsonFilesEdgesTest(_FailuresClean):
     def test_cached_read_honours_include(self):
         self._write("a.json", {"id": "a", "cwd": "/a"})
         self._write("b.json", {"id": "b", "cwd": "/b"})
-        sessions = parse_json_store(self._config(
-            cache=True, include=lambda e, _fp: e["id"] == "b"))
-        self.assertEqual([s.session_id for s in sessions], ["b"])
+        config = self._config(cache=True, include=lambda e, _fp: e["id"] == "b")
+        with parse_cache.activate(home=self.tmp):
+            sessions = parse_json_store(config)
+            self.assertEqual([s.session_id for s in sessions], ["b"])
+            # Unchanged files come from the cache, the excluded one too.
+            with patch("swe.sessions.engines.json_engine._file_fields",
+                       side_effect=AssertionError("read again")):
+                again = parse_json_store(config)
+        self.assertEqual([s.session_id for s in again], ["b"])
 
     @unittest.skipIf(_IS_ROOT, "root reads files whatever their mode")
     def test_unreadable_file_is_skipped(self):
-        self.lock(self._write("a.json", {"id": "a", "cwd": "/a"}))
+        locked = self._write("a.json", {"id": "a", "cwd": "/a"})
+        mode = stat.S_IMODE(locked.stat().st_mode)
+        self.lock(locked)
         self._write("b.json", {"id": "b", "cwd": "/b"})
-        for cache in (False, True):
-            with self.subTest(cache=cache):
-                sessions = parse_json_store(self._config(cache=cache))
-                self.assertEqual([s.session_id for s in sessions], ["b"])
+        sessions = parse_json_store(self._config(cache=False))
+        self.assertEqual([s.session_id for s in sessions], ["b"])
+        locked.chmod(mode)
+        # A read that fails without touching the file (so its stat, and the
+        # cache key, stay the same) must not be pinned as "no session".
+        real_open = open
+
+        def flaky_open(path, *args, **kwargs):
+            if str(path) == str(locked):
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_open(path, *args, **kwargs)
+
+        with parse_cache.activate(home=self.tmp):
+            with patch("builtins.open", flaky_open):
+                sessions = parse_json_store(self._config(cache=True))
+            self.assertEqual([s.session_id for s in sessions], ["b"])
+            sessions = parse_json_store(self._config(cache=True))
+        self.assertEqual(sorted(s.session_id for s in sessions), ["a", "b"])
 
     def test_include_that_raises_is_recorded(self):
         self._write("a.json", {"id": "a", "cwd": "/a"})
