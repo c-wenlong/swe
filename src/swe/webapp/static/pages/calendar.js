@@ -1,7 +1,7 @@
 /* Calendar: ports the Mac app's CalendarPage. When each harness was
  * working, as blocks of activity per project on a day, week, N-day or
  * month grid, with the mini month and the harness legend on the right.
- * Data from /v1/app/calendar (quiver/webapp/pages/calendar.py); the lane
+ * Data from /v1/app/calendar (swe/webapp/pages/calendar.py); the lane
  * layout (CalendarLayout), month cells (MonthLayout) and the legend's
  * hidden toggles live here. Read only.
  *
