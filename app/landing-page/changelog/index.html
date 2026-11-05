@@ -126,6 +126,12 @@ comments in <code>--json</code> gain <code>association</code>.</li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>The web app's model search and price edits no longer wait on the
+daily price download.</strong> The LiteLLM price list was fetched while
+holding the lock every catalog read and price save takes, so a slow
+network stalled the Models search and the Pricing page. The fetch now
+runs outside it, and a download cut short counts as tried for the day.</p>
+</li>
 <li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
 The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its
 command, but sessions carry the registry id <code>qwen-code</code>, so a file
