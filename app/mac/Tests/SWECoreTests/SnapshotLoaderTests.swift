@@ -24,31 +24,26 @@ actor MemorySnapshotStore<Content: SnapshotContent>: SnapshotStoring {
 /// A saved snapshot whose read waits until released.
 actor PausedReadStore<Content: SnapshotContent>: SnapshotStoring {
     let saved: Content
-    private var gate: CheckedContinuation<Void, Never>?
-    /// Bumped once a read is parked, so a test waits for it without spinning.
-    let parks = CountGate()
+    /// Where each read waits; `arrived` says one is parked.
+    nonisolated let gate = HoldGate()
     init(_ saved: Content) { self.saved = saved }
     func load() async -> Content? {
-        let parks = self.parks
-        await withCheckedContinuation {
-            gate = $0
-            Task { await parks.bump() }
-        }
+        // A cancelled read stops waiting, as a cancelled file read would.
+        try? await gate.pass()
         return saved
     }
     func save(_ content: Content) async {}
-    func release() { gate?.resume(); gate = nil }
+    nonisolated func release() { gate.open() }
 }
 
-/// Answers each fetch with the next value, counting calls.
+/// Answers each fetch with the next value, counting calls. A gated source
+/// holds every fetch until released; a fetch cancelled meanwhile throws.
 actor NamesSource {
     private var replies: [Result<Names, Error>]
     private(set) var calls = 0
-    private var gate: CheckedContinuation<Void, Never>?
     private let gated: Bool
-    /// Bumped once a gated fetch is parked, so a test waits for it without
-    /// spinning.
-    let parks = CountGate()
+    /// Where a gated fetch waits; `arrived` says one is parked.
+    nonisolated let gate = HoldGate()
 
     init(_ replies: [Result<Names, Error>], gated: Bool = false) {
         self.replies = replies
@@ -57,18 +52,12 @@ actor NamesSource {
 
     func fetch() async throws -> Names {
         calls += 1
-        if gated {
-            let parks = self.parks
-            await withCheckedContinuation {
-                gate = $0
-                Task { await parks.bump() }
-            }
-        }
+        if gated { try await gate.pass() }
         try Task.checkCancellation()
         return try (replies.count > 1 ? replies.removeFirst() : replies[0]).get()
     }
 
-    func release() { gate?.resume(); gate = nil }
+    nonisolated func release() { gate.open() }
 }
 
 @MainActor
@@ -126,12 +115,12 @@ actor NamesSource {
         let loader = loader(clock: TestClock(start))
         // The page opens, then closes while swe is still running.
         let first = Task { await loader.loadIfStale(from: "/bin/swe") { try await source.fetch() } }
-        try #require(await source.parks.reach(1))
+        try #require(await source.gate.arrived())
         first.cancel()
         #expect(loader.isLoading)
         // Reopened before swe answers: it joins the fetch in flight.
         let reopened = Task { await loader.loadIfStale(from: "/bin/swe") { try await source.fetch() } }
-        await source.release()
+        source.release()
         await reopened.value
         #expect(names(loader) == ["a"])
         #expect(!loader.isLoading)
@@ -193,10 +182,10 @@ actor NamesSource {
             let store = PausedReadStore(saved)
             let loader = SnapshotLoader(snapshots: store, now: { [start] in start })
             let restoring = Task { await loader.restore() }
-            try #require(await store.parks.reach(1))
+            try #require(await store.gate.arrived())
             await loader.load(from: "/bin/swe") { try live.get() }
             let shown = loader.state
-            await store.release()
+            store.release()
             await restoring.value
             #expect(loader.state == shown)
             if case .loaded(let value) = loader.state { #expect(value.names == ["live"]) }
@@ -262,10 +251,10 @@ actor NamesSource {
         let slow = NamesSource([.success(Names(names: ["slow"]))], gated: true)
         let loader = loader(clock: TestClock(start))
         let first = Task { await loader.load(from: "/bin/swe") { try await slow.fetch() } }
-        try #require(await slow.parks.reach(1))
+        try #require(await slow.gate.arrived())
         let applied = await loader.load(from: "/bin/swe") { Names(names: ["fast"]) }
         #expect(applied)
-        await slow.release()
+        slow.release()
         let stale = await first.value
         #expect(!stale)
         #expect(names(loader) == ["fast"])
@@ -276,24 +265,24 @@ actor NamesSource {
         let loader = loader(clock: TestClock(start))
         await loader.load(from: "/bin/swe") { Names(names: ["a"]) }
         let refresh = Task { await loader.load(from: "/bin/swe") { try await source.fetch() } }
-        try #require(await source.parks.reach(1))
+        try #require(await source.gate.arrived())
         #expect(names(loader) == ["a"])
         #expect(loader.isLoading)
-        await source.release()
+        source.release()
         await refresh.value
         #expect(names(loader) == ["b"])
     }
 }
 
 @Suite struct SnapshotFileTests {
-    func temporaryURL() -> URL {
-        FileManager.default.temporaryDirectory
-            .appending(path: "swe-snapshot-\(UUID().uuidString)/cache/names.json")
-    }
+    /// The file a snapshot lives at, in a cache folder `SnapshotFile`
+    /// makes itself, inside the test's own scratch folder.
+    func snapshotURL(in dir: TempDir) -> URL { dir.path("cache/names.json") }
 
     @Test func aSnapshotRoundTripsThroughAPrivateFile() async throws {
-        let url = temporaryURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent().deletingLastPathComponent()) }
+        let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
+        let url = snapshotURL(in: dir)
         let file = SnapshotFile<Snapshot<Names>>(url: url)
         let snapshot = Snapshot(source: "/bin/swe", savedAt: Date(timeIntervalSince1970: 1_791_700_000.25),
                                 value: Names(names: ["a", "b"]))
@@ -306,8 +295,9 @@ actor NamesSource {
     }
 
     @Test func aSnapshotOfAnotherShapeIsIgnored() async throws {
-        let url = temporaryURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent().deletingLastPathComponent()) }
+        let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
+        let url = snapshotURL(in: dir)
         let file = SnapshotFile<Snapshot<Names>>(url: url)
         #expect(await file.load() == nil)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
