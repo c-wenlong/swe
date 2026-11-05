@@ -232,8 +232,8 @@ const PrFilter = (() => {
     if (page.tab !== "pulls") return "";
     const coverage = prCoverage();
     const shown = PrFilter.FILTERS.filter((f) => PrFilter.offered(page.flags, f.id, coverage));
-    const lists = prLists(listedRepos());
     if (shown.length < 2) return "";
+    const lists = prLists(listedRepos());
     const now = prFilterNow();
     return `<div class="tabs gh-pr-filter" role="radiogroup" aria-label="Which pull requests to list">${shown.map((f) => {
       const n = lists.reduce((sum, [repo, prs]) => sum + prs.filter((pr) => PrFilter.includes(page.flags, f.id, repo, pr)).length, 0);
@@ -420,7 +420,7 @@ const PrFilter = (() => {
     </span>
     <span class="gh-row-side">${i % 2 ? Sk.pill(44) : Sk.bar(16, 16)}</span>
   </div>`).join("");
-  const loadingCard = (text, framed = true) =>
+  const loadingCard = (framed = true) =>
     framed
       ? `<div class="gh-box" role="status" aria-label="Loading"><div class="gh-group-head">${Sk.bar(120, 12)}</div>
         <div class="gh-surface last">${ghRowsSkeleton(5)}</div></div>`
@@ -463,7 +463,7 @@ const PrFilter = (() => {
     if (key === "pages") return pagesPanel(raw);
     // opts.prFilter: the dashboard's Mine / Review requested pick.
     const state = prFiltered(repo, key, filtered(raw, key, opts.query, opts.unfiltered), opts.prFilter || "all");
-    if (state.kind === "loading") return loadingCard("Fetching…", false);
+    if (state.kind === "loading") return loadingCard(false);
     if (state.kind === "failed") return errorCard(state.message, false);
     const rows = state.rows;
     if (opts.window) {
@@ -533,7 +533,7 @@ const PrFilter = (() => {
 
   function dashboardContent() {
     const d = page.data;
-    if (!d) return loadingCard("Checking gh and the pinned repos…");
+    if (!d) return loadingCard();
     const setup = GhUI.envSetup(d.github);
     if (setup) return GhUI.setupCard(setup, d.machine);
     if (!pins().length) {
@@ -797,7 +797,6 @@ const PrFilter = (() => {
     if (page.dragging) { page.repaintAfterDrag = true; return; }
     const d = page.data;
     const rail = d && !GhUI.envSetup(d.github) && pins().length;
-    prMemo = null;
     prMemo = { now: prFilterNow() };
     try {
       document.getElementById("panel").innerHTML = `<div class="page gh-page">
@@ -1121,7 +1120,7 @@ const PrFilter = (() => {
     if (page.observer) { page.observer.disconnect(); page.observer = null; }
     let content;
     if (!f.data) {
-      content = loadingCard("Fetching…");
+      content = loadingCard();
     } else if (GhUI.envSetup(f.data.github)) {
       content = GhUI.setupCard(GhUI.envSetup(f.data.github), f.data.machine);
     } else {

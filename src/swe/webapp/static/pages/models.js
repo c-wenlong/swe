@@ -30,7 +30,9 @@
     if (status !== 200 || !data) return pageError(header(false), status, data, () => render("models"));
     state.data = data;
     state.harness = data.harness_filter || [];
-    paint();
+    // Through repaintKeepingFocus: a box shown while this read was out
+    // may hold focus or an IME word mid-composition.
+    repaintKeepingFocus();
     // New rows change which keys the search leaves out: ask again.
     if (normalized(state.query)) runSearch(gen);
   }
@@ -85,15 +87,16 @@
     const period = document.getElementById("qm-period");
     period.onchange = () => { state.period = period.value; state.menuOpen = false; render("models"); };
     const search = document.getElementById("qm-search");
-    search.oninput = () => {
-      state.query = search.value;
+    // bindSearch holds the search back while an IME composes a word, so
+    // the repaint can't rebuild the box and end the word half-typed.
+    bindSearch(search, (text) => { state.query = text; }, () => {
       clearTimeout(state.timer);
       // Keystrokes coalesce: one catalog search once the typist pauses.
       // The page's generation is taken now, so a search that fires after
       // the user left for another page never paints over it.
       const gen = routeGen;
       state.timer = setTimeout(() => runSearch(gen), 150);
-    };
+    });
   }
 
   /* Rows on screen: your models, or under a query the ones whose name
@@ -149,6 +152,9 @@
 
   function repaintKeepingFocus() {
     const before = document.getElementById("qm-search");
+    // A reply landing mid-composition waits: compositionend searches
+    // again and repaints with it.
+    if (before && before.composing) return;
     const focused = before && document.activeElement === before;
     const at = before ? before.selectionStart : null;
     paint();
