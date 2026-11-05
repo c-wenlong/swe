@@ -21,17 +21,21 @@ actor FakeLedger: LedgerQuerying {
     var nextReport = ScanReport()
     func set(report: ScanReport) { nextReport = report }
     private(set) var scans = 0
-    private var scanGate: CheckedContinuation<Void, Never>?
+    /// Where the next held scan waits until `releaseScan` opens it.
+    private var scanGate: HoldGate?
     private var holdScans = false
     private(set) var scanWaiting = false
-    /// Bumped once a held scan is parked, so a test waits for that instead
-    /// of spinning on `scanWaiting`.
+    /// Bumped once a held scan reaches its gate, so a test waits for that
+    /// instead of spinning on `scanWaiting`. It can't pass until released.
     let scanParks = CountGate()
 
-    func holdNextScan() { holdScans = true }
+    func holdNextScan() {
+        holdScans = true
+        scanGate = HoldGate()
+    }
     func releaseScan() {
         holdScans = false
-        scanGate?.resume()
+        scanGate?.open()
         scanGate = nil
     }
     private(set) var pricingUpdates = 0
@@ -43,16 +47,17 @@ actor FakeLedger: LedgerQuerying {
     /// the summary cache's warming pass and stale revalidations mid-flight,
     /// while load's own earlier calls still go through.
     private var holdHarnessFrom: Int?
-    private var harnessGates: [CheckedContinuation<Void, Never>] = []
-    /// Bumped once per byHarness call that parks.
+    private var harnessGate = HoldGate()
+    /// Bumped once per byHarness call that reaches the gate and parks.
     let harnessParks = CountGate()
 
-    func holdHarnessQueries(fromCall index: Int) { holdHarnessFrom = index }
+    func holdHarnessQueries(fromCall index: Int) {
+        holdHarnessFrom = index
+        harnessGate = HoldGate()
+    }
     func releaseHarnessQueries() {
         holdHarnessFrom = nil
-        let gates = harnessGates
-        harnessGates = []
-        for gate in gates { gate.resume() }
+        harnessGate.open()
     }
 
     func set(harnesses: [String: UsageTotals], accounts: [String: UsageTotals] = [:],
@@ -74,16 +79,12 @@ actor FakeLedger: LedgerQuerying {
         scans += 1
         // Holds only the next scan: a second one (a capped reconcile tick)
         // runs straight through while the first is parked.
-        if holdScans {
+        if holdScans, let gate = scanGate {
             holdScans = false
             scanWaiting = true
-            let parks = scanParks
-            await withCheckedContinuation {
-                scanGate = $0
-                // Counted once the continuation is stored, so a release
-                // that follows the wait always finds it.
-                Task { await parks.bump() }
-            }
+            await scanParks.bump()
+            // A cancelled scan stops waiting, as a cancelled read would.
+            try? await gate.pass()
             scanWaiting = false
         }
         if let scanError { throw scanError }
@@ -93,11 +94,9 @@ actor FakeLedger: LedgerQuerying {
     func byHarness(in range: DateInterval) async -> [String: UsageTotals] {
         ranges.append(range)
         if let from = holdHarnessFrom, ranges.count >= from {
-            let parks = harnessParks
-            await withCheckedContinuation {
-                harnessGates.append($0)
-                Task { await parks.bump() }
-            }
+            let gate = harnessGate
+            await harnessParks.bump()
+            try? await gate.pass()
         }
         return harnesses
     }
