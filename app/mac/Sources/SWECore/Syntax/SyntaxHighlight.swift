@@ -50,7 +50,31 @@ public enum SyntaxHighlight {
             return code.isEmpty ? [] : [SyntaxToken(kind: .plain, text: code)]
         }
         if name == "diff" { state = nil; return diffTokens(code) }
+        // The patterns retry at every position, so only the first
+        // `maxColoured` UTF-16 units are coloured and the rest of a huge
+        // block shows plain, as the web hl() does (HL_MAX). The rest was
+        // not scanned, so a comment or string open at the cut is not
+        // known to close: the next chunk starts afresh.
+        if code.utf16.count > maxColoured {
+            let cut = colourCut(code)
+            var toks = scan(String(code[..<cut]), langs[name] ?? Spec(),
+                            numbered: isNumbered(code), state: &state)
+            state = nil
+            toks.append(SyntaxToken(kind: .plain, text: String(code[cut...])))
+            return toks
+        }
         return scan(code, langs[name] ?? Spec(), numbered: isNumbered(code), state: &state)
+    }
+
+    /// How much of one block is coloured; the web's HL_MAX.
+    static let maxColoured = 8000
+
+    /// The last character boundary at or before `maxColoured` UTF-16
+    /// units, so a surrogate pair or a CRLF is never split.
+    private static func colourCut(_ code: String) -> String.Index {
+        var cut = code.utf16.index(code.utf16.startIndex, offsetBy: maxColoured)
+        while String.Index(cut, within: code) == nil { cut = code.utf16.index(before: cut) }
+        return cut
     }
 
     /// A fence tag or extension onto the language table (`"py"` →
@@ -443,7 +467,11 @@ public enum SyntaxHighlight {
     /// offset, so ranges land on the same units `u` is indexed by.
     private static func match(_ re: NSRegularExpression, _ code: String, _ i: Int, _ n: Int) -> Int {
         guard i < n,
-              let m = re.firstMatch(in: code, options: [.anchored], range: NSRange(location: i, length: n - i)),
+              // Without anchoring bounds `^` means a real line start, not
+              // the range's: TOML's table header `^[ \t]*\[…` otherwise
+              // matched at every `[` and rescanned to the end each time.
+              let m = re.firstMatch(in: code, options: [.anchored, .withoutAnchoringBounds],
+                                    range: NSRange(location: i, length: n - i)),
               m.range.length > 0 else { return 0 }
         return m.range.length
     }
