@@ -192,6 +192,10 @@ def search(home, text: str, refresh: bool = False) -> dict:
     query = " ".join(str(text or "").split())
     if len(query) > SEARCH_MAX:
         raise PageError(400, "bad_search", "That search is too long.")
+    # The text is one argv item of `gh search repos`: one starting with
+    # "-" would be read as a flag (--web opens a browser on the hub).
+    if query.startswith("-"):
+        raise PageError(400, "bad_search", "A search can't start with \"-\".")
     if not query:
         return {"github": None, "status": "ok", "error": None, "query": "",
                 "results": [], "source": None}
