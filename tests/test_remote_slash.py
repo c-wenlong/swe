@@ -625,5 +625,47 @@ class TestSatellite(_Home):
         self.assertNotIn("slash", sent[1])
 
 
+class TestMalformedSatellitePush(unittest.TestCase):
+    """A satellite's pushed menu is another machine's JSON: bad shapes
+    are skipped, never a 500 on the "/" menu route."""
+
+    def test_combine_skips_bad_layers_and_rows(self):
+        for user in (["x"], "x", {"skills": "x"}, {"skills": [1, None]},
+                     {"skills": [{"name": "a"}]},
+                     {"skills": [{"name": 3, "source": "skill"}]}):
+            self.assertEqual(slash.combine("claude", user, None), [], user)
+        good = {"skills": [{"name": "a", "source": "skill"}]}
+        self.assertEqual(
+            [r["name"] for r in slash.combine("claude", good, ["x"])], ["a"])
+
+    def test_combine_drops_wrongly_typed_fields(self):
+        # The clients decode every row: a wrong type in one field would
+        # fail the whole menu, so the field goes and the row stays.
+        user = {"skills": [{"name": "a", "source": "skill",
+                            "description": 7, "argument_hint": ["x"],
+                            "insert": None, "argument_required": "yes",
+                            "extra": {"x": 1}}]}
+        self.assertEqual(slash.combine("claude", user, None), [
+            {"name": "a", "source": "skill", "description": ""}])
+        kept = {"skills": [{"name": "b", "source": "skill",
+                            "description": "d", "argument_hint": "<x>",
+                            "insert": "$b ", "argument_required": True}]}
+        self.assertEqual(slash.combine("claude", kept, None),
+                         kept["skills"])
+
+    def test_menu_route_survives_a_malformed_push(self):
+        home = temp_dir(self)
+        row = {"harness": "claude", "cwd": "/w", "machine_id": "m1"}
+        for pushed in ({"harnesses": {"claude": {"user": ["x"]}}},
+                       {"harnesses": {"claude": {
+                           "user": {"skills": [{"name": "a"}]}}}},
+                       {"harnesses": {"claude": {"folders": ["x"]}}},
+                       {"harnesses": {"claude": {"folders": {"/w": "x"}}}}):
+            self.assertTrue(slash.save_satellite(home, "m1", pushed))
+            answer = slash.for_remote_row(home, "claude:s1@m1", row)
+            self.assertIn("commands", answer, pushed)
+
+
 if __name__ == "__main__":
     unittest.main()
+

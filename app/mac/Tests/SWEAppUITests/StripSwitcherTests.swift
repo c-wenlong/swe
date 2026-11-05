@@ -34,7 +34,7 @@ import Testing
         let menu = menu(for: switcher, shown: "https://den.ts.net:8477")
         #expect(menu.items.filter { !$0.isSeparatorItem }
             .map { $0.title.components(separatedBy: "\n").first! } == [
-            "This Mac", "box", "den", "Reload den", "Open in Browser", "Add a Hub…"])
+            "This Mac", "box", "den", "Reload den", "Open in browser", "Add a hub…"])
         // The shown hub wears the check; This Mac never does on a hub.
         #expect(menu.items[2].state == .on)
         #expect(menu.items[0].state == .off && menu.items[1].state == .off)
@@ -62,7 +62,7 @@ import Testing
             machines: switcher, shown: HubOrigin("https://den.ts.net:8477")!,
             reload: { reloaded = true }, addHub: { added = true })
         fire(menu.items.first { $0.title == "Reload den" }!)
-        fire(menu.items.first { $0.title == "Add a Hub…" }!)
+        fire(menu.items.first { $0.title == "Add a hub…" }!)
         #expect(reloaded && added)
     }
 }

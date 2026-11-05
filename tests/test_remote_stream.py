@@ -10,10 +10,12 @@ import http.client
 import io
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from swe.remote import agent as agent_mod
+from swe.remote import hub as hub_mod
 from swe.remote import inject, protocol, stream, supervise
+from swe.sessions.models import Session
 from tests._tempdir import temp_dir
 from tests.test_remote_adapters import _FakeServeProc
 from tests.test_remote_hub import HubBase, _session
@@ -230,12 +232,21 @@ class TestDeltaStream(unittest.TestCase):
         self.assertEqual(done, ["a", "b"])
 
     def test_a_failing_sink_never_raises(self):
+        tried = []
+
         def boom(k, ev):
+            tried.append(ev["data"])
             raise RuntimeError("down")
 
         ds = stream.DeltaStream(boom, interval=0)
         ds.push("k", "m", "a", "assistant", "hi ")
         ds.finish("k", "a")
+        # The sink was offered the delta and the close, and the raise was
+        # swallowed each time; a later message still goes out.
+        self.assertEqual([(d["id"], d["done"]) for d in tried],
+                         [("a", False), ("a", True)])
+        ds.push("k", "m", "b", "assistant", "next ")
+        self.assertEqual(tried[-1]["id"], "b")
 
 
 # Pieces that make every cleaning step reach as far as it can: secrets
@@ -587,7 +598,34 @@ class TestCodexAppServerStreams(unittest.TestCase):
     def test_reader_thread_gets_the_injectors_deltas(self):
         sink = _Sink()
         inj = inject.CodexAppServerInjector(None, "codex:k", deltas=sink)
-        self.assertIs(inj.deltas, sink)
+        # _servers is shared class state: keep this test's entry out of it.
+        self.enterContext(patch.dict(inject.CodexAppServerInjector._servers, clear=True))
+        proc = MagicMock()
+        proc.poll.return_value = None
+        started = []
+
+        class Thread:
+            def __init__(self, target=None, args=(), **_kw):
+                self.target, self.args = target, args
+
+            def start(self):
+                started.append(self)
+
+        session = Session(timestamp=0, agent="Codex", path="/w",
+                          session_id="rollout-2026-01-01T00-00-00-"
+                                     "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+                          tool_name="codex")
+        with patch.object(inject.CodexAppServerInjector, "_spawn",
+                          return_value=proc), \
+                patch.object(inject, "account_env", return_value=None), \
+                patch.object(inject.threading, "Thread", Thread), \
+                patch.object(inject.CodexAppServerInjector, "_call",
+                             return_value=None):
+            inj._server_for(session)
+        (reader,) = started
+        self.assertIs(reader.target, inject._appserver_read_loop)
+        self.assertEqual(reader.args[1], "codex:k")
+        self.assertIs(reader.args[-1], sink)
 
 
 def _oc(etype, props):
@@ -680,7 +718,7 @@ class TestHubRelay(HubBase):
     def test_publish_transient_reaches_the_chat_but_not_the_journal(self):
         key = "codex:quiet"  # no tailer, so nothing else lands here
         session_q = self.srv.state.bus.subscribe(key)
-        global_q = self.srv.state.bus.subscribe(None)
+        global_q = self.srv.state.bus.subscribe(hub_mod.GLOBAL_KEY)
         ev = protocol.delta_event(key, "mbp", "a", "assistant", "hi ", 1)
         self.srv.state.publish_transient(key, ev)
         got = session_q.get_nowait()

@@ -514,7 +514,13 @@ class InitIntegrationTest(unittest.TestCase):
         self.assertTrue((_acct(home) / "skills").is_symlink())
         # The default harness homes were not linked by this run.
         self.assertFalse(os.path.lexists(home / ".claude" / "skills"))
-        self.assertEqual(init_commands.cmd_init(["--accounts", "--force"]), 1)
+        # --force is refused with --accounts. Kept under the throwaway home
+        # so a regression that let it through could not touch the real one.
+        out = io.StringIO()
+        with mock.patch.object(Path, "home", return_value=home), redirect_stdout(out):
+            code = init_commands.cmd_init(["--accounts", "--force"])
+        self.assertEqual(code, 1)
+        self.assertIn("--accounts only takes --check and --json", out.getvalue())
 
     def _cmd(self, home: Path, *args: str) -> tuple[int, str]:
         import io

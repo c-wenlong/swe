@@ -135,6 +135,22 @@ private func decodePr(_ json: String) throws -> GhPr {
         #expect(model.reviewRequested("o/a") == [4])
     }
 
+    /// The pages call without `now`: the freshness check reads the
+    /// model's injected clock, not the wall clock.
+    @Test func freshnessFollowsTheModelsClock() async {
+        let runner = router(["gh pr status --repo=o/a --json": status("o/a", requested: [4])])
+        let swe = SweClient(runner: runner)
+        let clock = Box(Date(timeIntervalSince1970: 1_000))
+        let model = GitHubModel(now: { clock.value })
+        await model.loadReviewRequests(repo: "o/a", swe: swe)
+        clock.value = clock.value.addingTimeInterval(30)
+        await model.loadReviewRequests(repo: "o/a", swe: swe)
+        #expect(runner.calls.count == 1)
+        clock.value = clock.value.addingTimeInterval(60)
+        await model.loadReviewRequests(repo: "o/a", swe: swe)
+        #expect(runner.calls.count == 2)
+    }
+
     /// The dashboard's load task restarts as the search changes, which
     /// cancels a status read in flight; the next task must read again
     /// rather than skip a reply that never came.

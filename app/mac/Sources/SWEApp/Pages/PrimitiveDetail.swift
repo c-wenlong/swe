@@ -393,7 +393,7 @@ struct PartsCard: View {
         // folder, and cancelling the old task drops a walk that still
         // lands for it.
         .task(id: root) { reload() }
-        .quiverSheet(isPresented: $sheetOpen, onDismiss: {
+        .cardSheet(isPresented: $sheetOpen, onDismiss: {
             // Drop the pick so reopening the same file restarts the
             // size and type check; a draft still in the store reopens
             // with its edits.
