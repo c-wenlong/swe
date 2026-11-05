@@ -161,10 +161,13 @@ struct LockedWebView: UIViewRepresentable {
     final class Lock: NSObject, WKNavigationDelegate, WKUIDelegate {
         /// The sheet's own load hasn't been allowed yet.
         var firstLoadPending = false
+        /// Navigations decided so far, allowed or not (tests wait on it).
+        private(set) var decided = 0
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                      preferences: WKWebpagePreferences,
                      decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
+            decided += 1
             preferences.allowsContentJavaScript = false
             let allow = PagePreview.allowsNavigation(firstLoadPending: firstLoadPending,
                                                      isMainFrame: action.targetFrame?.isMainFrame == true,

@@ -81,9 +81,7 @@ _preparing: set[tuple[str, int]] = set()
 _preparing_lock = threading.Lock()
 
 
-def _refresh(args) -> bool:
-    """A query dict's ``refresh=1``/``refresh=true``."""
-    return str((args.get("refresh") or [""])[0]) in {"1", "true"}
+_refresh = G.refresh_asked
 
 
 def _repo_arg(owner, name) -> str | None:
@@ -350,10 +348,10 @@ def _drop_issue(home, repo: str, number: int) -> None:
 
 def _pinned(home, name: str) -> str | None:
     """The pin ``name`` matches, spelled as pinned, or None."""
-    for pin in repos.load_pinned(manage.pins_file(home)):
-        if pin["name"].lower() == name.lower():
-            return pin["name"]
-    return None
+    try:
+        return G.pinned_name(home, name)
+    except G.PinError:
+        return None
 
 
 def final_prompt(cmd: dict, issue: dict | None, cwd: str,
