@@ -55,6 +55,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pane's write lock, so a message steered in at the same moment can't
   land between its arrow keys.
 
+- **One odd message from codex no longer stalls a Codex session.** An
+  app-server message the hub couldn't read (an approval with list
+  `params`, an unhashable id) ended the reader while codex kept running,
+  so every later send waited its full 60 s and failed until a detach.
+  The reader now skips such a message, and a server whose reader did
+  die is replaced on the next send.
+
 - **Archiving Qwen Code stops its shared hooks, and its hook settings
   count.** The hook contract table keyed Qwen Code as `qwen`, its
   command, while harness.json calls it `qwen-code`. Archiving qwen-code
