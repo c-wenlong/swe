@@ -538,7 +538,7 @@ const PrFilter = (() => {
     if (setup) return GhUI.setupCard(setup, d.machine);
     if (!pins().length) {
       return `<div class="card"><div class="gh-empty">${ico("stack", "gh-muted")}<span>Pin a repository to see its pull requests, issues and CI here.</span>
-        <button type="button" class="gh-button" data-add-repo>${ico("plus")}<span>Add repository</span></button></div></div>`;
+        <button type="button" class="btn lg hairline gh-button" data-add-repo>${ico("plus")}<span>Add repository</span></button></div></div>`;
     }
     const tabs = tabsFor(!!page.shown);
     const toolbar = `<div class="gh-toolbar">
@@ -993,7 +993,7 @@ const PrFilter = (() => {
   }
 
   const focusHeader = (f) => pageHeader(f.repo, "Pull requests, issues, CI and refs — every state, most recent first.",
-    `<a class="gh-button" href="#/repositories" title="Back to all repositories">${ico("chevronLeft")}<span>Repositories</span></a>
+    `<a class="btn lg hairline gh-button" href="#/repositories" title="Back to all repositories">${ico("chevronLeft")}<span>Repositories</span></a>
      <button class="icon-button${f.loading ? " spinning" : ""}" id="page-refresh" aria-label="Refresh" title="Fetch again">${icon("rescan")}</button>
      <a class="icon-button" href="https://github.com/${esc(f.repo)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${ico("external")}</a>`);
 
@@ -1076,7 +1076,7 @@ const PrFilter = (() => {
     const u = f.unpinned;
     document.getElementById("panel").innerHTML = `<div class="page gh-page">${focusHeader(f)}<div class="stack">
       <div class="card"><div class="gh-empty">${ico("stack", "gh-muted")}<span>${esc(u.message)}</span>
-        <button type="button" class="gh-button gh-primary" id="gh-pin-this"${u.pinning ? " disabled" : ""}
+        <button type="button" class="btn lg hairline gh-button gh-primary" id="gh-pin-this"${u.pinning ? " disabled" : ""}
           title="Check that GitHub has the repo, then pin it on the hub">${u.pinning ? "Pinning…" : "Pin it"}</button></div>
         ${u.error ? `<p class="error" role="alert">${esc(u.error)}</p>` : ""}</div></div></div>`;
     bindRefresh(() => renderFocus(f.repo, true));
@@ -1300,9 +1300,9 @@ const PrFilter = (() => {
     const mb = mergeBlock(pr), ab = autoBlock(pr);
     return `<select class="field gh-method" id="gh-merge-method" aria-label="Merge strategy"${off ? " disabled" : ""}>${
         METHODS.map((m) => `<option value="${m.value}"${m.value === s.method ? " selected" : ""}>${m.title}</option>`).join("")}</select>
-      <button type="button" class="gh-button gh-primary" id="gh-merge"${off || mb ? " disabled" : ""}
+      <button type="button" class="btn lg hairline gh-button gh-primary" id="gh-merge"${off || mb ? " disabled" : ""}
         title="${esc(mb || "Merge now with the selected strategy")}">Merge</button>
-      <button type="button" class="gh-button" id="gh-auto-merge"${off || ab ? " disabled" : ""}
+      <button type="button" class="btn lg hairline gh-button" id="gh-auto-merge"${off || ab ? " disabled" : ""}
         title="${esc(ab || "Arm auto-merge — merges when checks pass")}">Auto-merge</button>`;
   }
 
@@ -1317,8 +1317,8 @@ const PrFilter = (() => {
     return `<div class="gh-confirm" role="group" aria-label="Confirm">
       <div class="gh-confirm-text">${text}</div>
       <div class="gh-confirm-buttons">
-        <button type="button" class="gh-button" id="gh-confirm-cancel"${s.merging ? " disabled" : ""}>Cancel</button>
-        <button type="button" class="gh-button gh-primary" id="gh-confirm-go"${s.merging ? " disabled" : ""}>${go}</button>
+        <button type="button" class="btn lg hairline gh-button" id="gh-confirm-cancel"${s.merging ? " disabled" : ""}>Cancel</button>
+        <button type="button" class="btn lg hairline gh-button gh-primary" id="gh-confirm-go"${s.merging ? " disabled" : ""}>${go}</button>
       </div></div>`;
   }
 
@@ -1383,11 +1383,11 @@ const PrFilter = (() => {
     } else if (s.status === 401) {
       content = errorCard(CREDENTIAL_REFUSED, false);
     } else if (s.status !== 200 || !d) {
-      content = errorCard(GhUI.failMessage(s.status, d), false, '<button type="button" class="gh-button" data-sheet-refresh>Refresh</button>');
+      content = errorCard(GhUI.failMessage(s.status, d), false, '<button type="button" class="btn lg hairline gh-button" data-sheet-refresh>Refresh</button>');
     } else if (GhUI.envSetup(d.github)) {
       content = GhUI.setupCard(GhUI.envSetup(d.github), d.machine);
     } else if (d.status !== "ok" || !d.pr) {
-      content = errorCard(d.error || d.status, false, '<button type="button" class="gh-button" data-sheet-refresh>Refresh</button>');
+      content = errorCard(d.error || d.status, false, '<button type="button" class="btn lg hairline gh-button" data-sheet-refresh>Refresh</button>');
     } else {
       pr = d.pr;
       content = `<div class="gh-sheet-scroll">${sheetBody(pr)}</div>`;
@@ -1408,7 +1408,7 @@ const PrFilter = (() => {
           aria-label="Open in session">${ico("terminal")}</button>` : ""}
         ${safeHref(url) ? `<a class="icon-button" href="${safeHref(url)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${ico("external")}</a>` : ""}
         <button type="button" class="icon-button${s.busy && d ? " spinning" : ""}" data-sheet-refresh title="Fetch again" aria-label="Fetch again">${icon("rescan")}</button>
-        <button type="button" class="gh-button" id="gh-sheet-done">Done</button>
+        <button type="button" class="btn lg hairline gh-button" id="gh-sheet-done">Done</button>
       </div></div>`;
     for (const btn of dlg.querySelectorAll("[data-sheet-refresh]")) btn.onclick = () => loadPr(true);
     dlg.querySelector("#gh-sheet-done").onclick = () => dlg.close();
@@ -1483,8 +1483,8 @@ const PrFilter = (() => {
       ${x.error ? `<div class="caption gh-danger-text" role="alert">${esc(x.error)}</div>` : ""}
       ${x.note ? `<div class="caption" role="status">${esc(x.note)}</div>` : ""}
       <div class="gh-confirm-buttons">
-        <button type="button" class="gh-button" id="gh-session-cancel">${x.started ? "Close" : "Cancel"}</button>
-        <button type="button" class="gh-button gh-primary" id="gh-session-start"${ready ? "" : " disabled"}>${esc(x.phase || "Start")}</button>
+        <button type="button" class="btn lg hairline gh-button" id="gh-session-cancel">${x.started ? "Close" : "Cancel"}</button>
+        <button type="button" class="btn lg hairline gh-button gh-primary" id="gh-session-start"${ready ? "" : " disabled"}>${esc(x.phase || "Start")}</button>
       </div></div>`;
   }
 
@@ -1670,7 +1670,7 @@ const PrFilter = (() => {
     const dlg = document.getElementById("gh-issue-sheet");
     if (!s || !dlg) return;
     const d = s.data;
-    const retry = '<button type="button" class="gh-button" data-issue-refresh>Refresh</button>';
+    const retry = '<button type="button" class="btn lg hairline gh-button" data-issue-refresh>Refresh</button>';
     let content, issue = null;
     if (!d && !s.status) {
       content = sheetSkeleton();
@@ -1696,12 +1696,12 @@ const PrFilter = (() => {
     }
     dlg.innerHTML = `<div class="sheet-body">${content}${composer(s, issue)}${resolvePanel(s, issue)}
       <div class="gh-sheet-actions">
-        ${issue && !s.resolve ? `<button type="button" class="gh-button gh-primary" id="gh-resolve-open"${closed ? " disabled" : ""}
+        ${issue && !s.resolve ? `<button type="button" class="btn lg hairline gh-button gh-primary" id="gh-resolve-open"${closed ? " disabled" : ""}
           title="${closed ? "This issue is closed." : "Start an agent on this issue in its own worktree"}">${ico("terminal")}<span>Resolve with agent</span></button>` : ""}
         <span class="gh-spacer"></span>
         ${safeHref(url) ? `<a class="icon-button" href="${safeHref(url)}" target="_blank" rel="noopener" title="Open on GitHub" aria-label="Open on GitHub">${ico("external")}</a>` : ""}
         <button type="button" class="icon-button${s.busy && d ? " spinning" : ""}" data-issue-refresh title="Fetch again" aria-label="Fetch again">${icon("rescan")}</button>
-        <button type="button" class="gh-button" id="gh-issue-done">Done</button>
+        <button type="button" class="btn lg hairline gh-button" id="gh-issue-done">Done</button>
       </div></div>`;
     for (const btn of dlg.querySelectorAll("[data-issue-refresh]")) btn.onclick = () => loadIssue(true);
     dlg.querySelector("#gh-issue-done").onclick = () => dlg.close();
@@ -1725,7 +1725,7 @@ const PrFilter = (() => {
       <div class="gh-composer-row">
         <textarea class="field gh-session-prompt" id="gh-issue-comment" rows="2" aria-label="Comment"
           placeholder="Add context for whoever picks this up, you or an agent…"${off}>${esc(c.draft)}</textarea>
-        <button type="button" class="gh-button" id="gh-issue-comment-post" title="Post this comment on GitHub (⌘↩)"${
+        <button type="button" class="btn lg hairline gh-button" id="gh-issue-comment-post" title="Post this comment on GitHub (⌘↩)"${
           c.posting || !c.draft.trim() ? " disabled" : ""}>${c.posting ? "Posting…" : "Comment"}</button>
       </div>
       <div class="caption gh-muted">Posts to GitHub as ${login ? esc(login) : "the hub's gh account"}, through gh on ${
@@ -1812,8 +1812,8 @@ const PrFilter = (() => {
       ${x.error ? `<div class="caption gh-danger-text" role="alert">${esc(x.error)}</div>` : ""}
       ${x.note ? `<div class="caption" role="status">${esc(x.note)}</div>` : ""}
       <div class="gh-confirm-buttons">
-        <button type="button" class="gh-button" id="gh-resolve-cancel">${x.started ? "Close" : "Cancel"}</button>
-        <button type="button" class="gh-button gh-primary" id="gh-resolve-start"${ready ? "" : " disabled"}>${esc(x.phase || "Start")}</button>
+        <button type="button" class="btn lg hairline gh-button" id="gh-resolve-cancel">${x.started ? "Close" : "Cancel"}</button>
+        <button type="button" class="btn lg hairline gh-button gh-primary" id="gh-resolve-start"${ready ? "" : " disabled"}>${esc(x.phase || "Start")}</button>
       </div></div>`;
   }
 
@@ -1996,7 +1996,7 @@ const PrFilter = (() => {
     const stars = typeof hit.stars === "number" ? hit.stars.toLocaleString("en-US") : "0";
     const side = pinned ? badge("Pinned")
       : a.working === hit.name ? ico("running", "gh-muted gh-spin")
-        : `<button type="button" class="gh-button" data-pin="${esc(hit.name)}"${a.working ? " disabled" : ""}>Pin</button>`;
+        : `<button type="button" class="btn lg hairline gh-button" data-pin="${esc(hit.name)}"${a.working ? " disabled" : ""}>Pin</button>`;
     return `<div class="gh-hit">
       <div class="gh-hit-main">
         <div class="gh-hit-title"><span class="gh-title">${esc(hit.name)}</span>
@@ -2051,8 +2051,8 @@ const PrFilter = (() => {
     for (const btn of results.querySelectorAll("[data-pin]")) btn.onclick = () => pinRepo(btn.dataset.pin);
     const actions = dlg.querySelector("#gh-add-actions");
     actions.innerHTML = `<span class="gh-spacer"></span>
-      <button type="button" class="gh-button" id="gh-add-cancel">Cancel</button>
-      ${direct ? `<button type="button" class="gh-button gh-primary" id="gh-add-direct"${a.working ? " disabled" : ""}
+      <button type="button" class="btn lg hairline gh-button" id="gh-add-cancel">Cancel</button>
+      ${direct ? `<button type="button" class="btn lg hairline gh-button gh-primary" id="gh-add-direct"${a.working ? " disabled" : ""}
         title="Check that the repo exists, then pin it">${a.working === direct ? "Pinning…" : `Pin ${esc(direct)}`}</button>` : ""}`;
     actions.querySelector("#gh-add-cancel").onclick = () => dlg.close();
     const go = actions.querySelector("#gh-add-direct");
