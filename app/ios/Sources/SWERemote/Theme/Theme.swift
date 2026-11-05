@@ -164,21 +164,32 @@ enum Theme {
     static let fieldHeight: CGFloat = 44
     static let usageTrackHeight: CGFloat = 6
 
-    /// Each harness's colour, the same hand-picked palette as the Mac app
-    /// (`SWECore/Swe/HarnessColor.swift`); others hash into `palette`.
+    /// Each harness's colour (`harnessHex`), the same in light and dark.
     static func harness(_ id: String?) -> Color {
-        let fixed: [String: String] = [
-            "claude": "#d97757", "codex": "#3b7ff0", "opencode": "#139f8b", "devin": "#c4860f",
-            "cursor": "#c08ce0", "grok-bot": "#8a73e8", "pi": "#5fb3d9", "droid": "#e06c8f",
-            "freebuff": "#8ac74f", "cline": "#9aa0aa", "gemini": "#e3b51e",
-        ]
-        let palette = ["#5aa2ff", "#f0a04b", "#4ec9b0", "#e06c8f", "#9b7ff0",
-                       "#8ac74f", "#5ac8e0", "#f0755f", "#d9b44a", "#c08ce0"]
-        let key = (id ?? "").lowercased()
-        if let hex = fixed[key] { return Color(light: hex, dark: hex) }
-        let hash = key.unicodeScalars.reduce(5381) { ($0 &* 33) &+ Int($1.value) }
-        let hex = palette[abs(hash) % palette.count]
+        let hex = harnessHex(id ?? "")
         return Color(light: hex, dark: hex)
+    }
+
+    /// The hand-picked palette the Mac app keeps in `HarnessColor.fixed`
+    /// (`SWECore/Swe/HarnessColor.swift`) and the web in `Fmt.harnessColor`.
+    static let harnessFixed: [String: String] = [
+        "claude": "#d97757", "codex": "#3b7ff0", "opencode": "#139f8b", "devin": "#c4860f",
+        "cursor": "#c08ce0", "grok-bot": "#8a73e8", "pi": "#5fb3d9", "droid": "#e06c8f",
+        "freebuff": "#8ac74f", "cline": "#9aa0aa", "gemini": "#e3b51e",
+    ]
+    static let harnessPalette = ["#5aa2ff", "#f0a04b", "#4ec9b0", "#e06c8f", "#9b7ff0",
+                                 "#8ac74f", "#5ac8e0", "#f0755f", "#d9b44a", "#c08ce0"]
+
+    /// A harness in `harnessFixed` keeps its colour; any other takes the
+    /// palette slot that 64-bit FNV-1a over its UTF-8 bytes picks, the
+    /// Mac's `HarnessColor.stableIndex` and the web's rule, so an unlisted
+    /// harness is one colour on every client. Unsigned arithmetic: the
+    /// old signed hash could land on `Int.min`, where `abs` traps.
+    static func harnessHex(_ id: String) -> String {
+        if let hex = harnessFixed[id] { return hex }
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in id.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100000001b3 }
+        return harnessPalette[Int(hash % UInt64(harnessPalette.count))]
     }
 
     static func status(_ s: SessionStatus) -> Color {
@@ -216,6 +227,19 @@ struct ScaledMinHeight: ViewModifier {
     func body(content: Content) -> some View { content.frame(minHeight: height) }
 }
 
+/// See `View.scaledHeight`.
+struct ScaledHeight: ViewModifier {
+    @ScaledMetric private var height: CGFloat
+    private let cap: CGFloat
+
+    init(height: CGFloat, cap: CGFloat) {
+        _height = ScaledMetric(wrappedValue: height, relativeTo: .subheadline)
+        self.cap = cap
+    }
+
+    func body(content: Content) -> some View { content.frame(height: min(height, cap)) }
+}
+
 /// See `View.centredWhenWrapped`.
 struct CentredWhenWrapped: ViewModifier {
     @Environment(\.dynamicTypeSize) private var size
@@ -236,6 +260,16 @@ extension View {
     /// step with its label at larger sizes, and taller still when the
     /// label wraps, so a grown label never clips.
     func scaledMinHeight(_ height: CGFloat) -> some View { modifier(ScaledMinHeight(height: height)) }
+
+    /// A scrolling window's fixed height: `height` at the default text
+    /// size, scaled with the text from there the way `scaledMinHeight`
+    /// scales its rows, but never past `cap`. A window over the keyboard
+    /// keeps its default height as its most, so a few rows grown at a
+    /// large text size show whole and many scroll instead of running off
+    /// the screen.
+    func scaledHeight(_ height: CGFloat, cap: CGFloat) -> some View {
+        modifier(ScaledHeight(height: height, cap: cap))
+    }
 
     /// A fixed-width column for a row's icon, so the titles beside it
     /// line up. It widens with the text size, so a symbol that grew with

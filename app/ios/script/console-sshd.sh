@@ -6,9 +6,9 @@
 #   app/ios/script/console-sshd.sh [port]    # default 2222, Ctrl-C stops it
 #
 # It prints the env to pass to xcodebuild, e.g.
-#   TEST_RUNNER_QUIVER_SSH_PORT=2222 TEST_RUNNER_QUIVER_SSH_USER=you \
-#   TEST_RUNNER_QUIVER_SSH_HOST_KEY='ssh-ed25519 AAAA…' \
-#   TEST_RUNNER_QUIVER_SSH_KEY=<hex> xcodebuild … test
+#   TEST_RUNNER_SWE_SSH_PORT=2222 TEST_RUNNER_SWE_SSH_USER=you \
+#   TEST_RUNNER_SWE_SSH_HOST_KEY='ssh-ed25519 AAAA…' \
+#   TEST_RUNNER_SWE_SSH_KEY=<hex> xcodebuild … test
 # The key is new every run and the env is the only copy, so don't paste
 # it anywhere while the server runs.
 set -euo pipefail
@@ -49,5 +49,5 @@ StrictModes no
 EOF
 
 host_key=$(cut -d' ' -f1-2 "$dir/host_key.pub")
-echo "TEST_RUNNER_QUIVER_SSH_PORT=$port TEST_RUNNER_QUIVER_SSH_USER=$(id -un) TEST_RUNNER_QUIVER_SSH_HOST_KEY='$host_key' TEST_RUNNER_QUIVER_SSH_KEY=$key_hex"
+echo "TEST_RUNNER_SWE_SSH_PORT=$port TEST_RUNNER_SWE_SSH_USER=$(id -un) TEST_RUNNER_SWE_SSH_HOST_KEY='$host_key' TEST_RUNNER_SWE_SSH_KEY=$key_hex"
 /usr/sbin/sshd -D -e -f "$dir/sshd_config"
