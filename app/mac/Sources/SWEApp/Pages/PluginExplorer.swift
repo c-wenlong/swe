@@ -110,14 +110,17 @@ struct PluginExplorer: View {
                 TextField("Display name", text: $renameText)
                 Button("Rename") {
                     guard let id = renaming else { return }
-                    do {
-                        try app.primitiveNames.saved({ $0.set(renameText, forMarketplace: id) },
-                                                     to: PluginDisplayNames.file(home: home))
-                        renameError = nil
-                        renaming = nil
-                    } catch {
-                        renameError = "Couldn't save the name: \(error.localizedDescription)"
-                        renaming = nil
+                    renaming = nil
+                    let text = renameText
+                    let file = PluginDisplayNames.file(home: home)
+                    Task {
+                        do {
+                            app.primitiveNames = try await app.primitiveNames.savingOffMain(
+                                { $0.set(text, forMarketplace: id) }, to: file)
+                            renameError = nil
+                        } catch {
+                            renameError = "Couldn't save the name: \(error.localizedDescription)"
+                        }
                     }
                 }
                 Button("Cancel", role: .cancel) { renaming = nil }
@@ -538,5 +541,30 @@ private struct StatusDot: View {
         case .disabled, .cached: Circle().fill(Theme.borderStrong).frame(width: Theme.statusDot, height: Theme.statusDot)
         case .available, .absent: Circle().strokeBorder(Theme.textMuted, lineWidth: 1.2).frame(width: Theme.statusDot, height: Theme.statusDot)
         }
+    }
+}
+
+extension PluginDisplayNames {
+    /// These names with `change` applied, once `write` has saved them.
+    /// The write runs off the main actor (the file sits under `~/.swe`,
+    /// which may be a synced or slow folder); on failure it throws and
+    /// the caller keeps the names it had, so a failed rename changes
+    /// nothing.
+    @MainActor func savingOffMain(_ change: (inout PluginDisplayNames) -> Void, to url: URL,
+                       write: @escaping @Sendable (PluginDisplayNames, URL) throws -> Void
+                           = { try $0.save(to: $1) }) async throws -> PluginDisplayNames {
+        var next = self
+        change(&next)
+        let saved = next
+        let failure: String? = await offMain {
+            do { try write(saved, url); return nil } catch { return error.localizedDescription }
+        }
+        if let failure { throw SaveFailure(message: failure) }
+        return saved
+    }
+
+    struct SaveFailure: LocalizedError {
+        var message: String
+        var errorDescription: String? { message }
     }
 }

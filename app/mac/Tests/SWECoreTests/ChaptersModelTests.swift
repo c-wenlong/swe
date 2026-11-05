@@ -1125,6 +1125,22 @@ import Testing
         #expect(model.document(for: chapter)?.isDirty == true)
     }
 
+    /// The async open the page uses: the same cached document as the
+    /// sync one, and nil for a path that leaves the folder.
+    @Test func openingAChapterSharesTheDocumentAndRefusesAnEscape() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        let chapter = InstructionsCheck.Chapter(
+            name: "a.md", path: dir.path("a.md").path, exists: true)
+        #expect(model.openDocument(named: "a.md") == nil)
+        let opened = try #require(await model.opening(chapter))
+        #expect(model.openDocument(named: "a.md") === opened)
+        #expect(model.document(for: chapter) === opened)
+        let escape = InstructionsCheck.Chapter(name: "../x.md", path: dir.path("../x.md").path, exists: true)
+        #expect(await model.opening(escape) == nil)
+    }
+
     @Test func createChapterCleansItsFileWhenTheIndexSaveFails() async throws {
         let dir = try TempDir()
         let runner = Runner([check(dir.url)])

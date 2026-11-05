@@ -16,7 +16,9 @@ struct ProviderSetupSheet: View {
     var isInstalled: Bool
     @State private var model: InstallCatalogModel?
 
-    private var sweExecutable: String { SweLocation.executable(override: app.swePath) }
+    /// The swe a copied install line names. Resolving a Settings path
+    /// stats the file, so it is worked out once, off the main actor.
+    @State private var sweExecutable = SweLocation.bundled ?? "swe"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -37,6 +39,10 @@ struct ProviderSetupSheet: View {
         .padding(20)
         .frame(width: 560)
         .background(Theme.panel)
+        .task(id: app.swePath) {
+            let path = app.swePath
+            sweExecutable = await offMain { SweLocation.executable(override: path) }
+        }
         .task {
             let catalog = InstallCatalogModel(swe: app.swe)
             model = catalog

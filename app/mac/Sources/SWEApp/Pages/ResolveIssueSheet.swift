@@ -287,7 +287,8 @@ struct ResolveIssueSheet: View {
     private func loadHarnesses() async {
         await model.loadSessionHarnesses(swe: app.swe)
         let installed = model.sessionHarnesses.map(\.name)
-        let local = IssueResolve.localMachineId(home: FileManager.default.homeDirectoryForCurrentUser)
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let local = await offMain { IssueResolve.localMachineId(home: home) }
         var list = installed
         do {
             let machines = try await app.hub.withClient { try await $0.machines() }
