@@ -478,6 +478,12 @@ class CrLfReadLineTest(unittest.TestCase):
         os.write(w, b"a\r")
         real_select = select.select
         peeks = []
+        writer_open = [True]
+
+        def close_writer():
+            if writer_open[0]:
+                writer_open[0] = False
+                os.close(w)
 
         def peek(rlist, wlist, xlist, timeout=None):
             # The second chunk lands while the reader peeks for an LF after
@@ -486,17 +492,20 @@ class CrLfReadLineTest(unittest.TestCase):
             if timeout == prompt._CRLF_PEEK_TIMEOUT and not peeks:
                 peeks.append(timeout)
                 os.write(w, b"\nb\r\n")
-                os.close(w)
+                close_writer()
             return real_select(rlist, wlist, xlist, timeout)
 
         try:
             with patch.object(select, "select", peek):
                 self.assertEqual(prompt._read_line_bytes(r, echo=False), "a")
+                # Checked before reading on: without the peek the rest was
+                # never written and the next read would block for good.
+                self.assertEqual(peeks, [prompt._CRLF_PEEK_TIMEOUT])
                 self.assertEqual(prompt._read_line_bytes(r, echo=False), "b")
                 with self.assertRaises(EOFError):
                     prompt._read_line_bytes(r, echo=False)
-            self.assertEqual(peeks, [prompt._CRLF_PEEK_TIMEOUT])
         finally:
+            close_writer()
             os.close(r)
 
 

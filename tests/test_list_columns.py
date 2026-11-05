@@ -270,6 +270,21 @@ class InteractionTest(unittest.TestCase):
                 os.execv(sys.executable, [sys.executable, "-c", script])
             finally:
                 os._exit(127)
+        reaped = []
+
+        def cleanup():
+            # Runs whether the test passed or timed out: a child stalled
+            # before drawing or exiting is killed and reaped, and the pty
+            # closed, so nothing outlives the test.
+            if not reaped:
+                try:
+                    os.kill(pid, 9)
+                except ProcessLookupError:
+                    pass
+                os.waitpid(pid, 0)
+            os.close(fd)
+
+        self.addCleanup(cleanup)
         out = b""
 
         def read_until(done, timeout=10.0):
@@ -299,6 +314,7 @@ class InteractionTest(unittest.TestCase):
         # The child prints its result and exits; read to that EOF.
         read_until(lambda o: False)
         os.waitpid(pid, 0)
+        reaped.append(pid)
         text = out.decode(errors="replace")
         self.assertIn("RESULT:mark,b", text)
 
