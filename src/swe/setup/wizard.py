@@ -412,7 +412,10 @@ def _stage_report(
         configured = interactive_report_setup(load_config(), input_fn=input_fn)
         backup = backup_file(CONFIG_FILE)
         save_config(configured)
-    except (ConfigurationError, EOFError, KeyboardInterrupt) as exc:
+    except ConfigurationError as exc:
+        # Not EOFError or KeyboardInterrupt: Ctrl-D / Ctrl-C at a runner
+        # prompt stops the whole wizard at 130, as at every other prompt.
+        # Nothing is saved yet, since the save comes after the prompts.
         print(c("red", f"  Report configuration was not changed: {exc}"))
         return StageOutcome("report", SECTION_LABELS["report"], "attention", str(exc))
     print(c("green", f"  Saved report configuration to {CONFIG_FILE}"))

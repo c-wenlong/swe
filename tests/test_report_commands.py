@@ -13,6 +13,9 @@ from unittest.mock import Mock, patch
 
 from swe.reports.commands import (
     _default_period,
+    _pipeline,
+    _runner_spec,
+    _source_period,
     _followup,
     _generate,
     _parse_generate_args,
@@ -463,6 +466,243 @@ class HelpRoutesTest(unittest.TestCase):
             result = _followup(["edit", "fu_x", "ask", "for", "--help", "output"])
         self.assertEqual(result, 0)
         ledger.edit.assert_called_once_with("fu_x", text="ask for --help output")
+
+
+
+class ReportCommandEdgeTest(unittest.TestCase):
+    """Refusals, the runner config each role reads, the period a run
+    covers, and the follow-up and warnings views."""
+
+    def run_cmd(self, argv):
+        from swe.console import strip_ansi
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            result = cmd_report(argv)
+        return result, strip_ansi(output.getvalue())
+
+    def ledger(self):
+        ledger = FollowUpLedger(root=temp_dir(self),
+                                clock=lambda: "2026-08-01T00:00:00+00:00")
+        p = patch("swe.reports.commands.FollowUpLedger", return_value=ledger)
+        p.start()
+        self.addCleanup(p.stop)
+        return ledger
+
+    def test_an_unknown_or_valueless_flag_is_refused_before_any_work(self):
+        cases = {
+            ("--bogus",): "Unknown report argument: --bogus",
+            ("--days=x",): "--days must be a positive integer",
+            ("-w", "x"): "--weeks must be a positive integer",
+            ("--agent",): "--agent takes a value",
+            ("-s",): "-s requires a value",
+        }
+        for argv, message in cases.items():
+            with self.subTest(argv=argv), \
+                    patch("swe.reports.commands.load_resolved_config") as load:
+                result, out = self.run_cmd(["daily", *argv])
+                self.assertEqual(result, 1)
+                self.assertIn(message, out)
+                load.assert_not_called()
+        self.assertTrue(_parse_generate_args(["-h"]).help)
+
+    def test_overrides_win_over_config_for_each_role(self):
+        config = {"report": {
+            "session": {"harness": "claude", "model": "haiku", "args": ["--verbose"]},
+            "writer": {"harness": "codex", "model": "strong", "args": []},
+            "runner_timeout_seconds": 30, "writer_timeout_seconds": 90,
+        }}
+        parsed = _parse_generate_args(["--writer-model=override",
+                                       "--writer-arg=-c", "--writer-arg=x=1"])
+        session = _runner_spec(config, "session", parsed)
+        writer = _runner_spec(config, "writer", parsed)
+        self.assertEqual((session.harness, session.model, session.args,
+                          session.timeout_seconds),
+                         ("claude", "haiku", ("--verbose",), 30.0))
+        self.assertEqual((writer.harness, writer.model, writer.args,
+                          writer.timeout_seconds),
+                         ("codex", "override", ("-c", "x=1"), 90.0))
+
+    def test_the_pipeline_takes_its_limits_from_config(self):
+        from swe.configuration import resolve_config
+
+        config = resolve_config({"report": {
+            "session": {"harness": "claude", "model": "haiku"},
+            "writer": {"harness": "claude", "model": "opus"},
+            "max_workers": 2, "batch": {"max_sessions": 7, "max_chars": 9_000},
+            "max_summary_calls": 4, "max_estimated_input_tokens": 50_000,
+            "transcript": {"max_chars": 12_345}}})
+        with patch("swe.reports.commands.ReportPipeline") as pipeline:
+            _pipeline(config, "store", _parse_generate_args([]))
+        args, kwargs = pipeline.call_args
+        self.assertEqual((args[0].model, args[1].model), ("haiku", "opus"))
+        self.assertEqual(kwargs["max_workers"], 2)
+        self.assertEqual(kwargs["max_batch_sessions"], 7)
+        self.assertEqual(kwargs["max_batch_chars"], 9_000)
+        self.assertEqual(kwargs["max_summary_calls"], 4)
+        self.assertEqual(kwargs["max_estimated_input_tokens"], 50_000)
+        self.assertEqual(kwargs["max_transcript_chars"], 12_345)
+        self.assertEqual(kwargs["store"], "store")
+
+    def test_a_custom_range_never_advances_the_cursor(self):
+        store = Mock()
+        start, end, _, _, advance = _source_period(
+            "daily", _parse_generate_args(["--days=2"]), store)
+        self.assertFalse(advance)
+        self.assertLess(start, end)
+        store.get_cursor.assert_not_called()
+        with _frozen_now():
+            store.get_cursor.return_value = None
+            *_, advance = _source_period("weekly", _parse_generate_args([]), store)
+        self.assertTrue(advance)
+
+    def test_a_naive_cursor_is_read_in_local_time(self):
+        store = Mock()
+        store.get_cursor.return_value = SimpleNamespace(
+            through="2026-03-02T12:00:00")
+        with _frozen_now():
+            start_ms, end_ms, start_label, _ = _default_period("weekly", store)
+        expected = datetime(2026, 3, 2, 12, 0, 0, 1000).astimezone()
+        self.assertEqual(start_ms, int(expected.timestamp() * 1000))
+        self.assertEqual(start_label, expected.isoformat())
+        # Wednesday 4 March: the completed week ended Sunday 1 March, so a
+        # cursor past it leaves nothing to report.
+        self.assertGreater(start_ms, end_ms)
+
+    def test_unconfigured_runners_start_setup_and_stop_if_it_fails(self):
+        patches = (
+            patch("swe.reports.commands.load_resolved_config", return_value={}),
+            patch("swe.reports.commands.validate_config", return_value=[]),
+            patch("swe.reports.commands.report_setup_complete", return_value=False),
+        )
+        with patches[0], patches[1], patches[2], \
+                patch("swe.reports.commands.cmd_config", return_value=1) as setup, \
+                patch("swe.reports.commands.ReportStore") as store:
+            result, out = self.run_cmd(["daily"])
+        self.assertEqual(result, 1)
+        self.assertIn("starting setup", out)
+        setup.assert_called_once_with(["setup", "report"])
+        store.assert_not_called()
+
+    def test_overrides_that_name_every_runner_skip_setup(self):
+        with patch("swe.reports.commands.load_resolved_config", return_value={}), \
+                patch("swe.reports.commands.validate_config", return_value=[]), \
+                patch("swe.reports.commands.report_setup_complete", return_value=False), \
+                patch("swe.reports.commands.cmd_config") as setup, \
+                patch("swe.reports.commands._source_period",
+                      return_value=(5, 1, "a", "b", True)):
+            result, out = self.run_cmd([
+                "daily", "--session-harness=claude", "--session-model=haiku",
+                "--writer-harness=claude", "--writer-model=opus"])
+        self.assertEqual(result, 0)
+        setup.assert_not_called()
+        self.assertIn("No new sessions since the previous daily report", out)
+
+    def test_warnings_accepts_the_markdown_path_and_refuses_others(self):
+        folder = temp_dir(self)
+        (folder / "r.json").write_text(json.dumps({
+            "report_id": "daily-x", "cadence": "daily",
+            "period_start": "a", "period_end": "b", "generated_at": "c",
+            "warnings": []}))
+        result, out = self.run_cmd(["warnings", str(folder / "r.md")])
+        self.assertEqual(result, 0)
+        self.assertIn("Warnings for daily-x", out)
+        self.assertIn("No warnings were recorded", out)
+        result, out = self.run_cmd(["warnings", str(folder / "r.txt")])
+        self.assertEqual(result, 1)
+        self.assertIn("require a .json manifest", out)
+        result, out = self.run_cmd(["warnings", str(folder / "absent.json")])
+        self.assertEqual(result, 1)
+        self.assertIn("Could not read report warnings", out)
+        (folder / "bad.json").write_text("{not json")
+        result, out = self.run_cmd(["warnings", str(folder / "bad.json")])
+        self.assertEqual(result, 1)
+        self.assertIn("Could not read report warnings", out)
+        result, out = self.run_cmd(["warnings"])
+        self.assertEqual(result, 1)
+        self.assertIn("Usage: swe report warnings", out)
+
+    def test_followups_lists_by_status(self):
+        ledger = self.ledger()
+        open_item = ledger.add("Ship it", "/repo")
+        done = ledger.done(ledger.add("Done already", "/repo").id)
+        result, out = self.run_cmd(["followups"])
+        self.assertEqual(result, 0)
+        self.assertIn(f"[ ] {open_item.id}  Ship it", out)
+        self.assertIn(f"[x] {done.id}  Done already", out)
+        result, out = self.run_cmd(["followups", "--status=done"])
+        self.assertIn("Done already", out)
+        self.assertNotIn("Ship it", out)
+        # Bare `followup` lists only what is still open.
+        result, out = self.run_cmd(["followup"])
+        self.assertEqual(result, 0)
+        self.assertIn("Ship it", out)
+        self.assertNotIn("Done already", out)
+
+    def test_followups_refuses_a_bad_status_or_extra_words(self):
+        self.ledger()
+        for argv, message in (
+                (["followups", "--status"], "--status takes a value"),
+                (["followups", "open"], "Usage: swe report followups"),
+                (["followups", "--status=open", "x"], "Usage: swe report followups"),
+                (["followups", "--status=bogus"], "invalid follow-up status")):
+            with self.subTest(argv=argv):
+                result, out = self.run_cmd(argv)
+                self.assertEqual(result, 1)
+                self.assertIn(message, out)
+
+    def test_an_empty_ledger_says_so(self):
+        self.ledger()
+        result, out = self.run_cmd(["followups"])
+        self.assertEqual(result, 0)
+        self.assertIn("No follow-ups found.", out)
+
+    def test_followup_usage_errors(self):
+        self.ledger()
+        for argv, message in (
+                (["followup", "add"], "followup add <text>"),
+                (["followup", "done"], "followup done <id>"),
+                (["followup", "reopen", "a", "b"], "followup reopen <id>"),
+                (["followup", "edit", "fu_x"], "followup edit <id> <text>"),
+                (["followup", "work"], "followup work <id>"),
+                (["followup", "work", "fu_missing", "--new"], "Unknown follow-up: fu_missing"),
+                (["followup", "work", "fu_x", "--harness"], "--harness takes a value"),
+                (["followup", "frob"], "Unknown follow-up action: frob"),
+                (["followup", "done", "fu_missing"], "fu_missing")):
+            with self.subTest(argv=argv):
+                result, out = self.run_cmd(argv)
+                self.assertEqual(result, 1)
+                self.assertIn(message, out)
+
+    def test_followup_work_asks_how_to_continue(self):
+        ledger = self.ledger()
+        item = ledger.add("Finish", "/repo")
+        cases = (
+            (["r"], ("resume", None)),
+            (["new", "codex"], ("new", "codex")),
+        )
+        for answers, (mode, harness) in cases:
+            with self.subTest(answers=answers), \
+                    patch("builtins.input", side_effect=answers), \
+                    patch("swe.reports.commands.work_on_follow_up",
+                          return_value=None) as work:
+                result, _ = self.run_cmd(["followup", "work", item.id])
+            self.assertEqual(result, 0)
+            self.assertEqual(work.call_args.kwargs, {"mode": mode, "harness": harness})
+        with patch("builtins.input", return_value="maybe"), \
+                patch("swe.reports.commands.work_on_follow_up") as work:
+            result, out = self.run_cmd(["followup", "work", item.id])
+        self.assertEqual(result, 1)
+        self.assertIn("Choose 'resume' or 'new'", out)
+        work.assert_not_called()
+        # Named on the command line: no prompts, and the launch's exit
+        # status is the command's.
+        with patch("builtins.input", side_effect=AssertionError("prompted")), \
+                patch("swe.reports.commands.work_on_follow_up", return_value=4) as work:
+            result, _ = self.run_cmd(["followup", "work", item.id, "--new",
+                                      "--harness=claude"])
+        self.assertEqual(result, 4)
+        self.assertEqual(work.call_args.kwargs, {"mode": "new", "harness": "claude"})
 
 
 if __name__ == "__main__":
