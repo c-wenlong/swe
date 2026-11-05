@@ -36,7 +36,6 @@ Tests below pin the structural invariants the new layout must hold:
 import copy
 import io
 import tempfile
-import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -1610,17 +1609,31 @@ class FetchRateLimitsTtyTest(unittest.TestCase):
     deadline; the piped path stays a short static passthrough."""
 
     def test_tty_waits_for_slow_fetcher_and_clears_spinner(self):
+        import threading
+
         saved = _FETCHERS.copy()
         _FETCHERS.clear()
+        # The fetcher answers only once released. On the terminal the
+        # spinner's first frame releases it, and that frame is drawn only
+        # after _SPINNER_DELAY (0.2s), well past the 0.05s pipe deadline,
+        # so the fetcher provably outlived the pipe budget. The piped run
+        # is never released in time, so it must report a timeout.
+        release = threading.Event()
 
         def slow():
-            time.sleep(0.3)
+            release.wait(10)
             return RateLimitInfo(
                 tool_name="fake", used_percent=55, limit_reached=False,
                 reset_at=0.0, plan_type="pro", window_seconds=0)
 
+        class _SpinnerTty(_FakeTty):
+            def write(self, text):
+                if "fetching usage" in text:
+                    release.set()
+                return super().write(text)
+
         register("fake", slow)
-        err = _FakeTty()
+        err = _SpinnerTty()
         try:
             with tempfile.TemporaryDirectory() as tmp, patch(
                 "swe.harness.rate_limits.RATE_LIMITS_CACHE_FILE",
@@ -1635,6 +1648,7 @@ class FetchRateLimitsTtyTest(unittest.TestCase):
             ), patch("sys.stdout", _FakeTty()), patch("sys.stderr", err):
                 result = _fetch_rate_limits(refresh=True,
                                             tool_names={"fake"})
+            release.clear()
             with tempfile.TemporaryDirectory() as tmp2, patch(
                 "swe.harness.rate_limits.RATE_LIMITS_CACHE_FILE",
                 Path(tmp2) / "rate_limits_cache.json",
@@ -1646,6 +1660,7 @@ class FetchRateLimitsTtyTest(unittest.TestCase):
                 piped = _fetch_rate_limits(refresh=True,
                                            tool_names={"fake"})
         finally:
+            release.set()  # let the abandoned piped fetch finish
             _FETCHERS.clear()
             _FETCHERS.update(saved)
 
