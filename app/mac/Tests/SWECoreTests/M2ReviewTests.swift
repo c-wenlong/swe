@@ -114,7 +114,10 @@ import Testing
         let home = try TempDir()
         let usage = CountedUsage()
         let model = AccountsModel(store: ProfileStore(root: home.url.appending(path: "a"), userHome: home.url),
-                                  usage: usage, launcher: FakeLauncher(), terminal: { .terminal }, loginPath: { "" })
+                                  usage: usage, launcher: FakeLauncher(), terminal: { .terminal }, loginPath: { "" },
+                                  // The timer reads the cached PATH, whose default starts
+                                  // the developer's own login shell.
+                                  cachedLoginPath: { "" })
         let task = Task { await model.keepFresh(every: .milliseconds(10)) }
         // Three reloads, two default accounts each.
         #expect(await usage.calls.reach(6))

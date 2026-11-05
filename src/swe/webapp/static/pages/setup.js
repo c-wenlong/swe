@@ -247,7 +247,7 @@ function paint() {
   if (!onPage()) return;
   if (page.loadError) {
     return paintShell(`<div class="card"><p class="error" role="alert">${esc(page.loadError)}</p>
-      <div><button class="setup-button" id="setup-retry">Try again</button></div></div>`), bindRetry();
+      <div><button class="btn lg on-panel setup-button" id="setup-retry">Try again</button></div></div>`), bindRetry();
   }
   if (!page.wizard) return paintLanding();
   paintWizard();
@@ -277,7 +277,7 @@ function paintLanding() {
       <div class="card-title">Set up this machine</div>
       <p class="setup-text">SWE hasn't been set up on ${esc(machineName())} yet: there's no shared <code>${esc(file)}</code>.
         Pick the agents you use, then link one AGENTS.md, one skills folder and one list of MCP servers into each of them.</p>
-      <div><button class="setup-button primary" id="setup-start">Set up</button></div></div>`;
+      <div><button class="btn lg on-panel setup-button primary" id="setup-start">Set up</button></div></div>`;
   } else {
     const done = page.finished
       ? `<p class="setup-text">Set up. The Harnesses, <a href="#/agents">AGENTS.md</a>, <a href="#/skills">Skills</a> and
@@ -287,7 +287,7 @@ function paintLanding() {
       ${done}
       <p class="setup-text">${esc(machineName())} has a shared <code>${esc(file)}</code>. Run setup again to pick other agents,
         or to link ones installed since.</p>
-      <div><button class="setup-button" id="setup-start">Run setup again</button></div></div>`;
+      <div><button class="btn lg on-panel setup-button" id="setup-start">Run setup again</button></div></div>`;
   }
   paintShell(card);
   const start = document.getElementById("setup-start");
@@ -336,8 +336,8 @@ function paintWizard() {
     <div class="setup-foot">
       <button class="setup-link" id="setup-skip" title="Close this and set things up later"${page.applying ? " disabled" : ""}>Skip setup</button>
       <span class="setup-spacer"></span>
-      ${page.step > 0 ? `<button class="setup-button" id="setup-back"${page.applying ? " disabled" : ""}>Back</button>` : ""}
-      <button class="setup-button primary" id="setup-next"${continueDisabled() ? " disabled" : ""}>${esc(continueTitle())}</button>
+      ${page.step > 0 ? `<button class="btn lg on-panel setup-button" id="setup-back"${page.applying ? " disabled" : ""}>Back</button>` : ""}
+      <button class="btn lg on-panel setup-button primary" id="setup-next"${continueDisabled() ? " disabled" : ""}>${esc(continueTitle())}</button>
     </div>
   </section>`);
   bindWizard();
@@ -427,12 +427,12 @@ function missingBanner(p) {
         <p class="caption">A cask or install script that asks for a password can't finish here. Copy it into a terminal instead.</p>
         ${websiteLink}`
       : `<p class="caption">swe doesn't know an installer for ${esc(agentName(p.id))}. Get it from its own website.</p>
-        ${site ? `<div class="setup-download"><code>${esc(host)}</code><a class="setup-button small" href="${safeHref(site)}" target="_blank" rel="noopener noreferrer">Download</a></div>` : ""}`;
+        ${site ? `<div class="setup-download"><code>${esc(host)}</code><a class="btn lg on-panel setup-button small" href="${safeHref(site)}" target="_blank" rel="noopener noreferrer">Download</a></div>` : ""}`;
   }
   return `<div class="setup-missing">
     <div class="setup-missing-row">
       <p class="setup-text"><span class="strong">${esc(agentName(p.id))}</span> isn't installed yet. SWE will list it anyway, and you can install it any time.</p>
-      <button class="setup-button" data-install="${esc(p.id)}" aria-expanded="${open}"
+      <button class="btn lg on-panel setup-button" data-install="${esc(p.id)}" aria-expanded="${open}"
         title="Install ${esc(agentName(p.id))} on ${esc(machineName())}">Install…</button>
     </div>${panel}</div>`;
 }
@@ -442,10 +442,10 @@ function missingBanner(p) {
 function installButton(p, m) {
   const key = `${p.id}:${m.via}`;
   if (page.installRun === key) {
-    return `<span class="setup-installing" role="status"><span class="setup-spinner" aria-hidden="true"></span>Installing…</span>`;
+    return `<span class="setup-installing" role="status"><span class="spinner" aria-hidden="true"></span>Installing…</span>`;
   }
   if (!m.available) return `<span class="caption setup-off-path">${esc(m.via === "cask" ? "brew" : m.via === "script" ? "curl" : m.via)} not on PATH</span>`;
-  return `<button class="setup-button small primary" data-run-install="${esc(m.via)}" data-agent="${esc(p.id)}"${
+  return `<button class="btn lg on-panel setup-button small primary" data-run-install="${esc(m.via)}" data-agent="${esc(p.id)}"${
     page.installRun ? " disabled" : ""} title="Run ${esc(m.command)} on ${esc(machineName())}">Install</button>`;
 }
 
@@ -483,7 +483,7 @@ function linksStep() {
   const err = previewError();
   if (err) {
     return `<div class="setup-step"><div class="card setup-error"><p class="error" role="alert">${esc(err)}</p></div>
-      <div><button class="setup-button" id="setup-retry">Try again</button></div></div>`;
+      <div><button class="btn lg on-panel setup-button" id="setup-retry">Try again</button></div></div>`;
   }
   let html = "";
   if (page.applyError) html += `<div class="card setup-error"><p class="error setup-pre" role="alert">${esc(page.applyError)}</p></div>`;
@@ -588,9 +588,9 @@ function hubCard() {
       <input class="field" id="setup-hub-url" type="text" inputmode="url" autocomplete="off" spellcheck="false"
         aria-label="Hub repo URL" placeholder="https://github.com/you/swe-hub.git"
         value="${esc(page.hubUrl)}"${locked ? " disabled" : ""}>
-      <button class="setup-button" type="submit" id="setup-hub-clone"${locked || !page.hubUrl.trim() ? " disabled" : ""}>Clone</button>
+      <button class="btn lg on-panel setup-button" type="submit" id="setup-hub-clone"${locked || !page.hubUrl.trim() ? " disabled" : ""}>Clone</button>
     </form>
-    ${busy ? `<p class="setup-installing" role="status"><span class="setup-spinner" aria-hidden="true"></span>Cloning ${esc(job.url)}… This can take a few minutes.</p>` : ""}
+    ${busy ? `<p class="setup-installing" role="status"><span class="spinner" aria-hidden="true"></span>Cloning ${esc(job.url)}… This can take a few minutes.</p>` : ""}
     ${error ? `<p class="error setup-pre" role="alert">${esc(error)}</p>` : ""}
   </div>`;
 }

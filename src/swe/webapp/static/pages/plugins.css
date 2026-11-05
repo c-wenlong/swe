@@ -53,15 +53,6 @@
 
 /* Fix and Fix all: the app's secondary and primary buttons, and the
    inline confirms standing in for its confirmation dialogs */
-.pl-button {
-  height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong);
-  background: var(--panel); color: var(--text-primary); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
-}
-.pl-button:hover:not(:disabled) { background: var(--hover); }
-.pl-button.primary { background: var(--text-primary); color: var(--card); border-color: var(--text-primary); }
-.pl-button.primary:hover:not(:disabled) { background: var(--text-primary); opacity: .9; }
-.pl-button:disabled { cursor: default; opacity: .45; }
-.pl-button:focus-visible { outline: 1px solid var(--interactive); outline-offset: 2px; }
 .pl-running { display: grid; place-items: center; width: 44px; height: 32px; }
 .pl-confirm { gap: 10px; }
 .pl-confirm .caption { margin: 0; }
@@ -157,15 +148,8 @@
 .pl-acts { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; }
 .pl-act-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pl-act-name { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
-.pl-act { height: 28px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--card);
-  color: var(--text-primary); font-size: 12px; cursor: pointer; white-space: nowrap; }
-.pl-act:hover:not(:disabled) { background: var(--hover); }
-.pl-act.primary { background: var(--text-primary); color: var(--card); border-color: var(--text-primary); }
-.pl-act.primary.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
-.pl-act:disabled { opacity: .45; cursor: default; }
+.pl-act { height: 28px; font-size: 12px; }
 .pl-act-running { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
-.pl-spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border-strong);
-  border-top-color: var(--text-secondary); animation: spin 1s linear infinite; }
 .pl-act-confirm { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border);
   border-radius: 10px; background: var(--subtle); font-size: 13px; }
 .pl-act-buttons { display: flex; justify-content: flex-end; gap: 8px; }
