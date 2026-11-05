@@ -1325,7 +1325,14 @@ const SessionChat = (() => {
    * cards already cut their text there. */
   const HL_MAX = 8000;
   function hl(code, lang, ctx) {
-    if (code.length > HL_MAX) return hl(code.slice(0, HL_MAX), lang, ctx) + esc(code.slice(HL_MAX));
+    if (code.length > HL_MAX) {
+      const head = hl(code.slice(0, HL_MAX), lang, ctx);
+      // The plain rest wasn't scanned, so a comment or string open at the
+      // cut is not known to close: the next diff row starts afresh rather
+      // than wearing a state that may have ended in the skipped text.
+      if (ctx) ctx.s = null;
+      return head + esc(code.slice(HL_MAX));
+    }
     const name = langName(lang);
     if (!name || name === "text" || name === "diff") {
       if (ctx) ctx.s = null;

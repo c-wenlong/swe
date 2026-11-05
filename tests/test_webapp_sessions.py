@@ -807,7 +807,10 @@ const html = T.hl("-".repeat(n), "html");
 T.hl("${".repeat(n / 2), "bash");
 const ms = Date.now() - t0;
 return { ms, head, view: view.map((b) => b.t), tail: html.endsWith("-".repeat(100)),
-  link: T.inline("[[x](https://a.test)"), hash: T.heading("## a  ###") };
+  link: T.inline("[[x](https://a.test)"), hash: T.heading("## a  ###"),
+  // A cut inside a long comment leaves no comment open for the next row.
+  after: (() => { const st = { s: null }; T.hl("/*" + "c".repeat(9000) + "*/", "js", st);
+    return T.hl("let x = 1", "js", st).includes("tk-c"); })() };
 """)
         self.assertLess(out["ms"], 2000)
         self.assertEqual(out["head"], [1, "a" + " " * 40000 + "b"])
@@ -815,6 +818,7 @@ return { ms, head, view: view.map((b) => b.t), tail: html.endsWith("-".repeat(10
         self.assertTrue(out["tail"])
         self.assertEqual(out["link"], '[<a href="https://a.test" target="_blank" rel="noopener">x</a>')
         self.assertEqual(out["hash"], [2, "a"])
+        self.assertFalse(out["after"])
 
     def test_blocks_indented_under_a_list_item(self):
         """A fence or table indented under a list item parses as its own
