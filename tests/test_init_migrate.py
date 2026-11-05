@@ -737,6 +737,48 @@ class RenamedHookDirTest(unittest.TestCase):
             self.assertTrue((hooks / "qwen").is_symlink())
             self.assertFalse(os.path.lexists(hooks / "qwen-code"))
 
+    def _write_registry(self, home: Path, data: dict) -> None:
+        path = paths.config_dir_for(home) / "harness.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data))
+
+    def _assert_waits(self, home: Path, hooks: Path, why: str) -> None:
+        notes = move_renamed_hook_dirs(home)
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn("waits to move", notes[0])
+        self.assertIn(why, notes[0])
+        self.assertTrue((hooks / "qwen" / "gate.py").is_file())
+        self.assertFalse(os.path.lexists(hooks / "qwen-code"))
+
+    def test_an_archived_qwen_code_waits(self):
+        # init leaves an archived harness's links alone, so they would dangle.
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hooks = self._hub(tmp)
+            self._write_registry(home, {"qwen-code": {"state": "archived"}})
+            self._assert_waits(home, hooks, "qwen-code is archived")
+
+    def test_a_linkignored_link_into_the_old_dir_waits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hooks = self._hub(tmp)
+            (home / ".qwen" / "hooks").mkdir(parents=True)
+            (home / ".qwen" / "hooks" / "gate.py").symlink_to(hooks / "qwen" / "gate.py")
+            paths.linkignore_file_for(home).write_text(".qwen/hooks/gate.py\n")
+            self._assert_waits(home, hooks, ".linkignore")
+            # An ignored path that links somewhere else does not hold it up.
+            (home / ".qwen" / "hooks" / "gate.py").unlink()
+            (home / ".qwen" / "hooks" / "gate.py").symlink_to(home / "elsewhere.py")
+            self.assertEqual(move_renamed_hook_dirs(home),
+                             ["move hooks/qwen to hooks/qwen-code"])
+
+    def test_settings_naming_the_hub_path_waits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hooks = self._hub(tmp)
+            (home / ".qwen").mkdir()
+            (home / ".qwen" / "settings.json").write_text(json.dumps({"hooks": {
+                "Stop": [{"hooks": [{"type": "command",
+                                     "command": "~/.swe/hooks/qwen/gate.py"}]}]}}))
+            self._assert_waits(home, hooks, "settings.json names hooks/qwen/")
+
     def test_init_moves_the_dir_and_relinks_the_harness(self):
         from swe.init.commands import run_init
 

@@ -401,7 +401,8 @@ def run_init(home: Path, *, check_only: bool = False, force: bool = False,
     scaffold.extend(move_secrets(home, apply=not check_only))
     # Before the shared-hook deploy and plan_hooks below, so this same run
     # regenerates the moved wrappers and relinks the moved scripts.
-    scaffold.extend(move_renamed_hook_dirs(home, apply=not check_only))
+    scaffold.extend(move_renamed_hook_dirs(
+        home, apply=not check_only, patterns=patterns))
 
     instructions, skills = plan(home, patterns)
     # An uninstalled harness the registry does not know is noise: swe can

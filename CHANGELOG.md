@@ -35,7 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `capabilities.hooks` entry on qwen-code was never read. The row is now
   `qwen-code`, and `swe init` (or `swe hooks sync`) moves an existing
   `~/.swe/hooks/qwen/` to `hooks/qwen-code/` once and relinks it; a hub
-  that already has both folders is told to merge them by hand.
+  that already has both folders is told to merge them by hand. The move
+  waits while a link to the old folder could not be relinked (qwen-code
+  archived, or the link in `.linkignore`) or a settings file names the
+  old folder, so no hook stops running.
 
 - **Qwen Code sessions get `@` file references for attachments again.**
   The hub's attachment fallback table keyed Qwen Code as `qwen`, its

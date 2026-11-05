@@ -913,7 +913,7 @@ def _sync(rest: list[str], json_view: bool, fail) -> int:
     from swe.init.migrate import move_renamed_hook_dirs
 
     # Same one-shot rename swe init runs, ahead of the deploy and plan.
-    moved = move_renamed_hook_dirs(home)
+    moved = move_renamed_hook_dirs(home, registry=registry, patterns=patterns)
     written, pruned = _shared.apply_deploy(home, registry)
     statuses = plan_hooks(home, patterns=patterns, registry=registry)
     results: Counter = Counter()

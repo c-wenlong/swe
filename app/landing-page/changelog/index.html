@@ -140,7 +140,10 @@ still deployed shared-hook wrappers into <code>~/.qwen/hooks</code>, and a
 <code>capabilities.hooks</code> entry on qwen-code was never read. The row is now
 <code>qwen-code</code>, and <code>swe init</code> (or <code>swe hooks sync</code>) moves an existing
 <code>~/.swe/hooks/qwen/</code> to <code>hooks/qwen-code/</code> once and relinks it; a hub
-that already has both folders is told to merge them by hand.</p>
+that already has both folders is told to merge them by hand. The move
+waits while a link to the old folder could not be relinked (qwen-code
+archived, or the link in <code>.linkignore</code>) or a settings file names the
+old folder, so no hook stops running.</p>
 </li>
 <li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
 The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its
