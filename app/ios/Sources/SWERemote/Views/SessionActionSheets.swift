@@ -99,7 +99,7 @@ struct ForkSheet: View {
 
     var body: some View {
         NavigationStack {
-            ForkForm(row: row, prompt: $prompt, phase: flow.phase, busy: flow.busy) {
+            ForkForm(row: row, prompt: $prompt, flow: flow) {
                 launch = Task { await start() }
             }
             .navigationTitle("Fork \(row.displayTitle)")
@@ -135,24 +135,23 @@ struct ForkSheet: View {
 struct ForkForm: View {
     let row: SessionRow
     @Binding var prompt: String
-    var phase: LaunchFlow.Phase
-    var busy: Bool
+    let flow: LaunchFlow
     var start: () -> Void
 
     var body: some View {
-        PageScroll { ForkFields(row: row, prompt: $prompt, phase: phase, busy: busy, start: start) }
+        PageScroll { ForkFields(row: row, prompt: $prompt, flow: flow, start: start) }
     }
 }
 
 struct ForkFields: View {
     let row: SessionRow
     @Binding var prompt: String
-    var phase: LaunchFlow.Phase
-    var busy: Bool
+    let flow: LaunchFlow
     var start: () -> Void
 
     var body: some View {
         let ready = !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let busy = flow.busy
         Group {
             GroupLabel(text: "What should the fork do?")
             TextField("Its first message", text: $prompt, axis: .vertical)
@@ -167,26 +166,13 @@ struct ForkFields: View {
                 .font(Theme.caption).foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 4)
-            Button(action: start) {
-                HStack(spacing: 8) {
-                    if busy { ProgressView().controlSize(.small).tint(Theme.primaryForeground) }
-                    Text(phase == .waiting ? "Waiting for the fork" : busy && phase != .starting ? "Opening the chat" : busy ? "Starting" : "Start")
-                }
+            // The launch sheets' own button, note and footnote.
+            VStack(alignment: .leading, spacing: 8) {
+                LaunchStartButton(flow: flow, ready: ready,
+                                  footnote: "Runs under tmux in \(SessionGrouping.shortDir(row.cwd)). The chat opens once the fork shows up.",
+                                  idleTitle: "Start", waitingTitle: "Waiting for the fork", start: start)
             }
-            .primaryButton()
-            .disabled(!ready || busy)
             .padding(.top, 8)
-            if case .failed(let message) = phase {
-                Text(message).font(Theme.caption).foregroundStyle(Theme.dangerText)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if case .unconfirmed(let message) = phase {
-                Text(message).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Text("Runs under tmux in \(SessionGrouping.shortDir(row.cwd)). The chat opens once the fork shows up.")
-                .font(Theme.caption).foregroundStyle(Theme.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 4)
         }
     }
 }

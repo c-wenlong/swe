@@ -34,6 +34,14 @@ class TestTimestamp(unittest.TestCase):
         self.assertIsNone(parse_timestamp(None))
         self.assertIsNone(parse_timestamp("2026-10-03T10:00:03"))  # no zone
 
+    def test_impossible_dates_are_unreadable(self):
+        self.assertIsNone(parse_timestamp("2026-02-30T10:00:00Z"))
+        self.assertIsNone(parse_timestamp("2026-04-31T10:00:00Z"))
+        self.assertIsNone(parse_timestamp("2026-02-29T10:00:00Z"))  # not a leap year
+        self.assertIsNotNone(parse_timestamp("2028-02-29T10:00:00Z"))
+        self.assertIsNotNone(parse_timestamp("2000-02-29T10:00:00Z"))
+        self.assertIsNone(parse_timestamp("2100-02-29T10:00:00Z"))
+
 
 class TestClaude(unittest.TestCase):
     def test_key_and_tokens(self):

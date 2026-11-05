@@ -35,6 +35,28 @@ import Testing
         // /usr/bin/env reports the missing program with exit 127.
         #expect(result.status == 127)
     }
+
+    @Test func aPathHoldingAnEqualsSignStillRuns() async throws {
+        // env(1) would read `…/a=b/swe` as an assignment and never start it.
+        let temp = try TempDir()
+        let folder = temp.url.appendingPathComponent("a=b", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let script = folder.appendingPathComponent("swe")
+        try "#!/bin/sh\nprintf '%s' \"$1\"\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        let runner = ProcessRunner(executable: script.path, environment: env)
+        let result = try await runner.run(["--json"])
+        #expect(result.status == 0)
+        #expect(String(decoding: result.stdout, as: UTF8.self) == "--json")
+    }
+
+    @Test func aMissingPathHoldingAnEqualsSignIsStillNotInstalled() async throws {
+        let missing = "/nonexistent/a=b/swe"
+        let runner = ProcessRunner(executable: missing, environment: env)
+        let result = try await runner.run(["--json"])
+        #expect(result.status == 127)
+        #expect(SweClient.envNotFoundName(result.stderr) == missing)
+    }
 }
 
 @Suite struct ProcessRunnerOrderingTests {
