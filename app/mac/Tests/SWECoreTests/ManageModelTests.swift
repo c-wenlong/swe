@@ -79,7 +79,7 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
         _ = try folder.write("AGENTS.md", "project\n")
         let runner = ScriptedRunner([])
         let model = AgentsModel()
-        model.openProject(folder.url)
+        await model.openProject(folder.url)
         let doc = model.document(for: model.projectFiles[0])
         await model.settled()
         doc.text = "changed"
@@ -135,7 +135,7 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
         _ = try folder.write("AGENTS.md", "project\n")
         try folder.link("CLAUDE.md", to: "AGENTS.md")
         let model = AgentsModel()
-        model.openProject(folder.url)
+        await model.openProject(folder.url)
         #expect(model.projectFiles.map(\.name) == ["AGENTS.md", "CLAUDE.md"])
         #expect(model.projectFiles.map(\.exists) == [true, true])
         #expect(model.projectFiles[0].linksTo == nil)
@@ -156,14 +156,14 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
         _ = try folder.write("OTHER.md", "other\n")
         try folder.link("CLAUDE.md", to: "AGENTS.md")
         let model = AgentsModel()
-        model.openProject(folder.url)
+        await model.openProject(folder.url)
         _ = model.document(for: model.projectFiles[1])   // CLAUDE.md first
         await model.settled()
 
         // The link now points elsewhere; AGENTS.md must still edit AGENTS.md.
         try FileManager.default.removeItem(at: folder.url.appending(path: "CLAUDE.md"))
         try folder.link("CLAUDE.md", to: "OTHER.md")
-        model.rescanProject()
+        await model.rescanProject()
         let agents = model.document(for: model.projectFiles[0])
         let other = model.document(for: model.projectFiles[1])
         await model.settled()
@@ -176,7 +176,7 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
         let folder = try TempDir()
         _ = try folder.write("AGENTS.md", "v1\n")
         let model = AgentsModel()
-        model.openProject(folder.url)
+        await model.openProject(folder.url)
         let doc = model.document(for: model.projectFiles[0])
         await model.settled()
         _ = try folder.write("AGENTS.md", "v2\n")
@@ -189,14 +189,57 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
     @Test func aMissingProjectFileCanBeCreated() async throws {
         let folder = try TempDir()
         let model = AgentsModel()
-        model.openProject(folder.url)
+        await model.openProject(folder.url)
         #expect(model.projectFiles.map(\.exists) == [false, false])
         let doc = model.document(for: model.projectFiles[0])
         await model.settled()
         doc.text = "# Project\n"
         #expect(await doc.save() == .saved)
-        model.rescanProject()
+        await model.rescanProject()
         #expect(model.projectFiles[0].exists)
+    }
+
+    /// The scan stats and reads links in a folder that may stall, so
+    /// it never runs on the main thread.
+    @Test func theProjectScanRunsOffTheMainThread() async throws {
+        let folder = try TempDir()
+        let onMain = Flag()
+        let model = AgentsModel(scan: { url in
+            onMain.set(Thread.isMainThread)
+            return AgentsModel.scan(url)
+        })
+        await model.openProject(folder.url)
+        #expect(model.projectFiles.map(\.name) == ["AGENTS.md", "CLAUDE.md"])
+        #expect(onMain.value == false)
+    }
+
+    /// A scan of the previous folder finishing late must not list its
+    /// files under the folder opened since.
+    @Test func aLateScanOfAnOldFolderIsDropped() async throws {
+        let one = try TempDir()
+        let two = try TempDir()
+        _ = try one.write("AGENTS.md", "one")
+        let parked = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let model = AgentsModel(scan: { url in
+            if url == one.url { parked.signal(); release.wait() }
+            return AgentsModel.scan(url)
+        })
+        let first = Task { await model.openProject(one.url) }
+        // The first folder's scan is under way, held on its thread.
+        await offMain { parked.wait() }
+        await model.openProject(two.url)
+        release.signal()
+        await first.value
+        #expect(model.projectFolder == two.url)
+        #expect(model.projectFiles.map(\.exists) == [false, false])
+    }
+
+    private final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: Bool?
+        func set(_ v: Bool) { lock.withLock { stored = v } }
+        var value: Bool? { lock.withLock { stored } }
     }
 
     @Test func openingAnotherProjectDropsTheOldDocuments() async throws {
@@ -204,11 +247,11 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
         let two = try TempDir()
         _ = try one.write("AGENTS.md", "one")
         let model = AgentsModel()
-        model.openProject(one.url)
+        await model.openProject(one.url)
         let doc = model.document(for: model.projectFiles[0])
         await model.settled()
         doc.text = "edit"
-        model.openProject(two.url)
+        await model.openProject(two.url)
         #expect(!model.projectHasUnsavedChanges)
         #expect(model.projectFolder == two.url)
     }
