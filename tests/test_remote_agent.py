@@ -3,6 +3,7 @@
 import http.client
 import json
 import os
+import shutil
 import socket
 import struct
 import tempfile
@@ -72,6 +73,8 @@ class _Hub:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=3)
+        # The hub's home is a mkdtemp folder, so it is the hub's to remove.
+        shutil.rmtree(self.home, ignore_errors=True)
 
     def request(self, method, path, body=None, headers=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
@@ -1576,12 +1579,22 @@ class TestAgentEdges(unittest.TestCase):
 
     def test_execute_attachment_paths(self):
         ag = self._agent()
-        ok, note, _deg = ag._execute("claude:k", "attachment", {"ref": "r.png"})
-        self.assertFalse(ok)  # _get_bytes fails against no hub
-        with patch.object(agent_mod, "_get_bytes", return_value=b"png"):
+        # A failed pull (the hub unreachable) stages nothing. Stubbed, so
+        # the test never resolves or dials the fake hub host.
+        with patch.object(agent_mod, "_get_bytes", return_value=None) as pull:
+            ok, note, _deg = ag._execute("claude:k", "attachment", {"ref": "r.png"})
+        self.assertFalse(ok)
+        self.assertEqual(note, "attachment fetch failed")
+        # Without a hub_key the pull URL carries the local key.
+        self.assertEqual(pull.call_args[0][1],
+                         "/v1/agent/attachments/claude%3Ak/r.png")
+        self.assertIsNone(attachments.resolve(self.home, "claude:k", "r.png"))
+        with patch.object(agent_mod, "_get_bytes", return_value=b"png") as pull:
             ok, note, _deg = ag._execute("claude:k", "attachment",
                                    {"ref": "r.png", "hub_key": "hk"})
         self.assertTrue(ok)
+        self.assertEqual(note, "staged")
+        self.assertEqual(pull.call_args[0][1], "/v1/agent/attachments/hk/r.png")
         # place() keeps the hub's ref so a later message op resolves it.
         self.assertIsNotNone(
             attachments.resolve(self.home, "claude:k", "r.png"))
@@ -1947,24 +1960,39 @@ class TestAgentLoopEdges(unittest.TestCase):
 
     def test_run_spawns_and_joins_threads(self):
         ag = self._agent()
-        ag._register = lambda: None
-        ag._push_catalog = lambda: True
-        # Loop bodies exit instantly; run() then waits on _stop.
+        ag._register = MagicMock()
+        ag._push_catalog = MagicMock(return_value=True)
+        # Loop bodies only mark that they ran; run() then waits on _stop.
         # _usage_loop too: its push reads real provider quotas.
-        ag._uplink_loop = ag._catalog_loop = ag._tail_loop = \
-            ag._downlink_loop = ag._usage_loop = lambda: None
-        t = threading.Thread(target=ag.run, daemon=True)
+        loops = ("_uplink_loop", "_delta_loop", "_catalog_loop",
+                 "_usage_loop", "_tail_loop", "_downlink_loop")
+        ran = {name: threading.Event() for name in loops}
+        for name in loops:
+            setattr(ag, name, ran[name].set)
+        result = []
+        t = threading.Thread(target=lambda: result.append(ag.run()),
+                             daemon=True)
+        # Stop and join even when an assert below fails, so a broken run()
+        # does not leave its thread behind for the rest of the suite.
+        self.addCleanup(t.join, 5)
+        self.addCleanup(ag._stop.set)
         t.start()
-        time.sleep(0.2)
+        for name in loops:
+            self.assertTrue(ran[name].wait(5), f"{name} never started")
         ag._stop.set()
         t.join(timeout=5)
         self.assertFalse(t.is_alive())
+        self.assertEqual(result, [0])
+        ag._register.assert_called_once_with()
+        ag._push_catalog.assert_called_once_with()
 
     def test_serve_builds_and_runs(self):
         fake = MagicMock()
         fake.run.return_value = 0
-        with patch.object(agent_mod, "RemoteAgent", return_value=fake):
+        with patch.object(agent_mod, "RemoteAgent", return_value=fake) as cls:
             self.assertEqual(agent_mod.serve("http://h", "c"), 0)
+        cls.assert_called_once_with("http://h", "c", None)
+        fake.run.assert_called_once_with()
 
 
 class TestCatalogEdge(unittest.TestCase):
@@ -2124,33 +2152,63 @@ class TestR3FinalEdges(unittest.TestCase):
         resp.__iter__.return_value = iter([b"data: {}\n", b"\n"])
         resp.__enter__.return_value = resp
 
-        def sleepy(_s):
+        sleeps = []
+
+        def sleepy(s):
+            sleeps.append(s)
             ag._stop.set()
 
-        with patch("urllib.request.urlopen", return_value=resp), \
+        with patch("urllib.request.urlopen", return_value=resp) as urlopen, \
              patch.object(agent_mod.time, "sleep", sleepy):
             ag._command_stream()
+        # The stream ran to its end, then paused one second before the
+        # caller reconnects.
+        self.assertEqual(sleeps, [1])
+        self.assertEqual(
+            urlopen.call_args[0][0].full_url,
+            f"http://h:1/v1/agent/commands?machine={ag.machine_id}&last=0")
 
     def test_loop_bodies_run_once(self):
         ag = agent_mod.RemoteAgent("http://h:1", "c", self.home)
-        ag._push_events = lambda: ag._stop.set()
+        calls = []
+
+        def once(name, stop=True):
+            def body(*_a, **_kw):
+                calls.append(name)
+                if stop:
+                    ag._stop.set()
+            return body
+
+        ag._push_events = once("push_events")
         ag._uplink_loop()
+        self.assertEqual(calls, ["push_events"])
         ag._stop.clear()
-        ag._push_catalog = lambda: None
-        ag.tail_manager.sync = lambda rows, **kw: ag._stop.set()
+        calls.clear()
+        ag._push_catalog = once("push_catalog", stop=False)
+        ag.tail_manager.sync = once("sync")
         ag._catalog_loop()
+        self.assertEqual(calls, ["push_catalog", "sync"])
         ag._stop.clear()
-        ag.tail_manager.tick = lambda: ag._stop.set()
+        calls.clear()
+        ag.tail_manager.tick = once("tick")
         ag._tail_loop()
+        self.assertEqual(calls, ["tick"])
         ag._stop.clear()
+        calls.clear()
 
         def boom():
+            calls.append("command_stream")
             ag._stop.set()
             raise OSError("x")
 
+        # Stubbed: the real register would dial the fake hub host.
+        ag._register = once("register", stop=False)
         ag._command_stream = boom
         with patch.object(agent_mod, "RECONNECT_S", 0):
             ag._downlink_loop()
+        # Every reconnect registers first, and a raising stream ends the
+        # pass instead of escaping the loop.
+        self.assertEqual(calls, ["register", "command_stream"])
 
     def test_tail_loop_sweeps_keeping_the_outbox(self):
         ag = agent_mod.RemoteAgent("http://h:1", "c", self.home)

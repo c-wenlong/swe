@@ -174,13 +174,17 @@ final class ComposerAttachmentsTests: XCTestCase {
         XCTAssertEqual(uploads.map(\.0), ["log.txt"])
     }
 
-    /// Waits for the first chip to leave "Preparing".
+    /// Waits for the first chip to leave "Preparing" (bounded, so a
+    /// regression fails the test instead of hanging the run).
     private func uploadStarted(_ files: ComposerAttachments) async {
-        while files.items.first?.state == .preparing { await Task.yield() }
+        for _ in 0..<100_000 where files.items.first?.state == .preparing { await Task.yield() }
     }
 
     func testProgressOnlyMovesForward() async {
-        let files = model(gate: Gate())
+        let gate = Gate()
+        // The held upload is let go at the end, so no task outlives the test.
+        defer { gate.open() }
+        let files = model(gate: gate)
         files.addFile(name: "a.txt", data: Data("a".utf8))
         await uploadStarted(files)
         let id = files.items[0].id
@@ -236,7 +240,9 @@ final class ComposerAttachmentsTests: XCTestCase {
     }
 
     func testAMessageTakesUpToTenFiles() {
-        let files = model(gate: Gate())
+        let gate = Gate()
+        defer { gate.open() }
+        let files = model(gate: gate)
         for i in 0..<AttachmentRules.maxPerMessage { files.addFile(name: "\(i).txt", data: Data("x".utf8)) }
         XCTAssertEqual(files.room, 0)
         XCTAssertNil(files.addFile(name: "more.txt", data: Data("x".utf8)))
@@ -317,7 +323,7 @@ final class ComposerAttachmentsTests: XCTestCase {
     }
 
     func testDetachDropsACachedChatsFiles() async {
-        let app = AppModel()
+        let app = AppModel(hub: nil)
         let chat = app.chat("claude:1")
         chat.attachments.upload = { name, _, _ in StagedAttachment(ref: "1730000000-a1b2c3-\(name)") }
         await chat.attachments.addFile(name: "a.txt", data: Data("a".utf8))?.value
@@ -444,7 +450,7 @@ final class ComposerAttachmentsTests: XCTestCase {
             return original
         })
         // Let the load start, then send the message.
-        while made.url == nil { await Task.yield() }
+        for _ in 0..<100_000 where made.url == nil { await Task.yield() }
         files.clear()
         gate.open()
         await task?.value
@@ -476,7 +482,9 @@ final class ComposerAttachmentsTests: XCTestCase {
     }
 
     func testClearEmptiesTheComposer() {
-        let files = model(gate: Gate())
+        let gate = Gate()
+        defer { gate.open() }
+        let files = model(gate: gate)
         files.addFile(name: "a.txt", data: Data("a".utf8))
         files.clear()
         XCTAssertTrue(files.isEmpty)
@@ -501,7 +509,7 @@ final class ChatAttachmentTests: XCTestCase {
     }
 
     func testAQueuedSendKeepsItsFilesInTheTray() {
-        let chat = ChatModel(key: "claude:1", app: AppModel())
+        let chat = ChatModel(key: "claude:1", app: AppModel(hub: nil))
         let refs = ["1730000000-a1b2c3-photo-1.jpg"]
         chat.stage("what is this?", clientId: "c1", toTray: true, files: refs)
         XCTAssertEqual(chat.tray.first?.attachments, refs)
@@ -518,14 +526,14 @@ final class ChatAttachmentTests: XCTestCase {
     }
 
     func testARestoredQueuedSendKeepsItsFilesWhenItFails() {
-        let chat = ChatModel(key: "claude:1", app: AppModel())
+        let chat = ChatModel(key: "claude:1", app: AppModel(hub: nil))
         chat.mergeQueue([WaitingSend(clientId: "c1", text: "look", attachments: [.string("1730000000-a1b2c3-a.png")])])
         chat.apply(try! Hub.decoder.decode(Envelope.self, from: Data(#"{"type":"command.result","seq":50,"data":{"op":"message","ok":false,"note":"x","client_id":"c1"}}"#.utf8)))
         XCTAssertEqual(chat.fileNames(for: "send-c1"), ["a.png"])
     }
 
     func testABubbleNamesItsFilesWhetherItWaitsOrGoesOut() {
-        let chat = ChatModel(key: "claude:1", app: AppModel())
+        let chat = ChatModel(key: "claude:1", app: AppModel(hub: nil))
         chat.stage("see", clientId: "c1", toTray: false, files: ["1730000000-a1b2c3-log.txt"])
         XCTAssertEqual(chat.fileNames(for: "send-c1"), ["log.txt"])
         XCTAssertEqual(chat.fileNames(for: "m4"), [])
@@ -535,7 +543,7 @@ final class ChatAttachmentTests: XCTestCase {
     }
 
     func testTheEchoOfASendWithFilesReplacesItsBubble() {
-        let chat = ChatModel(key: "claude:1", app: AppModel())
+        let chat = ChatModel(key: "claude:1", app: AppModel(hub: nil))
         chat.stage("what is this", clientId: "c1", toTray: false, files: ["1730000000-a1b2c3-a.png"])
         let echo = "@/h/.swe/data/remote/inbox/0123456789abcdef01234567/1730000000-a1b2c3-a.png what is this"
         XCTAssertTrue(ChatModel.echoes(echo, "what is this"))
