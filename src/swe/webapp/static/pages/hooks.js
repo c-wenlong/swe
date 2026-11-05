@@ -434,9 +434,16 @@ async function createHook(sheet) {
     return;
   }
   // The script exists whatever happened to the form: show it in the list.
-  if (status === 200 && data) hooksPage.data = data;
+  // A list read still in flight began before the write: drop it, as
+  // hooksRun does, or it would put the old list back.
+  if (status === 200 && data) { hooksPage.seq++; hooksPage.data = data; }
   if (!current) {
-    if (status === 200 && hooksOnRoute() && !new URLSearchParams((location.hash.split("?")[1]) || "").get("hook")) paintHooks();
+    // The bump dropped any read out, a hook's detail included: read it
+    // again there (as hooksRun does), else paint the list just stored.
+    if (status === 200 && hooksOnRoute()) {
+      if (new URLSearchParams((location.hash.split("?")[1]) || "").get("hook")) renderHooks();
+      else paintHooks();
+    }
     return;
   }
   if (status !== 200 || !data) {
