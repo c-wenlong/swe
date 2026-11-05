@@ -68,8 +68,16 @@ class BrowserSafetyTest(unittest.TestCase):
     def test_noise_directories_are_hidden(self):
         """A plugin cache keeps lock and marker dirs beside real content;
         showing them buries what the reader opened the browser to find."""
+        from swe.find.browser import _visible_children
+
         for name in (".in_use", ".git", "__pycache__", "node_modules"):
             self.assertIn(name, HIDE_DIRS)
+        d = temp_dir(self)
+        for name in (".in_use", ".git", "__pycache__", "node_modules", "skills"):
+            (d / name).mkdir()
+        (d / "README.md").write_text("x")
+        self.assertEqual([p.name for p in _visible_children(d)],
+                         ["skills", "README.md"])
 
     def test_entry_labels_and_details_cannot_drive_the_terminal(self):
         """A directory can be named anything; the panes must not let an
@@ -195,8 +203,14 @@ class PluginRootsTest(unittest.TestCase):
     def test_every_adapter_survives_a_bogus_home(self):
         from swe.find import roots
 
-        for fn in (roots.agents_roots, roots.skills_roots, roots.plugins_roots):
-            self.assertIsInstance(fn(home=Path("/nope/nowhere")), list)
+        # The registry lives under the real home, so it is pinned empty:
+        # with nothing registered and no folders, there is nothing to list.
+        with mock.patch.object(roots, "load_registry_if_present",
+                               return_value={}):
+            for fn in (roots.agents_roots, roots.skills_roots,
+                       roots.plugins_roots):
+                self.assertEqual(fn(home=Path("/nope/nowhere")), [],
+                                 fn.__name__)
 
     def test_an_unknown_scope_does_not_raise(self):
         from swe.find import roots
@@ -268,9 +282,14 @@ class ThreePaneLayoutTest(unittest.TestCase):
             os.close(r)
 
     def test_the_footer_mentions_resizing(self):
-        from swe.find.browser import FOOTER
+        from swe.find.browser import _render
 
-        self.assertIn("resize", FOOTER)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _render([], 0, [Entry("a")], 0, [], "T", "crumb", 0, 10, 140,
+                    (3, 9, 8))
+        footer = strip_ansi(buf.getvalue()).rstrip().splitlines()[-1]
+        self.assertIn("[ ] { } resize", footer)
 
 
 class PreviewTest(unittest.TestCase):
@@ -307,7 +326,8 @@ class PreviewTest(unittest.TestCase):
     def test_an_unreadable_path_does_not_raise(self):
         from swe.find.browser import _preview
 
-        self.assertIsInstance(_preview(Entry("x", Path("/nope/nope")), 10), list)
+        self.assertEqual(_preview(Entry("x", Path("/nope/nope")), 10),
+                         ["(unreadable)"])
 
     def test_a_grouping_row_previews_its_children(self):
         from swe.find.browser import _preview
@@ -436,35 +456,6 @@ class ResizeTest(unittest.TestCase):
         self.assertNotEqual(_pane_widths(80, (2, 3, 5)),
                             _pane_widths(160, (2, 3, 5)))
 
-    def test_the_size_comes_from_the_terminal_not_the_environment(self):
-        """shutil.get_terminal_size prefers COLUMNS, which a resize never
-        updates, so a shell exporting it would pin the browser to the size
-        it started at."""
-        from pathlib import Path
-
-        source = Path("src/swe/find/browser.py").read_text()
-        measure = source[source.index("def measure()"):]
-        measure = measure[:measure.index("\n    heading")]
-        self.assertIn("os.get_terminal_size", measure)
-
-    def test_a_resize_handler_is_installed_and_restored(self):
-        from pathlib import Path
-
-        source = Path("src/swe/find/browser.py").read_text()
-        self.assertIn("SIGWINCH", source)
-        # Restored in the finally, beside the termios reset: leaving a
-        # handler installed would outlive the browser.
-        tail = source[source.index("    finally:"):]
-        self.assertIn("signal.signal", tail)
-
-    def test_it_waits_on_select_rather_than_a_bare_read(self):
-        """PEP 475 retries an interrupted read, so a blocking os.read
-        would never notice the signal."""
-        from pathlib import Path
-
-        source = Path("src/swe/find/browser.py").read_text()
-        self.assertIn("select.select", source)
-
 
 class BrowserMouseTest(unittest.TestCase):
     """The wheel scrolls the pane; it never quits the browser.
@@ -492,9 +483,12 @@ class BrowserMouseTest(unittest.TestCase):
         # tell which level a key left the browser on.
         self.levels = []
 
+        self.widths = []
+
         def count_render(*a, **k):
             renders[0] += 1
             self.levels.append([e.label for e in a[2]])
+            self.widths.append(a[9])
             return real_render(*a, **k)
 
         sel_kwargs = ({"side_effect": select_side_effect}
@@ -603,6 +597,46 @@ class BrowserMouseTest(unittest.TestCase):
         # a footer check would pass on the first frame alone, so count
         # the redraws the ticks forced.
         self.assertEqual(renders, 3)
+
+    def test_the_size_comes_from_the_terminal_not_the_environment(self):
+        """shutil.get_terminal_size prefers COLUMNS, which a resize never
+        updates, so a shell exporting it would pin the browser to the size
+        it started at."""
+        import os
+
+        with mock.patch.dict(os.environ, {"COLUMNS": "50", "LINES": "10"}):
+            self._drive(["cancel"],
+                        sizes=lambda _fd: os.terminal_size((120, 30)))
+        self.assertEqual(self.widths, [120])
+
+    def test_a_resize_handler_is_installed_and_restored(self):
+        """Leaving the handler installed would outlive the browser."""
+        import signal
+
+        previous = object()
+        with mock.patch("signal.signal", return_value=previous) as sig:
+            self._drive(["down", "cancel"])
+        first, last = sig.call_args_list[0].args, sig.call_args_list[-1].args
+        self.assertEqual(first[0], signal.SIGWINCH)
+        self.assertTrue(callable(first[1]))
+        self.assertEqual(last, (signal.SIGWINCH, previous))
+
+    def test_it_waits_on_select_with_a_timeout(self):
+        """PEP 475 retries an interrupted read, so a blocking os.read
+        would never notice the signal. The wait has to be a select that
+        wakes on its own."""
+        waits = []
+
+        def record(rlist, w, x, timeout=None):
+            waits.append((rlist, timeout))
+            return (rlist, [], [])
+
+        self._drive(["cancel"], select_side_effect=record)
+        self.assertEqual(len(waits), 1)
+        rlist, timeout = waits[0]
+        self.assertEqual(rlist, [0])
+        self.assertIsNotNone(timeout)
+        self.assertGreater(timeout, 0)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sent from a phone arrived as an `[Attached file: …]` line instead of
   an `@` reference.
 
+- **A satellite's malformed push no longer breaks the hub's routes.**
+  `/v1/agent/register` answered 500 when `machine` was not an object; an
+  uploaded event whose `data` was not an object failed its whole batch,
+  which the agent then resent forever, journaling the good events again;
+  a "/" menu push with the wrong shapes turned that satellite's menu
+  route into a 500; and `NaN`/`Infinity` (or `1e400`) in any request
+  body was stored and served back, which no client's JSON parser
+  accepts. Each is now a 422, a skipped event, a skipped row or a 400.
+
 - **An approval resolved without a request id now kills its ntfy
   buttons.** The hub clears every pending approval on such a resolve,
   but the notification tokens were retired only by exact request id, so

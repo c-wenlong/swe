@@ -47,7 +47,7 @@ from swe import __version__
 from swe.harness import remedies
 from swe.console import c
 from swe.harness.models import RateLimitInfo, _window
-from swe.paths import RATE_LIMITS_CACHE_FILE
+from swe.paths import RATE_LIMITS_CACHE_FILE, atomic_write_text
 
 
 # ---------------------------------------------------------------------------
@@ -586,10 +586,14 @@ def _fetch_codex() -> RateLimitInfo | None:
     elif isinstance(reset_at, (int, float)) and not isinstance(reset_at, bool):
         # ``bool`` subclasses ``int`` in Python — guard explicitly so a
         # pathological ``reset_at: True`` payload can't silently become
-        # ``1.0``. A 400-digit JSON int overflows float().
+        # ``1.0``. A 400-digit JSON int overflows float(), and a JSON
+        # ``1e999`` or ``NaN`` parses to a non-finite float that would
+        # crash the reset column and serialise as invalid JSON.
         try:
             reset_at = float(reset_at)
         except OverflowError:
+            reset_at = 0.0
+        if not math.isfinite(reset_at):
             reset_at = 0.0
     else:
         reset_at = 0.0
@@ -823,7 +827,7 @@ def _fetch_github_copilot() -> RateLimitInfo | None:
     )
 
     data = _fetch_json(req, timeout=10)
-    if data is None:
+    if not isinstance(data, dict):
         return None
 
     plan_type = str(data.get("copilot_plan") or "—")
@@ -839,8 +843,10 @@ def _fetch_github_copilot() -> RateLimitInfo | None:
     # are typically unlimited on paid plans.) When the snapshot is
     # missing entirely, _derive_copilot_fields({}) returns (0, False)
     # which is exactly the right "no data" display state.
-    snapshots = data.get("quota_snapshots") or {}
-    premium = snapshots.get("premium_interactions") or {}
+    snapshots = data.get("quota_snapshots")
+    snapshots = snapshots if isinstance(snapshots, dict) else {}
+    premium = snapshots.get("premium_interactions")
+    premium = premium if isinstance(premium, dict) else {}
     used_percent, limit_reached = _derive_copilot_fields(premium)
 
     return RateLimitInfo(
@@ -1097,13 +1103,12 @@ def _save_claude_state(
     if fetched_at is None:
         fetched_at = time.time() if info is not None else 0.0
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({
+        atomic_write_text(path, json.dumps({
             "info": asdict(info) if info is not None else None,
             "retry_at": retry_at,
             "credential_fingerprint": credential_fingerprint,
             "fetched_at": fetched_at,
-        }))
+        }), private=True)
     except OSError:
         pass
 
@@ -1638,13 +1643,20 @@ def _droid_fetch(req: urllib.request.Request) -> dict | None:
         if not timed_out.is_set():
             _warn_droid_http_error(code, retry_after_seconds)
 
+    # ``_fetch_json`` notes why it failed on the thread it runs on, so the
+    # worker hands its kinds back for this thread's fetch_one to read: a
+    # 401 then reports auth-required instead of an outage.
+    kinds: list[str] = []
+
     def fetch() -> None:
+        _reset_json_failures()
         result.append(_fetch_json(
             req,
             timeout=_DROID_FETCH_TIMEOUT,
             on_401=warn_401,
             on_http_error=warn_http_error,
         ))
+        kinds.extend(_json_failure_kinds())
 
     # DNS resolution can outlive urllib's socket timeout. Keep this optional
     # status lookup from holding the entire `swe list` command hostage.
@@ -1653,7 +1665,10 @@ def _droid_fetch(req: urllib.request.Request) -> dict | None:
     worker.join(_DROID_FETCH_TIMEOUT)
     if worker.is_alive():
         timed_out.set()
+        _note_json_failure("network")
         return None
+    for kind in kinds:
+        _note_json_failure(kind)
     return result[0] if result else None
 
 
@@ -2499,6 +2514,11 @@ def _cursor_grok_bot_window(data: dict | None) -> dict | None:
         return None
     percent = data.get("usagePercent")
     if isinstance(percent, bool) or not isinstance(percent, (int, float)):
+        return None
+    # A 400-digit JSON int overflows float(), which math.isfinite calls.
+    try:
+        percent = float(percent)
+    except OverflowError:
         return None
     if not math.isfinite(percent) or percent < 0:
         return None
@@ -3699,8 +3719,8 @@ def _save_cached(
         }
         if issues:
             payload["no_data_issues"] = issues
-        with open(RATE_LIMITS_CACHE_FILE, "w") as f:
-            json.dump(payload, f)
+        atomic_write_text(RATE_LIMITS_CACHE_FILE, json.dumps(payload),
+                          private=True)
     except Exception:
         pass
 

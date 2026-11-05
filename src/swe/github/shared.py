@@ -148,6 +148,12 @@ class PinError(ValueError):
         self.message = message
 
 
+def refresh_asked(args: dict) -> bool:
+    """A ``parse_qs`` query dict's ``refresh=1`` or ``refresh=true``:
+    the client wants ``gh`` asked again rather than the cache."""
+    return str((args.get("refresh") or [""])[0]) in {"1", "true"}
+
+
 def pinned_name(home: Path | None, raw: str) -> str:
     """The pin a ``repo`` argument names, spelled as pinned; raises
     ``PinError``. Clients only read repos the hub has pinned, as the Mac

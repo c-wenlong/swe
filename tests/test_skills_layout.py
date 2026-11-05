@@ -376,6 +376,31 @@ class SkillsLayoutTest(unittest.TestCase):
             # Untouched: the corrupt file is still there to fix by hand.
             self.assertEqual(links_file.read_text(), "{corrupt")
 
+    def test_save_link_records_writes_through_a_symlinked_file(self):
+        # write_text + rename on a fixed skill_links.tmp replaced a linked
+        # file (dotfiles layout) with a plain one.
+        from swe.skills.layout import load_link_records, save_link_records
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp) / ".config" / "swe"
+            config_dir.mkdir(parents=True)
+            real = Path(tmp) / "dotfiles" / "skill_links.json"
+            real.parent.mkdir()
+            real.write_text('{"links": []}', encoding="utf-8")
+            links_file = config_dir / "skill_links.json"
+            links_file.symlink_to(real)
+
+            with patch("swe.skills.layout.SKILL_LINKS_FILE", links_file), patch(
+                "swe.skills.layout.CONFIG_DIR", config_dir
+            ):
+                save_link_records([{"label": "x"}])
+                self.assertEqual(load_link_records(), [{"label": "x"}])
+
+            self.assertTrue(links_file.is_symlink())
+            self.assertEqual(json.loads(real.read_text())["links"], [{"label": "x"}])
+            self.assertEqual(sorted(p.name for p in config_dir.iterdir()),
+                             ["skill_links.json"])
+
     def test_unlink_preflights_the_records_file_before_unlinking(self):
         """A corrupt skill_links.json used to surface only after the
         symlink was already gone, leaving the root missing on retry."""

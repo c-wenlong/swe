@@ -5,6 +5,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import Mock, patch
 
+from swe.console import strip_ansi
 from swe.find.commands import cmd_find
 from swe.flags import expand_value_flags
 from swe.harness.commands import (
@@ -26,6 +27,30 @@ def _run(fn, args):
     with redirect_stdout(buf):
         code = fn(list(args))
     return code, buf.getvalue()
+
+
+def _sandbox_list(test):
+    """Point every per-user read ``swe list`` makes at fixed values.
+
+    Without this, cmd_list reads the developer's real registry, archive,
+    stars, column settings and session counts, so a test's outcome depended
+    on whose machine it ran on.
+    """
+    registry = {"demo": {"command": "demo-cmd", "description": "",
+                         "aliases": [], "tags": ["edit"]}}
+    for target, value in (
+        ("swe.harness.commands.load_registry", lambda: dict(registry)),
+        ("swe.harness.archive.load_archive", lambda: {}),
+        ("swe.harness.commands.list_section", lambda: {}),
+        ("swe.harness.commands.load_stars", lambda: []),
+        ("swe.harness.commands._session_counts", lambda *_: {}),
+        ("swe.harness.commands._broken_tools", lambda: set()),
+        ("swe.harness.commands.is_installed", lambda _cmd: False),
+        ("swe.harness.commands.link_states", lambda *a, **k: {}),
+    ):
+        p = patch(target, value)
+        p.start()
+        test.addCleanup(p.stop)
 
 
 class ExpandValueFlagsTest(unittest.TestCase):
@@ -489,6 +514,7 @@ class BareFlagRejectionTest(unittest.TestCase):
         self.assertIn("Unknown scope", out)
 
     def test_list_exclude_value_spelling_a_flag_does_not_refresh(self):
+        _sandbox_list(self)
         # A refresh run would clear the real session cache and re-poll
         # provider rate limits, so the refresh side-effects are patched.
         with (
@@ -504,6 +530,7 @@ class BareFlagRejectionTest(unittest.TestCase):
         inv_counts.assert_not_called()
 
     def test_list_real_boolean_flags_still_work(self):
+        _sandbox_list(self)
         with (
             patch("swe.sessions.aggregator.invalidate_cache"),
             patch(
@@ -516,12 +543,16 @@ class BareFlagRejectionTest(unittest.TestCase):
         invalidate.assert_called_once()
 
     def test_list_subcommand_dispatch_still_precedes_flag_parsing(self):
+        _sandbox_list(self)
         # `edit`/`legend` dispatch on the untouched argv: `-u edit` keeps
         # treating "edit" as a tag filter, and a real `edit` call hands its
         # own argv to cmd_list_edit, which rejects list-only flags.
         with patch("swe.harness.commands._fetch_rate_limits"):
             code, out = _run(cmd_list, ["-u", "edit"])
         self.assertEqual(code, 0)
+        # The fixture's one harness carries the tag "edit", so its row
+        # showing proves "edit" was read as a tag filter.
+        self.assertIn("demo-cmd", strip_ansi(out))
         code, out = _run(cmd_list, ["edit", "--reset", "-r"])
         self.assertEqual(code, 1)
         self.assertIn("Unexpected args", out)

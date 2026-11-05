@@ -289,6 +289,21 @@ class CodeVsDataTest(unittest.TestCase):
         self.assertEqual(findings, [])
 
 
+class RealSymlinkDirsTest(unittest.TestCase):
+    def test_hub_dir_comes_from_swe_dir_for(self):
+        # A hard-coded home/".swe" missed a home still served from the
+        # legacy ~/.quiver root.
+        from unittest.mock import patch
+        from swe.harness.drift import _real_symlink_dirs
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hub = Path(tmp), Path(tmp) / ".quiver"
+            with patch("swe.paths.swe_dir_for", return_value=hub) as resolve:
+                dirs = _real_symlink_dirs(Path(tmp) / "repo", home)
+        resolve.assert_called_with(home)
+        self.assertEqual(dirs[1], hub)
+
+
 class DanglingSymlinksTest(unittest.TestCase):
     def test_flags_broken_symlink_only(self):
         with tempfile.TemporaryDirectory() as tmp:

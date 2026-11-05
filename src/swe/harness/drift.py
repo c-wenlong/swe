@@ -563,9 +563,9 @@ def check_data_root(home: Path) -> list[Finding]:
 
 
 def _real_symlink_dirs(repo_root: Path, home: Path) -> list[Path]:
-    from swe.paths import skills_dir_for
+    from swe.paths import skills_dir_for, swe_dir_for
 
-    return [repo_root, home / ".swe", skills_dir_for(home)]
+    return [repo_root, swe_dir_for(home), skills_dir_for(home)]
 
 
 def _default_repo_root() -> Path:

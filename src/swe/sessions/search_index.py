@@ -472,7 +472,9 @@ def _scan_jsonl_head(path: str, max_lines: int = _HEAD_LINES) -> tuple[str, str]
                     continue
                 try:
                     data = json.loads(line)
-                except ValueError:
+                except (ValueError, RecursionError):
+                    # RecursionError: a line nested past the interpreter
+                    # limit, which took `swe session --search` down.
                     continue
                 if not isinstance(data, dict):
                     continue

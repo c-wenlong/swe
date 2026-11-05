@@ -413,8 +413,6 @@ def _to_session(entry: Any, file_path: str, config: JsonParserConfig) -> Session
 
     if not ts:
         ts = get_mtime(file_path)
-        if not ts and os.path.isdir(file_path):
-            ts = get_mtime(file_path)
 
     if not sid and file_path:
         sid = os.path.basename(file_path)

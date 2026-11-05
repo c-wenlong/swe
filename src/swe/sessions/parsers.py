@@ -385,8 +385,10 @@ def parse_crush():
                     )
                 )
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        # Recorded like every other parser: swallowed, a crash read as "no
+        # Crush history" and the aggregator pruned its cached sessions.
+        failures.record("crush", exc)
     return sessions
 
 
