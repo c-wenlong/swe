@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so any other local account could read them. The folder is now 0700
   (an existing one is tightened) and its files 0600.
 
+- **A pairing poll's secret no longer travels in the URL.** The web
+  app polled `/v1/pair/request/<id>?secret=…`, so the secret that
+  collects a new device's credential could land in proxy and access
+  logs. It now goes in an `X-Pair-Secret` header; the hub still reads
+  `?secret=` for iPhone builds already out.
+
 - **A resolve prompt no longer carries strangers' comments.** Anyone can
   comment on a public issue, and every comment went word for word into
   the first prompt of the agent resolving it. The prompt now quotes the
