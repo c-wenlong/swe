@@ -366,7 +366,7 @@ struct NewSessionSheet: View {
                 }
             }
         }
-        .task(id: browse.path) { await browseFolders(browse) }
+        .task(id: browse.asked) { await browseFolders(browse) }
     }
 
     private func browseRow(name: String, path: String) -> some View {
@@ -393,7 +393,9 @@ struct NewSessionSheet: View {
             let listing = try await app.hub.withClient {
                 try await $0.folders(path: place.path.isEmpty ? nil : place.path)
             }
-            guard browse?.path == place.path else { return }
+            guard browse?.asked == place.asked else { return }
+            // The hub's spelling of the folder ("~" expanded); `asked`
+            // stays, so the task keyed on it doesn't list it again.
             place.path = listing.path
             place.parent = listing.parent
             place.folders = listing.folders
@@ -403,7 +405,7 @@ struct NewSessionSheet: View {
             browse = place
         } catch is CancellationError {
         } catch {
-            guard browse?.path == place.path else { return }
+            guard browse?.asked == place.asked else { return }
             place.loading = false
             place.error = (error as? HubError)?.message ?? error.localizedDescription
             browse = place
@@ -447,11 +449,19 @@ struct NewSessionSheet: View {
 
     /// The sheet's folder browse state for one path.
     private struct FolderBrowse: Equatable {
+        /// The folder shown, as the hub spelled it once it answered.
         var path: String
+        /// The folder asked for, which keys the listing task.
+        var asked: String
         var parent: String?
         var folders: [HubFolderListing.Entry] = []
         var error: String?
         var loading = false
+
+        init(path: String) {
+            self.path = path
+            asked = path
+        }
     }
 
     /// One read of machines and sessions: the pickers and the folder

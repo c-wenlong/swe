@@ -297,8 +297,11 @@ EOF
   if [ "$installed_running" = 1 ]; then return 0; fi
   # Give a quit dev copy up to 10 s, so `open` doesn't race it.
   if [ -n "$quit" ]; then
+    # Every copy, not the first: `kill -0 a b` fails as soon as one exits.
     for _ in $(seq 1 50); do
-      kill -0 $quit 2>/dev/null || break
+      alive=0
+      for p in $quit; do kill -0 "$p" 2>/dev/null && alive=1; done
+      [ "$alive" = 1 ] || break
       sleep 0.2
     done
   fi

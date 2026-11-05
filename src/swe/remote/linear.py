@@ -88,7 +88,7 @@ query SweTasks($filter: IssueFilter, $first: Int!, $after: String) {
 _GET_QUERY = """\
 query SweTask($id: String!) {
   issue(id: $id) {
-    identifier title url updatedAt description
+    identifier title url updatedAt
     state { name type }
     team { key }
   }
@@ -344,10 +344,9 @@ class LinearTasks:
     # -------------------------------------------------------------- get
 
     def get(self, task: dict) -> dict | None:
-        """Fresh ``{state, title, url, description}`` for a stored ref,
-        cached like the list; ``None`` when Linear can't tell. The
-        description is the markdown body a resolve prompt quotes, as
-        the GitHub adapter's issue detail carries ``body``."""
+        """Fresh ``{state, status_name, title, url, updated_at}`` for a
+        stored ref, cached like the list; ``None`` when Linear can't
+        tell."""
         ref = str(task.get("ref") or "").strip()
         if not ref:
             return None
@@ -375,7 +374,6 @@ class LinearTasks:
                 "status_name": _status_name(issue),
                 "title": issue.get("title") or "",
                 "url": issue.get("url") or "",
-                "description": issue.get("description") or "",
                 "updated_at": issue.get("updatedAt")}
 
 

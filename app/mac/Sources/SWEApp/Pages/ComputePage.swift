@@ -775,6 +775,13 @@ private struct CleanupSheet: View {
 
     private func forceQuit(_ item: CleanupItem) async {
         await model.quit(item, force: true)
+        // quit samples straight after the signal, before a killed process
+        // has always left the table: look again for up to two seconds
+        // before calling it still running.
+        for _ in 0..<4 where !model.alivePids(of: item).isEmpty {
+            try? await Task.sleep(for: .milliseconds(500))
+            await model.refresh()
+        }
         stillThere[item.id] = !model.alivePids(of: item).isEmpty
     }
 }

@@ -1393,5 +1393,17 @@ class TestFocusFilter(unittest.TestCase):
             "repaintedAfter": True, "rowsAfter": ["beta"]})
 
 
+class TestPrSessionPrompt(unittest.TestCase):
+    def test_the_prefilled_prompt_leaves_the_pr_title_out(self):
+        """Anyone can open a PR; its title must not reach an agent's
+        prompt word for word (github/pulls.build_prompt's rule)."""
+        js = (STATIC / "repositories.js").read_text(encoding="utf-8")
+        start = js.index("async function openSession(s, pr)")
+        block = js[start:js.index("\n  }\n", start)]
+        self.assertIn("prompt: `Review pull request #${pr.number} in "
+                      "${pr.repo}.", block)
+        self.assertNotIn("pr.title", block)
+
+
 if __name__ == "__main__":
     unittest.main()
