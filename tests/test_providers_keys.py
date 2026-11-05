@@ -99,6 +99,18 @@ class ReadShellExportKeysTest(unittest.TestCase):
                 ("sk-proj-AbCdEfGh1234", "OPENAI_API_KEY"),
             )
 
+    def test_a_name_exported_twice_reads_as_the_last(self):
+        # The shell and KeysFile.keys both end up with the later line.
+        from swe.providers.keyfile import KeysFile
+
+        with TemporaryDirectory() as tmp:
+            f = Path(tmp) / ".api_keys"
+            f.write_text("export A_KEY=old\nexport B_KEY=b\nexport A_KEY=new\n")
+            self.assertEqual(read_shell_export_keys(f, ["A_KEY"]), ("new", "A_KEY"))
+            self.assertEqual(read_shell_export_keys(f, ["A_KEY", "B_KEY"]), ("new", "A_KEY"))
+            twin = {e.name: e for e in KeysFile(f.read_text()).keys}
+            self.assertEqual(twin["A_KEY"].value, "new")
+
     def test_extracts_unquoted_value(self):
         with TemporaryDirectory() as tmp:
             f = Path(tmp) / ".api_keys"

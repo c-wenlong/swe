@@ -94,7 +94,8 @@ def read_shell_export_keys(
     path: Path | None, env_vars: list[str]
 ) -> Optional[Tuple[str, str]]:
     """Parse a shell-style export file and return ``(value, env_var)``
-    for the first matching env-var name.
+    for the first of ``env_vars`` the file assigns, valued as its last
+    assignment.
 
     Accepts lines like::
 
@@ -116,6 +117,12 @@ def read_shell_export_keys(
     text = _safe_read_text(path)
     if text is None or path is None or not path.is_file():
         return None
+    # The name that appears first in the file is the one reported, but
+    # with its last assignment's value, which is what the shell sourcing
+    # the file ends up with (KeysFile.keys reads it the same way):
+    # returning the first line reported a stale key for a name exported
+    # twice.
+    found: dict[str, str] = {}
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
@@ -138,8 +145,9 @@ def read_shell_export_keys(
                 ):
                     value = value[1:-1]
                 if value:
-                    return (value, env_var)
-    return None
+                    found[env_var] = value  # keeps its first-seen place
+                break
+    return next(((value, name) for name, value in found.items()), None)
 
 
 def mask_key(raw: str | None) -> str:
