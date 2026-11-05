@@ -285,8 +285,9 @@ public final class PricingModel {
     /// downloaded sources — several keys can match one model (`gpt-4.1`
     /// and `gpt-4-1`), and removing just one would leave it user-priced.
     public func remove(matching model: String) async throws {
-        let keys = await ledger.catalog().userKeys(matching: model)
-        try overrides.remove(keys)
+        // Matched against the file, not the loaded catalog: a key the web
+        // app saved since would otherwise keep the model user-priced.
+        try overrides.remove { PricingCatalog.keys($0, matching: model) }
         try await reprice()
     }
 

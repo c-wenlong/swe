@@ -53,8 +53,9 @@ targets:
         NSCameraUsageDescription: Scan the pair QR that swe remote pair --app shows.
         CFBundleURLTypes:
           - CFBundleURLName: com.swe.remote.pair
-            # `swe` is what new hubs emit; `quiver` keeps pair, session
-            # and issue links written before the rename opening.
+            # The app writes `swe://` issue and session links. `quiver`
+            # is what hubs still write pair links as (so older builds
+            # open them), and what links from before the rename use.
             CFBundleURLSchemes: [swe, quiver]
         # The hub is plain HTTP on the tailnet, not TLS, and its address
         # can only take a few shapes: a MagicDNS name (always *.ts.net —

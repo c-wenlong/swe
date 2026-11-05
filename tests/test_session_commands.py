@@ -315,10 +315,6 @@ class SessionInteractiveTest(unittest.TestCase):
             self.assertLessEqual(visible_len(line), 98)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class SessionPreviewTest(unittest.TestCase):
     """The space-bar peek reads the transcript tail through the report readers."""
 
@@ -449,3 +445,7 @@ class SessionPreviewTest(unittest.TestCase):
         with patch("swe.sessions.commands._session_preview") as again:
             preview(0)
             again.assert_not_called()          # memoised per picker run
+
+
+if __name__ == "__main__":
+    unittest.main()
