@@ -101,7 +101,7 @@ struct AttachmentChip: View {
             Image(systemName: failed ? "exclamationmark.triangle" : item.isImage ? "photo" : "doc.text")
                 .font(Theme.font(size: 14))
                 .foregroundStyle(failed ? Theme.dangerText : Theme.textSecondary)
-                .frame(width: 16)
+                .iconColumn(16)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.name).font(Theme.control).foregroundStyle(Theme.textPrimary)
                     .lineLimit(1).truncationMode(.middle)

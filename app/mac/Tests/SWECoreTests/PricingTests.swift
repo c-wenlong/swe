@@ -99,6 +99,27 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
         #expect(catalog.listLookup("nonexistent-model") == nil)
     }
 
+    @Test func `an edit keeps a price another writer saved after loading`() throws {
+        let temp = try TempDir()
+        defer { withExtendedLifetime(temp) {} }
+        let url = temp.path("config/pricing.json")
+        // The app loads once at launch; the web app (another writer)
+        // saves a price afterwards.
+        var app = PricingOverrides(url: url)
+        var web = PricingOverrides(url: url)
+        try web.set("from-web", prices: .init(input: 2, output: 4))
+
+        try app.set("from-app", prices: .init(input: 1, output: 1))
+        #expect(PricingOverrides(url: url).models.keys.sorted() == ["from-app", "from-web"])
+        #expect(app.models.keys.sorted() == ["from-app", "from-web"])
+
+        // A remove of a price the app never saw still lands.
+        var stale = app
+        try web.set("later", prices: .init(input: 3, output: 3))
+        try stale.remove("later")
+        #expect(PricingOverrides(url: url).models.keys.sorted() == ["from-app", "from-web"])
+    }
+
     @Test func `a failed write leaves the in-memory prices alone`() throws {
         let temp = try TempDir()
         defer { withExtendedLifetime(temp) {} }
@@ -572,6 +593,20 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
         let totals = await ledger.totals(in: allTime)
         #expect(totals.costUSD == 2.5)  // 1M input @ $2.50/1M
         withExtendedLifetime(temp) {}
+    }
+
+    @Test func `reset also drops a matching key another writer saved after loading`() async throws {
+        let (_, model, temp) = try editableModel([event("gpt-4o", tokens: 1_000_000)])
+        await model.load()
+        try await model.save(key: "gpt-4o", prices: .init(input: 1, output: 2))
+        // The web app saves the dated form; the app's catalog never saw it.
+        var web = PricingOverrides(url: temp.path("config/pricing.json"))
+        try web.set("gpt-4o-2024-05-13", prices: .init(input: 3, output: 3))
+
+        try await model.remove(matching: "gpt-4o")
+        #expect(PricingOverrides(url: temp.path("config/pricing.json")).models.isEmpty)
+        let row = try #require(model.groups.flatMap(\.models).first)
+        #expect(row.source == .liteLLM)
     }
 
     @Test func `a saved price with no list price under it offers remove`() async throws {
