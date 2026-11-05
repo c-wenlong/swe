@@ -172,6 +172,24 @@ so every later send waited its full 60 s and failed until a detach.
 The reader now skips such a message, and a server whose reader did
 die is replaced on the next send.</p>
 </li>
+<li><p><strong>Archiving Qwen Code stops its shared hooks, and its hook settings
+count.</strong> The hook contract table keyed Qwen Code as <code>qwen</code>, its
+command, while harness.json calls it <code>qwen-code</code>. Archiving qwen-code
+still deployed shared-hook wrappers into <code>~/.qwen/hooks</code>, and a
+<code>capabilities.hooks</code> entry on qwen-code was never read. The row is now
+<code>qwen-code</code>, and <code>swe init</code> (or <code>swe hooks sync</code>) moves an existing
+<code>~/.swe/hooks/qwen/</code> to <code>hooks/qwen-code/</code> once and relinks it; a hub
+that already has both folders is told to merge them by hand. The move
+waits while a link to the old folder could not be relinked (qwen-code
+archived, or the link in <code>.linkignore</code>) or a settings file names the
+old folder, so no hook stops running.</p>
+</li>
+<li><p><strong><code>swe skills new</code> says when it had to make <code>~/.swe/skills</code>.</strong>
+<code>create()</code> promised to report whether it made the hub skills root but
+always answered no, so a skill written into a brand-new root (one no
+harness links to yet) printed only &quot;Created&quot;. It now adds a line
+saying to run <code>swe init</code> to link the root into your harnesses.</p>
+</li>
 <li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
 The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its
 command, but sessions carry the registry id <code>qwen-code</code>, so a file

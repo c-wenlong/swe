@@ -41,15 +41,29 @@ def _known_root_paths(home: Path, cwd: Path) -> set[Path]:
 
 
 def _source_for_path(path: Path, home: Path) -> str:
-    try:
-        rel = path.relative_to(home)
-    except ValueError:
+    # ``path`` arrives resolved; a home reached through a link (/var ->
+    # /private/var, /home -> /usr/home) only matches once resolved too.
+    rel = None
+    for base in (home, _resolved(home)):
+        try:
+            rel = path.relative_to(base)
+            break
+        except ValueError:
+            continue
+    if rel is None:
         return "catalog"
     if rel.parts and rel.parts[0].lower() == "desktop":
         return "desktop"
     if rel.parts and rel.parts[0].lower() == "documents":
         return "documents"
     return "catalog"
+
+
+def _resolved(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError):
+        return path
 
 
 def discover_skill_catalogs(

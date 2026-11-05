@@ -131,14 +131,15 @@ struct JSONTextEditEdgeTests {
     @Test func setReplacesScalarInPlace() throws {
         let text = "{\n  \"a\": 1,\n  \"b\": \"x\"\n}\n"
         let out = try JSONTextEdit.set(2, at: ["a"], in: text)
-        #expect(out.contains("\"a\": 2"))
-        #expect(out.contains("\"b\": \"x\""))
+        // Only the value changes: layout, order and the final newline stay.
+        #expect(out == "{\n  \"a\": 2,\n  \"b\": \"x\"\n}\n")
     }
 
     @Test func setInsertsMissingKey() throws {
         let text = "{\"a\": 1}"
         let out = try JSONTextEdit.set("v", at: ["new"], in: text)
-        #expect(out.contains("\"new\""))
+        // Appended last, on its own line, after the existing entry.
+        #expect(out == "{\"a\": 1,\n\"new\": \"v\"\n}")
     }
 
     @Test func setRejectsNonObject() {
@@ -155,7 +156,8 @@ struct JSONTextEditEdgeTests {
 
     @Test func setBoolRendersBare() throws {
         let out = try JSONTextEdit.set(true, at: ["flag"], in: "{}")
-        #expect(out.contains("true"))
+        // A JSON boolean, not the string "true".
+        #expect(out == #"{"flag": true}"#)
     }
 }
 
@@ -167,12 +169,22 @@ struct OverviewPeriodEdgeTests {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = Date(timeIntervalSince1970: 1_800_000_000)
+        // now is 2027-01-15 08:00 UTC; every range ends there.
+        let starts: [OverviewPeriod: Date] = [
+            .today: utc("2027-01-15T00:00:00Z"),
+            .week: utc("2027-01-08T08:00:00Z"),
+            .month: utc("2027-01-01T00:00:00Z"),
+            .thirtyDays: utc("2026-12-16T08:00:00Z"),
+            .ninetyDays: utc("2026-10-17T08:00:00Z"),
+            .year: utc("2026-01-15T08:00:00Z"),
+            .allTime: .distantPast,
+        ]
+        #expect(starts.count == OverviewPeriod.allCases.count)
         for period in OverviewPeriod.allCases {
             let range = period.range(now: now, calendar: cal)
-            #expect(range.end >= range.start)
+            #expect(range.start == starts[period], "\(period)")
+            #expect(range.end == now, "\(period)")
         }
-        let today = OverviewPeriod.today.range(now: now, calendar: cal)
-        #expect(cal.isDate(today.start, inSameDayAs: now))
     }
 }
 
@@ -214,8 +226,10 @@ struct APIKeyErrorTests {
         #expect(APIKeysError.invalidName("2bad").errorDescription?.contains("2bad") == true)
         #expect(APIKeysError.duplicate("KEY").errorDescription?.contains("KEY") == true)
         #expect(APIKeysError.notFound("GONE").errorDescription?.contains("GONE") == true)
-        #expect(APIKeysError.nameTaken("K").errorDescription?.contains("K") == true)
-        #expect(APIKeysError.providerTaken("P").errorDescription?.contains("P") == true)
+        #expect(APIKeysError.nameTaken("OPENAI_KEY").errorDescription
+                == "OPENAI_KEY is already exported; pick another variable name.")
+        #expect(APIKeysError.providerTaken("Anthropic").errorDescription
+                == "Anthropic already exists; move keys into it instead.")
         #expect(APIKeysError.multilineValue.errorDescription != nil)
         #expect(APIKeysError.changedOnDisk.errorDescription != nil)
         #expect(APIKeysError.unreadable("io").errorDescription?.contains("io") == true)

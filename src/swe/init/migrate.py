@@ -8,6 +8,7 @@ files; deciding whether to run is ``cmd_init``'s job.
 
 from __future__ import annotations
 
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -275,3 +276,98 @@ def seal_secrets_dir(home: Path | None = None, *, apply: bool = True) -> list[st
         os.chmod(secrets_dir, 0o700)
         seal.write_text(paths.SECRETS_GITIGNORE_BODY, encoding="utf-8")
     return ["seal secrets/ with its own .gitignore"]
+
+
+
+# Hub hook dirs whose harness key changed: (old name, registry id). A hub
+# dir is named by the key the contract table uses, and Qwen Code's row was
+# keyed by its command ("qwen") rather than its registry id ("qwen-code"),
+# so its scripts sat where archive checks and capabilities.hooks never
+# looked. The move lands them under the name everything else reads.
+RENAMED_HOOK_DIRS = (("qwen", "qwen-code"),)
+
+
+def _hook_dir_move_blocker(old: Path, harness: str, home: Path,
+                           registry: dict, patterns: list[str]) -> str | None:
+    """Why moving ``old`` would strand a hook nothing relinks, or None.
+
+    The run that moves the dir relinks the harness's hook links to it,
+    except where swe must leave them alone: an archived harness, and a
+    destination ``.linkignore`` protects. A settings file that names a
+    script by its hub path would point at nothing either. Each waits, so
+    every hook keeps running until the user clears the reason.
+    """
+    from swe.hooks.contracts import contract_for
+    from swe.init.hooks import hook_root
+    from swe.init.layout import archived_names, is_linkignored
+
+    if harness in archived_names(registry):
+        return f"{harness} is archived"
+    root, _why = hook_root(registry, harness, home)
+    if root is not None and root.is_dir():
+        for entry in sorted(root.iterdir()):
+            if not entry.is_symlink():
+                continue
+            try:
+                target = entry.parent / entry.readlink()
+            except OSError:
+                continue
+            # realpath on both sides: a link may spell the hub through the
+            # ~/.quiver compatibility link.
+            if Path(os.path.realpath(target)).is_relative_to(old.resolve()) \
+                    and is_linkignored(entry, home, patterns):
+                return f"~/{entry.relative_to(home)} is in .linkignore"
+    spellings = (f"{old}/", f".swe/hooks/{old.name}/",
+                 f".quiver/hooks/{old.name}/")
+    for rel in contract_for(registry, harness, home).settings:
+        settings = rel if rel.is_absolute() else home / rel
+        try:
+            text = settings.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if any(s in text for s in spellings):
+            return f"{settings.name} names hooks/{old.name}/ directly"
+    return None
+
+
+def move_renamed_hook_dirs(home: Path | None = None, *, apply: bool = True,
+                           registry: dict | None = None,
+                           patterns: list[str] | None = None) -> list[str]:
+    """Rename ``~/.swe/hooks/<old>/`` to its registry id, once.
+
+    A move happens only when the old path is a real directory and nothing
+    sits at the new one, so a second run is a no-op and a hub that already
+    has both is reported, never merged or overwritten. No link is left
+    behind (every walk over the hub would see the scripts twice); instead
+    the same ``swe init`` run relinks the harness's hooks to the moved
+    scripts (the old links show as ``relink``), and a move whose links
+    could not be relinked waits (see ``_hook_dir_move_blocker``). Returns
+    one note per change made, planned (``apply=False``) or deferred.
+    """
+    from swe.init.layout import load_linkignore, load_registry
+
+    home = home or Path.home()
+    hooks = paths.hooks_dir_for(home)
+    notes: list[str] = []
+    for old_name, new_name in RENAMED_HOOK_DIRS:
+        old, new = hooks / old_name, hooks / new_name
+        if old.is_symlink() or not old.is_dir():
+            continue
+        if os.path.lexists(new):
+            notes.append(f"hooks/{old_name} and hooks/{new_name} both exist, "
+                         "merge them by hand")
+            continue
+        if registry is None:
+            registry = load_registry(home)
+        if patterns is None:
+            patterns = load_linkignore(home)
+        blocker = _hook_dir_move_blocker(old, new_name, home, registry, patterns)
+        if blocker:
+            notes.append(f"hooks/{old_name} waits to move to hooks/{new_name}: "
+                         f"{blocker}")
+            continue
+        notes.append(f"move hooks/{old_name} to hooks/{new_name}")
+        if apply:
+            # Same directory, so a rename: nothing is copied or deleted.
+            old.rename(new)
+    return notes

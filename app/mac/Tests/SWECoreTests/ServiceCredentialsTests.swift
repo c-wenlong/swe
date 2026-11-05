@@ -89,16 +89,15 @@ final class ProbeTransport: HTTPTransport, @unchecked Sendable {
 
     @Test func readingMarksLastUsedAndReplaceKeepsTheAddedDate() async throws {
         let secrets = StubSecrets()
-        final class Clock: @unchecked Sendable { var date = Date(timeIntervalSince1970: 1_791_000_000) }
-        let clock = Clock()
+        let clock = Box(Date(timeIntervalSince1970: 1_791_000_000))
         let dir = try TempDir()
         defer { withExtendedLifetime(dir) {} }
         let credentials = ServiceCredentials(
             secrets: secrets, service: "svc",
             metadataURL: dir.url.appending(path: "config/services.json"),
-            now: { clock.date })
+            now: { clock.value })
         try await credentials.set("DEVIN_API_KEY", value: "one")
-        clock.date = Date(timeIntervalSince1970: 1_792_000_000)
+        clock.value = Date(timeIntervalSince1970: 1_792_000_000)
         _ = await credentials.value(for: "DEVIN_API_KEY")
 
         var status = await credentials.status(for: "DEVIN_API_KEY")
@@ -106,7 +105,7 @@ final class ProbeTransport: HTTPTransport, @unchecked Sendable {
         #expect(status.lastUsed == Date(timeIntervalSince1970: 1_792_000_000))
 
         // Replacing the value keeps the day it was first added.
-        clock.date = Date(timeIntervalSince1970: 1_793_000_000)
+        clock.value = Date(timeIntervalSince1970: 1_793_000_000)
         try await credentials.set("DEVIN_API_KEY", value: "two")
         status = await credentials.status(for: "DEVIN_API_KEY")
         #expect(status.added == Date(timeIntervalSince1970: 1_791_000_000))
@@ -393,17 +392,14 @@ final class ProbeTransport: HTTPTransport, @unchecked Sendable {
     }
 
     @Test func aProbeRefreshesTheKeysLastUsedDate() async throws {
-        final class Clock: @unchecked Sendable {
-            var date = Date(timeIntervalSince1970: 1_791_000_000)
-        }
-        let clock = Clock()
-        let (dir, _, model) = try make(now: { clock.date })
+        let clock = Box(Date(timeIntervalSince1970: 1_791_000_000))
+        let (dir, _, model) = try make(now: { clock.value })
         defer { withExtendedLifetime(dir) {} }
         let devin = try devin()
         await model.set("DEVIN_API_KEY", value: "tok")
         #expect(model.statuses["DEVIN_API_KEY"]?.lastUsed == nil)
 
-        clock.date = Date(timeIntervalSince1970: 1_792_000_000)
+        clock.value = Date(timeIntervalSince1970: 1_792_000_000)
         await model.probe(devin)
         #expect(model.statuses["DEVIN_API_KEY"]?.lastUsed
                     == Date(timeIntervalSince1970: 1_792_000_000))
@@ -458,10 +454,8 @@ final class ProbeTransport: HTTPTransport, @unchecked Sendable {
     }
 }
 
-/// SWE's service keys write through `SecItemKeychain` in-process;
-/// `KeychainCLI` no longer writes, so a value never sits on `security`'s
-/// argv where `ps` could read it.
-@Suite struct ServiceKeychainTests {
+/// Where the Services settings live now.
+@Suite struct ServicesSettingsSectionTests {
     /// Services moved under Integrations; an old saved section still
     /// lands there.
     @Test func servicesLiveUnderIntegrations() {

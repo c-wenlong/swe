@@ -184,14 +184,24 @@ def compact_transcript(
         error=transcript.error,
     )
     # Separator accounting can exceed the approximate per-message budget by a
-    # few characters. Deterministically trim the final selected message.
-    overflow = len(compacted.normalized_text) - max_chars
-    if overflow > 0 and compacted.messages:
+    # few characters. Deterministically trim the final selected message. A
+    # budget smaller than a role header ("assistant: " is 11 characters)
+    # cannot hold even an emptied message, so drop trailing messages until
+    # the text fits.
+    while compacted.messages:
+        overflow = len(compacted.normalized_text) - max_chars
+        if overflow <= 0:
+            break
         last = compacted.messages[-1]
-        shortened = last.text[: max(0, len(last.text) - overflow)]
-        compacted.messages[-1] = NormalizedMessage(
-            last.role, shortened, kind=last.kind, timestamp=last.timestamp
-        )
+        if overflow <= len(last.text):
+            compacted.messages[-1] = NormalizedMessage(
+                last.role,
+                last.text[: len(last.text) - overflow],
+                kind=last.kind,
+                timestamp=last.timestamp,
+            )
+            break
+        compacted.messages.pop()
     return compacted
 
 

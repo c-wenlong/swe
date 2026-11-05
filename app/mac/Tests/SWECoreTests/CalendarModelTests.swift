@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import SWECore
 
@@ -360,7 +361,7 @@ private struct TogglingActivity: ActivityProviding {
         held.held = true
         model.land(on: utc("2026-10-20T00:00:00Z"))
         async let load: () = model.load()
-        await held.started(calls + 1)
+        #expect(await held.started(calls + 1))
         #expect(model.blocks.count == 1)
         held.release()
         await load
@@ -669,134 +670,86 @@ private struct TogglingActivity: ActivityProviding {
 }
 
 
-/// A provider whose reads the test holds open until it lets them through.
-private final class HeldActivity: ActivityProviding, @unchecked Sendable {
-    var blocks: [ActivityBlock]
+/// A provider whose reads the test holds at a gate until it lets them
+/// through. A held read parks on `HoldGate`, so a test that never
+/// releases it fails on the gate's timeout rather than hanging.
+private final class HeldActivity: ActivityProviding, Sendable {
+    private struct State {
+        var blocks: [ActivityBlock]
+        var prefetchBlocks: [ActivityBlock]?
+        var holdPrefetch = false
+        var held = true
+        /// Held reads park here; `release` opens it, and holding again
+        /// after a release starts a fresh one.
+        var gate = HoldGate()
+        var calls = 0
+    }
+    private let state: Mutex<State>
+    private let reads = CountGate()
+    init(blocks: [ActivityBlock]) { state = Mutex(State(blocks: blocks)) }
+
     /// What non-forced (prefetch) reads answer; nil means the same blocks.
-    var prefetchBlocks: [ActivityBlock]?
+    var prefetchBlocks: [ActivityBlock]? {
+        get { state.withLock { $0.prefetchBlocks } }
+        set { state.withLock { $0.prefetchBlocks = newValue } }
+    }
     /// Hold non-forced reads too, so prefetches can be ordered after loads.
-    var holdPrefetch = false
-    private var state = State()
-    init(blocks: [ActivityBlock]) { self.blocks = blocks }
+    var holdPrefetch: Bool {
+        get { state.withLock { $0.holdPrefetch } }
+        set { state.withLock { $0.holdPrefetch = newValue } }
+    }
     var calls: Int { state.withLock { $0.calls } }
     var held: Bool {
         get { state.withLock { $0.held } }
-        set { state.withLock { $0.held = newValue } }
-    }
-    /// Let held reads through; calls after this never wait.
-    func release() {
-        let pending = state.withLock { s -> [CheckedContinuation<Void, Never>] in
-            s.held = false
-            defer { s.waiting.removeAll() }
-            return s.waiting
-        }
-        pending.forEach { $0.resume() }
-    }
-    /// Returns once `count` reads have started. load() paints a cached
-    /// range before it asks any provider, so this orders a check after
-    /// the paint instead of yielding and hoping the load ran first.
-    /// Cancellation (a test's time limit) resumes the wait too, so a read
-    /// that never starts fails the test instead of hanging the suite.
-    func started(_ count: Int = 1) async {
-        let id = UUID()
-        await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                let now = state.withLock { s -> Bool in
-                    if s.calls >= count || Task.isCancelled { return true }
-                    s.arrivals.append((id, count, continuation))
-                    return false
-                }
-                if now { continuation.resume() }
-            }
-        } onCancel: { [state] in
+        set {
             state.withLock { s in
-                s.arrivals.firstIndex { $0.id == id }.map { s.arrivals.remove(at: $0) }
-            }?.continuation.resume()
-        }
-    }
-    func activityBlocks(in range: DateInterval, gap: TimeInterval,
-                        force: Bool) async throws -> [ActivityBlock] {
-        let arrived = state.withLock { s -> [CheckedContinuation<Void, Never>] in
-            s.calls += 1
-            let ready = s.arrivals.filter { s.calls >= $0.count }
-            s.arrivals.removeAll { s.calls >= $0.count }
-            return ready.map(\.continuation)
-        }
-        arrived.forEach { $0.resume() }
-        let waitFirst = !force && holdPrefetch ? true : state.withLock { $0.held }
-        if waitFirst {
-            await withCheckedContinuation { continuation in
-                let wait = state.withLock { s -> Bool in
-                    if s.held || (!force && holdPrefetch) {
-                        s.waiting.append(continuation)
-                        return true
-                    }
-                    return false
-                }
-                if !wait { continuation.resume() }
+                if newValue && !s.held { s.gate = HoldGate() }
+                s.held = newValue
             }
         }
-        let source = !force ? (prefetchBlocks ?? blocks) : blocks
-        return source.filter { $0.end >= range.start && $0.start < range.end }
     }
-    private final class State: @unchecked Sendable {
-        var calls = 0
-        var held = true
-        var waiting: [CheckedContinuation<Void, Never>] = []
-        var arrivals: [(id: UUID, count: Int,
-                        continuation: CheckedContinuation<Void, Never>)] = []
-        private let lock = NSLock()
-        func withLock<T>(_ body: (State) -> T) -> T {
-            lock.lock()
-            defer { lock.unlock() }
-            return body(self)
+    /// Let held reads through; reads after this wait only if held again
+    /// (or, with `holdPrefetch`, until the next release).
+    func release() {
+        let gate = state.withLock { s -> HoldGate in
+            s.held = false
+            return s.gate
         }
-    }
-}
-
-/// Returns once the model's prefetches and snapshot saves have finished,
-/// or once the test is cancelled (its time limit), so a background task
-/// that never ends fails the test instead of hanging the suite.
-@MainActor
-private func settled(_ model: CalendarModel) async {
-    let gate = OnceGate()
-    await withTaskCancellationHandler {
-        await withCheckedContinuation { continuation in
-            gate.arm(continuation)
-            Task { @MainActor in
-                await model.backgroundWork()
-                gate.open()
-            }
-        }
-    } onCancel: {
         gate.open()
     }
+    /// True once `count` reads have started, false after `gateTimeout`.
+    /// load() paints a cached range before it asks any provider, so this
+    /// orders a check after the paint instead of yielding and hoping the
+    /// load ran first.
+    func started(_ count: Int = 1) async -> Bool { await reads.reach(count) }
+
+    func activityBlocks(in range: DateInterval, gap: TimeInterval,
+                        force: Bool) async throws -> [ActivityBlock] {
+        let (gate, source) = state.withLock { s -> (HoldGate?, [ActivityBlock]) in
+            s.calls += 1
+            let hold = s.held || (!force && s.holdPrefetch)
+            return (hold ? s.gate : nil, !force ? (s.prefetchBlocks ?? s.blocks) : s.blocks)
+        }
+        await reads.bump()
+        try await gate?.pass()
+        return source.filter { $0.end >= range.start && $0.start < range.end }
+    }
 }
 
-/// A continuation resumed exactly once, by whichever of `open()` and
-/// `arm(_:)` comes second.
-private final class OnceGate: @unchecked Sendable {
-    private var continuation: CheckedContinuation<Void, Never>?
-    private var opened = false
-    private let lock = NSLock()
-    func arm(_ continuation: CheckedContinuation<Void, Never>) {
-        lock.lock()
-        if opened {
-            lock.unlock()
-            continuation.resume()
-            return
-        }
-        self.continuation = continuation
-        lock.unlock()
+/// Waits until the model's prefetches and snapshot saves have finished,
+/// for at most `gateTimeout`. The work runs in a task of its own, since
+/// awaiting a background task's value ignores cancellation: a timeout
+/// that joined it would hang along with it.
+@MainActor
+private func settled(_ model: CalendarModel,
+                     sourceLocation: SourceLocation = #_sourceLocation) async {
+    let done = CountGate()
+    Task { @MainActor in
+        await model.backgroundWork()
+        await done.bump()
     }
-    func open() {
-        lock.lock()
-        opened = true
-        let waiting = continuation
-        continuation = nil
-        lock.unlock()
-        waiting?.resume()
-    }
+    #expect(await done.reach(1), "the model's background work never finished",
+            sourceLocation: sourceLocation)
 }
 
 /// A snapshot store the test fills and reads back.
@@ -844,7 +797,7 @@ private final class SnapSpy: SnapshotStoring, @unchecked Sendable {
                                   now: { utc("2026-10-14T12:00:00Z") },
                                   calendar: calendar, restored: snap)
         async let load: () = model.load()
-        await held.started()
+        #expect(await held.started())
         // The cached range's blocks are on screen while the provider's
         // read is still suspended.
         #expect(model.blocks.count == 1)
@@ -893,7 +846,7 @@ private final class SnapSpy: SnapshotStoring, @unchecked Sendable {
         held.held = true
         model.noteScanCompleted()
         async let load: () = model.load(force: true)
-        await held.started(calls + 1)
+        #expect(await held.started(calls + 1))
         #expect(model.blocks.count == 1)
         held.release()
         await load
@@ -946,7 +899,7 @@ private final class SnapSpy: SnapshotStoring, @unchecked Sendable {
         // One yield does not promise the async-let child has reached the
         // main actor yet; under load it often has not. Wait for the held
         // read instead: the paint comes first, and the read never answers.
-        await held.started()
+        #expect(await held.started())
         #expect(cached.blocks.count == 1)
         held.release()
         await load
@@ -1035,9 +988,8 @@ extension CalendarCacheTests {
     }
 
     @Test func aSnapshotFromAnOlderVersionIsDiscarded() throws {
-        let temp = FileManager.default.temporaryDirectory
-            .appending(path: "calendar-snap-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: temp) }
+        let dir = try TempDir()
+        let temp = dir.url
         // The version-1 shape: per-session blocks, no project/sessions.
         let old = """
             {"version":1,"savedAt":778000000,
@@ -1047,7 +999,6 @@ extension CalendarCacheTests {
                 "responses":2,"cwd":"/w"}]}}]}
             """
         let url = temp.appending(path: "app-calendar.json")
-        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
         try old.write(to: url, atomically: true, encoding: .utf8)
         #expect(SnapshotFile<CalendarSnapshot>(url: url).load() == nil)
         #expect(CalendarSnapshot.currentVersion == 2)
@@ -1076,58 +1027,34 @@ private actor RecordingActivity: ActivityProviding {
     }
 }
 
-/// Answers its first read; every later read waits for `release()` and
-/// then fails, so a test can hold a prefetch and fail it later.
-private final class LaterReadsFail: ActivityProviding, @unchecked Sendable {
+/// Answers its first read; every later read waits at `gate` and then
+/// fails with an error naming the read, so a test can hold a prefetch,
+/// fail it later, and tell which read a load's error came from.
+private final class LaterReadsFail: ActivityProviding, Sendable {
     struct Failure: LocalizedError {
-        var errorDescription: String? { "prefetch failed" }
+        let read: Int
+        var errorDescription: String? { "read \(read) failed" }
     }
-    private let lock = NSLock()
-    private var calls = 0
-    private var open = false
-    private var held: [CheckedContinuation<Void, Never>] = []
-    private var arrivals: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
+    let gate = HoldGate()
+    private let reads = CountGate()
+    private let asked = Mutex<[DateInterval]>([])
 
-    func release() {
-        let waiting = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
-            open = true
-            defer { held = [] }
-            return held
-        }
-        waiting.forEach { $0.resume() }
-    }
+    /// The range each read asked for, in order.
+    var ranges: [DateInterval] { asked.withLock { $0 } }
 
-    /// Returns once `count` reads have started.
-    func started(_ count: Int) async {
-        await withCheckedContinuation { continuation in
-            let now = lock.withLock { () -> Bool in
-                if calls >= count { return true }
-                arrivals.append((count, continuation))
-                return false
-            }
-            if now { continuation.resume() }
-        }
-    }
+    /// True once `count` reads have started, false after `gateTimeout`.
+    func started(_ count: Int) async -> Bool { await reads.reach(count) }
 
     func activityBlocks(in range: DateInterval, gap: TimeInterval,
                         force: Bool) async throws -> [ActivityBlock] {
-        let (n, ready) = lock.withLock { () -> (Int, [CheckedContinuation<Void, Never>]) in
-            calls += 1
-            let ready = arrivals.filter { calls >= $0.count }.map(\.continuation)
-            arrivals.removeAll { calls >= $0.count }
-            return (calls, ready)
+        let n = asked.withLock { asked -> Int in
+            asked.append(range)
+            return asked.count
         }
-        ready.forEach { $0.resume() }
+        await reads.bump()
         if n == 1 { return [] }
-        await withCheckedContinuation { continuation in
-            let wait = lock.withLock { () -> Bool in
-                if open { return false }
-                held.append(continuation)
-                return true
-            }
-            if !wait { continuation.resume() }
-        }
-        throw Failure()
+        try await gate.pass()
+        throw Failure(read: n)
     }
 }
 
@@ -1235,7 +1162,7 @@ private final class LaterReadsFail: ActivityProviding, @unchecked Sendable {
     }
 
     @Test(.timeLimit(.minutes(1)))
-    func aFailedPrefetchTheLoadWaitedForSetsTheError() async {
+    func aFailedPrefetchTheLoadWaitedForSetsTheError() async throws {
         let provider = LaterReadsFail()
         let model = CalendarModel(providers: [provider], defaults: freshDefaults(),
                                   now: { utc("2026-10-14T12:00:00Z") }, calendar: calendar)
@@ -1243,14 +1170,25 @@ private final class LaterReadsFail: ActivityProviding, @unchecked Sendable {
         await model.load()
         #expect(model.loadError == nil)
         // Both neighbour prefetches (Oct 12, Oct 16) are reading, held.
-        await provider.started(3)
+        try #require(await provider.started(3))
+        // Read 1 was the load's own; the prefetch reading Oct 16 is 2 or 3.
+        let oct16 = try #require(provider.ranges[1..<3].firstIndex {
+            $0.contains(utc("2026-10-16T12:00:00Z"))
+        }) + 1
         // Oct 14 to Oct 16: only Oct 16 is new, and a prefetch already
         // reads it, so the load waits for that read instead of its own.
         model.land(on: utc("2026-10-15T00:00:00Z"))
-        async let load: () = model.load()
-        provider.release()
-        await load
-        #expect(model.loadError == "prefetch failed")
+        let load = Task { await model.load() }
+        // Main-actor jobs run in the order they were queued, so once this
+        // one has run the load has taken its first step: it has seen which
+        // days a running read covers and is waiting on it (or, if it no
+        // longer joins, on a read of its own, held at the same gate).
+        await Task { @MainActor in }.value
+        provider.gate.open()
+        await load.value
+        // The error is the Oct 16 prefetch's own: a load that read Oct 16
+        // again would report its own read, the fourth.
+        #expect(model.loadError == "read \(oct16) failed")
     }
 
     @Test(.timeLimit(.minutes(1)))
