@@ -352,12 +352,15 @@ struct McpAddServerSheet: View {
 }
 
 /// Stores an add's secrets, then runs the add. When the add fails, the
-/// secrets it stored for the first time are removed again, but only while
-/// the hub's entry for the server is what it was before: swe saves the hub
-/// before the harness files, so a hub that changed now refers to those
-/// `${NAME}`s and must keep their values. A hub that can't be read, before
-/// or after, keeps them too. A value that replaced an older one stays
-/// replaced; swe has no way to read the old value back.
+/// secrets it stored for the first time come back out, except any the
+/// hub's saved entry still refers to: swe saves the hub before the harness
+/// files, so a failure after that leaves a hub entry that needs them. The
+/// hub's row can't show that directly (a harness-defined server's row is
+/// built from the first harness's copy), but its `secretsMissing` is read
+/// from the hub's own entry: whatever this removal left missing there is
+/// put back. A hub that can't be read afterwards gets every value back. A
+/// value that replaced an older one stays replaced; swe has no way to read
+/// the old value back.
 @MainActor
 struct McpAddCommit {
     /// Stores one value; answers whether it replaced one (nil: unknown).
@@ -368,8 +371,6 @@ struct McpAddCommit {
     var removeSecret: (_ name: String) async -> Void
 
     func run(values: [(String, String)]) async throws {
-        // No values, nothing to take back: skip the extra hub read.
-        let before: McpServer?? = values.isEmpty ? .none : await snapshot()
         var created: [String] = []
         do {
             for (secret, value) in values {
@@ -377,17 +378,23 @@ struct McpAddCommit {
             }
             try await add()
         } catch {
-            if !created.isEmpty, case .some(let was) = before,
-               case .some(let now) = await snapshot(), now == was {
-                for secret in created { await removeSecret(secret) }
-            }
+            await takeBack(created, values: values)
             throw error
         }
     }
 
-    /// `.some(entry)` when the hub could be read, `.none` when it couldn't.
-    private func snapshot() async -> McpServer?? {
-        do { return .some(try await hubEntry()) } catch { return .none }
+    private func takeBack(_ created: [String], values: [(String, String)]) async {
+        guard !created.isEmpty else { return }
+        for secret in created { await removeSecret(secret) }
+        let needed: Set<String>
+        do {
+            needed = Set(try await hubEntry()?.secretsMissing ?? [])
+        } catch {
+            needed = Set(created)
+        }
+        for (secret, value) in values where created.contains(secret) && needed.contains(secret) {
+            _ = try? await setSecret(secret, value)
+        }
     }
 }
 

@@ -4,24 +4,27 @@ import Testing
 @testable import SWEApp
 
 /// A failed MCP add must not leave the secrets it stored behind, unless
-/// the hub already refers to them.
+/// the hub's saved entry refers to them.
 @Suite @MainActor struct McpAddCommitTests {
     private struct Refused: Error {}
 
-    /// A fake hub and secrets store that records every call.
+    /// A fake hub and secrets store that records every call. The hub
+    /// entry is the `${NAME}`s it refers to; the row the fake lists, like
+    /// swe's, reports the referred names with no value as missing.
     @MainActor final class Fake {
         var store: [String: String]
-        var hub: McpServer?
+        /// nil: the hub has no entry for the server.
+        var hubRefs: Set<String>?
         var hubReadable = true
-        /// Thrown by the add after `hubAfterAdd` lands, when set.
+        /// What the add writes to the hub before failing or succeeding.
+        var hubAfterAdd: Set<String>??
         var addError: Error?
-        var hubAfterAdd: McpServer??
         var failOnSet: String?
         var calls: [String] = []
 
-        init(store: [String: String] = [:], hub: McpServer? = nil) {
+        init(store: [String: String] = [:], hubRefs: Set<String>? = nil) {
             self.store = store
-            self.hub = hub
+            self.hubRefs = hubRefs
         }
 
         var commit: McpAddCommit {
@@ -35,13 +38,16 @@ import Testing
                 },
                 add: {
                     self.calls.append("add")
-                    if case .some(let entry) = self.hubAfterAdd { self.hub = entry }
+                    if case .some(let refs) = self.hubAfterAdd { self.hubRefs = refs }
                     if let error = self.addError { throw error }
                 },
                 hubEntry: {
                     self.calls.append("list")
                     guard self.hubReadable else { throw Refused() }
-                    return self.hub
+                    guard let refs = self.hubRefs else { return nil }
+                    return McpServer(name: "srv", command: "npx", harnesses: ["claude-code"],
+                                     secretsMissing: refs.filter { self.store[$0] == nil }.sorted(),
+                                     inHub: true)
                 },
                 removeSecret: { name in
                     self.calls.append("remove \(name)")
@@ -50,18 +56,15 @@ import Testing
         }
     }
 
-    private static func server(_ name: String, harnesses: [String] = []) -> McpServer {
-        McpServer(name: name, command: "npx", harnesses: harnesses, inHub: true)
-    }
-
     private let values = [("SRV_TOKEN", "t"), ("SRV_KEY", "k")]
+    private let both: Set<String> = ["SRV_TOKEN", "SRV_KEY"]
 
-    @Test func aSuccessfulAddKeepsEverySecret() async throws {
+    @Test func aSuccessfulAddKeepsEverySecretAndNeverListsTheHub() async throws {
         let fake = Fake()
-        fake.hubAfterAdd = .some(Self.server("srv"))
+        fake.hubAfterAdd = .some(both)
         try await fake.commit.run(values: values)
         #expect(fake.store == ["SRV_TOKEN": "t", "SRV_KEY": "k"])
-        #expect(!fake.calls.contains { $0.hasPrefix("remove") })
+        #expect(fake.calls == ["set SRV_TOKEN", "set SRV_KEY", "add"])
     }
 
     @Test func aRefusedNewAddRemovesTheSecretsItCreated() async {
@@ -83,40 +86,43 @@ import Testing
     }
 
     /// Replace on: the hub already had the server, and swe refused before
-    /// writing anything. The entry is unchanged, so the new secrets go.
-    @Test func aRefusedReplaceWithAnUnchangedHubStillCleansUp() async {
-        let fake = Fake(hub: Self.server("srv", harnesses: ["claude-code"]))
+    /// writing anything. The old entry doesn't use the new names, so they
+    /// go. (The old rule kept them whenever the hub held the server.)
+    @Test func aRefusedReplaceCleansUpWhatTheOldEntryDoesNotUse() async {
+        let fake = Fake(hubRefs: [])
         fake.addError = Refused()
         await #expect(throws: Refused.self) { try await fake.commit.run(values: values) }
         #expect(fake.store.isEmpty)
     }
 
     /// swe saved the hub, then a harness file failed: the hub now refers
-    /// to the secrets, so they stay.
-    @Test func aFailureAfterTheHubChangedKeepsTheSecrets() async {
-        let fake = Fake()
-        fake.hubAfterAdd = .some(Self.server("srv"))
+    /// to the secrets, so they end up stored, even though the listed row
+    /// (built from the harness's old copy) looks the same as before.
+    @Test func aFailureAfterTheHubWasSavedKeepsWhatItRefersTo() async {
+        let fake = Fake(hubRefs: [])
+        fake.hubAfterAdd = .some(both)
         fake.addError = Refused()
         await #expect(throws: Refused.self) { try await fake.commit.run(values: values) }
         #expect(fake.store == ["SRV_TOKEN": "t", "SRV_KEY": "k"])
     }
 
-    @Test func aReplacedHubEntryKeepsTheSecrets() async {
-        let fake = Fake(hub: Self.server("srv"))
-        fake.hubAfterAdd = .some(McpServer(name: "srv", command: "uvx", harnesses: [], inHub: true))
+    /// Only the names the saved entry uses come back.
+    @Test func aHubThatUsesSomeNamesGetsOnlyThose() async {
+        let fake = Fake()
+        fake.hubAfterAdd = .some(["SRV_TOKEN"])
         fake.addError = Refused()
         await #expect(throws: Refused.self) { try await fake.commit.run(values: values) }
-        #expect(fake.store.count == 2)
+        #expect(fake.store == ["SRV_TOKEN": "t"])
     }
 
-    /// A hub that can't be read can't show the entry is unchanged, so the
-    /// secrets stay rather than risk breaking a server that needs them.
+    /// A hub that can't be read can't show a name is unused, so every
+    /// value goes back rather than risk breaking a server that needs it.
     @Test func anUnreadableHubKeepsTheSecrets() async {
         let fake = Fake()
         fake.hubReadable = false
         fake.addError = Refused()
         await #expect(throws: Refused.self) { try await fake.commit.run(values: values) }
-        #expect(fake.store.count == 2)
+        #expect(fake.store == ["SRV_TOKEN": "t", "SRV_KEY": "k"])
     }
 
     /// A store that refuses the second value: the first, already stored,
@@ -140,11 +146,6 @@ import Testing
             add: commit.add, hubEntry: commit.hubEntry, removeSecret: commit.removeSecret)
         await #expect(throws: Refused.self) { try await unknown.run(values: values) }
         #expect(fake.store.count == 2)
-    }
-
-    @Test func noValuesMeansNoExtraHubRead() async throws {
-        let fake = Fake()
-        try await fake.commit.run(values: [])
-        #expect(fake.calls == ["add"])
+        #expect(!fake.calls.contains { $0.hasPrefix("remove") })
     }
 }
