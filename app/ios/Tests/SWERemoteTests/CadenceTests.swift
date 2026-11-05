@@ -20,10 +20,14 @@ final class CadenceTests: XCTestCase {
         let queue = Queue()
         var delivered: [[SSHShell.Event]] = []
         let batcher = ConsoleEventBatcher(schedule: queue.add) { delivered.append($0) }
-        // 500 chunks from NIO's thread before the main queue gets round.
-        DispatchQueue.concurrentPerform(iterations: 1) { _ in
+        // 500 chunks from another thread, as NIO's, before the main queue
+        // gets round. (`concurrentPerform` with one iteration ran inline.)
+        let pushed = DispatchSemaphore(value: 0)
+        Thread {
             for i in 0..<500 { batcher.push(.output([UInt8(i % 256)])) }
-        }
+            pushed.signal()
+        }.start()
+        pushed.wait()
         XCTAssertEqual(queue.blocks.count, 1, "one main-queue hop for the burst, not one per chunk")
         queue.runAll()
         XCTAssertEqual(delivered.count, 1)
