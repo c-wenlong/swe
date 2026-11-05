@@ -16,10 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (an existing one is tightened) and its files 0600.
 
 - **A pairing poll's secret no longer travels in the URL.** The web
-  app polled `/v1/pair/request/<id>?secret=…`, so the secret that
-  collects a new device's credential could land in proxy and access
-  logs. It now goes in an `X-Pair-Secret` header; the hub still reads
-  `?secret=` for iPhone builds already out.
+  app and the iPhone app polled `/v1/pair/request/<id>?secret=…`, so
+  the secret that collects a new device's credential could land in
+  proxy and access logs. Both now send it in an `X-Pair-Secret` header;
+  the hub still reads `?secret=` for iPhone builds already out.
+
+- **An Open in session prompt no longer carries a stranger's PR text.**
+  Anyone can open a pull request on a public repo, and its title, body
+  and failing check names (which a fork's own workflow can name) went
+  word for word into the first prompt of the agent reviewing it. The
+  brief now follows the resolve prompt's rule: it quotes the title and
+  body line by line behind a note that they are untrusted data, only
+  when the author's `author_association` is `OWNER`, `MEMBER` or
+  `COLLABORATOR`, and otherwise says in one line that they were left
+  out. Failing check names are always quoted, and the web's Open in
+  session sheet no longer puts the title in the prompt it prefills.
+  The hub's PR detail gains `association`.
 
 - **A resolve prompt no longer carries strangers' comments.** Anyone can
   comment on a public issue, and every comment went word for word into
@@ -180,6 +192,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Safe Storage item.
 
 ### Changed
+
+- **A stored Linear task's refresh no longer downloads its
+  description.** The hub asked Linear for each issue's full body on
+  every task read and never used it. The unused Notion page-body
+  renderer, built for a resolve route that never shipped, is gone
+  too.
 
 - **Cursor's limit meters read "Cursor models" and "Other models", and
   reset times show two units.** The rows the Cursor accounts and harness

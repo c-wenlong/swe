@@ -58,8 +58,6 @@ An example per layer, from the harness domain:
 
 The remaining packages sit outside that convention:
 
-- `history/`: a compatibility shim that re-exports `Session` and
-  `get_all_sessions`; new code imports `swe.sessions`.
 - `sync/` (`swe sync`): `commands.py` is the controller (argv, the printed
   report, `--json` through `json_output.emit`) and `repo.py` the service
   (git plumbing for the `~/.swe` hub repo: commit, trial `merge-tree`
@@ -92,7 +90,6 @@ The same packages by responsibility, with the ownership rules that go with them 
 | `reports/` | daily/weekly session reports: transcripts, triage, batching, model runners, follow-up ledger |
 | `providers/` | LLM provider metadata and API key file lookup |
 | `setup/` | interactive onboarding wizard (the one logic module allowed to print) |
-| `history/` | backward-compatible re-exports; prefer `swe.sessions` |
 | `ledger/` | the web app's usage ledger: a Python port of the Mac app's `SWECore/Ledger` (log parsers, dedup store, LiteLLM pricing, Overview figures). Keep its rules in step with the Swift ones |
 | `webapp/` | the web app the hub serves at `/` (`static/`; old `/app/` links redirect there) and its page data at `/v1/app/*` (`api.py`, `pages/`); see [web-app.md](web-app.md) |
 | `remote/` | `swe remote`: the hub (`hub.py`, every `/v1/*` route), the satellite agent, pairing, devices and the session tailers; see [remote-control.md](remote-control.md) |

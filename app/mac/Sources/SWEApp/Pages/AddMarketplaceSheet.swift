@@ -61,12 +61,14 @@ struct AddMarketplaceSheet: View {
             FormField("Harnesses") {
                 HStack(spacing: 14) {
                     ForEach(harnesses, id: \.self) { harness in
-                        Toggle(HarnessMark(harness).name,
-                               isOn: Binding(get: { chosen.contains(harness) },
+                        // The harness's logo, its name only as the fallback.
+                        Toggle(isOn: Binding(get: { chosen.contains(harness) },
                                              set: { on in
                                                  if on { chosen.insert(harness) }
                                                  else { chosen.remove(harness) }
-                                             }))
+                                             })) {
+                            HarnessMarkView(harness: harness)
+                        }
                             .toggleStyle(.checkbox)
                             .disabled(lookingUp)
                     }

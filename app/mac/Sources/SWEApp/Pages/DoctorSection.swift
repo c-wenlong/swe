@@ -441,11 +441,17 @@ private struct FindingRow: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Launch an agent on this Mac. It gets this prompt:")
                 .font(Theme.caption).foregroundStyle(Theme.textSecondary)
-            Text(remedy.prompt ?? "")
-                .font(Self.mono).foregroundStyle(Theme.textSecondary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxHeight: 90)
+            // A long prompt scrolls inside the box instead of being cut
+            // off at its height.
+            ScrollView {
+                Text(remedy.prompt ?? "")
+                    .font(Self.mono).foregroundStyle(Theme.textSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 90)
+            .fixedSize(horizontal: false, vertical: true)
             if agentLoading {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)

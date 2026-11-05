@@ -646,10 +646,8 @@ property's group (To-do → `open`, In progress → `in_progress`,
 Complete → `closed`), a select option's words ("Done", "Shipped",
 "Won't do" → `closed`; "In progress", "Review" → `in_progress`;
 anything else → `open`), a ticked checkbox → `closed`. An archived page
-reads `closed`. A stored page refreshes through `GET /v1/pages/<id>`;
-`NotionTasks.detail` adds the page body, read with `GET
-/v1/blocks/<id>/children` (nested blocks to three levels, at most 12
-calls) and rendered to markdown for a resolve prompt.
+reads `closed`. A stored page refreshes through `GET /v1/pages/<id>`
+alone; nothing reads a page's body.
 
 The answer's `notion` block reads like `linear`'s: `disabled`, `ok`
 (`login` is the user's name), `auth-required` (the token won't resolve
@@ -1162,7 +1160,14 @@ plus `body`, per-check `check_runs`, `reviews`, `review_requests`,
 merge state and additions/deletions, and two fields a client shows
 before opening: `worktree` (where an open puts the checkout) and
 `suggested_prompt` (the review brief `github/pulls.build_prompt`
-writes). `400 bad_repo` for a malformed owner/repo, `422 bad_pr` for a
+writes), plus `association`, the author's `author_association` from
+one REST read (`gh pr view` has no such field). Anyone can open a PR
+on a public repo, and a fork's workflow names its own checks, so the
+brief follows the resolve prompt's rule: it quotes the title and body
+line by line (`> `) behind a note that they are untrusted data only
+when `association` is `OWNER`, `MEMBER` or `COLLABORATOR`, and
+otherwise says in one line that they were left out; failing check
+names are always quoted. `400 bad_repo` for a malformed owner/repo, `422 bad_pr` for a
 non-number, `404 not_pinned` for a repo the hub doesn't pin; a `gh`
 failure answers `200 {status, pr: null, error}` — the row's `status`
 carries `gh`'s word (`not-found`, `upstream-error`), so the client
