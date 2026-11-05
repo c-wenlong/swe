@@ -275,3 +275,41 @@ def seal_secrets_dir(home: Path | None = None, *, apply: bool = True) -> list[st
         os.chmod(secrets_dir, 0o700)
         seal.write_text(paths.SECRETS_GITIGNORE_BODY, encoding="utf-8")
     return ["seal secrets/ with its own .gitignore"]
+
+
+# Hub hook dirs whose harness key changed: (old name, registry id). A hub
+# dir is named by the key the contract table uses, and Qwen Code's row was
+# keyed by its command ("qwen") rather than its registry id ("qwen-code"),
+# so its scripts sat where archive checks and capabilities.hooks never
+# looked. The move lands them under the name everything else reads.
+RENAMED_HOOK_DIRS = (("qwen", "qwen-code"),)
+
+
+def move_renamed_hook_dirs(home: Path | None = None, *, apply: bool = True) -> list[str]:
+    """Rename ``~/.swe/hooks/<old>/`` to its registry id, once.
+
+    A move happens only when the old path is a real directory and nothing
+    sits at the new one, so a second run is a no-op and a hub that already
+    has both is reported, never merged or overwritten. No link is left
+    behind: an old name is no harness any more, and the same ``swe init``
+    run relinks the harness's hooks to the moved scripts (the old links
+    show as ``relink``). Returns one note per change made (or, with
+    ``apply=False``, planned).
+    """
+    import os
+
+    hooks = paths.hooks_dir_for(home)
+    notes: list[str] = []
+    for old_name, new_name in RENAMED_HOOK_DIRS:
+        old, new = hooks / old_name, hooks / new_name
+        if old.is_symlink() or not old.is_dir():
+            continue
+        if os.path.lexists(new):
+            notes.append(f"hooks/{old_name} and hooks/{new_name} both exist, "
+                         "merge them by hand")
+            continue
+        notes.append(f"move hooks/{old_name} to hooks/{new_name}")
+        if apply:
+            # Same directory, so a rename: nothing is copied or deleted.
+            old.rename(new)
+    return notes

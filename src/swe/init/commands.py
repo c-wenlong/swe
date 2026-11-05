@@ -30,7 +30,13 @@ from swe.init.manage import (
     new_harnesses,
     register,
 )
-from swe.init.migrate import apply_migration, move_secrets, plan_migration, write_gitignore
+from swe.init.migrate import (
+    apply_migration,
+    move_renamed_hook_dirs,
+    move_secrets,
+    plan_migration,
+    write_gitignore,
+)
 from swe.init.models import LinkRow
 from swe.init.layout import (
     LinkIgnoreError,
@@ -393,6 +399,9 @@ def run_init(home: Path, *, check_only: bool = False, force: bool = False,
     if not check_only:
         write_gitignore(home)
     scaffold.extend(move_secrets(home, apply=not check_only))
+    # Before the shared-hook deploy and plan_hooks below, so this same run
+    # regenerates the moved wrappers and relinks the moved scripts.
+    scaffold.extend(move_renamed_hook_dirs(home, apply=not check_only))
 
     instructions, skills = plan(home, patterns)
     # An uninstalled harness the registry does not know is noise: swe can

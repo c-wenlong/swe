@@ -9,6 +9,7 @@ in the versioned half, or a second run undoing the first.
 
 import io
 import json
+import os
 import re
 import tempfile
 import unittest
@@ -24,6 +25,7 @@ from swe.init.migrate import (
     DROP,
     apply_migration,
     plan_migration,
+    move_renamed_hook_dirs,
     move_secrets,
     write_gitignore,
 )
@@ -678,6 +680,81 @@ class CmdInitMigrationTest(unittest.TestCase):
                           re.sub(r"\x1b\[[0-9;]*m", "", out))
             self.assertFalse(target.exists(), "seed wrote through a symlink")
             self.assertTrue(paths.agents_file_for(home).is_symlink())
+
+
+class RenamedHookDirTest(unittest.TestCase):
+    """``~/.swe/hooks/qwen`` moves to ``hooks/qwen-code`` once, safely."""
+
+    def _hub(self, tmp: str) -> tuple[Path, Path]:
+        home = Path(tmp)
+        hooks = paths.hooks_dir_for(home)
+        (hooks / "qwen").mkdir(parents=True)
+        (hooks / "qwen" / "gate.py").write_text("print('{}')\n")
+        (hooks / "qwen" / ".disabled").write_text("old.py\n")
+        return home, hooks
+
+    def test_moves_the_dir_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hooks = self._hub(tmp)
+            self.assertEqual(move_renamed_hook_dirs(home),
+                             ["move hooks/qwen to hooks/qwen-code"])
+            self.assertFalse(os.path.lexists(hooks / "qwen"))
+            self.assertEqual((hooks / "qwen-code" / "gate.py").read_text(),
+                             "print('{}')\n")
+            self.assertEqual((hooks / "qwen-code" / ".disabled").read_text(),
+                             "old.py\n")
+            self.assertEqual(move_renamed_hook_dirs(home), [])
+
+    def test_plan_only_moves_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hooks = self._hub(tmp)
+            self.assertEqual(move_renamed_hook_dirs(home, apply=False),
+                             ["move hooks/qwen to hooks/qwen-code"])
+            self.assertTrue((hooks / "qwen" / "gate.py").is_file())
+            self.assertFalse(os.path.lexists(hooks / "qwen-code"))
+
+    def test_an_existing_qwen_code_dir_is_left_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hooks = self._hub(tmp)
+            (hooks / "qwen-code").mkdir()
+            (hooks / "qwen-code" / "gate.py").write_text("mine\n")
+            notes = move_renamed_hook_dirs(home)
+            self.assertEqual(len(notes), 1)
+            self.assertIn("merge them by hand", notes[0])
+            self.assertEqual((hooks / "qwen-code" / "gate.py").read_text(), "mine\n")
+            self.assertEqual((hooks / "qwen" / "gate.py").read_text(),
+                             "print('{}')\n")
+
+    def test_a_linked_old_dir_is_not_moved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            hooks = paths.hooks_dir_for(home)
+            hooks.mkdir(parents=True)
+            elsewhere = home / "elsewhere"
+            elsewhere.mkdir()
+            (hooks / "qwen").symlink_to(elsewhere)
+            self.assertEqual(move_renamed_hook_dirs(home), [])
+            self.assertTrue((hooks / "qwen").is_symlink())
+            self.assertFalse(os.path.lexists(hooks / "qwen-code"))
+
+    def test_init_moves_the_dir_and_relinks_the_harness(self):
+        from swe.init.commands import run_init
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hooks = self._hub(tmp)
+            (home / ".qwen" / "hooks").mkdir(parents=True)
+            old_link = home / ".qwen" / "hooks" / "gate.py"
+            old_link.symlink_to(hooks / "qwen" / "gate.py")
+            with mock.patch("shutil.which", return_value=None):
+                check = run_init(home, check_only=True, quiet=True, ask=False)
+            self.assertIn("move hooks/qwen to hooks/qwen-code", check.scaffold)
+            self.assertTrue((hooks / "qwen").is_dir())
+            with mock.patch("shutil.which", return_value=None):
+                run = run_init(home, quiet=True, ask=False, yes=True)
+            self.assertIn("move hooks/qwen to hooks/qwen-code", run.scaffold)
+            self.assertEqual(old_link.resolve(),
+                             (hooks / "qwen-code" / "gate.py").resolve())
+            self.assertEqual(old_link.read_text(), "print('{}')\n")
 
 
 if __name__ == "__main__":
