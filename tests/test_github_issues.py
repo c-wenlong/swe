@@ -201,6 +201,7 @@ class TestIssueWorktree(unittest.TestCase):
         real_lock = manage._mirror_lock
         cloning = threading.Event()
         second_waiting = threading.Event()
+        contended = []
         results = {}
 
         class SpyLock:
@@ -210,11 +211,21 @@ class TestIssueWorktree(unittest.TestCase):
             def __enter__(self):
                 if cloning.is_set() and not second_waiting.is_set() \
                         and threading.current_thread() is second:
+                    # Signal only once the lock is proven held by the
+                    # first resolve. A lock that lets the second in at
+                    # once never signals, so the clone waits out its cap
+                    # and the test fails rather than racing.
+                    if self.lock.acquire(blocking=False):
+                        contended.append(False)
+                        return self
+                    contended.append(True)
                     second_waiting.set()
-                return self.lock.__enter__()
+                self.lock.acquire()
+                return self
 
             def __exit__(self, *exc):
-                return self.lock.__exit__(*exc)
+                self.lock.release()
+                return False
 
         def resolve(n):
             results[n] = manage.issue_worktree("o/r", n, self.home)
@@ -236,6 +247,8 @@ class TestIssueWorktree(unittest.TestCase):
             first.start()
             first.join(30)
             second.join(30)
+        self.assertEqual(contended, [True],
+                         "the second resolve was not held at the lock")
         self.assertEqual(saw_second, [True],
                          "the second resolve never reached the lock")
         self.assertEqual(self.clones, 1)

@@ -36,6 +36,7 @@ Tests below pin the structural invariants the new layout must hold:
 import copy
 import io
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -1619,8 +1620,10 @@ class FetchRateLimitsTtyTest(unittest.TestCase):
         # so the fetcher provably outlived the pipe budget. The piped run
         # is never released in time, so it must report a timeout.
         release = threading.Event()
+        started = []
 
         def slow():
+            started.append(time.monotonic())
             release.wait(10)
             return RateLimitInfo(
                 tool_name="fake", used_percent=55, limit_reached=False,
@@ -1628,7 +1631,11 @@ class FetchRateLimitsTtyTest(unittest.TestCase):
 
         class _SpinnerTty(_FakeTty):
             def write(self, text):
-                if "fetching usage" in text:
+                # Release only once the fetcher has itself been running
+                # for twice the pipe deadline, so a worker that started
+                # late cannot be released before its deadline is tested.
+                if ("fetching usage" in text and started
+                        and time.monotonic() - started[0] > 0.1):
                     release.set()
                 return super().write(text)
 
@@ -1649,6 +1656,7 @@ class FetchRateLimitsTtyTest(unittest.TestCase):
                 result = _fetch_rate_limits(refresh=True,
                                             tool_names={"fake"})
             release.clear()
+            started.clear()
             with tempfile.TemporaryDirectory() as tmp2, patch(
                 "swe.harness.rate_limits.RATE_LIMITS_CACHE_FILE",
                 Path(tmp2) / "rate_limits_cache.json",
