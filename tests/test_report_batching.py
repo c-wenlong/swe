@@ -182,6 +182,20 @@ class CompactionEdgeTest(unittest.TestCase):
                     self.assertLessEqual(len(compacted.normalized_text), budget)
 
 
+    def test_a_budget_under_a_role_header_still_fits(self):
+        # A lone message is always kept, and "human: " alone is 7
+        # characters, so a smaller budget came back over it with the
+        # message's text emptied but its header still in place.
+        for messages in ([("human", "q" * 30, "message")],
+                         [("assistant", "r" * 30, "message"), ("tool", "t" * 30, "tool")],
+                         [("human", "q" * 30, "message"), ("assistant", "r" * 30, "message"),
+                          ("tool", "t" * 30, "tool")]):
+            for budget in range(1, 16):
+                with self.subTest(roles=[m[0] for m in messages], budget=budget):
+                    compacted = compact_transcript(transcript(*messages), budget)
+                    self.assertLessEqual(len(compacted.normalized_text), budget)
+
+
 class BatchEdgeTest(unittest.TestCase):
     def test_limits_must_be_positive(self):
         for kwargs in ({"max_sessions": 0}, {"max_chars": 0}, {"max_sessions": -1}):
