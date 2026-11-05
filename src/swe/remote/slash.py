@@ -590,10 +590,30 @@ def combine(harness: str, user: dict, project: dict) -> list[dict]:
     for scope, layer in spec.order:
         rows = scopes[scope].get(layer) or []
         for row in rows if isinstance(rows, list) else []:
-            if (isinstance(row, dict) and isinstance(row.get("name"), str)
-                    and row["name"] and isinstance(row.get("source"), str)):
-                out.setdefault(row["name"], dict(row))
+            clean = _custom_row(row)
+            if clean is not None:
+                out.setdefault(clean["name"], clean)
     return list(out.values())
+
+
+# A custom row's fields and their JSON types: the clients decode every
+# row of the menu, so one wrong type would fail the whole answer.
+_ROW_STRINGS = ("name", "description", "source", "argument_hint", "insert")
+_ROW_BOOLS = ("argument_required",)
+
+
+def _custom_row(row) -> dict | None:
+    """``row`` with only its known, rightly typed fields; None without a
+    name and source."""
+    if not isinstance(row, dict):
+        return None
+    clean = {k: row[k] for k in _ROW_STRINGS if isinstance(row.get(k), str)}
+    clean.update({k: row[k] for k in _ROW_BOOLS
+                  if isinstance(row.get(k), bool)})
+    if not clean.get("name") or "source" not in clean:
+        return None
+    clean.setdefault("description", "")
+    return clean
 
 
 def custom_entries(harness: str, cwd: str, home: Path | None = None,

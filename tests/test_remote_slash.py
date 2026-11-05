@@ -638,6 +638,21 @@ class TestMalformedSatellitePush(unittest.TestCase):
         self.assertEqual(
             [r["name"] for r in slash.combine("claude", good, ["x"])], ["a"])
 
+    def test_combine_drops_wrongly_typed_fields(self):
+        # The clients decode every row: a wrong type in one field would
+        # fail the whole menu, so the field goes and the row stays.
+        user = {"skills": [{"name": "a", "source": "skill",
+                            "description": 7, "argument_hint": ["x"],
+                            "insert": None, "argument_required": "yes",
+                            "extra": {"x": 1}}]}
+        self.assertEqual(slash.combine("claude", user, None), [
+            {"name": "a", "source": "skill", "description": ""}])
+        kept = {"skills": [{"name": "b", "source": "skill",
+                            "description": "d", "argument_hint": "<x>",
+                            "insert": "$b ", "argument_required": True}]}
+        self.assertEqual(slash.combine("claude", kept, None),
+                         kept["skills"])
+
     def test_menu_route_survives_a_malformed_push(self):
         home = temp_dir(self)
         row = {"harness": "claude", "cwd": "/w", "machine_id": "m1"}
