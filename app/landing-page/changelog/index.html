@@ -120,10 +120,10 @@ so any other local account could read them. The folder is now 0700
 (an existing one is tightened) and its files 0600.</p>
 </li>
 <li><p><strong>A pairing poll's secret no longer travels in the URL.</strong> The web
-app polled <code>/v1/pair/request/&lt;id&gt;?secret=…</code>, so the secret that
-collects a new device's credential could land in proxy and access
-logs. It now goes in an <code>X-Pair-Secret</code> header; the hub still reads
-<code>?secret=</code> for iPhone builds already out.</p>
+app and the iPhone app polled <code>/v1/pair/request/&lt;id&gt;?secret=…</code>, so
+the secret that collects a new device's credential could land in
+proxy and access logs. Both now send it in an <code>X-Pair-Secret</code> header;
+the hub still reads <code>?secret=</code> for iPhone builds already out.</p>
 </li>
 <li><p><strong>A resolve prompt no longer carries strangers' comments.</strong> Anyone can
 comment on a public issue, and every comment went word for word into
