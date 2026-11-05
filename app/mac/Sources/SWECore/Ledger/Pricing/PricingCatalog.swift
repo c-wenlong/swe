@@ -15,7 +15,7 @@ public struct PricingCatalog: Sendable {
     /// Where a model's price came from: a user override, SWE's
     /// supplement, or the LiteLLM list.
     public enum Source: String, Sendable {
-        case yours, quiver, liteLLM
+        case yours, swe, liteLLM
     }
 
     /// What a logged model name resolves to. The ledger and the Pricing
@@ -140,7 +140,7 @@ public struct PricingCatalog: Sendable {
         for (key, value) in supplement.prices {
             if let rates = Self.rates(from: value) {
                 entries[key] = rates
-                sources[key] = .quiver
+                sources[key] = .swe
             }
         }
         // Snapshot before the user's prices replace any keys: this is the
