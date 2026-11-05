@@ -151,4 +151,15 @@ private let older = #"""
         #expect(["included", "auto", "api", "grok_bot", "5h", "7d Fable"].map(UsageFormat.window)
                 == ["Included", "Auto", "API", "Grok Bot", "5h", "7d Fable"])
     }
+
+    @Test func cursorMetersHaveAnInfoLine() {
+        for label in ["included", "auto", "api", "grok_bot", "on_demand"] {
+            #expect(UsageFormat.windowInfo("cursor", label) != nil)
+        }
+        // A window swe never explains gets no button, and another
+        // harness's lookalike label never borrows Cursor's text.
+        #expect(UsageFormat.windowInfo("cursor", "5h") == nil)
+        #expect(UsageFormat.windowInfo("claude", "api") == nil)
+        #expect(UsageFormat.windowInfo("devin", "on_demand") == nil)
+    }
 }

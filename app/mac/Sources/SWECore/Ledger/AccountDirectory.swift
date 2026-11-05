@@ -148,6 +148,26 @@ public enum UsageFormat {
         }
     }
 
+    /// What a meter bills for, for the click-pinned tip beside its bar on
+    /// the Accounts page. Only meters worth explaining have a line; the
+    /// rest get no button. "on_demand" stands for the on-demand row, not
+    /// a window. The web app's `Fmt.meterInfo` keeps the same table.
+    public static func windowInfo(_ harness: String, _ label: String) -> String? {
+        switch (harness, label) {
+        case ("cursor", "included"):
+            "Everything billed this cycle: the included credit pool and on-demand spend together."
+        case ("cursor", "auto"):
+            "The draw on the credit pool by Auto-routed requests, where Cursor picks the model."
+        case ("cursor", "api"):
+            "The draw on the credit pool by named-model requests; at 100% they only continue if on-demand billing is on."
+        case ("cursor", "grok_bot"):
+            "Grok Bot's own weekly allowance, separate from the billing cycle."
+        case ("cursor", "on_demand"):
+            "Metered spend once the credit pool runs out; uncapped when the account sets no spend limit."
+        default: nil
+        }
+    }
+
     /// "in 12m", "in 4h 28m", "in 25d": how long until a limit resets.
     public static func resetIn(_ date: Date, now: Date) -> String {
         let seconds = date.timeIntervalSince(now)
