@@ -420,6 +420,13 @@ def _followup(args: list[str]) -> int:
             if "--project" in words:
                 index = words.index("--project")
                 project = words[index + 1]
+                if not project.strip():
+                    raise ValueError("--project needs a folder")
+                # Absolute now: stored as typed, `--project=.` was later
+                # resolved against the folder `followup work` ran from. A
+                # join, not abspath, so a `..` after a symlink still means
+                # what the shell meant.
+                project = os.path.join(os.getcwd(), os.path.expanduser(project))
                 del words[index : index + 2]
             item = ledger.add(" ".join(words), project)
         elif action in {"done", "dismiss", "reopen"}:

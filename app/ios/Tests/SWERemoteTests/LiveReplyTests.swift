@@ -7,10 +7,6 @@ import XCTest
 /// are tested there and in the web chat's port.
 @MainActor
 final class LiveReplyTests: XCTestCase {
-    private func env(_ json: String) -> Envelope {
-        try! Hub.decoder.decode(Envelope.self, from: Data(json.utf8))
-    }
-
     private func delta(_ id: String, _ text: String, _ seq: Int, done: Bool = false) -> Envelope {
         env(#"{"type":"message.delta","session":"claude:1","data":{"id":"\#(id)","kind":"assistant","text":"\#(text)","seq":\#(seq),"done":\#(done)}}"#)
     }

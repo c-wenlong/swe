@@ -80,11 +80,11 @@ private struct SessionsContent: View {
                 listPage
             }
         }
-        .quiverSheet(item: $detail) { row in
+        .cardSheet(item: $detail) { row in
             SessionDetail(row: row, title: model.hubOverlay.title(for: row),
                           resume: { resume(row) }, close: { detail = nil })
         }
-        .quiverSheet(item: $hubSheet) { sheet in
+        .cardSheet(item: $hubSheet) { sheet in
             switch sheet.kind {
             case .rename:
                 SessionRenameSheet(key: sheet.key, current: model.hubOverlay.title(for: sheet.row) ?? "")
@@ -98,7 +98,7 @@ private struct SessionsContent: View {
         .onChange(of: app.hub.overlay, initial: true) { model.hubOverlay = app.hub.overlay }
         // A launch the sheet lands refreshes the list behind the chat
         // it opens.
-        .quiverSheet(isPresented: $showsNewSession) {
+        .cardSheet(isPresented: $showsNewSession) {
             NewSessionSheet()
         }
         // Another page started a session (Resolve with agent) and asked

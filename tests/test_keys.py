@@ -13,6 +13,7 @@ empty read.
 
 import io
 import os
+import tty
 import unittest
 from unittest import mock
 from unittest.mock import patch
@@ -189,13 +190,22 @@ class LayeringTest(unittest.TestCase):
     def test_the_module_imports_nothing_from_the_project(self):
         """It sits at the bottom beside console and paths, so every widget
         can reach it without inventing a cycle."""
+        import ast
         from pathlib import Path
 
-        source = Path("src/swe/keys.py").read_text()
-        for line in source.splitlines():
-            stripped = line.strip()
-            if stripped.startswith(("import ", "from ")):
-                self.assertNotIn("quiver", stripped, line)
+        # Read from the imported module itself, not a cwd-relative path,
+        # and parse rather than grep so a multi-line import still counts.
+        tree = ast.parse(Path(keys.__file__).read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                self.assertEqual(node.level, 0, "relative import")
+                names = [node.module or ""]
+            else:
+                continue
+            for name in names:
+                self.assertNotEqual(name.split(".")[0], "swe", name)
 
 
 class ChecklistWindowTest(unittest.TestCase):
@@ -414,11 +424,13 @@ class RawTerminalTest(unittest.TestCase):
         handler directly covers its body in the parent process, where
         coverage can see it."""
         import signal
+        import termios
 
         master, slave = self._pty()
         saved = {s: signal.getsignal(s)
                  for s in (signal.SIGTERM, signal.SIGHUP)}
         try:
+            cooked = termios.tcgetattr(slave)
             with patch("sys.stdout", io.StringIO()):
                 with keys.raw_terminal(slave):
                     handler = signal.getsignal(signal.SIGTERM)
@@ -432,14 +444,21 @@ class RawTerminalTest(unittest.TestCase):
                         (keys.MOUSE_OFF + "\x1b[?25h").encode())
                     # Not a tty, or the write itself failing: neither may
                     # stop the restore + reraise.
-                    kill.reset_mock()
                     with patch("os.isatty", return_value=False), \
+                         patch("os.write") as wr, \
                          patch("os.kill") as kill:
+                        tty.setraw(slave)
                         handler(signal.SIGHUP, None)
+                    wr.assert_not_called()
+                    kill.assert_called_once_with(os.getpid(), signal.SIGHUP)
+                    self._assert_attrs_restored(slave, cooked)
                     with patch("os.isatty", return_value=True), \
                          patch("os.write", side_effect=OSError("gone")), \
                          patch("os.kill") as kill:
+                        tty.setraw(slave)
                         handler(signal.SIGHUP, None)
+                    kill.assert_called_once_with(os.getpid(), signal.SIGHUP)
+                    self._assert_attrs_restored(slave, cooked)
         finally:
             # Put back what was there, not defaults: the runner may own
             # these handlers.
@@ -511,21 +530,32 @@ class RawTerminalTest(unittest.TestCase):
             # tty.setraw keeps its own binding of tcsetattr, so the patch
             # only lands on _restore's call — which is the one under test.
             with patch("sys.stdout", io.StringIO()), \
-                 patch("termios.tcsetattr", side_effect=boom):
+                 patch("termios.tcsetattr", side_effect=boom) as tcset:
                 with keys.raw_terminal(slave):
                     pass
+                tcset.assert_called()
+                # The widget's own error comes out, not the restore's.
+                with self.assertRaisesRegex(RuntimeError, "widget"):
+                    with keys.raw_terminal(slave):
+                        raise RuntimeError("widget")
         finally:
             os.close(master)
             os.close(slave)
 
     def test_a_cleanup_write_failure_is_swallowed(self):
+        import termios
+
         master, slave = self._pty()
         out = mock.Mock()
         out.write.side_effect = OSError("dead stdout")
         try:
+            cooked = termios.tcgetattr(slave)
             with patch("sys.stdout", out):
                 with keys.raw_terminal(slave):
                     pass
+            out.write.assert_called()
+            # The failed write did not stop the termios restore behind it.
+            self._assert_attrs_restored(slave, cooked)
         finally:
             os.close(master)
             os.close(slave)

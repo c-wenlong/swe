@@ -13,6 +13,7 @@ below is a DOM good enough to drive the real page scripts: ``#panel``
 answer from canned routes so the POST bodies can be inspected."""
 
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -1038,11 +1039,18 @@ process.stdout.write(JSON.stringify({
 
     def test_no_harness_note_names_the_settings_section(self):
         """The web Settings section is "Providers"; "Provider visibility"
-        is only a row inside it on the Mac."""
-        for page in ("tasks.js", "repositories.js"):
-            text = (PAGES / page).read_text(encoding="utf-8")
-            self.assertNotIn("Settings › Provider visibility", text, page)
-            self.assertIn("turn it on in Settings › Providers.", text, page)
+        is only a row inside it on the Mac.
+
+        Read from the source: Tasks' and Repositories' notes are drawn
+        inside page closures with no seam to run them alone (the Sessions
+        sheet's note is run above). Every "No harness can start" note in
+        any script is checked, so a copy moved to another page is too."""
+        static = PAGES.parent
+        notes = [(path.name, note) for path in sorted([*static.glob("*.js"), *PAGES.glob("*.js")])
+                 for note in re.findall(r"No harness can start[^`\"<]*", path.read_text(encoding="utf-8"))]
+        self.assertTrue({"tasks.js", "repositories.js"} <= {name for name, _ in notes}, notes)
+        for name, note in notes:
+            self.assertTrue(note.endswith("turn it on in Settings › Providers."), (name, note))
 
     def test_menu_rules(self):
         out = self.run_node(STUB + MENU_JS.read_text(encoding="utf-8") + "\n" + MENU_UNIT)

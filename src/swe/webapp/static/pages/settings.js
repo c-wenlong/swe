@@ -686,9 +686,9 @@ function setupCard() {
   const rows = s.steps.map(setupRow);
   // A failed step SWE retries (a hub that stopped) is fixed the same
   // way as one it hasn't done yet.
-  const quiverSteps = s.steps.some((x) => x.state === "todo"
+  const swePending = s.steps.some((x) => x.state === "todo"
     || (x.state === "failed" && x.action && x.action.kind === "apply"));
-  const foot = quiverSteps
+  const foot = swePending
     ? setRow("Steps SWE does itself", "Open Settings › Remote › Set up remote control in the SWE Mac app, or run swe remote setup --apply on the hub machine.",
         '<button class="set-button" id="set-setup-recheck">Check again</button>')
     : setRow("Done one of these?", "Steps you finish in a browser show here when you check again.",
@@ -724,6 +724,7 @@ async function settingsLoadSetup() {
   let status = 0, data = null;
   try { ({ status, data } = await api("/v1/app/settings?part=remote_setup")); } catch { status = 0; }
   p.setupBusy = false;
+  if (gen === routeGen && settingsSignedOut(status)) return;
   p.setup = status === 200 && data
     ? data.remote_setup
     : { error: failText(status, data, null) };
@@ -869,7 +870,7 @@ function filesSection() {
 const hubSyncCount = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /* The card's lines from `swe sync status --json`, as the Mac card words
- * them (HubSyncStatus.lines in QuiverCore). */
+ * them (HubSyncStatus.lines in SWECore). */
 function hubSyncLines(s) {
   if (!s.mode) return { repo: s.problem || "~/.swe isn't a git repository.", changes: "", warning: s.problem };
   const repo = s.mode === "device"
@@ -1083,6 +1084,7 @@ async function settingsSetSearch(on) {
   const { status, data } = await apiPost("/v1/app/settings/session_search", { enabled: on });
   p.searchBusy = false;
   if (gen !== p.searchGen) return;
+  if (settingsSignedOut(status)) return;
   if (status === 200 && data && data.session_search) {
     if (p.data) p.data.session_search = data.session_search;
   } else {
@@ -1104,6 +1106,7 @@ async function settingsSearchAction(body, focus) {
   const { status, data } = await apiPost("/v1/app/settings/session_search", body);
   p.searchBusy = false;
   if (gen !== p.searchGen) return;
+  if (settingsSignedOut(status)) return;
   if (status === 200 && data && data.session_search) {
     if (p.data) p.data.session_search = data.session_search;
   } else {
@@ -1519,6 +1522,7 @@ async function settingsLoadGithub(refresh) {
   if (onSettingsPage() && settingsSection() === "integrations") settingsRepaintRemote();
   const { status, data } = await api(`/v1/app/settings?part=github${refresh ? "&refresh=1" : ""}`);
   p.githubBusy = false;
+  if (gen === routeGen && settingsSignedOut(status)) return;
   if (status === 200 && data) p.github = data.github;
   else p.github = { error: failText(status, data, null) };
   if (gen === routeGen && onSettingsPage() && settingsSection() === "integrations") settingsRepaintRemote();

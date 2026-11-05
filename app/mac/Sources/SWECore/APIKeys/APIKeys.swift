@@ -798,8 +798,9 @@ public final class APIKeysModel {
         // Show the file now; the shell can take seconds to start.
         shellRead = false
         rebuild()
+        // readShell recomputes sourcing when its answer lands, and a newer
+        // read that superseded it does the same.
         await readShell()
-        refreshSourcing()
     }
 
     /// The login shell's environment when read (ZDOTDIR set in .zshenv

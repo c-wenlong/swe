@@ -694,8 +694,12 @@ class CrudCommandsTest(unittest.TestCase):
             settings.parent.mkdir(parents=True, exist_ok=True)
             settings.write_text(json.dumps({"hooks": {
                 "Stop": [{"hooks": [{"command": "gate.py"}]}]}}))
-            code, out = _run(home, "delete", "gate")
+            # Not a terminal, so no prompt can answer for --yes. Pinned so
+            # the test does not stop at a prompt when run from a terminal.
+            with mock.patch.object(sys.stdin, "isatty", return_value=False):
+                code, out = _run(home, "delete", "gate")
             self.assertEqual(code, 1)
+            self.assertIn("Refused without --yes", out)
             self.assertTrue(src.exists())   # nothing deleted without --yes
             code, out = _run(home, "delete", "gate", "--yes")
             self.assertEqual(code, 0, out)
@@ -1486,11 +1490,18 @@ class ReviewFixesTest(unittest.TestCase):
             source.mkdir(parents=True)
             gate = source / "gate.py"
             gate.write_text("# events: [Stop]\n")
-            source.chmod(0o500)  # unlink fails on the read-only dir
-            try:
+            # Fail the unlink itself rather than chmod the folder: a
+            # read-only folder does not stop root, so that version passed
+            # or failed depending on who ran it.
+            real_unlink = Path.unlink
+
+            def _refuse(path, *a, **k):
+                if path == gate:
+                    raise PermissionError(13, "Permission denied", str(path))
+                return real_unlink(path, *a, **k)
+
+            with mock.patch.object(Path, "unlink", _refuse):
                 code, out = _run(home, "delete", "gate", "--yes")
-            finally:
-                source.chmod(0o700)
             self.assertEqual(code, 1, out)
             self.assertIn("failed", out)
             self.assertTrue(gate.is_file())

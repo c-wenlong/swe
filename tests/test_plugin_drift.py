@@ -226,6 +226,22 @@ class UnregisteredTest(_FakeHome, unittest.TestCase):
         self.assertEqual(found, [("claude", "far", "unregistered"),
                                  ("codex", "far", "unregistered")])
 
+    def test_find_plugins_reports_a_remote_only_hub_too(self):
+        # `swe find plugins` gated its drift section on swe_plugins alone,
+        # so a hub whose only marketplace is GitHub-sourced showed none.
+        from swe.find.commands import _swe_drift
+
+        shutil.rmtree(self.home / ".swe" / "plugins" / "mk")
+        remote = self.home / ".swe" / "plugins" / "far"
+        _write(remote / ".claude-plugin" / "marketplace.json", json.dumps(
+            {"name": "far", "plugins": [{"name": "r", "source": {
+                "source": "github", "repo": "o/r"}}]}))
+        found = _swe_drift(self.home, lambda harness: harness == "claude")
+        self.assertEqual([(f.marketplace, f.kind) for f in found],
+                         [("far", "unregistered")])
+        shutil.rmtree(remote)
+        self.assertIsNone(_swe_drift(self.home, lambda harness: True))
+
     def test_dir_with_spaces_is_quoted(self):
         spaced = self.home / ".swe" / "plugins" / "my mk"
         shutil.copytree(self.market, spaced, symlinks=True)

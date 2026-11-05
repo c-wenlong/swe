@@ -35,6 +35,16 @@ class HarnessProcessCommandTest(unittest.TestCase):
             "claude", ["claude", "--model", "claude sonnet"]
         )
 
+    def test_use_runs_a_state_only_row_under_its_name(self):
+        # A row with no "command" (recorded state only) raised KeyError.
+        tools = {"claude": {"aliases": []}}
+        with patch("swe.harness.commands.load_registry", return_value=tools), patch(
+            "swe.harness.commands.is_installed", return_value=True
+        ), patch("swe.harness.commands.os.execvp") as execvp:
+            cmd_use(["claude"])
+
+        execvp.assert_called_once_with("claude", ["claude"])
+
     def test_use_does_not_exec_missing_binary(self):
         tools = {"claude": {"command": "claude", "aliases": []}}
         with patch("swe.harness.commands.load_registry", return_value=tools), patch(
