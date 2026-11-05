@@ -84,7 +84,10 @@ and staples the app and the image when `SWE_NOTARY_PROFILE` or the
 either stops instead of writing a DMG Gatekeeper would reject. A
 credential-free DMG for local testing needs an ad-hoc bundle:
 `SWE_SIGN_IDENTITY=-` on the prod build, or a plain debug build.
-BOOTSTRAP.md lists where the credentials live.
+The release job reads them from the repo's Actions secrets
+(`MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`, `NOTARY_KEY`,
+`NOTARY_KEY_ID`, `NOTARY_ISSUER`, `SPARKLE_PRIVATE_KEY`; see
+`.github/workflows/release.yml`).
 
 ## Layout
 
@@ -97,7 +100,11 @@ BOOTSTRAP.md lists where the credentials live.
 | `Sources/SWECore/Limits` | Limit readings from every source, the 90% and reset alerts, the widget snapshot |
 | `Sources/SWEApp` | The SwiftUI shell: window, sidebar, pages, menu bar panel |
 | `Sources/SWEWidgets` | The WidgetKit extension: usage limits, usage summary, activity heatmap, top models |
+| `Sources/SWEWidgetsUI` | The widgets' views and colours, shared by the extension and the app's widget previews |
+| `Sources/SWEFanHelper` | The root launchd helper that holds a manual fan speed while SWE runs |
 | `Tests/SWECoreTests` | Swift Testing suites; `Fixtures/` holds real `swe --json` output |
+| `Tests/SWEAppUITests` | Tests of app-target code: views hosted in offscreen windows, page rules |
+| `Tests/SWEWidgetsUITests` | The widget views' layout rules |
 | `script/install-app.sh` | Builds `origin/main` and installs it as `~/Applications/SWE.app` |
 | `script/setup-machine.sh` | Sets up a new dev Mac: Xcode check, checkout onto `origin/main`, install, hub, running app |
 | `script/bundle-swe.sh` | Puts `swe` and its own Python into the bundle; `build-app.sh` runs it and signs the Python binaries |
@@ -126,6 +133,10 @@ launch). `keepBackedUp` keeps one copy a day in `backups/`, the newest 7. Source
 | Codex | `<home>/sessions/**` and `archived_sessions/` | response (`token_usage_record`) or turn (`token_count`) | `response_id`, else session + timestamp |
 | OpenCode | `opencode.db`, read-only | assistant message | message id |
 | Devin | `sessions.db`, read-only | request | `metadata.request_id` |
+| Pi | `<home>/agent/sessions/<project>/*.jsonl` | assistant message | file name + message id |
+| Droid | `<home>/sessions/<project>/<uuid>.settings.json` | session (totals, re-read when rewritten) | session id |
+| Cline | `<home>/data/sessions/<id>/<id>.json` | session (totals, re-read when rewritten) | session id |
+| Cursor, Grok Bot | `swe harness usage-events cursor --json` (Cursor's usage feed) | usage event | account + time + model + conversation |
 
 `scan(roots:)` reads only what changed: files resume from a per-file cursor
 (inode, size, mtime, offset, head and tail hashes) and are re-read from the
