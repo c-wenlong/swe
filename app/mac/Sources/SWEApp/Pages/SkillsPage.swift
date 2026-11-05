@@ -47,7 +47,7 @@ struct SkillsPage: View {
             await model.loadIfStale(for: app.swePath)
             await catalog
         }
-        .quiverSheet(isPresented: $adding) {
+        .cardSheet(isPresented: $adding) {
             NewSkillSheet()
         }
     }

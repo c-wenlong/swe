@@ -479,7 +479,7 @@ final class AppModel {
         didSet { githubNotify.windowVisible = mainWindowOnScreen }
     }
     /// Banners provider incidents from the Service status poll, which it
-    /// also drives. Assigned in init, where `~/.quiver` is known.
+    /// also drives. Assigned in init, where `~/.swe` is known.
     let serviceNotify: ServiceStatusNotifier
     /// The MCP servers page's "Server folders" section.
     let mcpRepo = McpServerRepoModel()
