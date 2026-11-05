@@ -18,13 +18,18 @@ const fakeTimers = () => {
   globalThis.setTimeout = (fn, ms = 0) => { due.set(++next, { fn, at: now + ms }); return next; };
   globalThis.clearTimeout = (id) => { due.delete(id); };
   return (ms) => {
-    now += ms;
+    const until = now + ms;
     for (;;) {
-      const ready = [...due].filter(([, t]) => t.at <= now).sort((a, b) => a[1].at - b[1].at || a[0] - b[0]);
-      if (!ready.length) return;
-      due.delete(ready[0][0]);
-      ready[0][1].fn();
+      const ready = [...due].filter(([, t]) => t.at <= until).sort((a, b) => a[1].at - b[1].at || a[0] - b[0]);
+      if (!ready.length) break;
+      // The clock stands at each timer's own time while it runs, so a
+      // timer it sets is due from then, not from the end of the advance.
+      const [id, t] = ready[0];
+      due.delete(id);
+      now = t.at;
+      t.fn();
     }
+    now = until;
   };
 };
 """

@@ -545,6 +545,10 @@ class TestHubClone(_HubClone, unittest.TestCase):
             """The setup lock as a clone holds it: every wait times out."""
 
             def acquire(self, blocking=True, timeout=-1):
+                # Each wait is bounded: an unbounded one would sit behind
+                # the clone for its whole run on a real lock.
+                if not (blocking and 0 < timeout <= 1):
+                    raise AssertionError(f"apply waited without a short bound: {blocking=} {timeout=}")
                 waits.append(timeout)
                 if len(waits) == claim_on_wait:
                     setup_page._claim_clone()

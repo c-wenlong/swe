@@ -127,11 +127,14 @@ class TestLoad(unittest.TestCase):
                        for _ in range(3)]
             for t in threads:
                 t.start()
-            for _ in threads:
-                self.assertTrue(arrived.acquire(timeout=5), "a request never reached the lock")
-            gate.set()
-            for t in threads:
-                t.join(5)
+            try:
+                for _ in threads:
+                    self.assertTrue(arrived.acquire(timeout=5), "a request never reached the lock")
+            finally:
+                # Even on a failure, no worker outlives the patches.
+                gate.set()
+                for t in threads:
+                    t.join(5)
         self.assertEqual(built, [".js"])
 
     def test_a_broken_page_does_not_stop_the_others(self):
