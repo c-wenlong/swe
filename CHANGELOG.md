@@ -266,6 +266,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   iPhone's Usage tab a row of machine chips under the periods. A
   satellite's days are its own local days, and its view has no top
   models, since daily rows carry none. Closes
+  [#525](https://github.com/c-wenlong/swe/issues/525).
 - **Mac and web: Hub sync card.** Settings › Files shows `swe sync
   status` for `~/.swe` (branch mode, uncommitted changes by primitive,
   commits to push and pull, new commits on `origin/main`, files kept
@@ -737,6 +738,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Notion-Version: 2022-06-28`, paginates with a cap, waits out a 429's
   `Retry-After`, and renders a page body to markdown for a resolve
   prompt. Read-only. Part of
+  [#847](https://github.com/c-wenlong/swe/issues/847).
 
 - **Tasks on the Mac, the web and the iPhone show Notion like Linear.**
   The three clients read the hub's new `notion` env block beside
@@ -5047,7 +5049,9 @@ service / model layering, tests with an 84% coverage floor).
   status colors, dim version text, `version unknown` fallback, three
   heal-side-effect cases (live overrides stored, live matches stored,
   dirty stored value cleared), off-PATH footer conditional rendering
-  (with/without orphans), alphabetical row order, and bold header line.- `swe list` now shows a **RATE** column with usage percentage and reset countdown for tools that expose rate limit APIs. Currently supports:
+  (with/without orphans), alphabetical row order, and bold header line.
+
+- `swe list` now shows a **RATE** column with usage percentage and reset countdown for tools that expose rate limit APIs. Currently supports:
   - **Codex** via ChatGPT `backend-api/wham/usage` endpoint using OAuth
     tokens from `~/.codex/auth.json`
   - **GitHub Copilot** via `api.github.com/copilot_internal/user` using
