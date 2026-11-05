@@ -148,6 +148,14 @@ class ServerRendererTest(unittest.TestCase):
         self.assertEqual(srv["args"], ["/tmp/server.js"])
         self.assertEqual(srv["env"]["API_KEY"], "secret-value-1")
 
+    def test_control_characters_round_trip(self):
+        # json.dumps leaves DEL raw, which TOML forbids: the whole
+        # config.toml then failed to parse on every later read.
+        value = "a\x7fb\x01\t\"q\"\\é"
+        text = render_codex_server("odd\x7fname", {"command": "x", "env": {"K": value}})
+        srv = tomllib.loads(text)["mcp_servers"]["odd\x7fname"]
+        self.assertEqual(srv["env"]["K"], value)
+
     def test_remote_server_with_headers(self):
         canonical = {
             "url": "https://mcp.example.com/mcp",

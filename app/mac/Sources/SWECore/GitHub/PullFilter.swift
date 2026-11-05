@@ -97,9 +97,10 @@ extension GitHubModel {
     /// within `maxAge`; `force` (Refresh) reads regardless. Only the
     /// review-requested bucket is kept: Mine reads the login against
     /// each row's author, which also covers the focus page's closed and
-    /// merged PRs.
+    /// merged PRs. `now` defaults to the model's own clock.
     public func loadReviewRequests(repo: String, swe: SweClient, force: Bool = false,
-                                   now: Date = .now, maxAge: TimeInterval = 60) async {
+                                   now: Date? = nil, maxAge: TimeInterval = 60) async {
+        let now = now ?? self.now()
         if !force, let last = reviewRequests[repo], now.timeIntervalSince(last.fetchedAt) < maxAge { return }
         let previous = reviewRequests[repo]?.numbers
         // Stamped before the call, so concurrent loads share this one.

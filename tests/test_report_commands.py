@@ -6,7 +6,7 @@ import shlex
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-from datetime import datetime, time, timedelta
+from datetime import datetime
 from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -25,6 +25,22 @@ from swe.reports.models import FollowUp
 from swe.reports.pipeline import ReportApprovalError, ReportWriterError
 
 from tests._tempdir import temp_dir
+
+
+# A fixed "now" for the report window: Wednesday 4 March 2026, mid-morning
+# in the machine's own zone. The window code reads datetime.now(), so a
+# test that read the real clock after the call failed across midnight.
+_FROZEN = datetime(2026, 3, 4, 10, 30).astimezone()
+
+
+class _FrozenDatetime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return _FROZEN if tz is None else _FROZEN.astimezone(tz)
+
+
+def _frozen_now():
+    return patch("swe.reports.commands.datetime", _FrozenDatetime)
 
 
 class ReportCommandsTest(unittest.TestCase):
@@ -104,38 +120,37 @@ class ReportCommandsTest(unittest.TestCase):
 
     def test_daily_default_ends_at_last_completed_day(self):
         store = SimpleNamespace(get_cursor=lambda _cadence: None)
-        _start_ms, _end_ms, start, end = _default_period("daily", store)
-        now = datetime.now().astimezone()
+        with _frozen_now():
+            _start_ms, _end_ms, start, end = _default_period("daily", store)
 
-        self.assertEqual(
-            datetime.fromisoformat(end).date(), now.date() - timedelta(days=1)
-        )
-        self.assertEqual(datetime.fromisoformat(end).hour, 23)
-        self.assertEqual(datetime.fromisoformat(start).date(), now.date() - timedelta(days=1))
-        self.assertLess(datetime.fromisoformat(end), now)
+        # Yesterday, midnight to the last millisecond before today.
+        self.assertEqual(datetime.fromisoformat(start), datetime(2026, 3, 3, tzinfo=_FROZEN.tzinfo))
+        self.assertEqual(datetime.fromisoformat(end),
+                         datetime(2026, 3, 3, 23, 59, 59, 999000, tzinfo=_FROZEN.tzinfo))
 
     def test_invalid_cursor_falls_back_to_completed_window(self):
         store = SimpleNamespace(
             get_cursor=lambda _cadence: SimpleNamespace(through="not-a-date")
         )
 
-        _start_ms, _end_ms, start, end = _default_period("weekly", store)
+        with _frozen_now():
+            _start_ms, _end_ms, start, end = _default_period("weekly", store)
 
-        self.assertLess(datetime.fromisoformat(start), datetime.fromisoformat(end))
-        self.assertEqual(datetime.fromisoformat(end).weekday(), 6)
+        # The last whole Monday-to-Sunday week before Wednesday 4 March.
+        self.assertEqual(datetime.fromisoformat(start), datetime(2026, 2, 23, tzinfo=_FROZEN.tzinfo))
+        self.assertEqual(datetime.fromisoformat(end),
+                         datetime(2026, 3, 1, 23, 59, 59, 999000, tzinfo=_FROZEN.tzinfo))
 
     def test_cursor_at_period_end_produces_an_inverted_window(self):
         # After a successful daily report the cursor sits at the period
         # end, so a rerun starts one millisecond past it.
-        now = datetime.now().astimezone()
-        end_dt = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo) - timedelta(
-            milliseconds=1
-        )
+        end_dt = datetime(2026, 3, 3, 23, 59, 59, 999000, tzinfo=_FROZEN.tzinfo)
         store = SimpleNamespace(
             get_cursor=lambda _cadence: SimpleNamespace(through=end_dt.isoformat())
         )
 
-        start_ms, end_ms, _start, _end = _default_period("daily", store)
+        with _frozen_now():
+            start_ms, end_ms, _start, _end = _default_period("daily", store)
 
         self.assertGreater(start_ms, end_ms)
 
@@ -318,6 +333,22 @@ class ReportCommandsTest(unittest.TestCase):
             final = ledger.get(item.id)
             self.assertEqual(final.text, "Ship the tested fix")
             self.assertEqual(final.status, "dismissed")
+
+    def test_followup_add_stores_a_relative_project_absolute(self):
+        # Stored as typed, `--project=.` was later resolved against the
+        # folder `followup work` ran from and launched in the wrong place.
+        import contextlib
+        import io
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = FollowUpLedger(root=tmp, clock=lambda: "2026-08-01T00:00:00+00:00")
+            with patch("swe.reports.commands.FollowUpLedger", return_value=ledger), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(_followup(["add", "Rel", "--project=sub"]), 0)
+                self.assertEqual(_followup(["add", "Empty", "--project="]), 1)
+            self.assertEqual([i.project_root for i in ledger.list()],
+                             [os.path.join(os.getcwd(), "sub")])
 
     def test_followup_work_rejects_conflicting_modes_before_launch(self):
         item = FollowUp(id="fu_test", text="Finish", project_root="/tmp")

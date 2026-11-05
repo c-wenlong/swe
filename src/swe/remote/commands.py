@@ -31,6 +31,7 @@ from swe.json_output import emit, error_stream, take_json_flag
 from swe.paths import remote_dir_for
 from swe.remote import agent as agent_mod
 from swe.remote import catalog as catalog_mod
+from swe.remote import devices as devices_mod
 from swe.remote import (
     launchd, notify, pairing, protocol, sshkeys, supervise, tail,
 )
@@ -751,10 +752,11 @@ def _cmd_devices(flags: dict, json_view: bool) -> int:
     revoke = flags.get("--revoke")
     if revoke:
         try:
-            if revoke.startswith("tailnet:"):
+            if revoke.startswith(devices_mod.TAILNET_PREFIX):
                 # One of the owner's tailnet devices, let in without
                 # pairing: it stops getting in until it pairs again.
-                ok = pairing.revoke_signin(None, revoke[len("tailnet:"):])
+                ok = pairing.revoke_signin(
+                    None, revoke[len(devices_mod.TAILNET_PREFIX):])
             else:
                 ok = pairing.revoke_device(None, revoke)
         except sshkeys.KeysNotSynced as exc:
@@ -777,8 +779,6 @@ def _cmd_devices(flags: dict, json_view: bool) -> int:
     devices = pairing.load_devices()
     signins = pairing.load_signins()
     if json_view:
-        from swe.remote import devices as devices_mod
-
         return emit({
             "devices": [
                 pairing.device_view(did, row)
@@ -827,9 +827,7 @@ def _cmd_attach(flags: dict, rest: list[str]) -> int:
               file=sys.stderr)
         return 1
     if len(rest) > 1:
-        print(c("red", f"unexpected args: {' '.join(rest[1:])}"),
-              file=sys.stderr)
-        return 1
+        return _unexpected(rest[1:])
     want = rest[0]
     mode = flags.get("--mode") or "auto"
     if mode not in supervise.ATTACH_MODES:
@@ -1216,51 +1214,32 @@ def _remote_state_dir() -> str:
         return "~/.swe/data/remote"
 
 
+def _unexpected(extra: list[str]) -> int:
+    """The refusal for trailing positionals a subcommand doesn't take."""
+    print(c("red", f"unexpected args: {' '.join(extra)}"), file=sys.stderr)
+    return 1
+
+
 def _dispatch(sub: str, flags: dict, rest: list[str], json_view: bool) -> int:
-    if sub == "serve":
-        if rest:
-            print(c("red", f"unexpected args: {' '.join(rest)}"), file=sys.stderr)
-            return 1
-        return _cmd_serve(flags)
-    if sub == "pair":
-        if rest:
-            print(c("red", f"unexpected args: {' '.join(rest)}"), file=sys.stderr)
-            return 1
-        return _cmd_pair(flags, json_view)
-    if sub == "status":
-        if rest:
-            print(c("red", f"unexpected args: {' '.join(rest)}"), file=sys.stderr)
-            return 1
-        return _cmd_status(flags, json_view)
-    if sub == "devices":
-        if rest:
-            print(c("red", f"unexpected args: {' '.join(rest)}"), file=sys.stderr)
-            return 1
-        return _cmd_devices(flags, json_view)
     if sub == "attach":
         return _cmd_attach(flags, rest)
-    if sub == "agent":
-        if rest:
-            print(c("red", f"unexpected args: {' '.join(rest)}"),
-                  file=sys.stderr)
-            return 1
-        return _cmd_agent(flags, json_view)
-    if sub == "setup":
-        if rest:
-            print(c("red", f"unexpected args: {' '.join(rest)}"), file=sys.stderr)
-            return 1
-        return _cmd_setup(flags, json_view)
-    if sub == "notify":
-        if rest:
-            print(c("red", f"unexpected args: {' '.join(rest)}"), file=sys.stderr)
-            return 1
-        return _cmd_notify(flags, json_view)
-    if sub == "ssh":
-        if rest:
-            print(c("red", f"unexpected args: {' '.join(rest)}"), file=sys.stderr)
-            return 1
-        return _cmd_ssh(flags, json_view)
-    return 0
+    # Every other subcommand takes flags only.
+    handlers = {
+        "serve": lambda: _cmd_serve(flags),
+        "pair": lambda: _cmd_pair(flags, json_view),
+        "status": lambda: _cmd_status(flags, json_view),
+        "devices": lambda: _cmd_devices(flags, json_view),
+        "agent": lambda: _cmd_agent(flags, json_view),
+        "setup": lambda: _cmd_setup(flags, json_view),
+        "notify": lambda: _cmd_notify(flags, json_view),
+        "ssh": lambda: _cmd_ssh(flags, json_view),
+    }
+    handler = handlers.get(sub)
+    if handler is None:
+        return 0
+    if rest:
+        return _unexpected(rest)
+    return handler()
 
 
 def cmd_remote(args: list[str]) -> int:

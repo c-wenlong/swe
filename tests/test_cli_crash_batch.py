@@ -78,6 +78,24 @@ class SessionCountsCacheTest(unittest.TestCase):
             with mock.patch.object(usage, "SESSION_COUNTS_CACHE_FILE", cache):
                 return usage._load_cached_counts(None)
 
+    def test_windows_that_is_not_an_object_is_a_miss(self):
+        self.assertIsNone(self._load({"windows": [1]}))
+
+    def test_save_over_a_malformed_cache_rewrites_it(self):
+        # A window entry that is not an object crashed the save with
+        # AttributeError, which `except OSError` did not catch.
+        from swe.sessions import usage
+
+        for payload in ({"windows": {"all": 5}}, {"windows": [1]}):
+            with tempfile.TemporaryDirectory() as tmp:
+                cache = Path(tmp) / "session_counts.json"
+                cache.write_text(json.dumps(payload))
+                with mock.patch.object(usage, "SESSION_COUNTS_CACHE_FILE", cache):
+                    usage._save_cached_counts(None, {"claude": 2}, merge_prior=True)
+                    self.assertEqual(usage._load_cached_counts(None), {"claude": 2})
+                self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()),
+                                 ["session_counts.json"])
+
     def test_unparseable_cached_at_is_a_miss(self):
         got = self._load({
             "windows": {"all": {"cached_at": "yesterday",
