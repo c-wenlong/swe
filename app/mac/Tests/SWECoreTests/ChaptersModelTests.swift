@@ -215,6 +215,34 @@ import Testing
         #expect(runner.builds == 0)
     }
 
+    @Test func moveFileRefusesARuleAlreadyOnTheDestination() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await folderModel(
+            dir, runner: runner,
+            targets: #"{"version":1,"chapters":{"one.md":{"only":["claude"]}}}"#)
+        #expect(await model.move(file: "eng/one.md", toFolder: "",
+                                 swe: SweClient(runner: runner)) != nil)
+        // The stale destination rule stands; the file never moved.
+        #expect(FileManager.default.fileExists(atPath: dir.path("eng/one.md").path))
+        let rules = try ChapterTargets.parse(dir.read("targets.json")).rules
+        #expect(rules["eng/one.md"] == nil)
+        #expect(rules["one.md"] == ["only": ["claude"]])
+    }
+
+    @Test func moveFileRefusesALinkedChapter() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await folderModel(dir, runner: runner)
+        try dir.link("alias.md", to: dir.path("a.md").path)
+        #expect(await model.move(file: "alias.md", toFolder: "eng",
+                                 swe: SweClient(runner: runner)) != nil)
+        // inside() would have moved the link's target; both stay put.
+        #expect(dir.isLink("alias.md"))
+        #expect(try dir.read("a.md") == "# A\n")
+        #expect(try dir.read("index.txt").contains("a.md"))
+    }
+
     @Test func removeUnlistsButKeepsTheFileOnDisk() async throws {
         let dir = try TempDir()
         let runner = Runner([check(dir.url), check(dir.url, chapters: [("b.md", true)])])

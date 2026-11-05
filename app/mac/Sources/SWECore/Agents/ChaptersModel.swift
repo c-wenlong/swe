@@ -869,6 +869,11 @@ public final class ChaptersModel {
             return "The path cannot leave AGENTS_MD."
         }
         return await queuedCompile { () -> String? in
+            // Checked again inside the queue: the draft may have gone
+            // dirty while earlier work ran, and dropping it loses edits.
+            if self.documents[name]?.isDirty == true {
+                return "Save or revert \(name) before moving it."
+            }
             guard let index = await self.readyIndex(),
                   let targetsDocument = await self.readyTargets() else {
                 return "The chapter files haven't been read."
@@ -885,6 +890,19 @@ public final class ChaptersModel {
             guard !ChapterIndex.entries(index.text).contains(where: {
                 ChapterIndex.names($0, newName)
             }) else { return "\(newName) is already in the index." }
+            // A stale rule under the destination name would silently
+            // scope the moved chapter; which rule wins is a hand edit.
+            guard rules[ChapterIndex.normalize(newName)] == nil else {
+                return "\(newName) already has a harness rule; fix targets.json first."
+            }
+            // inside() resolves links: moving what it returns relocates
+            // the link's target out from under the link.
+            let linked = await offMain {
+                (try? FileManager.default.destinationOfSymbolicLink(
+                    atPath: URL(fileURLWithPath: check.directory)
+                        .appending(path: name).path)) != nil
+            }
+            if linked { return "\(name) is a link; move the file it points at." }
             // The file moves first: until index.txt catches up, the old
             // entry is missing, which a racing build reports rather than
             // compiling the chapter without its rule.
@@ -922,15 +940,33 @@ public final class ChaptersModel {
                 index.text = renamed
                 if await index.save() != .saved {
                     await index.load()
-                    _ = await undo()
+                    // The rule goes back before the file does: while the
+                    // file is still at its new path the old index entry
+                    // is missing to a build, never unruled.
+                    var restored = targetsUndo == nil
                     if let targetsUndo {
                         targetsDocument.text = targetsUndo
-                        _ = await targetsDocument.save()
+                        restored = await targetsDocument.save() == .saved
+                        if !restored { await targetsDocument.load() }
                     }
+                    guard restored else {
+                        return "index.txt changed on disk and the move couldn't be undone: \(name) is at \(newName) with its rule under the new name; fix index.txt and targets.json by hand."
+                    }
+                    _ = await undo()
                     return "index.txt changed on disk; try again."
                 }
             }
-            self.documents[name] = nil
+            // A doc that went dirty mid-move keeps its draft, re-homed
+            // onto a fresh document at the new path.
+            if let document = self.documents[name] {
+                self.documents[name] = nil
+                if document.isDirty {
+                    let rehomed = InstructionDocument(url: to)
+                    self.documents[newName] = rehomed
+                    await rehomed.load()
+                    rehomed.text = document.text
+                }
+            }
             if self.selected == name { self.selected = newName }
             await self.refreshTree(under: check.directory)
             if indexChanged { await self.build(swe: swe) }
