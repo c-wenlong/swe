@@ -128,8 +128,8 @@ GLOBAL_KEY = "_global"
 
 # ``queue``-mode sends poll a fresh session status on this cadence and
 # give up after the cap — a turn outliving it fails the send honestly.
-QUEUE_POLL_S = 2.0
-QUEUE_WAIT_MAX_S = 1800
+QUEUE_POLL_S = protocol.IDLE_POLL_S
+QUEUE_WAIT_MAX_S = protocol.IDLE_WAIT_MAX_S
 # Per-key in-flight sends (waiting plus running) get an honest 429
 # rather than an unbounded backlog nobody reads.
 MAX_SEND_BACKLOG = 20
@@ -1223,7 +1223,7 @@ def _json_bytes(payload) -> bytes:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    server_version = "quiver-remote"
+    server_version = "swe-remote"
     protocol_version = "HTTP/1.1"
     state: HubState  # stamped on the server, set in make_server
 

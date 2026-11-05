@@ -169,7 +169,7 @@ final class CountingSessionSource: SessionListing, @unchecked Sendable {
         await ledger.set(usage)
         return SessionsModel(source: FakeSessionSource(list: SessionList(sessions: sessions, failures: [])),
                              ledger: ledger, defaultHomes: ["/Users/k/.claude", "/Users/k/.codex"],
-                             limit: limit, now: { [now] in now }, calendar: calendar)
+                             limit: limit, now: { [now] in now }, calendar: calendar, searchIndexingEnabled: false)
     }
 
     @Test func sessionsCarryTheirTokensAndCost() async throws {
@@ -303,7 +303,7 @@ final class CountingSessionSource: SessionListing, @unchecked Sendable {
             source: FakeSessionSource(list: SessionList(
                 sessions: [session("a", "claude", cwd: nil, at: 1_791_699_000)], failures: [])),
             ledger: ledger, defaultHomes: ["/Users/k/.claude", "/Users/k/.codex"],
-            now: { [now] in now }, calendar: calendar,
+            now: { [now] in now }, calendar: calendar, searchIndexingEnabled: false,
             accountLabel: { $0.hasSuffix("/w/home") ? "Claude: Work" : nil })
         await model.load()
 
@@ -330,7 +330,7 @@ final class CountingSessionSource: SessionListing, @unchecked Sendable {
         let model = SessionsModel(
             source: FakeSessionSource(list: SessionList(sessions: [listed], failures: [])),
             ledger: ledger, defaultHomes: ["/Users/k/.claude", "/Users/k/.codex"],
-            now: { [now] in now }, calendar: calendar,
+            now: { [now] in now }, calendar: calendar, searchIndexingEnabled: false,
             accountLabel: { _ in "Claude: Work" })
         await model.load()
 
@@ -353,7 +353,7 @@ final class CountingSessionSource: SessionListing, @unchecked Sendable {
         let ledgerOnly = SessionsModel(
             source: FakeSessionSource(list: SessionList(sessions: [], failures: [])),
             ledger: ledgerOnlyStore, defaultHomes: ["/Users/k/.claude"],
-            now: { [now] in now }, calendar: calendar)
+            now: { [now] in now }, calendar: calendar, searchIndexingEnabled: false)
         var listed = session("w1", "claude", cwd: "/c/quiver", at: 1_791_699_000, title: "Account work")
         listed.accountHome = home
         let listedStore = FakeSessionLedger()
@@ -361,7 +361,7 @@ final class CountingSessionSource: SessionListing, @unchecked Sendable {
         let listedModel = SessionsModel(
             source: FakeSessionSource(list: SessionList(sessions: [listed], failures: [])),
             ledger: listedStore, defaultHomes: ["/Users/k/.claude"],
-            now: { [now] in now }, calendar: calendar)
+            now: { [now] in now }, calendar: calendar, searchIndexingEnabled: false)
 
         await ledgerOnly.load()
         await listedModel.load()
@@ -478,7 +478,7 @@ final class CountingSessionSource: SessionListing, @unchecked Sendable {
     @Test func usageRefreshesWithoutListingAgain() async throws {
         let ledger = FakeSessionLedger()
         let source = CountingSessionSource(SessionList(sessions: [session("a", "claude", cwd: nil, at: 1_791_699_000)], failures: []))
-        let model = SessionsModel(source: source, ledger: ledger, now: { [now] in now }, calendar: calendar)
+        let model = SessionsModel(source: source, ledger: ledger, now: { [now] in now }, calendar: calendar, searchIndexingEnabled: false)
         await model.load()
         #expect(model.rows.first?.usage == nil)
         await ledger.set([usage("a", "claude", models: ["opus"], cost: 2)])
@@ -489,7 +489,7 @@ final class CountingSessionSource: SessionListing, @unchecked Sendable {
 
     @Test func aUsageRefreshDuringTheFirstLoadDoesNotStrandIt() async throws {
         let source = GatedSessionSource(SessionList(sessions: [session("a", "claude", cwd: nil, at: 1_791_699_000)], failures: []))
-        let model = SessionsModel(source: source, ledger: FakeSessionLedger(), now: { [now] in now }, calendar: calendar)
+        let model = SessionsModel(source: source, ledger: FakeSessionLedger(), now: { [now] in now }, calendar: calendar, searchIndexingEnabled: false)
         let load = Task { await model.load() }
         try #require(await source.parks.reach(1))
         await model.refreshUsage()
@@ -509,7 +509,7 @@ final class CountingSessionSource: SessionListing, @unchecked Sendable {
     @Test func aFailedListingIsShown() async {
         let model = SessionsModel(
             source: FakeSessionSource(list: SessionList(sessions: [], failures: []), error: SweError.commandFailed(status: 1, message: "boom")),
-            ledger: FakeSessionLedger(), now: { [now] in now })
+            ledger: FakeSessionLedger(), now: { [now] in now }, searchIndexingEnabled: false)
         await model.load()
         #expect(model.error == "boom")
     }
@@ -743,7 +743,7 @@ final class CountingSessionSource: SessionListing, @unchecked Sendable {
         let model = SessionsModel(
             source: FakeSessionSource(list: SessionList(sessions: [
                 session("a", "claude", cwd: nil, at: 1_791_700_000 - 7 * 86_400 + 30)], failures: [])),
-            ledger: FakeSessionLedger(), now: { clock.now }, calendar: calendar)
+            ledger: FakeSessionLedger(), now: { clock.now }, calendar: calendar, searchIndexingEnabled: false)
         await model.load()
         model.filter.window = .week
         #expect(model.visible.map(\.id) == ["a"])
@@ -801,7 +801,7 @@ final class CountingSessionSource: SessionListing, @unchecked Sendable {
         let model = SessionsModel(
             source: FakeSessionSource(list: SessionList(sessions: [
                 session("a", "claude", cwd: nil, at: 1_000)], failures: [])),
-            ledger: FakeSessionLedger(), now: { clock.now }, calendar: calendar)
+            ledger: FakeSessionLedger(), now: { clock.now }, calendar: calendar, searchIndexingEnabled: false)
         await model.load()
         model.filter.window = .all
         let first = model.visible

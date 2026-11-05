@@ -2,6 +2,10 @@ import Foundation
 import Testing
 @testable import SWECore
 
+/// The home the fixtures' paths sit under, never the machine's own:
+/// a marketplace is editable by where it sits relative to it.
+private let fixtureHome = URL(fileURLWithPath: "/h")
+
 /// `swe plugins catalog --json` as swe writes it: one hub marketplace, one
 /// registered elsewhere, one no harness registers any more, and Cursor's
 /// cache.
@@ -292,7 +296,7 @@ func decodedInventory() throws -> [Skill] {
              "ran": [["codex", "plugin", "add", "linter@official"]], "edited": null, "output": "ok",
              "state": {"installed": true, "enabled": true, "version": "1"}}
             """#))])
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         let swe = SweClient(runner: runner)
         await model.load(swe: swe)
         await model.run(PluginAction(verb: .install, ref: "linter@official", harness: "codex"), swe: swe)
@@ -312,7 +316,7 @@ func decodedInventory() throws -> [Skill] {
              "detail": "already disabled", "ran": [], "edited": null, "output": null,
              "state": {"installed": true, "enabled": false, "version": "1.2.0"}}
             """#))])
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         let swe = SweClient(runner: runner)
         await model.load(swe: swe)
         await model.run(PluginAction(verb: .disable, ref: "toolkit@kit", harness: "claude"), swe: swe)
@@ -322,7 +326,7 @@ func decodedInventory() throws -> [Skill] {
     @Test func aFailedActionShowsSwesReasonAndStillReloads() async throws {
         let runner = catalogRunner([(["plugins", "uninstall"], CommandResult(
             status: 1, stdout: Data(), stderr: "codex plugin remove canva@openai-curated failed with exit status 1:\nno such plugin\n"))])
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         let swe = SweClient(runner: runner)
         await model.load(swe: swe)
         await model.run(PluginAction(verb: .uninstall, ref: "canva@openai-curated", harness: "codex"), swe: swe)
@@ -333,7 +337,7 @@ func decodedInventory() throws -> [Skill] {
 
     @Test func anActionTheCatalogDoesNotOfferIsNeverSent() async throws {
         let runner = catalogRunner()
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         let swe = SweClient(runner: runner)
         // Nothing on show yet: nothing to act on.
         await model.run(PluginAction(verb: .install, ref: "linter@official", harness: "codex"), swe: swe)
@@ -350,7 +354,7 @@ func decodedInventory() throws -> [Skill] {
     }
 
     @Test func aReloadForASweNoLongerPickedIsDropped() async throws {
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         let other = SweClient(runner: catalogRunner())
         let runner = HookRunner(catalogRunner([(["plugins", "install"], json(#"""
             {"action": "install", "harness": "codex", "ref": "linter@official", "changed": true,
@@ -378,7 +382,7 @@ func decodedInventory() throws -> [Skill] {
     }
 
     @Test func eachMarketplaceSitsUnderItsSourceAndEachRowShowsThatSourcesChips() async throws {
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         await model.load(swe: SweClient(runner: catalogRunner()))
         let index = try #require(model.index)
         #expect(index.total == 9)
@@ -419,7 +423,7 @@ func decodedInventory() throws -> [Skill] {
     }
 
     @Test func installedCountsAreForTheSourcesHarness() async throws {
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         await model.load(swe: SweClient(runner: catalogRunner()))
         let sources = try #require(model.index).sources
         func market(_ id: String) -> ExploreMarketplace? { sources.flatMap(\.marketplaces).first { $0.id == id } }
@@ -438,7 +442,7 @@ func decodedInventory() throws -> [Skill] {
 
     @Test func anOpenedPluginFollowsItsRefAcrossAReload() async throws {
         let runner = catalogRunner()
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         await model.load(swe: SweClient(runner: runner))
         let index = try #require(model.index)
         // drawer lives under the hub source; the lookup a detail view
@@ -528,7 +532,7 @@ func decodedInventory() throws -> [Skill] {
     }
 
     @Test func filtersByHarnessAndText() async throws {
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         await model.load(swe: SweClient(runner: catalogRunner()))
         model.skills = try decodedInventory()
         await model.indexed()
@@ -562,7 +566,7 @@ func decodedInventory() throws -> [Skill] {
     }
 
     @Test func marketplacesStartClosedAndOpenPerToggle() async throws {
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         await model.load(swe: SweClient(runner: catalogRunner()))
         #expect(model.index != nil)
         // Every marketplace starts closed, hub or not.
@@ -576,17 +580,17 @@ func decodedInventory() throws -> [Skill] {
     }
 
     @Test func openStateIsSessionOnly() {
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         model.toggle("claude/official")
         #expect(model.isOpen("claude/official"))
         // Nothing is kept between runs: a fresh model starts closed.
-        let next = PluginCatalogModel()
+        let next = PluginCatalogModel(home: fixtureHome)
         #expect(!next.isOpen("claude/official"))
         #expect(next.expanded.isEmpty)
     }
 
     @Test func aSearchOpensWhatItFindsAndLeavesTheOwnStateAlone() async throws {
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         await model.load(swe: SweClient(runner: catalogRunner()))
         model.toggle("local/kit")
 
@@ -613,7 +617,7 @@ func decodedInventory() throws -> [Skill] {
     }
 
     @Test func aPluginListsItsSkillsAndEveryInstalledCopyOncePerName() async throws {
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         await model.load(swe: SweClient(runner: catalogRunner()))
         model.skills = try decodedInventory()
         await model.indexed()
@@ -630,11 +634,11 @@ func decodedInventory() throws -> [Skill] {
     @Test func theLastCatalogShowsAtOnceOnTheNextLaunch() async throws {
         let store = MemorySnapshotStore<Snapshot<PluginCatalog>>()
         let runner = catalogRunner()
-        let first = PluginCatalogModel(snapshots: store)
+        let first = PluginCatalogModel(snapshots: store, home: fixtureHome)
         await first.loadIfStale(swe: SweClient(runner: runner), for: "/bin/swe")
         #expect(await store.saves == 1)
 
-        let next = PluginCatalogModel(snapshots: store)
+        let next = PluginCatalogModel(snapshots: store, home: fixtureHome)
         #expect(next.lookup == .pending)
         let before = next.revision
         await next.restore()
@@ -649,14 +653,14 @@ func decodedInventory() throws -> [Skill] {
     @Test func aCatalogSweCannotReadIsUnavailableNotEmpty() async {
         let runner = ScriptedRunner([(["plugins", "catalog", "--json"], CommandResult(
             status: 1, stdout: Data(), stderr: "Unknown subcommand: catalog\n"))])
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         await model.load(swe: SweClient(runner: runner))
         #expect(model.lookup == .unavailable("Unknown subcommand: catalog"))
         #expect(model.index == nil)
     }
 
     @Test func withoutAnInventoryEachPluginListsTheCatalogsOwnSkills() async throws {
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         await model.load(swe: SweClient(runner: catalogRunner()))
         let vercel = try #require(model.index?.rows.first { $0.id == "vercel@official" })
         #expect(vercel.skills.map(\.name) == ["ai-sdk", "eve"])
@@ -672,7 +676,7 @@ func decodedInventory() throws -> [Skill] {
     }
 
     @Test func anIndexOvertakenByNewerSkillsIsDropped() async throws {
-        let model = PluginCatalogModel()
+        let model = PluginCatalogModel(home: fixtureHome)
         await model.load(swe: SweClient(runner: catalogRunner()))
         let inventory = try decodedInventory()
         // Two inventories in a row, before either index lands: only the
@@ -800,7 +804,7 @@ func decodedInventory() throws -> [Skill] {
         guard case .loaded(let report) = fixes.state else { Issue.record("\(fixes.state)"); return }
         let finding = try #require(report.drift.first)
 
-        let model = PluginCatalogModel(work: work)
+        let model = PluginCatalogModel(work: work, home: fixtureHome)
         let runner = HookRunner(catalogRunner([(["plugins", "uninstall"], json(#"""
             {"action": "uninstall", "harness": "codex", "ref": "canva@openai-curated", "changed": true,
              "state": {"installed": false, "enabled": null, "version": null}}
@@ -835,7 +839,7 @@ func decodedInventory() throws -> [Skill] {
     @Test func everySkillIsShownExactlyOnceAcrossBothPages() async throws {
         let runner = catalogRunner()
         let swe = SweClient(runner: runner)
-        let explore = PluginCatalogModel()
+        let explore = PluginCatalogModel(home: fixtureHome)
         await explore.load(swe: swe)
         let skillsPage = SkillsModel(swe: swe)
         await skillsPage.load()
@@ -860,7 +864,7 @@ func decodedInventory() throws -> [Skill] {
     func everySkillOnThisMacIsShownExactlyOnce() async throws {
         let path = try #require(ProcessInfo.processInfo.environment["QUIVER_COVERAGE_SWE"])
         let swe = SweClient(runner: ProcessRunner(executable: path))
-        let explore = PluginCatalogModel(timeout: .seconds(120))
+        let explore = PluginCatalogModel(timeout: .seconds(120), home: fixtureHome)
         await explore.load(swe: swe)
         let skillsPage = SkillsModel(swe: swe)
         await skillsPage.load()

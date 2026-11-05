@@ -94,13 +94,13 @@ function paintDoctor() {
   let body;
   if (p.state === "failed") {
     body = `<div class="card doctor-state"><p class="error" role="alert">${esc(p.error)}</p>
-      <div><button class="doctor-button" data-doctor="reload">Try again</button></div></div>`;
+      <div><button class="btn" data-doctor="reload">Try again</button></div></div>`;
   } else if (p.state !== "loaded" || !p.data) {
     body = doctorSkeleton();
   } else if (!p.data.findings.length) {
     body = `${doctorLostError()}${doctorFixAllCard()}${doctorBlocked()}<div class="card doctor-state doctor-clear">
       <span class="doctor-seal">${doctorIcon("seal")}</span><p class="empty">Everything checks out.</p>
-      <button class="doctor-button" data-doctor="reload">Check again</button></div>`;
+      <button class="btn" data-doctor="reload">Check again</button></div>`;
   } else {
     body = `${doctorLostError()}${doctorFixAllCard()}${doctorBlocked()}${doctorFindings(p.data.findings)}`;
   }
@@ -124,13 +124,13 @@ function doctorBlocked() {
   const machine = (p.data && p.data.machine) || "the hub";
   const list = blocked.map((path) => `<code>${esc(path)}</code>`).join(", ");
   const button = replacing
-    ? `<span class="doctor-running" role="status"><span class="doctor-spinner" aria-hidden="true"></span>Replacing…</span>`
-    : blocked.length ? `<button class="doctor-button" data-doctor="replace-ask" aria-expanded="${p.confirmingReplace}"${p.running ? " disabled" : ""}>Replace and back up…</button>` : "";
+    ? `<span class="doctor-running" role="status"><span class="spinner" aria-hidden="true"></span>Replacing…</span>`
+    : blocked.length ? `<button class="btn" data-doctor="replace-ask" aria-expanded="${p.confirmingReplace}"${p.running ? " disabled" : ""}>Replace and back up…</button>` : "";
   const confirm = p.confirmingReplace && !replacing ? `<div class="doctor-confirm" role="group" aria-label="Run swe init --force?">
       <p class="caption">This runs swe init --force on ${esc(machine)}: each of these is copied to ~/.swe/backups, then replaced with a link to the shared copy.</p>
       <div class="doctor-confirm-buttons">
-        <button class="doctor-button" data-doctor="replace-cancel">Cancel</button>
-        <button class="doctor-button primary danger" data-doctor="replace-go">Replace and back up</button>
+        <button class="btn" data-doctor="replace-cancel">Cancel</button>
+        <button class="btn primary danger" data-doctor="replace-go">Replace and back up</button>
       </div></div>` : "";
   return `<div class="card doctor-blocked">
     ${blocked.length ? `<p class="doctor-blocked-text">A real file or folder is in the way, so swe init left ${blocked.length === 1 ? "it" : "them"} alone: ${list}.</p>` : ""}
@@ -144,15 +144,15 @@ function doctorFixAllCard() {
   const p = doctorPage;
   const machine = (p.data && p.data.machine) || "the hub";
   if (p.running === "fix-all") {
-    return `<div class="card doctor-fixall"><span class="doctor-running" role="status"><span class="doctor-spinner" aria-hidden="true"></span>Fixing…</span></div>`;
+    return `<div class="card doctor-fixall"><span class="doctor-running" role="status"><span class="spinner" aria-hidden="true"></span>Fixing…</span></div>`;
   }
   if (p.confirmingFixAll) {
     const n = (p.data && p.data.fixable) || 0;
     return `<div class="card doctor-fixall"><div class="doctor-confirm" role="group" aria-label="Fix all?">
       <p class="caption">This runs swe doctor --fix on ${esc(machine)}: the ${n === 1 ? "local fix" : `${n} local fixes`} in order (setup, discover, init, plugin installs), checking again after each. Real files in the way are left alone. Installs, and fixes that delete or overwrite, wait for their own Run.</p>
       <div class="doctor-confirm-buttons">
-        <button class="doctor-button" data-doctor="fixall-cancel">Cancel</button>
-        <button class="doctor-button primary" data-doctor="fixall-go">Fix all</button>
+        <button class="btn" data-doctor="fixall-cancel">Cancel</button>
+        <button class="btn primary" data-doctor="fixall-go">Fix all</button>
       </div></div></div>`;
   }
   if (p.fixAllError) {
@@ -168,7 +168,7 @@ function doctorFixAllCard() {
     : "Nothing to fix here: what is left needs you.";
   const errors = failed.map((s) => `<p class="error" role="alert"><code>${esc(s.fix || s.action)}</code>: ${esc(s.error)}</p>`).join("");
   return `<div class="card doctor-fixall"><div class="doctor-card-head"><span class="caption" role="status">${esc(line)}</span>
-    <button class="doctor-button" data-doctor="fixall-dismiss">Dismiss</button></div>${errors}</div>`;
+    <button class="btn" data-doctor="fixall-dismiss">Dismiss</button></div>${errors}</div>`;
 }
 
 function doctorFindings(findings) {
@@ -180,7 +180,7 @@ function doctorFindings(findings) {
       p.showsAll ? "Show less" : hidden === 1 ? "Show 1 more" : `Show ${hidden} more`}</button>` : "";
   return `<div class="card doctor-card">
     <div class="doctor-card-head"><span class="card-title">${findings.length === 1 ? "1 finding" : `${findings.length} findings`}</span>
-      <span class="doctor-head-actions">${(p.data && p.data.fixable) ? `<button class="doctor-button" data-doctor="fixall-ask" aria-expanded="${p.confirmingFixAll}"${p.running ? " disabled" : ""} title="Run every safe local fix, in order">Fix all (${p.data.fixable})</button>` : ""}
+      <span class="doctor-head-actions">${(p.data && p.data.fixable) ? `<button class="btn" data-doctor="fixall-ask" aria-expanded="${p.confirmingFixAll}"${p.running ? " disabled" : ""} title="Run every safe local fix, in order">Fix all (${p.data.fixable})</button>` : ""}
       <button class="icon-button" data-doctor="reload" aria-label="Refresh" title="Run the checks again">${icon("rescan")}</button></span></div>
     <div class="doctor-rows">${shown.map(doctorRow).join("")}</div>${fold}
   </div>`;
@@ -226,8 +226,8 @@ function doctorLegacyFix(f, id) {
   if (!f.fix) return "";
   const running = p.running === id;
   const run = !f.action ? ""
-    : running ? `<span class="doctor-running" role="status"><span class="doctor-spinner" aria-hidden="true"></span>Running…</span>`
-    : `<button class="doctor-button primary" data-doctor="run" aria-expanded="${p.confirming === id}"${p.running ? " disabled" : ""}>Run</button>`;
+    : running ? `<span class="doctor-running" role="status"><span class="spinner" aria-hidden="true"></span>Running…</span>`
+    : `<button class="btn primary" data-doctor="run" aria-expanded="${p.confirming === id}"${p.running ? " disabled" : ""}>Run</button>`;
   let fix = `<div class="doctor-fix"><code class="doctor-command">${esc(f.fix)}</code>${run}
     <button class="icon-button doctor-copy" data-doctor="copy" aria-label="Copy the command" title="Copy the command">${doctorIcon("copy")}</button></div>`;
   if (p.confirming === id && !running && DOCTOR_RUNS[f.action]) fix += doctorConfirm(f, f.action);
@@ -275,10 +275,10 @@ function doctorRemedy(f, id, r, i) {
     const copy = r.command
       ? `<button class="icon-button doctor-copy" data-doctor="copy" data-idx="${i}" aria-label="Copy the command" title="Copy the command">${doctorIcon("copy")}</button>` : "";
     affordance = p.running === key
-      ? `<span class="doctor-running" role="status"><span class="doctor-spinner" aria-hidden="true"></span>Running…</span>`
-      : `${copy}<button class="doctor-button primary" data-doctor="run" data-idx="${i}" aria-expanded="${p.confirming === key}"${p.running ? " disabled" : ""}>Run</button>`;
+      ? `<span class="doctor-running" role="status"><span class="spinner" aria-hidden="true"></span>Running…</span>`
+      : `${copy}<button class="btn primary" data-doctor="run" data-idx="${i}" aria-expanded="${p.confirming === key}"${p.running ? " disabled" : ""}>Run</button>`;
   } else if (r.kind === "agent") {
-    affordance = `<button class="doctor-button" data-doctor="agent" data-idx="${i}" aria-expanded="${p.agent && p.agent.id === id && p.agent.idx === i}"${p.agentBusy ? " disabled" : ""}>${esc(r.title)}</button>`;
+    affordance = `<button class="btn" data-doctor="agent" data-idx="${i}" aria-expanded="${p.agent && p.agent.id === id && p.agent.idx === i}"${p.agentBusy ? " disabled" : ""}>${esc(r.title)}</button>`;
   } else if (r.kind === "command" && r.command) {
     affordance = `<button class="icon-button doctor-copy" data-doctor="copy" data-idx="${i}" aria-label="Copy the command" title="Copy the command">${doctorIcon("copy")}</button>`;
   }
@@ -299,8 +299,8 @@ function doctorConfirm(f, action, r, idx) {
   return `<div class="doctor-confirm" role="group" aria-label="Run ${esc(label)}?">
     <p class="caption">${esc(DOCTOR_RUNS[action](machine, f, r))}</p>
     <div class="doctor-confirm-buttons">
-      <button class="doctor-button" data-doctor="cancel">Cancel</button>
-      <button class="doctor-button primary" data-doctor="go" data-action="${esc(action)}"${idx === undefined ? "" : ` data-idx="${idx}"`}>Run ${esc(label)}</button>
+      <button class="btn" data-doctor="cancel">Cancel</button>
+      <button class="btn primary" data-doctor="go" data-action="${esc(action)}"${idx === undefined ? "" : ` data-idx="${idx}"`}>Run ${esc(label)}</button>
     </div></div>`;
 }
 
@@ -315,15 +315,15 @@ function doctorAgentPanel(f, r) {
   const pick = launchable.length ? chips
     : `<span class="caption">No harness can start on ${esc(machine)}: install one there, or turn it on in Settings › Providers.</span>`;
   const phase = agent.phase
-    ? `<span class="doctor-running" role="status"><span class="doctor-spinner" aria-hidden="true"></span>${esc(agent.phase)}</span>` : "";
+    ? `<span class="doctor-running" role="status"><span class="spinner" aria-hidden="true"></span>${esc(agent.phase)}</span>` : "";
   return `<div class="doctor-confirm" role="group" aria-label="Fix with agent">
     <p class="caption">Launch an agent on ${esc(machine)}. It gets this prompt:</p>
     <pre class="doctor-prompt">${esc(r.prompt || "")}</pre>
     <div class="doctor-chips">${pick}</div>
     ${agent.error ? `<p class="error" role="alert">${esc(agent.error)}</p>` : ""}
     <div class="doctor-confirm-buttons">${phase}
-      <button class="doctor-button" data-doctor="agent-cancel"${agent.phase ? " disabled" : ""}>Cancel</button>
-      <button class="doctor-button primary" data-doctor="agent-go"${agent.phase || !agent.harness || !r.prompt ? " disabled" : ""}>Launch ${esc(agent.harnessName || "")}</button>
+      <button class="btn" data-doctor="agent-cancel"${agent.phase ? " disabled" : ""}>Cancel</button>
+      <button class="btn primary" data-doctor="agent-go"${agent.phase || !agent.harness || !r.prompt ? " disabled" : ""}>Launch ${esc(agent.harnessName || "")}</button>
     </div></div>`;
 }
 

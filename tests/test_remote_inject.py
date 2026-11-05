@@ -395,6 +395,25 @@ class TestTmuxInjector(unittest.TestCase):
         self.assertTrue(out.ok)
         self.assertEqual(st.call_args[0][1], "/compact")
 
+    def test_model_and_effort_only_where_the_tui_takes_them(self):
+        # Typed into a TUI without /model or /effort, the line would be
+        # sent to the model as a prompt.
+        import dataclasses
+        for tool, op, ok in (("claude", "model", True),
+                             ("claude", "effort", True),
+                             ("codex", "model", True),
+                             ("codex", "effort", False),
+                             ("opencode", "model", False),
+                             ("gemini", "model", False)):
+            session = dataclasses.replace(self.session, tool_name=tool)
+            with patch.object(supervise, "send_text",
+                              return_value=True) as st:
+                out = self.inj.control(session, op, "x")
+            self.assertEqual(out.ok, ok, (tool, op))
+            self.assertEqual(st.called, ok, (tool, op))
+            if not ok:
+                self.assertTrue(out.note.startswith("unsupported_control:"))
+
     def test_send_empty_and_unreachable(self):
         out = self.inj.send(self.session, {"text": "", "mode": "steer"}, "done")
         self.assertFalse(out.ok)
@@ -974,10 +993,6 @@ class TestHubWrites(unittest.TestCase):
         self.assertIn("shot.png", sent)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestAttachmentCapability(unittest.TestCase):
     """``capabilities.attachments`` over ``ATTACH_FALLBACK``."""
 
@@ -1045,3 +1060,7 @@ class TestAttachmentCapability(unittest.TestCase):
         with patch.object(registry, "load_registry_readonly",
                           side_effect=ValueError):
             self.assertTrue(attachments.at_refs("claude"))
+
+
+if __name__ == "__main__":
+    unittest.main()

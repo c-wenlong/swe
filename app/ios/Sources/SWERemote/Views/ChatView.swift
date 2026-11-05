@@ -660,13 +660,18 @@ struct TableBlock: View {
         let hiddenColumns = table.columnCount - columns
         VStack(alignment: .leading, spacing: 4) {
             grid(columns: columns, rows: Array(rows))
-            if hiddenRows > 0 || hiddenColumns > 0 {
-                Text([hiddenRows > 0 ? "\(hiddenRows) more rows" : nil,
-                      hiddenColumns > 0 ? "\(hiddenColumns) more columns" : nil]
-                    .compactMap { $0 }.joined(separator: " and ") + " not shown")
-                    .font(Theme.caption).foregroundStyle(Theme.textMuted)
+            if let note = Self.hiddenNote(rows: hiddenRows, columns: hiddenColumns) {
+                Text(note).font(Theme.caption).foregroundStyle(Theme.textMuted)
             }
         }
+    }
+
+    /// "3 more rows and 1 more column not shown", or nil when nothing was cut.
+    static func hiddenNote(rows: Int, columns: Int) -> String? {
+        let parts = [rows > 0 ? "\(rows) more \(rows == 1 ? "row" : "rows")" : nil,
+                     columns > 0 ? "\(columns) more \(columns == 1 ? "column" : "columns")" : nil]
+            .compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " and ") + " not shown"
     }
 
     private func grid(columns: Int, rows: [[String]]) -> some View {
