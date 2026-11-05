@@ -201,8 +201,9 @@ const Fmt = (() => {
       const rest = minutes % 60;
       return rest ? `in ${Math.floor(minutes / 60)}h ${rest}m` : `in ${minutes / 60}h`;
     }
+    const days = Math.floor(minutes / (24 * 60));
     const rest = Math.floor((minutes % (24 * 60)) / 60);
-    return rest ? `in ${Math.floor(minutes / (24 * 60))}d ${rest}h` : `in ${minutes / (24 * 60)}d`;
+    return rest ? `in ${days}d ${rest}h` : `in ${days}d`;
   }
 
   /* UsageFormat.window: a limit window named as the harness's CLI does;
