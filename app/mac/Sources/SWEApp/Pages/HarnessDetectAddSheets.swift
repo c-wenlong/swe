@@ -136,6 +136,13 @@ struct AddHarnessSheet: View {
             ? "Start with a letter or digit; then . _ -" : nil
     }
 
+    /// `swe add` takes the command as a positional word, where one that
+    /// starts with "-" reads as a flag; the CLI and the web editor refuse
+    /// it, so the sheet says why before Add rather than after.
+    static func commandProblem(_ command: String) -> String? {
+        command.trimmingCharacters(in: .whitespaces).hasPrefix("-") ? "The command can't start with -" : nil
+    }
+
     private func csv(_ text: String) -> [String] {
         text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
@@ -151,7 +158,9 @@ struct AddHarnessSheet: View {
             }
             FormField("Command") {
                 TextField("binary name or path", text: $command).sweField(monospaced: true)
-                if !command.isEmpty, !command.hasPrefix("/"), onPath == false {
+                if let problem = Self.commandProblem(command) {
+                    Text(problem).font(Theme.caption).foregroundStyle(Theme.dangerText)
+                } else if !command.isEmpty, !command.hasPrefix("/"), onPath == false {
                     Text("Not on PATH yet").font(Theme.caption).foregroundStyle(Theme.textSecondary)
                 }
             }
@@ -189,7 +198,7 @@ struct AddHarnessSheet: View {
                     Task {
                         do {
                             try await model.add(
-                                name: name, command: command,
+                                name: name, command: command.trimmingCharacters(in: .whitespaces),
                                 description: description,
                                 aliases: csv(aliases), tags: csv(tags))
                             await reload()
@@ -199,7 +208,8 @@ struct AddHarnessSheet: View {
                     }
                 }
                 .primaryButton()
-                .disabled(working || nameProblem != nil || command.isEmpty)
+                .disabled(working || nameProblem != nil || command.trimmingCharacters(in: .whitespaces).isEmpty
+                          || Self.commandProblem(command) != nil)
             }
         }
         .sheetScaffold(width: 420)
