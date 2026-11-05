@@ -62,6 +62,30 @@ final class LargeTextLayoutTests: XCTestCase {
                              size(twoLines.dynamicTypeSize(.accessibility1)).height)
     }
 
+    /// The `@` and `/` menu rows and the queued tray's rows keep their
+    /// height at the default size and grow with the text above it; a
+    /// fixed height clipped their words at accessibility sizes.
+    func testPromptMenuAndTrayRowsGrowWithTheText() {
+        let mention = MentionRow(entry: FileEntry(path: "src/app/main.py"))
+        let command = CommandRow(command: SlashCommand(name: "review", description: "Review the open diff",
+                                                       source: "project", argumentHint: "[file]"))
+        let queued = QueuedRow(send: QueuedSend(clientId: "a", text: "run the tests again", phase: .waiting),
+                               editing: false, onEdit: {}, onRemove: {}, onSendNow: {})
+        XCTAssertEqual(size(mention.frame(width: 340).dynamicTypeSize(.large)).height, MentionMenu.rowHeight)
+        XCTAssertEqual(size(command.frame(width: 340).dynamicTypeSize(.large)).height, CommandMenuView.rowHeight)
+        XCTAssertEqual(size(queued.frame(width: 340).dynamicTypeSize(.large)).height, QueuedTray.rowHeight)
+        for (name, large, huge) in [
+            ("mention", size(mention.frame(width: 340).dynamicTypeSize(.large)).height,
+             size(mention.frame(width: 340).dynamicTypeSize(.accessibility3)).height),
+            ("command", size(command.frame(width: 340).dynamicTypeSize(.large)).height,
+             size(command.frame(width: 340).dynamicTypeSize(.accessibility3)).height),
+            ("queued", size(queued.frame(width: 340).dynamicTypeSize(.large)).height,
+             size(queued.frame(width: 340).dynamicTypeSize(.accessibility3)).height),
+        ] {
+            XCTAssertGreaterThan(huge, large * 1.5, name)
+        }
+    }
+
     @ViewBuilder private var details: some View {
         Text("#1214")
         Text("· c-wenlong")

@@ -54,7 +54,9 @@ struct PromptField: View {
 
 /// The card both prompt menus sit in, just above the prompt box: rows
 /// on `Theme.card` with a hairline border; past `visibleRows` it scrolls.
-/// With `refresh` it always scrolls, so a pull can reload it.
+/// With `refresh` it always scrolls, so a pull can reload it. Rows are
+/// `rowHeight` at the default text size and grow with the text, so the
+/// scrolling window grows with them.
 struct PromptMenuCard<Rows: View>: View {
     let count: Int
     let rowHeight: CGFloat
@@ -67,10 +69,10 @@ struct PromptMenuCard<Rows: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             if let refresh {
-                scroller.frame(height: CGFloat(max(1, min(count, visibleRows))) * rowHeight)
+                scroller.scaledHeight(CGFloat(max(1, min(count, visibleRows))) * rowHeight)
                     .refreshable { await refresh() }
             } else if count > visibleRows {
-                scroller.frame(height: CGFloat(visibleRows) * rowHeight)
+                scroller.scaledHeight(CGFloat(visibleRows) * rowHeight)
             } else {
                 VStack(spacing: 0) { rows() }
             }
@@ -151,7 +153,7 @@ struct MentionMenu: View {
     }
 }
 
-private struct MentionRow: View {
+struct MentionRow: View {
     let entry: FileEntry
 
     var body: some View {
@@ -170,7 +172,8 @@ private struct MentionRow: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
-        .frame(height: MentionMenu.rowHeight)
+        // Taller with the text: a fixed 44 pt cut the name at large sizes.
+        .scaledMinHeight(MentionMenu.rowHeight)
         .contentShape(.rect)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(parent.isEmpty ? name : "\(name), in \(parent)")
@@ -226,7 +229,7 @@ struct CommandMenuView: View {
     }
 }
 
-private struct CommandRow: View {
+struct CommandRow: View {
     let command: SlashCommand
 
     var body: some View {
@@ -256,7 +259,8 @@ private struct CommandRow: View {
             }
         }
         .padding(.horizontal, 14)
-        .frame(height: CommandMenuView.rowHeight)
+        // Taller with the text: a fixed 54 pt cut the description off.
+        .scaledMinHeight(CommandMenuView.rowHeight)
         .contentShape(.rect)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([command.label, command.argumentHint, command.description, command.sourceLabel]

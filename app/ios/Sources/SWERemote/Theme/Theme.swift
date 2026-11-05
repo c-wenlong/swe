@@ -216,6 +216,15 @@ struct ScaledMinHeight: ViewModifier {
     func body(content: Content) -> some View { content.frame(minHeight: height) }
 }
 
+/// See `View.scaledHeight`.
+struct ScaledHeight: ViewModifier {
+    @ScaledMetric private var height: CGFloat
+
+    init(height: CGFloat) { _height = ScaledMetric(wrappedValue: height, relativeTo: .subheadline) }
+
+    func body(content: Content) -> some View { content.frame(height: height) }
+}
+
 /// See `View.centredWhenWrapped`.
 struct CentredWhenWrapped: ViewModifier {
     @Environment(\.dynamicTypeSize) private var size
@@ -236,6 +245,11 @@ extension View {
     /// step with its label at larger sizes, and taller still when the
     /// label wraps, so a grown label never clips.
     func scaledMinHeight(_ height: CGFloat) -> some View { modifier(ScaledMinHeight(height: height)) }
+
+    /// A fixed height, such as a scrolling list's few visible rows:
+    /// `height` at the default text size, scaled with the text from there
+    /// the way `scaledMinHeight` scales its rows.
+    func scaledHeight(_ height: CGFloat) -> some View { modifier(ScaledHeight(height: height)) }
 
     /// A fixed-width column for a row's icon, so the titles beside it
     /// line up. It widens with the text size, so a symbol that grew with

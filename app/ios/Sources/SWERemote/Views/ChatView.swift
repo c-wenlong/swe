@@ -1280,7 +1280,7 @@ struct QueuedTray: View {
                     // The chat anchors its scroll views at the bottom; the
                     // tray starts at its oldest send.
                     .defaultScrollAnchor(.top)
-                    .frame(height: CGFloat(visibleRows) * Self.rowHeight)
+                    .scaledHeight(CGFloat(visibleRows) * Self.rowHeight)
             } else {
                 rows
             }
@@ -1309,7 +1309,7 @@ struct QueuedTray: View {
     }
 }
 
-private struct QueuedRow: View {
+struct QueuedRow: View {
     let send: QueuedSend
     let editing: Bool
     let onEdit: () -> Void
@@ -1362,7 +1362,8 @@ private struct QueuedRow: View {
         }
         .padding(.leading, 14)
         .padding(.trailing, 2)
-        .frame(height: QueuedTray.rowHeight)
+        // Taller with the text: a fixed 44 pt clipped the message.
+        .scaledMinHeight(QueuedTray.rowHeight)
     }
 }
 
