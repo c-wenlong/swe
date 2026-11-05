@@ -233,6 +233,24 @@ import Testing
         ])
     }
 
+    @Test func headingLevelsStopAtSix() {
+        #expect(GitHubMarkdown.blocks("###### six") == [.heading(6, "six")])
+        #expect(GitHubMarkdown.blocks("####### seven") == [.paragraph("####### seven")])
+        #expect(GitHubMarkdown.blocks("#") == [.heading(1, "")])
+    }
+
+    @Test func aHugeRunOfHashesIsReadInLinearTime() {
+        // Counting the level from the start each step was quadratic: a
+        // 200K-character line took over a minute. Linear takes well under
+        // a second even on a slow runner.
+        let line = String(repeating: "#", count: 200_000)
+        let clock = ContinuousClock()
+        var blocks: [MarkdownBlock] = []
+        let elapsed = clock.measure { blocks = GitHubMarkdown.blocks(line) }
+        #expect(blocks == [.paragraph(line)])
+        #expect(elapsed < .seconds(5))
+    }
+
     @Test func blocksKeepSoftBreaks() {
         // GitHub wraps bodies hard — one source line is a rendered line.
         let blocks = GitHubMarkdown.blocks("line one\nline two")
