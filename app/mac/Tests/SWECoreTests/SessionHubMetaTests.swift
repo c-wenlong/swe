@@ -296,7 +296,7 @@ extension HubStubbed {
         #expect(hub.meta(for: "claude:a")?.pinnedAt == nil)
         let sent = try #require(HubStub.requests.last)
         #expect(sent.httpMethod == "POST")
-        let body = try JSONSerialization.jsonObject(with: sent.httpBody ?? Self.read(sent)) as? [String: Bool]
+        let body = try JSONSerialization.jsonObject(with: HubStub.bodyData(sent)) as? [String: Bool]
         #expect(body == ["pinned": false])
     }
 
@@ -316,15 +316,40 @@ extension HubStubbed {
         let hub = try paired()
         HubStub.handler = { req in req.url?.path == "/v1/sessions" ? (200, Data(Self.rows.utf8)) : (404, Data()) }
         await hub.refreshKeys()
+        // The hub normalizes what it is sent, so its answer, not the
+        // request, is what the overlay must show.
+        HubStub.requests = []
         HubStub.handler = { req in
-            let title = (try? JSONSerialization.jsonObject(with: req.httpBody ?? Self.read(req)) as? [String: String])?["title"] ?? "?"
-            let reply = #"{"ok": true, "title": "\#(title.isEmpty ? "b" : title)", "harness_title": "b", "pinned": false, "pinned_at": null}"#
+            let sent = HubStub.body(req)["title"] ?? "?"
+            let title = sent.isEmpty ? "b" : "Docs pass"
+            let reply = #"{"ok": true, "title": "\#(title)", "harness_title": "b", "pinned": false, "pinned_at": null}"#
             return req.url?.path.hasSuffix("/title") == true ? (200, Data(reply.utf8)) : (404, Data())
         }
-        try await hub.rename("codex:b", title: "Docs pass")
+        try await hub.rename("codex:b", title: "  Docs   pass ")
+        #expect(HubStub.body(try #require(HubStub.requests.last)) == ["title": "  Docs   pass "])
         #expect(hub.meta(for: "codex:b")?.title == "Docs pass")
         #expect(hub.meta(for: "codex:b")?.isRenamed == true)
         try await hub.rename("codex:b", title: "")
+        #expect(hub.meta(for: "codex:b")?.title == "b")
+        #expect(hub.meta(for: "codex:b")?.isRenamed == false)
+    }
+
+    /// A refused rename throws the hub's reason for the sheet and leaves
+    /// the row's name as it was.
+    @Test func aRefusedRenameThrowsAndKeepsTheName() async throws {
+        let hub = try paired()
+        HubStub.handler = { req in req.url?.path == "/v1/sessions" ? (200, Data(Self.rows.utf8)) : (404, Data()) }
+        await hub.refreshKeys()
+        HubStub.handler = { _ in
+            (409, Data(#"{"error": {"code": "title_taken", "message": "another session has that title"}}"#.utf8))
+        }
+        let error = await #expect(throws: HubError.self) {
+            try await hub.rename("codex:b", title: "Docs pass")
+        }
+        #expect(error?.status == 409)
+        #expect(error?.code == "title_taken")
+        #expect(error?.message == "Another session has that title")
+        #expect(hub.meta(for: "codex:b")?.title == "b")
         #expect(hub.meta(for: "codex:b")?.isRenamed == false)
     }
 
@@ -351,21 +376,6 @@ extension HubStubbed {
         let launch = try await hub.fork("claude:a", prompt: "try the other fix")
         #expect(launch.launchId == "L1")
         #expect(HubStub.body(try #require(HubStub.requests.last)) == ["prompt": "try the other fix"])
-    }
-
-    /// The body URLSession handed the protocol as a stream.
-    nonisolated static func read(_ request: URLRequest) -> Data {
-        guard let stream = request.httpBodyStream else { return Data() }
-        stream.open()
-        defer { stream.close() }
-        var data = Data()
-        var buffer = [UInt8](repeating: 0, count: 4096)
-        while stream.hasBytesAvailable {
-            let n = stream.read(&buffer, maxLength: buffer.count)
-            guard n > 0 else { break }
-            data.append(buffer, count: n)
-        }
-        return data
     }
 }
 }

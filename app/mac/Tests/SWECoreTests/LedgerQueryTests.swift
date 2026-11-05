@@ -41,6 +41,8 @@ import Testing
     /// row, and the plain `ts` index it replaces is dropped (#1568).
     @Test func rangeReadsUseTheCoveringIndex() throws {
         let temp = try TempDir()
+        // The store holds a path, not the folder: keep the folder alive.
+        defer { withExtendedLifetime(temp) {} }
         let store = try LedgerStore(url: temp.path("ledger.sqlite"))
         let names = try store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
         var indexes: Set<String> = []

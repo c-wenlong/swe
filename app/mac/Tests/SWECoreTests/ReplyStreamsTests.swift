@@ -146,8 +146,7 @@ import Testing
         chat.repaintStreams()
         #expect(chat.streaming.count == 1)
         chat.apply(env("session.status", #"{"status":"idle"}"#, seq: 3))
-        for _ in 0..<20 where !chat.streaming.isEmpty { await Task.yield() }
-        #expect(chat.streaming.isEmpty)
+        #expect(await observe { chat.streaming.isEmpty })
 
         chat.apply(delta("y", "mid", 1))
         chat.repaintStreams()

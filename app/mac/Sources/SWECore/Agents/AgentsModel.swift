@@ -9,7 +9,7 @@ import Observation
 @Observable
 public final class AgentsModel {
     /// The files a project folder can hold, in the order the page lists them.
-    public static let projectFileNames = ["AGENTS.md", "CLAUDE.md"]
+    public nonisolated static let projectFileNames = ["AGENTS.md", "CLAUDE.md"]
 
     public struct ProjectFile: Equatable, Sendable, Identifiable {
         public var id: String { name }
@@ -18,6 +18,18 @@ public final class AgentsModel {
         public let exists: Bool
         /// When this file is a symlink to another file in the list, its name.
         public let linksTo: String?
+        /// Where the file's link chain ends (the file itself when it is
+        /// not a link), as the last scan found it: the path its document
+        /// opens at and is cached under.
+        public let target: URL
+
+        public init(name: String, url: URL, exists: Bool, linksTo: String?, target: URL? = nil) {
+            self.name = name
+            self.url = url
+            self.exists = exists
+            self.linksTo = linksTo
+            self.target = target ?? url.standardizedFileURL
+        }
     }
 
     public private(set) var check: Loadable<InitCheck> = .idle
@@ -32,8 +44,17 @@ public final class AgentsModel {
     /// Not observed: `document(for:)` fills it while a view reads it.
     @ObservationIgnored private var projectDocuments: [URL: InstructionDocument] = [:]
     @ObservationIgnored private var generation = 0
+    /// Lists a folder's instruction files. It stats and reads links, and
+    /// the folder may sit on a stalled mount or file provider, so it
+    /// always runs off the main actor.
+    @ObservationIgnored private let scan: @Sendable (URL) -> [ProjectFile]
+    /// Bumped by each rescan, so an older scan finishing late can't
+    /// overwrite a newer one.
+    @ObservationIgnored private var scans = 0
 
-    public init() {}
+    public init(scan: @escaping @Sendable (URL) -> [ProjectFile] = AgentsModel.scan) {
+        self.scan = scan
+    }
 
     public func load(swe: SweClient) async {
         generation += 1
@@ -97,27 +118,40 @@ public final class AgentsModel {
 
     /// Switches to `folder`, dropping the documents of the previous one.
     /// The page asks before calling this while edits are unsaved.
-    public func openProject(_ folder: URL) {
+    public func openProject(_ folder: URL) async {
         projectFolder = folder
         projectDocuments = [:]
-        rescanProject()
+        projectFiles = []
+        await rescanProject()
     }
 
     /// Lists the folder's instruction files again, after one was created.
-    public func rescanProject() {
+    public func rescanProject() async {
+        scans += 1
+        let mine = scans
         guard let folder = projectFolder else {
             projectFiles = []
             return
         }
+        let scan = self.scan
+        let files = await offMain { scan(folder) }
+        // Another folder opened, or a newer rescan ran, while this read.
+        guard mine == scans, projectFolder == folder else { return }
+        projectFiles = files
+    }
+
+    /// The instruction files `folder` can hold, whether each exists, and
+    /// which one links to another: the disk work behind `rescanProject`.
+    public nonisolated static func scan(_ folder: URL) -> [ProjectFile] {
         let fm = FileManager.default
-        let urls: [URL] = Self.projectFileNames.map { folder.appending(path: $0) }
-        projectFiles = urls.map { url in
+        let urls: [URL] = projectFileNames.map { folder.appending(path: $0) }
+        return urls.map { url in
             // CLAUDE.md -> AGENTS.md: this file's link ends at another listed file.
             let target = InstructionDocument.resolveLinks(url).standardizedFileURL
             let other = urls.first { $0 != url && $0.standardizedFileURL == target }
             return ProjectFile(name: url.lastPathComponent, url: url,
                                exists: fm.fileExists(atPath: url.path),
-                               linksTo: other?.lastPathComponent)
+                               linksTo: other?.lastPathComponent, target: target)
         }
     }
 
@@ -125,7 +159,7 @@ public final class AgentsModel {
     /// to lose, flags ones with edits, and notices files created or relinked.
     public func checkDisk() async {
         await global?.checkDisk()
-        rescanProject()
+        await rescanProject()
         for document in projectDocuments.values { await document.checkDisk() }
     }
 
@@ -134,7 +168,7 @@ public final class AgentsModel {
     /// Opened at the link's target, the same path it is cached under, so it
     /// always reads and writes that one file even if the link moves later.
     public func document(for file: ProjectFile) -> InstructionDocument {
-        let key = InstructionDocument.resolveLinks(file.url).standardizedFileURL
+        let key = file.target
         if let open = projectDocuments[key] { return open }
         let document = InstructionDocument(url: key)
         projectDocuments[key] = document

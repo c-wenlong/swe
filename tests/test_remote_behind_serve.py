@@ -16,7 +16,7 @@ from swe.remote import agent as agent_mod
 from swe.remote import commands, pairing
 from swe.remote import hub as hub_mod
 
-from tests.test_remote_commands import _run
+from tests.test_remote_commands import _run, _TempHome
 from tests.test_remote_hub import _Server
 
 from tests._tempdir import temp_dir
@@ -378,7 +378,11 @@ class TestPairLinks(unittest.TestCase):
                          "http://h:1/#pair=t")
 
 
-class TestCommands(unittest.TestCase):
+class TestCommands(_TempHome, unittest.TestCase):
+    # A scratch HOME per test: `serve --install` refuses when the agent's
+    # plist is in ~/Library/LaunchAgents, and under the suite's shared
+    # HOME any earlier test that left one there failed the install case.
+
     def _saved(self, cfg):
         return patch.object(commands, "load_hub_config", return_value=cfg)
 
