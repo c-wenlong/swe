@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **The hub's session journals are private to your account.** Every
+  prompt, reply and tool call a remote session sees is journaled under
+  `~/.swe/data/remote/journal/`, which was created 0755 with 0644 files,
+  so any other local account could read them. The folder is now 0700
+  (an existing one is tightened) and its files 0600.
+
 - **A resolve prompt no longer carries strangers' comments.** Anyone can
   comment on a public issue, and every comment went word for word into
   the first prompt of the agent resolving it. The prompt now quotes the
