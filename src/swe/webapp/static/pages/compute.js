@@ -868,6 +868,10 @@ function openComputeLimits() {
       p.acBusy = false;
       if (status === 401) {
         if (dialog.open) dialog.close();
+        // Stop the poll and drop a read already out, or its reply would
+        // paint the page over the pair form.
+        clearTimeout(p.timer);
+        p.seq++;
         if (currentRoute() === "compute") renderGate();
         return;
       }

@@ -535,7 +535,13 @@ async function doctorAgentLaunch(finding, idx) {
     if (onDoctorPage()) renderGate();
     return;
   }
-  if (!live()) { p.agentBusy = false; return; }
+  if (!live()) {
+    // Left the page (or closed the picker) before the hub answered: no
+    // picker stays behind stuck on "Starting…".
+    p.agentBusy = false;
+    if (p.agent === agent) p.agent = null;
+    return;
+  }
   if (!((status === 200 || status === 202) && data && data.launch_id)) {
     agent.phase = null;
     agent.error = controlErrorText(status, data,
