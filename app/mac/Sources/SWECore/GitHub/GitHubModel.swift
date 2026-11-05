@@ -158,6 +158,9 @@ public final class GitHubModel {
     /// `historyStore` is what survives the quit — a repo's rows load
     /// from SQLite on first touch.
     private var history: [String: RepoHistory] = [:]
+    /// The store's board for a repo, read off the main actor when the
+    /// focus page first opens it (`prime`), for seeding.
+    private var storedBoards: [String: RepoBoard] = [:]
     /// The SQLite store history persists through; nil in tests or when
     /// the file cannot open — the in-memory dictionary still covers
     /// the session either way.
@@ -580,6 +583,7 @@ public final class GitHubModel {
     /// Remembered rows go up first — the page shows what it knows
     /// while the network answers.
     public func loadFocus(repo: String, swe: SweClient) async {
+        await prime(repo: repo)
         seedFocus(repo: repo)
         await withTaskGroup(of: Void.self) { group in
             for tab in RepoTab.allCases {
@@ -595,7 +599,7 @@ public final class GitHubModel {
     /// dictionary over it.
     private func seedFocus(repo: String) {
         let h = history(repo: repo)
-        var board = focusBoards[repo] ?? historyStore?.board(repo: repo) ?? RepoBoard()
+        var board = focusBoards[repo] ?? storedBoards[repo] ?? RepoBoard()
         if !h.pulls.isEmpty, !board.isLoaded(.pulls) { board.pulls = .loaded(h.pulls) }
         if !h.issues.isEmpty, !board.isLoaded(.issues) { board.issues = .loaded(h.issues) }
         if !h.runs.isEmpty, !board.isLoaded(.actions) { board.runs = .loaded(h.runs) }
@@ -606,8 +610,31 @@ public final class GitHubModel {
     /// first, then the SQLite store — one read per repo, cached either
     /// way. Reads sort newest-first, the invariant `mergeHistory` keeps
     /// — stored positions can drift when imports meet live writes.
+    /// Read a repo's remembered rows and board from SQLite off the main
+    /// actor, once per repo per session. On the history queue, so it
+    /// sees every write queued before it.
+    private func prime(repo: String) async {
+        guard history[repo] == nil, let store = historyStore else { return }
+        let board = await onHistoryQueue { store.board(repo: repo) }
+        guard history[repo] == nil else { return }
+        history[repo] = RepoHistory(pulls: board.pulls.rows().sorted { $0.id > $1.id },
+                                    issues: board.issues.rows().sorted { $0.id > $1.id },
+                                    runs: board.runs.rows().sorted { $0.id > $1.id })
+        storedBoards[repo] = board
+    }
+
+    /// `work` on the history queue, awaited: a store read that keeps
+    /// the main actor free and lands after the writes before it.
+    private func onHistoryQueue<Value: Sendable>(_ work: @escaping @Sendable () -> Value) async -> Value {
+        await withCheckedContinuation { continuation in
+            historyWriteQueue.async { continuation.resume(returning: work()) }
+        }
+    }
+
     private func history(repo: String) -> RepoHistory {
         if let h = history[repo] { return h }
+        // Only a path that skipped `prime` lands here (tests reach the
+        // model directly); the app's paths all read the store off main.
         let pulls: [GhPr] = historyStore?.rows(repo: repo, surface: .pulls) ?? []
         let issues: [GhIssue] = historyStore?.rows(repo: repo, surface: .issues) ?? []
         let runs: [GhRun] = historyStore?.rows(repo: repo, surface: .runs) ?? []
@@ -644,7 +671,11 @@ public final class GitHubModel {
                 Task { await loadFocusTab(tab, repo: repo, swe: swe) }
             }
         }
+        await prime(repo: repo)
         let limit = focusLimit(for: key)
+        // The numbers the reply listed, for rechecking remembered rows
+        // it did not.
+        var window: Set<Int>? = nil
         // The reply's own row count — exhaustion is measured on what
         // arrived, not on the merged listing history makes bigger.
         var fetched: Int? = nil
@@ -654,12 +685,14 @@ public final class GitHubModel {
                 apply(try await swe.ghPullRequests(repo: repo, state: "all", limit: limit),
                       to: key, \.pulls, store: .focus) {
                     fetched = ($0.pullRequests ?? []).count
+                    window = Set(($0.pullRequests ?? []).map(\.number))
                     return $0.pullRequests ?? []
                 }
             case .issues:
                 apply(try await swe.ghIssues(repo: repo, state: "all", limit: limit),
                       to: key, \.issues, store: .focus) {
                     fetched = ($0.issues ?? []).count
+                    window = Set(($0.issues ?? []).map(\.number))
                     return $0.issues ?? []
                 }
             case .actions:
@@ -691,13 +724,20 @@ public final class GitHubModel {
             if let fetched, fetched < limit {
                 focusExhausted.insert(key)
             }
+            if let window, !focusExhausted.contains(key) {
+                await recheckStaleOpen(tab, repo: repo, swe: swe, window: window)
+            }
         } catch is CancellationError {
         } catch {
             var board = focusBoards[repo] ?? RepoBoard()
             board.fail(tab, message: error.localizedDescription)
             focusBoards[repo] = board
             // Remembered rows stand in for the error — a blip must not
-            // blank a listing the app already knows.
+            // blank a listing the app already knows. The store's latest
+            // board is read off main for the list surfaces.
+            if let store = historyStore {
+                storedBoards[repo] = await onHistoryQueue { store.board(repo: repo) }
+            }
             remember(tab, repo: repo)
         }
     }
@@ -739,7 +779,7 @@ public final class GitHubModel {
             // persist may not have run yet.
             guard var board = focusBoards[repo],
                   case .failed = board.pages,
-                  let seeded = historyStore?.board(repo: repo),
+                  let seeded = storedBoards[repo],
                   case .loaded = seeded.pages else { return }
             board.pages = seeded.pages
             focusBoards[repo] = board
@@ -755,13 +795,103 @@ public final class GitHubModel {
     ) {
         guard var board = focusBoards[repo],
               case .failed = board[keyPath: path],
-              // The marker is the answer, not the row count — a surface
-              // that fetched empty restores .loaded([]), not the error.
-              historyStore?.fetched(repo: repo, surface: surface) == true
+              // The store's board is .loaded only where the fetched marker
+              // is set — a surface that fetched empty restores .loaded([]),
+              // not the error.
+              let stored = storedBoards[repo]?[keyPath: path],
+              case .loaded = stored
         else { return }
-        let rows: [Row] = historyStore?.rows(repo: repo, surface: surface) ?? []
-        board[keyPath: path] = .loaded(rows)
+        board[keyPath: path] = stored
         focusBoards[repo] = board
+    }
+
+    /// Remembered rows still marked open that one refresh checks again.
+    static let recheckCap = 100
+    /// Pulls found no longer open that one refresh looks up one by one
+    /// (merged and closed look the same from the open listing); the rest
+    /// wait for the next refresh.
+    static let recheckViews = 5
+
+    /// The store only adds and updates rows, so a pull or issue cached as
+    /// open that closed or merged after it slid out of the fetch window
+    /// stayed open forever. One open-only listing (capped) says which of
+    /// the remembered open rows still are: a row it should have listed
+    /// and didn't has closed. An issue then is closed; a pull, merged or
+    /// closed, is read once to learn which.
+    private func recheckStaleOpen(_ tab: RepoTab, repo: String, swe: SweClient, window: Set<Int>) async {
+        switch tab {
+        case .pulls:
+            let stale = history(repo: repo).pulls
+                .filter { $0.state == .open && !window.contains($0.number) }.prefix(Self.recheckCap)
+            guard !stale.isEmpty,
+                  let open = await openNumbers({ try await swe.ghPullRequests(repo: repo, state: "open", limit: Self.recheckCap) },
+                                               repo: repo, rows: { $0.pullRequests?.map(\.number) })
+            else { return }
+            var moved: [GhPr] = []
+            for pr in stale where open.closed(pr.number) {
+                guard moved.count < Self.recheckViews else { break }
+                guard let detail = try? await swe.ghPrView(repo: repo, ref: String(pr.number)).pr,
+                      detail.state != .open else { continue }
+                moved.append(GhPr(detail))
+            }
+            update(repo: repo, \.pulls, into: \.pulls, moved: moved, surface: .pulls)
+        case .issues:
+            let stale = history(repo: repo).issues
+                .filter { $0.state == .open && !window.contains($0.number) }.prefix(Self.recheckCap)
+            guard !stale.isEmpty,
+                  let open = await openNumbers({ try await swe.ghIssues(repo: repo, state: "open", limit: Self.recheckCap) },
+                                               repo: repo, rows: { $0.issues?.map(\.number) })
+            else { return }
+            let moved = stale.filter { open.closed($0.number) }.map { $0.closed() }
+            update(repo: repo, \.issues, into: \.issues, moved: moved, surface: .issues)
+        default:
+            return
+        }
+    }
+
+    /// What one open-only listing can say: `closed(n)` is true only for a
+    /// number the listing would have shown were it open — any number
+    /// when the listing ended short of its cap, else one newer than its
+    /// oldest row (gh lists newest first).
+    private struct OpenListing {
+        var numbers: Set<Int>
+        var complete: Bool
+        func closed(_ number: Int) -> Bool {
+            guard !numbers.contains(number) else { return false }
+            return complete || number > (numbers.min() ?? .max)
+        }
+    }
+
+    private func openNumbers<Entry: GhEntryFields>(
+        _ fetch: () async throws -> GhResults<Entry>, repo: String, rows: (Entry) -> [Int]?
+    ) async -> OpenListing? {
+        guard let reply = try? await fetch(),
+              let entry = reply.results.first(where: { $0.repo == repo }),
+              entry.status == .ok, let numbers = rows(entry) else { return nil }
+        return OpenListing(numbers: Set(numbers), complete: numbers.count < Self.recheckCap)
+    }
+
+    /// Put rows whose state moved into the history, the focus board and
+    /// the store.
+    private func update<Row: Identifiable & Codable & Sendable>(
+        repo: String,
+        _ boardPath: WritableKeyPath<RepoBoard, Loadable<[Row]>>,
+        into historyPath: WritableKeyPath<RepoHistory, [Row]>,
+        moved: [Row], surface: GitHubHistory.Surface
+    ) where Row.ID == Int {
+        guard !moved.isEmpty else { return }
+        let byID = Dictionary(moved.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var h = history(repo: repo)
+        h[keyPath: historyPath] = h[keyPath: historyPath].map { byID[$0.id] ?? $0 }
+        history[repo] = h
+        if var board = focusBoards[repo], case .loaded(let rows) = board[keyPath: boardPath] {
+            board[keyPath: boardPath] = .loaded(rows.map { byID[$0.id] ?? $0 })
+            focusBoards[repo] = board
+        }
+        let rows = h[keyPath: historyPath]
+        historyWriteQueue.async { [historyStore] in
+            historyStore?.remember(repo: repo, surface: surface, rows: rows)
+        }
     }
 
     /// Rows a repo remembers past a single fetch — the file stays small
@@ -1506,3 +1636,29 @@ extension GhReleaseEntry: GhEntryFields {}
 extension GhTagEntry: GhEntryFields {}
 extension GhBranchEntry: GhEntryFields {}
 extension GhPrStatusEntry: GhEntryFields {}
+
+private extension Loadable {
+    /// A loaded list's rows, empty for any other state.
+    func rows<Row>() -> [Row] where Value == [Row] {
+        if case .loaded(let rows) = self { return rows }
+        return []
+    }
+}
+
+extension GhPr {
+    /// The listing row for a pull read in full.
+    init(_ detail: GhPrDetail) {
+        self.init(number: detail.number, title: detail.title, state: detail.state, draft: detail.draft,
+                  author: detail.author, branch: detail.branch, base: detail.base, labels: detail.labels,
+                  mergeable: detail.mergeable, reviewDecision: detail.reviewDecision, checks: detail.checks,
+                  updatedAt: detail.updatedAt, url: detail.url)
+    }
+}
+
+extension GhIssue {
+    /// This issue, closed.
+    func closed() -> GhIssue {
+        GhIssue(number: number, title: title, state: .closed, author: author, labels: labels,
+                assignees: assignees, comments: comments, updatedAt: updatedAt, url: url)
+    }
+}

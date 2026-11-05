@@ -960,6 +960,80 @@ import Testing
         #expect(prs.count == 50)
     }
 
+    /// A pull view reply for `number` in `state`.
+    private func prView(_ number: Int, _ state: String) -> String {
+        "\(env),\"repo\":\"o/a\",\"status\":\"ok\",\"pr\":{\"number\":\(number),\"title\":\"Fix \(number)\","
+            + "\"state\":\"\(state)\",\"draft\":false,\"author\":\"me\",\"branch\":\"f\",\"base\":\"main\","
+            + "\"labels\":[],\"mergeable\":\"unknown\",\"review_decision\":\"approved\",\"checks\":\"passing\","
+            + "\"updated_at\":\"2026-10-21T00:00:00Z\",\"url\":\"https://github.com/o/a/pull/\(number)\","
+            + "\"repo\":\"o/a\",\"body\":\"\",\"merge_state\":\"unknown\",\"check_runs\":[],\"reviews\":[],"
+            + "\"review_requests\":[]}"
+    }
+
+    /// Issue rows numbered `numbers`, all open.
+    private func issueRows(_ numbers: ClosedRange<Int>) -> String {
+        "[" + numbers.map { n in
+            "{\"number\":\(n),\"title\":\"Bug \(n)\",\"state\":\"open\",\"author\":\"me\",\"labels\":[],"
+            + "\"assignees\":[],\"comments\":0,\"updated_at\":\"2026-10-20T00:00:00Z\","
+            + "\"url\":\"https://github.com/o/a/issues/\(n)\"}"
+        }.joined(separator: ",") + "]"
+    }
+
+    /// A pull remembered as open that merged after it slid out of the
+    /// fetch window must not stay open forever: the refresh's open-only
+    /// listing misses it, and one read says it merged. One still listed
+    /// open is left alone, unread.
+    @Test func aRememberedOpenPullThatMergedOutsideTheWindowIsUpdated() async {
+        let calls = focusRouter(repo: "o/a", pulls: prRows(1...50))
+        let swe = SweClient(runner: calls)
+        let model = GitHubModel()
+        await model.loadFocusTab(.pulls, repo: "o/a", swe: swe)
+        // Ten new pulls push 1...10 out of the window; 3 merged since,
+        // the rest of them are still open.
+        calls.replies["gh pr --state=all --limit=50 --repo=o/a --json"] = .init(
+            status: 0, stdout: envelope("\(env),\"results\":[{\"repo\":\"o/a\",\"status\":\"ok\",\"pull_requests\":\(prRows(11...60))}]"),
+            stderr: "")
+        let openNumbers = (1...60).filter { $0 != 3 }
+        calls.replies["gh pr --state=open --limit=100 --repo=o/a --json"] = .init(
+            status: 0, stdout: envelope("\(env),\"results\":[{\"repo\":\"o/a\",\"status\":\"ok\",\"pull_requests\":"
+                + "[" + openNumbers.map { n in prRows(n...n).dropFirst().dropLast() }.joined(separator: ",") + "]}]"),
+            stderr: "")
+        calls.replies["gh pr view 3 --repo=o/a --json"] = .init(
+            status: 0, stdout: envelope(prView(3, "merged")), stderr: "")
+        await model.loadFocusTab(.pulls, repo: "o/a", swe: swe)
+        guard case .loaded(let prs) = model.focusBoard(for: "o/a").pulls else {
+            Issue.record("pulls not loaded"); return
+        }
+        #expect(prs.first { $0.number == 3 }?.state == .merged)
+        #expect(prs.first { $0.number == 4 }?.state == .open)
+        let views = calls.calls.filter { $0.starts(with: ["gh", "pr", "view"]) }
+        #expect(views == [["gh", "pr", "view", "3", "--repo=o/a", "--json"]])
+    }
+
+    /// An issue remembered open that a complete open-only listing leaves
+    /// out has closed: no per-issue read needed.
+    @Test func aRememberedOpenIssueMissingFromTheOpenListingIsClosed() async {
+        let calls = focusRouter(repo: "o/a", pulls: "[]")
+        calls.replies["gh issue --state=all --limit=50 --repo=o/a --json"] = .init(
+            status: 0, stdout: envelope("\(env),\"results\":[{\"repo\":\"o/a\",\"status\":\"ok\",\"issues\":\(issueRows(1...50))}]"),
+            stderr: "")
+        let swe = SweClient(runner: calls)
+        let model = GitHubModel()
+        await model.loadFocusTab(.issues, repo: "o/a", swe: swe)
+        calls.replies["gh issue --state=all --limit=50 --repo=o/a --json"] = .init(
+            status: 0, stdout: envelope("\(env),\"results\":[{\"repo\":\"o/a\",\"status\":\"ok\",\"issues\":\(issueRows(11...60))}]"),
+            stderr: "")
+        calls.replies["gh issue --state=open --limit=100 --repo=o/a --json"] = .init(
+            status: 0, stdout: envelope("\(env),\"results\":[{\"repo\":\"o/a\",\"status\":\"ok\",\"issues\":\(issueRows(2...60))}]"),
+            stderr: "")
+        await model.loadFocusTab(.issues, repo: "o/a", swe: swe)
+        guard case .loaded(let issues) = model.focusBoard(for: "o/a").issues else {
+            Issue.record("issues not loaded"); return
+        }
+        #expect(issues.first { $0.number == 1 }?.state == .closed)
+        #expect(issues.first { $0.number == 2 }?.state == .open)
+    }
+
     /// Remembered rows ride the SQLite store: a relaunched model whose
     /// fetch never lands still opens the page on what it knew.
     @Test func focusHistorySurvivesARelaunch() async {
