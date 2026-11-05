@@ -49,7 +49,7 @@ final class HostKeyPinTests: XCTestCase {
 final class SSHTargetStoreTests: XCTestCase {
     private var suite = ""
 
-    override func setUp() { suite = "quiver.tests.\(UUID().uuidString)" }
+    override func setUp() { suite = "swe.tests.\(UUID().uuidString)" }
     override func tearDown() { UserDefaults().removePersistentDomain(forName: suite) }
 
     func testKeepsOneTargetPerHub() {
@@ -93,7 +93,7 @@ final class ConsoleModelTests: XCTestCase {
                                 credential: Credential(deviceId: "d", credential: "c", name: "phone"))
 
     override func setUp() {
-        suite = "quiver.tests.\(UUID().uuidString)"
+        suite = "swe.tests.\(UUID().uuidString)"
         store = SSHTargetStore(defaults: UserDefaults(suiteName: suite)!)
     }
 
@@ -157,7 +157,7 @@ final class ConsoleModelTests: XCTestCase {
 }
 
 /// The real transport against a throwaway sshd. Skipped unless
-/// `TEST_RUNNER_QUIVER_SSH_PORT`, `…_USER`, `…_HOST_KEY` and `…_KEY` are
+/// `TEST_RUNNER_SWE_SSH_PORT`, `…_USER`, `…_HOST_KEY` and `…_KEY` are
 /// set (xcodebuild strips the prefix); `script/console-sshd.sh` starts
 /// one with a fresh key each run and prints them.
 final class SSHShellIntegrationTests: XCTestCase {
@@ -168,8 +168,8 @@ final class SSHShellIntegrationTests: XCTestCase {
 
     private func server(hostKeys: [String]? = nil) throws -> Server {
         let env = ProcessInfo.processInfo.environment
-        guard let port = env["QUIVER_SSH_PORT"].flatMap(Int.init), let user = env["QUIVER_SSH_USER"],
-              let hostKey = env["QUIVER_SSH_HOST_KEY"], let hex = env["QUIVER_SSH_KEY"],
+        guard let port = env["SWE_SSH_PORT"].flatMap(Int.init), let user = env["SWE_SSH_USER"],
+              let hostKey = env["SWE_SSH_HOST_KEY"], let hex = env["SWE_SSH_KEY"],
               let raw = Self.bytes(hex: hex),
               let key = try? P256.Signing.PrivateKey(rawRepresentation: raw) else {
             throw XCTSkip("no test sshd")
@@ -194,12 +194,12 @@ final class SSHShellIntegrationTests: XCTestCase {
     func testOpensAShellAndEchoes() async throws {
         let server = try server()
         let seen = expectation(description: "echo comes back")
-        let output = OutputLog(expect: "quiver-console-42", fulfil: seen)
+        let output = OutputLog(expect: "swe-console-42", fulfil: seen)
         let shell = try await SSHShell.open(target: server.target, key: server.key, cols: 80, rows: 24) { event in
             if case .output(let bytes) = event { output.append(bytes) }
         }
         // The typed line echoes back too; only the shell's answer says 42.
-        shell.write(Array("echo quiver-console-$((40+2))\n".utf8))
+        shell.write(Array("echo swe-console-$((40+2))\n".utf8))
         await fulfillment(of: [seen], timeout: 10)
         shell.close()
     }

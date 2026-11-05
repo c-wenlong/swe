@@ -3314,7 +3314,7 @@ def _muse_cookie_rows() -> list[tuple[Callable, str, float, bytes]]:
     for _service, pattern, key_reader in _CHROMIUM_COOKIE_SOURCES:
         for db in glob.glob(os.path.expanduser(pattern)):
             try:
-                con = sqlite3.connect(f"file:{db}?mode=ro", uri=True,
+                con = sqlite3.connect(f"file:{urllib.parse.quote(db)}?mode=ro", uri=True,
                                       timeout=1)
                 try:
                     found = con.execute(
