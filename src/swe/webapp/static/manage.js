@@ -857,7 +857,7 @@ function windowRow(harness, w, now) {
     ? (w.as_of ? `as of ${Fmt.ago(w.as_of, now)}` : "")
     : (w.reset_at && w.reset_at > real ? `Resets ${Fmt.resetIn(w.reset_at, real)}` : "");
   return `<div class="limit${failed ? " failed" : ""}">
-    <div class="limit-head"><span class="limit-label-wrap"><span class="limit-label">${esc(Fmt.windowLabel(w.window))}</span>${meterInfoBtn(Fmt.meterInfo(harness, w.window), Fmt.windowLabel(w.window), `${harness}:${w.window}`)}</span>
+    <div class="limit-head"><span class="limit-label-wrap"><span class="limit-label">${esc(Fmt.windowLabel(harness, w.window))}</span>${meterInfoBtn(Fmt.meterInfo(harness, w.window), Fmt.windowLabel(harness, w.window), `${harness}:${w.window}`)}</span>
       <span class="num">${failed && !w.as_of ? "—" : `${pct}%`}</span></div>
     <div class="track"><div class="fill" style="width:${pct}%; background:${barColor(pct)}"></div></div>
     ${right ? `<div class="caption">${esc(right)}</div>` : ""}

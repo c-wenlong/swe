@@ -191,7 +191,7 @@ const Fmt = (() => {
     return abs < 1 ? "now" : rtf.format(Math.trunc(diff), "second");
   }
 
-  /* UsageFormat.resetIn: "in 12m", "in 4h 28m", "in 25d"; minutes round up. */
+  /* UsageFormat.resetIn: "in 12m", "in 4h 28m", "in 6d 13h"; minutes round up. */
   function resetIn(epoch, now = Date.now() / 1000) {
     const seconds = epoch - now;
     if (seconds <= 0) return "now";
@@ -201,11 +201,15 @@ const Fmt = (() => {
       const rest = minutes % 60;
       return rest ? `in ${Math.floor(minutes / 60)}h ${rest}m` : `in ${minutes / 60}h`;
     }
-    return `in ${Math.floor(minutes / (24 * 60))}d`;
+    const rest = Math.floor((minutes % (24 * 60)) / 60);
+    return rest ? `in ${Math.floor(minutes / (24 * 60))}d ${rest}h` : `in ${minutes / (24 * 60)}d`;
   }
 
-  /* UsageFormat.window: a limit window named as the harness's CLI does. */
-  function windowLabel(label) {
+  /* UsageFormat.window: a limit window named as the harness's CLI does;
+   * Cursor's "included" and "api" read "Cursor models" and "Other models". */
+  function windowLabel(harness, label) {
+    if (harness === "cursor" && label === "included") return "Cursor models";
+    if (harness === "cursor" && label === "api") return "Other models";
     return { included: "Included", auto: "Auto", api: "API", grok_bot: harnessName("grok-bot") }[label]
       || label || "Usage";
   }

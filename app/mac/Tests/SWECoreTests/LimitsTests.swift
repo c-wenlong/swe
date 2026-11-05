@@ -261,8 +261,9 @@ func reading(
         #expect(UsageFormat.resetIn(now + 12 * 60, now: now) == "in 12m")
         #expect(UsageFormat.resetIn(now + 4 * 3_600 + 28 * 60, now: now) == "in 4h 28m")
         #expect(UsageFormat.resetIn(now + 3 * 3_600, now: now) == "in 3h")
-        #expect(UsageFormat.resetIn(now + 30 * 3_600, now: now) == "in 1d")
+        #expect(UsageFormat.resetIn(now + 30 * 3_600, now: now) == "in 1d 6h")
         #expect(UsageFormat.resetIn(now + 25 * 86_400, now: now) == "in 25d")
+        #expect(UsageFormat.resetIn(now + 6 * 86_400 + 13 * 3_600 + 20, now: now) == "in 6d 13h")
         #expect(UsageFormat.resetIn(now + 20, now: now) == "in 1m")
         #expect(UsageFormat.resetIn(now - 5, now: now) == "now")
     }

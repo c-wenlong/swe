@@ -136,14 +136,18 @@ public enum UsageFormat {
     }
 
     /// A limit window's name as the harness's own CLI prints it: Cursor's
-    /// "included", "auto", "api" and "grok_bot" read "Included", "Auto",
-    /// "API" and "Grok Bot"; "5h" or "7d Fable" stay as they are.
-    public static func window(_ label: String) -> String {
-        switch label {
-        case "included": "Included"
-        case "auto": "Auto"
-        case "api": "API"
-        case "grok_bot": HarnessMark("grok-bot").name
+    /// "included" and "api" read "Cursor models" and "Other models", its
+    /// "auto" and "grok_bot" "Auto" and "Grok Bot"; "5h" or "7d Fable"
+    /// stay as they are. Only Cursor's buckets get those names; another
+    /// harness's "included" keeps the CLI's own word.
+    public static func window(_ harness: String, _ label: String) -> String {
+        switch (harness, label) {
+        case ("cursor", "included"): "Cursor models"
+        case ("cursor", "api"): "Other models"
+        case (_, "included"): "Included"
+        case (_, "auto"): "Auto"
+        case (_, "api"): "API"
+        case (_, "grok_bot"): HarnessMark("grok-bot").name
         default: label
         }
     }
@@ -168,7 +172,8 @@ public enum UsageFormat {
         }
     }
 
-    /// "in 12m", "in 4h 28m", "in 25d": how long until a limit resets.
+    /// "in 12m", "in 4h 28m", "in 6d 13h": how long until a limit resets,
+    /// two units so a days-away reset still shows the hours.
     public static func resetIn(_ date: Date, now: Date) -> String {
         let seconds = date.timeIntervalSince(now)
         guard seconds > 0 else { return "now" }
@@ -178,7 +183,8 @@ public enum UsageFormat {
             let rest = minutes % 60
             return rest == 0 ? "in \(minutes / 60)h" : "in \(minutes / 60)h \(rest)m"
         }
-        return "in \(minutes / (24 * 60))d"
+        let rest = (minutes % (24 * 60)) / 60
+        return rest == 0 ? "in \(minutes / (24 * 60))d" : "in \(minutes / (24 * 60))d \(rest)h"
     }
 
     /// "5m ago", "1h ago", "3d ago": how old something is, whole units only.

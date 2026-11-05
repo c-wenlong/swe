@@ -147,9 +147,12 @@ private let older = #"""
         #expect(UsageFormat.balance(0) == "$0.00")
     }
 
-    @Test func cursorBucketsReadLikeTheCli() {
-        #expect(["included", "auto", "api", "grok_bot", "5h", "7d Fable"].map(UsageFormat.window)
-                == ["Included", "Auto", "API", "Grok Bot", "5h", "7d Fable"])
+    @Test func cursorBucketsReadAsModelGroups() {
+        #expect(["included", "auto", "api", "grok_bot", "5h", "7d Fable"]
+                    .map { UsageFormat.window("cursor", $0) }
+                == ["Cursor models", "Auto", "Other models", "Grok Bot", "5h", "7d Fable"])
+        // Another harness's lookalike keys never borrow Cursor's names.
+        #expect(UsageFormat.window("claude", "api") == "API")
     }
 
     @Test func cursorMetersHaveAnInfoLine() {
