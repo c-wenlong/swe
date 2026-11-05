@@ -126,6 +126,12 @@ comments in <code>--json</code> gain <code>association</code>.</li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>An approval resolved without a request id now kills its ntfy
+buttons.</strong> The hub clears every pending approval on such a resolve,
+but the notification tokens were retired only by exact request id, so
+the buttons of the cleared prompts stayed spendable until they expired
+and could answer the next prompt on the session.</p>
+</li>
 <li><p><strong>A wildcard hub bind no longer turns off the Host check, and a
 second <code>swe remote serve</code> on a taken port no longer disturbs the
 running hub.</strong> <code>--host=0.0.0.0 --unsafe-bind-any</code> left the hub's

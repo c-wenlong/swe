@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An approval resolved without a request id now kills its ntfy
+  buttons.** The hub clears every pending approval on such a resolve,
+  but the notification tokens were retired only by exact request id, so
+  the buttons of the cleared prompts stayed spendable until they expired
+  and could answer the next prompt on the session.
+
 - **A wildcard hub bind no longer turns off the Host check, and a
   second `swe remote serve` on a taken port no longer disturbs the
   running hub.** `--host=0.0.0.0 --unsafe-bind-any` left the hub's
