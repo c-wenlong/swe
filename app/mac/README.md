@@ -87,7 +87,7 @@ credential-free DMG for local testing needs an ad-hoc bundle:
 The release job reads them from the repo's Actions secrets
 (`MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD`,
 `NOTARY_KEY`, `NOTARY_KEY_ID`, `NOTARY_ISSUER`, `SPARKLE_PRIVATE_KEY`;
-see `.github/workflows/release.yml` and the release checklist).
+see `.github/workflows/release.yml` and [RELEASE_CHECKLIST.md](../../RELEASE_CHECKLIST.md)).
 
 ## Layout
 
