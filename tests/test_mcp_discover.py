@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -72,6 +73,9 @@ class McpDiscoverTest(unittest.TestCase):
                 # The disk scan walks the real HOME; stub it so only the
                 # fixture configs above are seen.
                 "swe.mcp.discover._scanned_servers", return_value={}
+            ), patch.dict(
+                # redact/shield read the secrets store under HOME.
+                os.environ, {"HOME": str(tmp_path)}
             ):
                 # discover_mcp_servers calls get_mcp_tools through its own
                 # module binding, so the patch lives on mcp.discover.
@@ -126,6 +130,9 @@ class McpDiscoverTest(unittest.TestCase):
                 # Unstubbed, the disk scan would find the real HOME's servers
                 # and apply would write them (and their secrets) here.
                 "swe.mcp.discover._scanned_servers", return_value={}
+            ), patch.dict(
+                # redact/shield read the secrets store under HOME.
+                os.environ, {"HOME": str(tmp_path)}
             ):
                 mock_tools.return_value = {"opencode": mcp_map["opencode"]}
                 findings = discover_mcp_servers()

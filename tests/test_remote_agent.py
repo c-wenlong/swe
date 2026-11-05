@@ -1972,6 +1972,10 @@ class TestAgentLoopEdges(unittest.TestCase):
         result = []
         t = threading.Thread(target=lambda: result.append(ag.run()),
                              daemon=True)
+        # Stop and join even when an assert below fails, so a broken run()
+        # does not leave its thread behind for the rest of the suite.
+        self.addCleanup(t.join, 5)
+        self.addCleanup(ag._stop.set)
         t.start()
         for name in loops:
             self.assertTrue(ran[name].wait(5), f"{name} never started")

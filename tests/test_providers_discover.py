@@ -71,6 +71,11 @@ class DiscoverProviderKeysTest(unittest.TestCase):
 
 
 class CommandsSmokeTest(unittest.TestCase):
+    def setUp(self):
+        # A home outside the temp folders, so printed key paths stay
+        # absolute (not "~/...") even when TMPDIR sits under HOME.
+        self.enterContext(patch.object(Path, "home", return_value=Path("/nonexistent-home")))
+
     def _setup(self, tmp: Path, *, create_keys_dir: bool = True):
         config_dir = tmp / ".config" / "swe"
         registry_file = config_dir / "providers.json"
