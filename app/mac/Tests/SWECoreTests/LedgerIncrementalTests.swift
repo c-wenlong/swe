@@ -142,7 +142,7 @@ func claudeLine(
     /// One unreadable transcript must not take the rest of the scan down
     /// with it: it becomes a note, the good file still reads, and a later
     /// scan retries the file once it is readable again.
-    @Test func anUnreadableFileSkipsWithANoteAndTheRestStillScans() async throws {
+    @Test(skippedAsRoot) func anUnreadableFileSkipsWithANoteAndTheRestStillScans() async throws {
         let s = try Setup()
         // Sorts before s1.jsonl, so the scan hits it first.
         let bad = s.home.appendingPathComponent("projects/-p/aaa-bad.jsonl")
