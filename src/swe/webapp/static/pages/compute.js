@@ -880,6 +880,9 @@ function openComputeLimits() {
           return;
         }
       } else {
+        // The write failed, so the queued age didn't reach the hub either;
+        // it stays in this browser and the error says to try again.
+        p.pendingAge = null;
         p.acError = failText(status, data, "");
       }
       drawAutoclean(refocus);
@@ -910,6 +913,9 @@ function openComputeLimits() {
     const seconds = resolveAge();
     if (!hasHub || seconds === before) return;
     if (p.acBusy) { p.pendingAge = seconds; return; }
+    // This write carries the newest age: an older one still queued (its
+    // write failed, so nothing sent it) must not follow and undo it.
+    p.pendingAge = null;
     const cur = ac();
     postClean({ enabled: cur.enabled === true, force: cur.force === true,
                 orphan_age_seconds: seconds });
