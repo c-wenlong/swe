@@ -35,6 +35,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse, urlsplit
 
 from swe.github import cli as ghcli
+from swe.github import shared as github_shared
 from swe.paths import atomic_write_text, read_json_dict, remote_dir_for
 from swe.remote import (
     attachments,
@@ -264,14 +265,23 @@ def _encode_frame(ev: dict) -> bytes | None:
     ).encode("utf-8")
 
 
+def _ownership_event(key: str, machine_id: str, ownership, tmux, mode,
+                     kept) -> dict:
+    """The ``session.ownership`` event every ownership change emits."""
+    return protocol.event("session.ownership", key, machine_id, {
+        "ownership": ownership, "tmux": tmux, "mode": mode,
+        "kept": bool(kept),
+    })
+
+
 class EventBus:
     """Fan-out to SSE subscriber queues, keyed by session or global."""
 
     def __init__(self) -> None:
-        self._subs: list[tuple[str | None, "queue.Queue"]] = []
+        self._subs: list[tuple[str, "queue.Queue"]] = []
         self._lock = threading.Lock()
 
-    def subscribe(self, key: str | None) -> "queue.Queue":
+    def subscribe(self, key: str) -> "queue.Queue":
         q: queue.Queue = queue.Queue(maxsize=2000)
         with self._lock:
             self._subs.append((key, q))
@@ -286,18 +296,18 @@ class EventBus:
         (those carry the hub's commands out, not its sessions to anyone)."""
         with self._lock:
             return any(
-                key is None or not key.startswith(_SAT_PREFIX)
-                for key, _q in self._subs
+                not key.startswith(_SAT_PREFIX) for key, _q in self._subs
             )
 
-    def publish(self, key: str, event: dict, *, exact: bool = False) -> None:
-        """``exact`` leaves out the whole-hub (``None``) subscribers."""
+    def publish(self, key: str, event: dict) -> None:
+        """Hand ``event`` to ``key``'s subscribers. The global stream is
+        its own key (``GLOBAL_KEY``), fed by ``HubState.emit``."""
         with self._lock:
             subs = list(self._subs)
         if not isinstance(event, SharedEvent):
             event = SharedEvent(event)
         for want, q in subs:
-            if want == key or (want is None and not exact):
+            if want == key:
                 try:
                     q.put_nowait(event)
                 except queue.Full:
@@ -647,7 +657,7 @@ class HubState:
         """
         ev = dict(event)
         ev.pop("seq", None)
-        self.bus.publish(key, ev, exact=True)
+        self.bus.publish(key, ev)
 
     def expire_pending_approvals(self) -> None:
         """Sweep ``pending_approvals`` entries past ``APPROVAL_TTL_S``.
@@ -1089,19 +1099,10 @@ class HubState:
                             # a kept tmux session taken back): same hot
                             # window as an attach through the hub.
                             self.tail_manager.wake(row["key"])
-                        self.emit(
-                            row["key"],
-                            protocol.event(
-                                "session.ownership", row["key"],
-                                self.machine_id,
-                                {
-                                    "ownership": new_own,
-                                    "tmux": row.get("tmux"),
-                                    "mode": row.get("mode"),
-                                    "kept": bool(row.get("kept")),
-                                },
-                            ),
-                        )
+                        self.emit(row["key"], _ownership_event(
+                            row["key"], self.machine_id, new_own,
+                            row.get("tmux"), row.get("mode"),
+                            row.get("kept")))
                 rows, as_of = self.catalog.tail_snapshot()
                 self.tail_manager.sync(rows, as_of=as_of)
                 supervise.reap_kept(self.home, self.catalog.session_for)
@@ -1199,6 +1200,22 @@ class HubState:
 
 
 _UNSET = object()
+
+
+def _no_constant(name: str):
+    """``json.loads``'s hook for ``NaN``/``Infinity``: a request body
+    holding one is unreadable. Stored and served back, a non-finite
+    number breaks every client's ``JSON.parse`` and ``JSONDecoder``."""
+    raise ValueError(f"{name} is not a JSON number")
+
+
+def _finite_float(text: str) -> float:
+    """``json.loads``'s float hook: ``1e400`` parses to ``inf``, which
+    would serve back as ``Infinity``, so it is refused like ``NaN``."""
+    value = float(text)
+    if value != value or value in (float("inf"), float("-inf")):
+        raise ValueError(f"{text} is out of range")
+    return value
 
 
 def _json_bytes(payload) -> bytes:
@@ -1407,7 +1424,9 @@ class _Handler(BaseHTTPRequestHandler):
             if not raw:
                 data: object = {}
             else:
-                data = json.loads(raw.decode("utf-8", errors="replace"))
+                data = json.loads(raw.decode("utf-8", errors="replace"),
+                                  parse_constant=_no_constant,
+                                  parse_float=_finite_float)
         except (ValueError, UnicodeError):
             data = None
         result = data if isinstance(data, dict) else None
@@ -1493,7 +1512,7 @@ class _Handler(BaseHTTPRequestHandler):
                                 str((peer or {}).get("node_name") or ""))
         except Exception:
             pass
-        return f"tailnet:{node}"
+        return f"{devices_mod.TAILNET_PREFIX}{node}"
 
     def _client_device(self) -> str | None:
         """The paired device behind the bearer, unless it is a satellite.
@@ -2172,7 +2191,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/v1/usage":
-            refresh = str((args.get("refresh") or [""])[0]) in {"1", "true"}
+            refresh = github_shared.refresh_asked(args)
             try:
                 body = usage_mod.snapshot(refresh=refresh)
             except (OSError, ValueError) as exc:
@@ -2477,7 +2496,9 @@ class _Handler(BaseHTTPRequestHandler):
             if not self._require_satellite():
                 return
             body = self._read_body()
-            machine = (body or {}).get("machine") or {}
+            machine = (body or {}).get("machine")
+            if not isinstance(machine, dict):
+                machine = {}
             mid = str(machine.get("id") or "")
             if not mid:
                 self._send_error(
@@ -2539,19 +2560,10 @@ class _Handler(BaseHTTPRequestHandler):
             for hub_key, ownership in before.items():
                 if ownership and ownership != old.get(hub_key):
                     hub_row = self._state.catalog.row_for(hub_key) or {}
-                    self._state.emit(
-                        hub_key,
-                        protocol.event(
-                            "session.ownership", hub_key,
-                            self._state.machine_id,
-                            {
-                                "ownership": ownership,
-                                "tmux": hub_row.get("tmux"),
-                                "mode": hub_row.get("mode"),
-                                "kept": bool(hub_row.get("kept")),
-                            },
-                        ),
-                    )
+                    self._state.emit(hub_key, _ownership_event(
+                        hub_key, self._state.machine_id, ownership,
+                        hub_row.get("tmux"), hub_row.get("mode"),
+                        hub_row.get("kept")))
             self._send_json(200, {
                 "ok": True, "rows": len(rows), "slash": bool(stored),
             })
@@ -3143,9 +3155,14 @@ class _Handler(BaseHTTPRequestHandler):
             etype = ev.get("type")
             if not isinstance(etype, str) or etype not in _SAT_EVENT_TYPES:
                 continue
+            data = ev.get("data")
+            if data is not None and not isinstance(data, dict):
+                # emit() and the clients read data as an object; one
+                # bad event would 500 the batch, and the agent resends a
+                # refused batch whole, journaling its good events again.
+                continue
             kinds = _SAT_KIND_SETS.get(etype)
             if kinds is not None:
-                data = ev.get("data")
                 kind = data.get("kind") if isinstance(data, dict) else None
                 if not isinstance(kind, str) or kind not in kinds:
                     continue
@@ -3730,18 +3747,9 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             tmux = mode = None
             kept = False
-        self._state.emit(
-            key,
-            protocol.event(
-                "session.ownership", key, self._state.machine_id,
-                {
-                    "ownership": row.get("ownership"),
-                    "tmux": tmux,
-                    "mode": mode,
-                    "kept": kept,
-                },
-            ),
-        )
+        self._state.emit(key, _ownership_event(
+            key, self._state.machine_id, row.get("ownership"),
+            tmux, mode, kept))
 
     def _read_upload(self):
         """Returns ``(name, data)`` or sends the error and returns None."""
@@ -3950,7 +3958,7 @@ class _Handler(BaseHTTPRequestHandler):
         """``GET /v1/devices/me``: the caller's own pairing record, so a
         client can show (and rename) itself. The owner's unpaired tailnet
         device has no devices.json row — a stub with its node name."""
-        if device_id.startswith("tailnet:"):
+        if device_id.startswith(devices_mod.TAILNET_PREFIX):
             self._send_json(200, {
                 "id": device_id,
                 "name": "This device",
@@ -3969,7 +3977,7 @@ class _Handler(BaseHTTPRequestHandler):
         ``display_name``; an empty name clears it back to the paired one.
         Owner tailnet devices have no row to rename — same answer as the
         SSH key route."""
-        if device_id.startswith("tailnet:"):
+        if device_id.startswith(devices_mod.TAILNET_PREFIX):
             self._send_error(
                 409, "needs_pairing",
                 "pair this device to rename it",

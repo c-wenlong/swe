@@ -146,6 +146,17 @@ class TestApprovalTokens(unittest.TestCase):
         self.assertEqual(self._spend(a, "k1", "r1"), BAD)
         self.assertEqual(self._spend(b, "k1", "r2"), OK)
 
+    def test_drop_naming_no_request_retires_the_whole_session(self):
+        # The hub clears every pending approval on a resolve that names
+        # no request, so every button for the session must die with it.
+        a = self.tokens.mint("k1", "r1", ALLOW)
+        b = self.tokens.mint("k1", "r2", ALLOW)
+        other = self.tokens.mint("k2", "r1", ALLOW)
+        self.tokens.drop("k1", "")
+        self.assertEqual(self._spend(a, "k1", "r1"), BAD)
+        self.assertEqual(self._spend(b, "k1", "r2"), BAD)
+        self.assertEqual(self._spend(other, "k2", "r1"), OK)
+
     def test_burn_on_mismatch(self):
         # A mismatched request_id is a failed spend, not a free probe:
         # the token is gone for its real binding too.

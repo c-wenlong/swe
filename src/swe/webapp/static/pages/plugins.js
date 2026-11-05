@@ -1,5 +1,5 @@
 /* Plugins: a port of the Mac app's PluginsPage (Explore and Health tabs).
- * Data from /v1/app/plugins?view=health|explore (quiver/webapp/pages/
+ * Data from /v1/app/plugins?view=health|explore (swe/webapp/pages/
  * plugins.py). Health's Fix and Fix all POST /v1/app/plugins/fix|fix_all,
  * each after an inline confirm naming the commands. The plugin sheet's
  * Install, Enable, Disable and Uninstall per harness POST
@@ -469,7 +469,7 @@ function isOpen(id) {
 }
 
 /* swe's words for a registered marketplace whose folder is not here
-   (`_read_manifest` in src/quiver/plugins/catalog.py). A settings.json
+   (`_read_manifest` in src/swe/plugins/catalog.py). A settings.json
    from another machine names several at once, so each harness gets one
    line naming them and where they were looked for, as the Mac app does. */
 const MISSING_MANIFEST = "no marketplace manifest on disk";

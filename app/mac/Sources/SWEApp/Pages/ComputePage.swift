@@ -60,7 +60,7 @@ struct ComputePage: View {
                         .allowsHitTesting(false)
                 }
             }
-            .quiverSheet(isPresented: $cleaning) {
+            .cardSheet(isPresented: $cleaning) {
                 CleanupSheet(items: cleanupSnapshot, model: model)
             }
         } content: {

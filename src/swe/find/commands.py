@@ -25,6 +25,7 @@ from swe.find.plugin_drift import (
     KINDS as DRIFT_KINDS,
     FixError,
     apply_fix,
+    hub_marketplaces,
     plugin_drift,
     swe_plugins,
 )
@@ -846,13 +847,16 @@ DRIFT_TITLE = "Drift"
 DRIFT_NONE = "none, claude and codex run what ~/.swe/plugins holds"
 
 
-def _quiver_drift(home: Path, visible) -> list | None:
+def _swe_drift(home: Path, visible) -> list | None:
     """Drift findings for this view, or None when ~/.swe/plugins is empty.
 
     None and [] differ on purpose: a machine with no swe plugins has no
-    drift section at all, one whose plugins all match says so.
+    drift section at all, one whose plugins all match says so. A
+    marketplace whose plugins all come from GitHub has no local plugin for
+    swe_plugins to find but still needs registering, so it counts too,
+    the same rule plugin_drift keeps.
     """
-    if not swe_plugins(home):
+    if not swe_plugins(home) and not hub_marketplaces(home):
         return None
     return [f for f in plugin_drift(home) if visible(f.harness)]
 
@@ -868,7 +872,7 @@ def _plugins_json(home: Path, harness: str) -> dict:
     tell "nothing to reach the harnesses" (0) from "all reached" (drift []).
     """
     visible, _ = harness_filter(load_registry_if_present(), normalise_harness(harness))
-    drift = _quiver_drift(home, visible) or []
+    drift = _swe_drift(home, visible) or []
     return {"sources": len(swe_plugins(home)),
             "drift": [_drift_json(f) for f in drift]}
 
@@ -989,7 +993,7 @@ def cmd_find_plugins(args=None, root_flag: bool = False, scope: str = "global",
     # discover_plugins already emits canonical registry names, so a plugin's
     # own .harness is what visible() resolves — same rule as every other view.
     shown = [p for p in shown if visible(p.harness)]
-    drift = _quiver_drift(home, visible)
+    drift = _swe_drift(home, visible)
 
     label = {"global": "installed and enabled",
              "local": "installed but disabled",

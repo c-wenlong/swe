@@ -70,11 +70,6 @@ textarea.harness-input { height: auto; padding: 8px 10px; resize: vertical; line
 .harness-detect-row input { margin: 0; accent-color: var(--interactive); }
 .harness-detect-name { color: var(--text-primary); }
 .harness-detect-path { color: var(--text-muted); word-break: break-all; }
-.harness-scanning { display: flex; align-items: center; gap: 8px; margin: 0; }
-.harness-spinner {
-  width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border-strong);
-  border-top-color: var(--text-secondary); animation: spin 1s linear infinite; flex: none;
-}
 @media (max-width: 720px) {
   .harness-pair { grid-template-columns: minmax(0, 1fr); }
   /* Three header buttons don't fit beside the title on a phone: they go under it. */

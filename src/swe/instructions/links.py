@@ -166,7 +166,8 @@ def relink(
                     result.notes.append(
                         f"{path} reaches {landed} through another link "
                         f"(Home Manager?); point it at {target} there")
-        except OSError:
+        except (OSError, RuntimeError):
+            # RuntimeError: a symlink loop before Python 3.13.
             continue
 
     if result.account_retargets:

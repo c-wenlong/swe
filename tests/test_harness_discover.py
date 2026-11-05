@@ -273,10 +273,6 @@ class ResolveExecutableListingTest(unittest.TestCase):
         self.assertEqual(Path(found[0]).name, "mytool")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class HomeScanTest(unittest.TestCase):
     """The ~ and ~/.config sweep for agent-shaped homes without a binary.
 
@@ -669,3 +665,7 @@ class ApplySkipTest(unittest.TestCase):
         self.assertEqual(reg["newcli"]["aliases"], ["nc"])
         self.assertTrue(any("cc" in s["reason"] for s in skipped))
         self.assertEqual(reg["claude"]["aliases"], ["cc"])
+
+
+if __name__ == "__main__":
+    unittest.main()

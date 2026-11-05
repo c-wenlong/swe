@@ -17,6 +17,10 @@ from swe.github import shared as G
 from swe.webapp.pages import inbox as gh_inbox
 
 from tests._tempdir import temp_dir
+
+# The fixtures' updated_at, 2026-10-23T18:29:12Z, as calendar.timegm gives it.
+# A literal, so a wrong ISO parser (timezone, format) cannot agree with itself.
+_UPDATED_EPOCH = 1792780152.0
 from tests.test_remote_hub import HubBase, _session
 from tests.test_webapp_repositories import FakeGh
 
@@ -84,8 +88,7 @@ class TestInboxRow(unittest.TestCase):
         self.assertEqual(row["updated_at"], "2026-10-23T18:29:12Z")
         self.assertTrue(row["unread"])
         # ``last_active_at`` is the epoch the dismissal store compares.
-        self.assertAlmostEqual(
-            row["last_active_at"], ghcli._parse_iso(row["updated_at"]))
+        self.assertEqual(row["last_active_at"], _UPDATED_EPOCH)
 
     def test_unknown_reason_passes_through(self):
         row = ghcli.inbox_row(_note(reason="security_alert"))
@@ -157,7 +160,8 @@ class TestMerge(_GithubCatalog):
         keys = [i["key"] for i in cat.inbox(now=now)]
         self.assertEqual(keys, ["gh:9"])
         # And INBOX_MAX_AGE_S is genuinely past for this stamp.
-        self.assertLess(ghcli._parse_iso(old), now - INBOX_MAX_AGE_S)
+        # 2026-09-01T00:00:00Z = 1788220800 (calendar.timegm).
+        self.assertLess(1788220800.0, now - INBOX_MAX_AGE_S)
 
     def test_no_feed_no_github_rows(self):
         cat = Catalog(temp_dir(self), machine_id="mbp",
@@ -169,7 +173,7 @@ class TestMerge(_GithubCatalog):
     def test_dismissal_hides_until_the_thread_updates(self):
         cat = self._cat(github=[_gh_row(nid="9")])
         cat.poll_github()
-        last = ghcli._parse_iso("2026-10-23T18:29:12Z")
+        last = _UPDATED_EPOCH
         self.assertEqual(
             cat.inbox(dismissed={"gh:9": last}), [])
         self.assertEqual(
@@ -399,7 +403,7 @@ class TestHubRoute(HubBase):
         self._wire()
         phone, tablet = self.srv.pair(), self.srv.pair()
         hdr = lambda c: {"Authorization": f"Bearer {c['credential']}"}
-        last = ghcli._parse_iso("2026-10-23T18:29:12Z")
+        last = _UPDATED_EPOCH
         status, data = self.srv.request(
             "POST", "/v1/inbox/dismiss",
             body={"key": "gh:1", "last_active_at": last},
