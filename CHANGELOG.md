@@ -28,8 +28,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drops onto a folder row to move the chapter on disk; its index.txt
   entry keeps its slot (an off comment follows it) and any targets.json
   rule is re-keyed, so a move never widens the chapter's harness set.
-  The folder row glows and grows as the drag crosses it, and a drop on
-  empty rail space moves the file to the top level.
+  The folder row glows and grows as the drag crosses it.
+
+- **Chapters reorder and undo in the AGENTS.md rail.** The rail lists
+  each folder's files in index.txt order, so dragging a file up or down
+  reorders the index: rows below slide up into the vacated slot as the
+  drag passes them, and only the pointer's height counts — sideways
+  drift never reparents. A drop on a folder row still moves the file
+  there, a "Top level" strip appears under the outline for the root,
+  and dropping between two rows lands the index entry in that gap.
+  Every rail move registers on the window's UndoManager, so ⌘Z (and
+  ⇧⌘Z under Edit) walks file moves and reorders back.
+
+- **Hover tips no longer eat clicks.** A tip is a separate window and
+  could float over its own control when it flipped below for room, so
+  the first click only dismissed the tip — visible buttons like an API
+  probe's Test needed two presses. The tip window now ignores mouse
+  events everywhere it appears: a click on covered controls goes
+  straight through, and a click on the tip itself still dismisses it.
 
 - **Muse shows Meta's logo.** The `muse` harness id is aliased to the
   bundled `meta` mark (`harness-meta-color.svg`) on the Mac, iPhone and

@@ -243,6 +243,91 @@ import Testing
         #expect(try dir.read("index.txt").contains("a.md"))
     }
 
+    @Test func moveAnchorsBeforeAnOffChapter() {
+        #expect(ChapterIndex.move("a.md\n# off.md\nb.md\nc.md\n",
+                                name: "c.md", before: "off.md")
+                == "a.md\nc.md\n# off.md\nb.md\n")
+    }
+
+    @Test func moveCarriesAnOffChapterKeepingItsState() {
+        #expect(ChapterIndex.move("a.md\n# off.md\nb.md\n",
+                                name: "off.md", before: nil)
+                == "a.md\nb.md\n# off.md\n")
+    }
+
+    @Test func treeListsFilesInIndexOrder() {
+        let tree = ChapterTree.build(
+            files: ["a.md", "b.md", "eng/m.md", "eng/z.md", "eng/loose.md"],
+            folders: ["eng"],
+            order: ["b.md", "eng/z.md", "a.md", "eng/m.md"])
+        #expect(tree.map(\.path) == ["eng", "b.md", "a.md"])
+        // Indexed files in index order; the unindexed one sorts after.
+        #expect(tree[0].children.map(\.path)
+                == ["eng/z.md", "eng/m.md", "eng/loose.md"])
+    }
+
+    @Test func moveFileIntoAGapPlacesTheIndexEntry() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await folderModel(dir, runner: runner)
+        let problem = await model.move(file: "b.md", toFolder: "eng",
+                                       before: "eng/one.md",
+                                       swe: SweClient(runner: runner))
+        #expect(problem == nil)
+        #expect(try dir.read("index.txt") == "# in order\na.md\neng/b.md\neng/one.md\n")
+        #expect(FileManager.default.fileExists(atPath: dir.path("eng/b.md").path))
+        #expect(runner.builds == 1)
+    }
+
+    /// The undo's Task lands a beat after `undo()`: wait out the work
+    /// rather than racing it.
+    private func until(_ condition: @escaping () -> Bool) async -> Bool {
+        for _ in 0..<200 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
+    @Test func undoPutsTheFileAndIndexBack() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await folderModel(dir, runner: runner)
+        let undo = UndoManager()
+        model.undoManager = undo
+        let problem = await model.move(file: "eng/one.md", toFolder: "",
+                                       swe: SweClient(runner: runner))
+        #expect(problem == nil)
+        #expect(try dir.read("index.txt") == "# in order\na.md\none.md\nb.md\n")
+        #expect(undo.canUndo)
+        undo.undo()
+        #expect(await until {
+            FileManager.default.fileExists(atPath: dir.path("eng/one.md").path)
+                && (try? dir.read("index.txt")) == "# in order\na.md\neng/one.md\nb.md\n"
+        })
+        #expect(undo.canRedo)
+        undo.redo()
+        #expect(await until {
+            FileManager.default.fileExists(atPath: dir.path("one.md").path)
+                && (try? dir.read("index.txt")) == "# in order\na.md\none.md\nb.md\n"
+        })
+    }
+
+    @Test func undoRestoresTheChapterOrder() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        let undo = UndoManager()
+        model.undoManager = undo
+        await model.move(chapter: "b.md", before: "a.md",
+                         swe: SweClient(runner: runner))
+        #expect(try dir.read("index.txt") == "# in order\nb.md\na.md\n")
+        undo.undo()
+        #expect(await until {
+            (try? dir.read("index.txt")) == "# in order\na.md\nb.md\n"
+        })
+    }
+
     @Test func removeUnlistsButKeepsTheFileOnDisk() async throws {
         let dir = try TempDir()
         let runner = Runner([check(dir.url), check(dir.url, chapters: [("b.md", true)])])
