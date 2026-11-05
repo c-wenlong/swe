@@ -1440,6 +1440,127 @@ import Testing
         #expect(!fans.helperInstalled)
     }
 
+    // MARK: Handing the fans back when something fails
+
+    @MainActor @Test func aSpeedThatCantBeWrittenSaysWhereAndAsksForNoPassword() async throws {
+        // A file where the control folder should be: no write can land,
+        // even as root, so the request never exists and nothing prompts.
+        let blocker = scratch.url.appending(path: "blocker-\(UUID().uuidString)")
+        try Data().write(to: blocker)
+        let url = blocker.appending(path: "control.json")
+        let installer = FakeInstaller()
+        let fans = FanControl(control: url, reader: { FanKeys.read(FakeSMC.twoFans()) }, status: { nil },
+                              installer: installer, inspect: { _ in installer.state },
+                              executable: "/Apps/SWE", owner: 77, defaults: TestDefaults("fan"))
+        await fans.applyManual()
+        guard case .failed(let message) = fans.phase else {
+            Issue.record("phase is \(fans.phase), not failed")
+            return
+        }
+        #expect(message.hasPrefix("Couldn't write \(url.path)"))
+        #expect(installer.installs == 0)
+        #expect(!fans.isHolding)
+    }
+
+    @MainActor @Test func aFailedRemovalStillHandsTheFansBack() async {
+        let installer = FakeInstaller()
+        installer.installed.value = true
+        // The Starting deadline parks here; let it go when the test ends.
+        let sleeper = Sleeper()
+        defer { sleeper.fire() }
+        let (fans, url) = control(FakeSMC.twoFans(), installer: installer, sleeper: sleeper)
+        await fans.refresh()
+        await fans.applyManual()
+        #expect(FanControlFile.request(at: url) != nil)
+        installer.error = .failed("launchctl bootout failed")
+        await fans.removeHelper()
+        // The request is gone before the prompt, so the helper that stays
+        // behind sets the fans to automatic; the failure is still said.
+        #expect(installer.uninstalls == 1)
+        #expect(FanControlFile.request(at: url) == nil)
+        #expect(fans.phase == .failed("launchctl bootout failed"))
+        #expect(fans.helperInstalled)
+        #expect(!fans.busy)
+    }
+
+    @MainActor @Test func aCancelledRemovalHandsTheFansBackAndKeepsTheHelper() async {
+        let installer = FakeInstaller()
+        installer.installed.value = true
+        // The Starting deadline parks here; let it go when the test ends.
+        let sleeper = Sleeper()
+        defer { sleeper.fire() }
+        let (fans, url) = control(FakeSMC.twoFans(), installer: installer, sleeper: sleeper)
+        await fans.refresh()
+        await fans.applyManual()
+        installer.error = .cancelled
+        await fans.removeHelper()
+        #expect(FanControlFile.request(at: url) == nil)
+        #expect(fans.phase == .automatic)
+        #expect(fans.helperInstalled)
+    }
+
+    @MainActor @Test func switchingTheRuleOffMidTakeoverGivesTheFansBack() async {
+        // The rule's takeover parks in its fan read; the user switches the
+        // rule off meanwhile. The fans must end automatic, not held by a
+        // rule that is off.
+        let smc = FakeSMC.twoFans()
+        let installer = FakeInstaller()
+        installer.installed.value = true
+        let blocking = Box(false)
+        let arrived = CountGate()
+        let release = DispatchSemaphore(value: 0)
+        let sleeper = Sleeper()
+        defer { sleeper.fire() }
+        let url = scratch.url.appending(path: "fan-\(UUID().uuidString)/control.json")
+        let fans = FanControl(control: url,
+                              reader: {
+                                  if blocking.value {
+                                      Task { await arrived.bump() }
+                                      _ = release.wait(timeout: .now() + 60)
+                                  }
+                                  return FanKeys.read(smc)
+                              },
+                              status: { nil }, installer: installer, inspect: { _ in installer.state },
+                              executable: "/Apps/SWE", owner: 77,
+                              clock: { Date(timeIntervalSince1970: 1_800_000_000) },
+                              // The Starting deadline never fires, so only the
+                              // switch can end the hold.
+                              sleep: { await sleeper.sleep($0) },
+                              defaults: TestDefaults("fan"))
+        await fans.refresh()
+        fans.thresholdEnabled = true
+        fans.threshold = 80
+        blocking.value = true
+        let takeover = Task { await fans.checkTemperature(95) }
+        #expect(await arrived.reach(1))
+        #expect(fans.heldByThreshold)
+        blocking.value = false
+        fans.thresholdEnabled = false
+        release.signal()
+        await takeover.value
+        #expect(!fans.heldByThreshold)
+        #expect(fans.phase == .automatic)
+        #expect(FanControlFile.request(at: url) == nil)
+    }
+
+    @Test func theInstallerRefusesBeforeAnyPromptWhenAPathOrTheCopyIsOdd() async throws {
+        // Both refusals land before the hash and osascript: a nonexistent
+        // executable can never be read, so no prompt can appear here.
+        let pin = FanOwnerPin.cdhash(String(repeating: "ab", count: 20))
+        #expect(pin.isValid)
+        let installer = AdministratorInstaller(owner: { pin }, replacing: { false })
+        let missing = "/nonexistent/\(UUID().uuidString)/SWE"
+        await #expect(throws: FanHelperInstallError.failed("SWE's paths can't hold a line break for the fan helper.")) {
+            try await installer.install(executable: missing, control: URL(fileURLWithPath: "/tmp/a\nb/control.json"))
+        }
+        await #expect(throws: FanHelperInstallError.failed("SWE's paths can't hold a line break for the fan helper.")) {
+            try await installer.install(executable: "/Apps/S\nWE", control: URL(fileURLWithPath: "/tmp/control.json"))
+        }
+        await #expect(throws: FanHelperInstallError.failed("Couldn't read \(missing).")) {
+            try await installer.install(executable: missing, control: URL(fileURLWithPath: "/tmp/control.json"))
+        }
+    }
+
     // MARK: - Fakes
 
     /// An SMC in a dictionary. Mode writes can be refused a number of times,

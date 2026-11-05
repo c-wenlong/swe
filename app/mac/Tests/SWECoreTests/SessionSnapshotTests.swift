@@ -71,7 +71,7 @@ struct StubbornSource: SessionListing {
     func model(source: SessionListing, ledger: FakeSessionLedger, snapshots: any SnapshotStoring<SessionSnapshot>,
                clock: TestClock) -> SessionsModel {
         SessionsModel(source: source, ledger: ledger, defaultHomes: ["/Users/k/.claude", "/Users/k/.codex"],
-                      snapshots: snapshots, maxAge: 60, now: { clock.now })
+                      snapshots: snapshots, maxAge: 60, now: { clock.now }, searchIndexingEnabled: false)
     }
 
     @Test func aLoadedListIsShownAtOnceByTheNextLaunch() async throws {
@@ -137,7 +137,7 @@ struct StubbornSource: SessionListing {
     @Test func aListingThatNeverAnswersGivesUpAndCanBeRetried() async throws {
         let source = HangingSource()
         let model = SessionsModel(source: source, ledger: FakeSessionLedger(), snapshots: MemorySnapshotStore<SessionSnapshot>(),
-                                  listTimeout: .milliseconds(50), now: { [start] in start })
+                                  listTimeout: .milliseconds(50), now: { [start] in start }, searchIndexingEnabled: false)
         await model.load(for: "/bin/swe")
         #expect(model.isLoading == false)
         #expect(model.error != nil)
@@ -148,7 +148,7 @@ struct StubbornSource: SessionListing {
     @Test func aListingThatIgnoresCancellationStillTimesOutOnTime() async throws {
         let model = SessionsModel(source: StubbornSource(), ledger: FakeSessionLedger(),
                                   snapshots: MemorySnapshotStore<SessionSnapshot>(), listTimeout: .milliseconds(50),
-                                  now: { [start] in start })
+                                  now: { [start] in start }, searchIndexingEnabled: false)
         let elapsed = await ContinuousClock().measure { await model.load(for: "/bin/swe") }
         // The bound catches a hang, not latency: it sits under the
         // source's 60s hold, so a broken timeout still fails while a

@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so any other local account could read them. The folder is now 0700
   (an existing one is tightened) and its files 0600.
 
+- **A pairing poll's secret no longer travels in the URL.** The web
+  app polled `/v1/pair/request/<id>?secret=…`, so the secret that
+  collects a new device's credential could land in proxy and access
+  logs. It now goes in an `X-Pair-Secret` header; the hub still reads
+  `?secret=` for iPhone builds already out.
+
 - **A resolve prompt no longer carries strangers' comments.** Anyone can
   comment on a public issue, and every comment went word for word into
   the first prompt of the agent resolving it. The prompt now quotes the
@@ -27,6 +33,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comments in `--json` gain `association`.
 
 ### Fixed
+
+- **The web app's model search and price edits no longer wait on the
+  daily price download.** The LiteLLM price list was fetched while
+  holding the lock every catalog read and price save takes, so a slow
+  network stalled the Models search and the Pricing page. The fetch now
+  runs outside it, and a download cut short counts as tried for the day.
+
+- **A model or effort switch is no longer typed into a TUI that can't
+  take it.** On a tmux session the hub typed `/model <v>` or `/effort
+  <v>` into any harness's pane, so opencode or codex (for effort) got the
+  line as a prompt to the model. It now refuses with `unsupported_control`
+  unless the harness's TUI is known to run the command, the rule the
+  session's `model_modes` and a launch already follow.
+
+- **A status feed with a `NaN` or out-of-range time no longer blanks
+  the web Status page.** Python's JSON reader takes `NaN`, `Infinity`
+  and `1e400`, and the incident time went back out as bare `NaN`, which
+  the browser refuses to parse. Such a time now reads as unknown, as it
+  does in the Mac app.
+
+- **A late approval tap can no longer answer the next terminal prompt.**
+  Once a prompt was answered at the terminal, its request id stopped
+  being checked, so a phone's delayed tap on it could answer the next
+  prompt the agent showed before the hub had named it. A replaced or
+  cleared id is now refused. An approval's key walk also shares the
+  pane's write lock, so a message steered in at the same moment can't
+  land between its arrow keys.
+
+- **One odd message from codex no longer stalls a Codex session.** An
+  app-server message the hub couldn't read (an approval with list
+  `params`, an unhashable id) ended the reader while codex kept running,
+  so every later send waited its full 60 s and failed until a detach.
+  The reader now skips such a message, and a server whose reader did
+  die is replaced on the next send.
 
 - **Qwen Code sessions get `@` file references for attachments again.**
   The hub's attachment fallback table keyed Qwen Code as `qwen`, its
