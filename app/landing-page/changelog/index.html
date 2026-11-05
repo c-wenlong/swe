@@ -119,6 +119,12 @@ prompt, reply and tool call a remote session sees is journaled under
 so any other local account could read them. The folder is now 0700
 (an existing one is tightened) and its files 0600.</p>
 </li>
+<li><p><strong>A pairing poll's secret no longer travels in the URL.</strong> The web
+app polled <code>/v1/pair/request/&lt;id&gt;?secret=…</code>, so the secret that
+collects a new device's credential could land in proxy and access
+logs. It now goes in an <code>X-Pair-Secret</code> header; the hub still reads
+<code>?secret=</code> for iPhone builds already out.</p>
+</li>
 <li><p><strong>A resolve prompt no longer carries strangers' comments.</strong> Anyone can
 comment on a public issue, and every comment went word for word into
 the first prompt of the agent resolving it. The prompt now quotes the
@@ -158,6 +164,25 @@ prompt the agent showed before the hub had named it. A replaced or
 cleared id is now refused. An approval's key walk also shares the
 pane's write lock, so a message steered in at the same moment can't
 land between its arrow keys.</p>
+</li>
+<li><p><strong>One odd message from codex no longer stalls a Codex session.</strong> An
+app-server message the hub couldn't read (an approval with list
+<code>params</code>, an unhashable id) ended the reader while codex kept running,
+so every later send waited its full 60 s and failed until a detach.
+The reader now skips such a message, and a server whose reader did
+die is replaced on the next send.</p>
+</li>
+<li><p><strong>Archiving Qwen Code stops its shared hooks, and its hook settings
+count.</strong> The hook contract table keyed Qwen Code as <code>qwen</code>, its
+command, while harness.json calls it <code>qwen-code</code>. Archiving qwen-code
+still deployed shared-hook wrappers into <code>~/.qwen/hooks</code>, and a
+<code>capabilities.hooks</code> entry on qwen-code was never read. The row is now
+<code>qwen-code</code>, and <code>swe init</code> (or <code>swe hooks sync</code>) moves an existing
+<code>~/.swe/hooks/qwen/</code> to <code>hooks/qwen-code/</code> once and relinks it; a hub
+that already has both folders is told to merge them by hand. The move
+waits while a link to the old folder could not be relinked (qwen-code
+archived, or the link in <code>.linkignore</code>) or a settings file names the
+old folder, so no hook stops running.</p>
 </li>
 <li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
 The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its

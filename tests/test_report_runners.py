@@ -318,5 +318,191 @@ class RunStructuredTest(unittest.TestCase):
         self.assertIn("[REDACTED]", message)
 
 
+
+class RunnerEdgeTest(unittest.TestCase):
+    """Spec validation, diagnostics pulled from stdout, output decoding and
+    the schema checks, one refusal at a time."""
+
+    def completed(self, stdout, *, returncode=0, stderr=""):
+        return subprocess.CompletedProcess([], returncode, stdout, stderr)
+
+    def run_with(self, stdout, *, returncode=0, stderr="", harness="claude",
+                 args=(), kind="session_summary_batch"):
+        with patch("swe.reports.runners.subprocess.run",
+                   return_value=self.completed(stdout, returncode=returncode,
+                                               stderr=stderr)) as run:
+            result = run_structured(RunnerSpec(harness, "m", args), "p",
+                                    output_kind=kind, sleep=Mock())
+        return result, run
+
+    def failure(self, stdout, **kwargs):
+        with self.assertRaises(RunnerError) as raised:
+            self.run_with(stdout, **kwargs)
+        return str(raised.exception)
+
+    def test_spec_refuses_an_empty_model_or_timeout(self):
+        with self.assertRaisesRegex(ValueError, "model must not be empty"):
+            RunnerSpec("claude", "  ")
+        for timeout in (0, -1):
+            with self.assertRaisesRegex(ValueError, "greater than zero"):
+                RunnerSpec("claude", "m", timeout_seconds=timeout)
+        spec = RunnerSpec("  Claude ", "m", ["--verbose"])
+        self.assertEqual((spec.harness, spec.args), ("claude", ("--verbose",)))
+
+    def test_codex_config_overrides_that_lift_the_sandbox_are_refused(self):
+        for args in (("-c", "sandbox_mode=danger-full-access"),
+                     ("-csandbox_mode=x",),
+                     ("--config=approval_policy=never",),
+                     ("-c", "'sandbox_workspace_write.network_access'=true")):
+            with self.subTest(args=args):
+                with self.assertRaisesRegex(ValueError, "managed by SWE"):
+                    build_argv(RunnerSpec("codex", "m", args))
+        argv = build_argv(RunnerSpec("codex", "m", ("-c", "model_reasoning_effort=high")))
+        self.assertEqual(argv[-3:], ["-c", "model_reasoning_effort=high", "-"])
+
+    def test_no_diagnostic_at_all_says_so(self):
+        message = self.failure("", returncode=2)
+        self.assertIn("exit code 2: no diagnostic output", message)
+        # A JSON record that is not an error says nothing either.
+        message = self.failure(json.dumps({"type": "result", "result": "ok"}),
+                               returncode=2)
+        self.assertIn("no diagnostic output", message)
+
+    def test_a_stdout_error_object_names_its_message_or_type(self):
+        cases = {
+            json.dumps({"type": "error", "error": {"message": "overloaded"}}): "overloaded",
+            json.dumps({"type": "error", "error": {"type": "invalid_request"}}): "invalid_request",
+            json.dumps({"type": "error", "error": "quota exhausted"}): "quota exhausted",
+            json.dumps({"is_error": True}): "structured harness error",
+        }
+        for stdout, detail in cases.items():
+            with self.subTest(detail):
+                self.assertIn(f"exit code 1: {detail}",
+                              self.failure(stdout, returncode=1, harness="codex"))
+
+    def test_the_last_error_line_of_jsonl_wins_and_status_is_named(self):
+        stdout = "\n".join([
+            "not json",
+            json.dumps(["a", "list"]),
+            json.dumps({"type": "error", "message": "first"}),
+            json.dumps({"api_error_status": 500, "message": "upstream sk-abcdefghijklm"}),
+        ])
+        message = self.failure(stdout, returncode=1, harness="codex")
+        self.assertIn("HTTP 500: upstream [REDACTED]", message)
+        self.assertNotIn("first", message)
+
+    def test_the_auth_hint_is_claude_only_and_never_doubled(self):
+        message = self.failure("", returncode=1, stderr="401 Unauthorized",
+                               harness="codex")
+        self.assertNotIn("claude auth login", message)
+        message = self.failure(
+            "", returncode=1,
+            stderr="Unauthorized: run claude auth login again")
+        self.assertEqual(message.count("claude auth login"), 1)
+
+    def test_an_inline_sensitive_value_is_redacted(self):
+        message = self.failure("", returncode=1, stderr="bad key hunter22",
+                               args=("--token=hunter22",))
+        self.assertNotIn("hunter22", message)
+        self.assertIn("[REDACTED]", message)
+
+    def test_a_signal_exit_is_retried_once(self):
+        with patch("swe.reports.runners.subprocess.run", side_effect=[
+                self.completed("", returncode=-9),
+                self.completed(json.dumps(SUMMARY))]) as run:
+            result = run_structured(RunnerSpec("claude", "m"), "p",
+                                    output_kind="session_summary_batch",
+                                    sleep=Mock())
+        self.assertEqual((result.attempts, run.call_count), (2, 2))
+
+    def test_a_missing_or_unstartable_harness_is_a_runner_error(self):
+        spec = RunnerSpec("claude", "m", ("--api-key", "hunter22"))
+        with patch("swe.reports.runners.subprocess.run",
+                   side_effect=FileNotFoundError("claude")):
+            with self.assertRaisesRegex(RunnerError, "executable not found: claude"):
+                run_structured(spec, "p", output_kind="final_report")
+        with patch("swe.reports.runners.subprocess.run",
+                   side_effect=PermissionError("denied hunter22")):
+            with self.assertRaises(RunnerError) as raised:
+                run_structured(spec, "p", output_kind="final_report")
+        self.assertIn("Unable to start claude", str(raised.exception))
+        self.assertNotIn("hunter22", str(raised.exception))
+
+    def test_output_decoding_finds_the_payload_where_each_harness_puts_it(self):
+        payloads = {
+            "structured_output": json.dumps({"structured_output": SUMMARY}),
+            "fenced result": json.dumps(
+                {"result": "```json\n" + json.dumps(SUMMARY) + "\n```"}),
+            "result object": json.dumps({"result": SUMMARY}),
+            "codex item": "\n".join([
+                json.dumps({"item": {"type": "agent_message", "text": "{bad"}}),
+                json.dumps({"item": {"type": "agent_message",
+                                     "text": json.dumps(SUMMARY)}}),
+                json.dumps({"type": "turn.completed"}),
+            ]),
+        }
+        for label, stdout in payloads.items():
+            with self.subTest(label):
+                result, _ = self.run_with(stdout, harness="codex")
+                self.assertEqual(result.data, SUMMARY)
+
+    def test_output_without_a_payload_is_malformed(self):
+        for stdout in ("", json.dumps({"result": 7}), json.dumps([SUMMARY]),
+                       json.dumps({"item": {"type": "reasoning", "text": "{}"}})):
+            with self.subTest(stdout=stdout):
+                with self.assertRaisesRegex(RunnerOutputError, "malformed or missing"):
+                    self.run_with(stdout)
+
+    def test_each_summary_field_is_checked(self):
+        def broken(**changes):
+            data = json.loads(json.dumps(SUMMARY))
+            session = data["sessions"][0]
+            for key, value in changes.items():
+                (data if key in data else session)[key] = value
+            return data
+
+        cases = {
+            "got 'final_report'": dict(kind="final_report"),
+            "'project_summary' must be a string": dict(project_summary=None),
+            "'sessions' must be non-empty": dict(sessions=[]),
+            "must be an object": dict(sessions=["s1"]),
+            "'objective' must be a string": dict(objective=3),
+            "'status' must be completed": dict(status="done"),
+            "'changes' must be a list of strings": dict(changes=[1]),
+            "'blockers' must be a list of strings": dict(blockers="none"),
+        }
+        for message, changes in cases.items():
+            with self.subTest(message):
+                with self.assertRaisesRegex(RunnerOutputError, message):
+                    self.run_with(json.dumps(broken(**changes)))
+
+    def test_each_final_report_field_is_checked(self):
+        good = {"action": "create", "follow_up_id": "f1", "text": "t",
+                "project_path": "/p", "evidence": ["e"]}
+
+        def report(markdown="# R", suggestions=None):
+            return json.dumps({"kind": "final_report", "markdown": markdown,
+                               "follow_up_suggestions": [good] if suggestions is None
+                               else suggestions})
+
+        result, _ = self.run_with(report(), kind="final_report")
+        self.assertEqual(result.data["markdown"], "# R")
+        cases = {
+            "markdown must not be empty": report(markdown="  "),
+            "must be a list of objects": report(suggestions=["x"]),
+            "'text' must be a string": report(suggestions=[{**good, "text": None}]),
+            "action must be create": report(suggestions=[{**good, "action": "delete"}]),
+            "'evidence' must be a list": report(suggestions=[{**good, "evidence": "e"}]),
+        }
+        for message, stdout in cases.items():
+            with self.subTest(message):
+                with self.assertRaisesRegex(RunnerOutputError, message):
+                    self.run_with(stdout, kind="final_report")
+
+    def test_an_unknown_output_kind_is_refused(self):
+        with self.assertRaisesRegex(RunnerOutputError, "Unknown structured output kind"):
+            self.run_with(json.dumps({"kind": "mystery"}), kind="mystery")
+
+
 if __name__ == "__main__":
     unittest.main()

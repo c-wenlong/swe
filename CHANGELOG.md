@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so any other local account could read them. The folder is now 0700
   (an existing one is tightened) and its files 0600.
 
+- **A pairing poll's secret no longer travels in the URL.** The web
+  app polled `/v1/pair/request/<id>?secret=…`, so the secret that
+  collects a new device's credential could land in proxy and access
+  logs. It now goes in an `X-Pair-Secret` header; the hub still reads
+  `?secret=` for iPhone builds already out.
+
 - **A resolve prompt no longer carries strangers' comments.** Anyone can
   comment on a public issue, and every comment went word for word into
   the first prompt of the agent resolving it. The prompt now quotes the
@@ -54,6 +60,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleared id is now refused. An approval's key walk also shares the
   pane's write lock, so a message steered in at the same moment can't
   land between its arrow keys.
+
+- **One odd message from codex no longer stalls a Codex session.** An
+  app-server message the hub couldn't read (an approval with list
+  `params`, an unhashable id) ended the reader while codex kept running,
+  so every later send waited its full 60 s and failed until a detach.
+  The reader now skips such a message, and a server whose reader did
+  die is replaced on the next send.
+
+- **Archiving Qwen Code stops its shared hooks, and its hook settings
+  count.** The hook contract table keyed Qwen Code as `qwen`, its
+  command, while harness.json calls it `qwen-code`. Archiving qwen-code
+  still deployed shared-hook wrappers into `~/.qwen/hooks`, and a
+  `capabilities.hooks` entry on qwen-code was never read. The row is now
+  `qwen-code`, and `swe init` (or `swe hooks sync`) moves an existing
+  `~/.swe/hooks/qwen/` to `hooks/qwen-code/` once and relinks it; a hub
+  that already has both folders is told to merge them by hand. The move
+  waits while a link to the old folder could not be relinked (qwen-code
+  archived, or the link in `.linkignore`) or a settings file names the
+  old folder, so no hook stops running.
 
 - **Qwen Code sessions get `@` file references for attachments again.**
   The hub's attachment fallback table keyed Qwen Code as `qwen`, its
