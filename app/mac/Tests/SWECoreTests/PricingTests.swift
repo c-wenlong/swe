@@ -99,6 +99,27 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
         #expect(catalog.listLookup("nonexistent-model") == nil)
     }
 
+    @Test func `an edit keeps a price another writer saved after loading`() throws {
+        let temp = try TempDir()
+        defer { withExtendedLifetime(temp) {} }
+        let url = temp.path("config/pricing.json")
+        // The app loads once at launch; the web app (another writer)
+        // saves a price afterwards.
+        var app = PricingOverrides(url: url)
+        var web = PricingOverrides(url: url)
+        try web.set("from-web", prices: .init(input: 2, output: 4))
+
+        try app.set("from-app", prices: .init(input: 1, output: 1))
+        #expect(PricingOverrides(url: url).models.keys.sorted() == ["from-app", "from-web"])
+        #expect(app.models.keys.sorted() == ["from-app", "from-web"])
+
+        // A remove of a price the app never saw still lands.
+        var stale = app
+        try web.set("later", prices: .init(input: 3, output: 3))
+        try stale.remove("later")
+        #expect(PricingOverrides(url: url).models.keys.sorted() == ["from-app", "from-web"])
+    }
+
     @Test func `a failed write leaves the in-memory prices alone`() throws {
         let temp = try TempDir()
         defer { withExtendedLifetime(temp) {} }

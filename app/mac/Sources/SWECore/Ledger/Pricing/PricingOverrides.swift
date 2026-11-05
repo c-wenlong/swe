@@ -51,8 +51,11 @@ public struct PricingOverrides: Sendable {
     /// under a changed "Price applies to" never loses the price. The
     /// in-memory list changes only once the write lands, so a failed
     /// write leaves it exactly as it was and a retry still writes.
+    /// Each edit starts from the file, not from `models`: swe (the web
+    /// app's Pricing page) may have saved a price since this was loaded,
+    /// and an edit from the stale list would delete it.
     public mutating func set(_ name: String, prices: Prices, replacing: String? = nil) throws {
-        var updated = models
+        var updated = try Self.read(url)
         if let replacing { updated.removeValue(forKey: replacing) }
         updated[name] = prices
         try write(updated, dropping: replacing.map { [$0] } ?? [])
@@ -70,9 +73,13 @@ public struct PricingOverrides: Sendable {
     /// remove take them all — taking just the row's own key would leave
     /// the model user-priced.
     public mutating func remove(_ keys: [String]) throws {
-        var updated = models
+        let current = try Self.read(url)
+        var updated = current
         for key in keys { updated.removeValue(forKey: key) }
-        guard updated != models else { return }
+        guard updated != current else {
+            models = current
+            return
+        }
         try write(updated, dropping: Set(keys))
         models = updated
     }
