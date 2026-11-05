@@ -790,6 +790,26 @@ class BrowserMouseTest(unittest.TestCase):
         code, _, _, _ = self._drive(["down", "up", "cancel"])
         self.assertEqual(code, 0)
 
+    def test_a_bare_esc_quits(self):
+        # It was ignored, so the next read came round with no key left.
+        code, _, _, renders = self._drive(["escape"])
+        self.assertEqual((code, renders), (0, 1))
+
+    def test_esc_alone_and_an_arrow_read_as_different_keys(self):
+        import os
+
+        from swe.find.browser import _read_key
+
+        # The writer stays open, as a terminal does: a lone Esc is told
+        # from an arrow by nothing else being queued behind it.
+        for raw, want in ((b"\x1b", "escape"), (b"\x1b[A", "up"),
+                          (b"\x1bOB", "down"), (b"\x1b[C", "open")):
+            r, w = os.pipe()
+            os.write(w, raw)
+            self.assertEqual(_read_key(r), want, raw)
+            os.close(w)
+            os.close(r)
+
     def test_tracking_is_on_for_the_browse_and_off_before_termios(self):
         from swe import keys
 

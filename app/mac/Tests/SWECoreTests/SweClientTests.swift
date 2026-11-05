@@ -502,6 +502,19 @@ func fixture(_ name: String) throws -> Data {
             ["harness", "discover", "--apply", "newcli", "guess", "--json"])
     }
 
+    @Test func aRefusedNameStillReturnsTheSkippedReason() async throws {
+        // swe exits 1 when a named pick is refused, with the reason in the
+        // body; the sheet needs that body rather than a bare failure.
+        let doc = #"{"schema": 1, "data": {"applied": {"added": [], "skipped": "#
+            + #"[{"name": "newcli", "reason": "already registered"}], "refused": true},"#
+            + findingsJSON + "}}"
+        let runner = ScriptedRunner([(["harness", "discover"],
+            CommandResult(status: 1, stdout: Data(doc.utf8), stderr: ""))])
+        let reply = try await SweClient(runner: runner).registerHarnesses(["newcli"])
+        #expect(reply.applied?.added == [])
+        #expect(reply.applied?.skipped.map(\.name) == ["newcli"])
+    }
+
     @Test func addHarnessArgvOmitsEmptyOptionals() async throws {
         let ok = CommandResult(status: 0, stdout: Data(#"""
         {"schema": 1, "data": {"name": "t", "command": "t", "action": "added",

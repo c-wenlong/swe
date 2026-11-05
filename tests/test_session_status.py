@@ -1195,6 +1195,24 @@ class TailRecordsTest(unittest.TestCase):
         self.assertFalse(complete)
         self.assertEqual([{"tail": 1}], list(records))
 
+    def test_window_starting_on_a_line_boundary_keeps_that_record(self):
+        # The window opens exactly where the last record starts, so the
+        # record before it ends on the byte just outside the window. That
+        # record was dropped as a "partial" first line, losing the window's
+        # only whole record.
+        from swe.sessions.status import _tail_records
+
+        tmp = temp_dir(self)
+        last = json.dumps({"tail": 1}) + "\n"
+        path = tmp / "s.jsonl"
+        path.write_text(json.dumps({"head": "x" * 500}) + "\n" + last)
+        records, complete = _tail_records(str(path), len(last))
+        self.assertFalse(complete)
+        self.assertEqual([{"tail": 1}], list(records))
+        # One byte smaller and the window opens inside the record.
+        records, _ = _tail_records(str(path), len(last) - 1)
+        self.assertEqual([], list(records))
+
     def test_a_walk_decodes_only_the_records_it_reaches(self):
         from swe.sessions import status
 

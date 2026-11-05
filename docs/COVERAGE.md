@@ -44,10 +44,7 @@ otherwise local coding-session archives change the result between machines.
 
 ## Untested modules
 
-No module with logic is left without a test. The only files at 0% are
-`mcp_formats.py` and `history/__init__.py`, compatibility shims that
-re-export another module and hold no logic; nothing in the tree imports
-either any more. `mcp/server.py` (89%) is tested against a stand-in
+No module with logic is left without a test. `mcp/server.py` (89%) is tested against a stand-in
 `FastMCP`, since the optional `server` extra is not installed in the test
 environment.
 
