@@ -1,6 +1,7 @@
 """The web app on the hub: /app/ pages and /v1/app/* data."""
 
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -412,12 +413,20 @@ class TestBodySheets(unittest.TestCase):
                                                    "label": "New skill", "open": False, "closed": 1,
                                                    "idleClosed": 1, "gateClosed": True})
 
+    # The two checks below read page source: a page builds its sheet inside
+    # a render closure that only runs with the whole app around it, so
+    # there is no seam to run it under node. They match the ways a dialog
+    # can be made (markup in any case, createElement with any quote) and a
+    # hashchange listener with any quote, so a reformat can't slip past.
+    MADE_DIALOG = re.compile(r"<dialog\b|createElement\(\s*[\"'`]dialog[\"'`]\s*\)", re.I)
+    OWN_HASHCHANGE = re.compile(r"[\"'`]hashchange[\"'`]")
+
     def test_pages_keep_no_sheet_inside_the_panel(self):
         """Skills and Plugins used to draw their sheets into #panel, where a
         repaint deleted them; Plugins reopened its sheet on a later visit."""
         for page in ("skills", "plugins", "hooks"):
             src = (APP_JS.parent / "pages" / f"{page}.js").read_text(encoding="utf-8")
-            self.assertNotIn("<dialog", src, page)
+            self.assertIsNone(self.MADE_DIALOG.search(src), page)
 
     def test_body_sheets_go_through_bodySheet(self):
         """Compute, Pricing and Service status kept sheets on document.body
@@ -425,9 +434,9 @@ class TestBodySheets(unittest.TestCase):
         page, and the other two each carried their own hashchange copy."""
         for page in ("compute", "pricing", "status"):
             src = (APP_JS.parent / "pages" / f"{page}.js").read_text(encoding="utf-8")
-            self.assertIn("bodySheet(", src, page)
-            for made in ("<dialog", 'createElement("dialog")', '"hashchange"'):
-                self.assertNotIn(made, src, page)
+            self.assertRegex(src, r"\bbodySheet\(", page)
+            self.assertIsNone(self.MADE_DIALOG.search(src), page)
+            self.assertIsNone(self.OWN_HASHCHANGE.search(src), page)
 
 
 
@@ -486,11 +495,15 @@ class TestSafeHref(unittest.TestCase):
 
     def test_pages_link_outside_urls_only_through_it(self):
         """No page builds an href from server data with plain esc(); the
-        one esc() href left is Hooks' own in-app route."""
+        one esc() href left is Hooks' own in-app route. A source scan:
+        every page's markup is a template literal, so this is the one
+        place all of them can be checked at once. It allows either quote
+        and spaces inside the ``${ }``."""
         static = APP_JS.parent
+        esc_href = re.compile(r"""href\s*=\s*["']\$\{\s*esc\(""")
         hits = [f"{p.name}:{n}" for p in sorted([*static.glob("*.js"), *static.glob("pages/*.js")])
                 for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
-                if 'href="${esc(' in line]
+                if esc_href.search(line)]
         self.assertEqual([h.split(":")[0] for h in hits], ["hooks.js"], hits)
 
 

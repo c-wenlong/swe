@@ -9,6 +9,7 @@ PATH and harness configs never leak in, and PATH lookups find nothing.
 
 import io
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -29,6 +30,8 @@ from tests.test_remote_hub import HubBase
 from tests.test_webapp import app_js_function
 
 from tests._tempdir import temp_dir
+
+PAGES_DIR = Path(__file__).resolve().parents[1] / "src/swe/webapp/static/pages"
 
 GIT = shutil.which("git")
 
@@ -635,12 +638,24 @@ class TestRoute(_Home, HubBase):
             self.assertIn("message", json.loads(data)["error"])
 
     def test_page_assets_are_served(self):
+        # The bundles carry the page's own files, whole (the script as a
+        # string compiled on its own, the stylesheet as it is).
         _, js = self.srv.request("GET", "/pages.js")
-        self.assertIn(b"/v1/app/setup/apply", js)
-        # The look step saves where Settings › General reads it.
-        self.assertIn(b'"quiver.appearance"', js)
+        self.assertIn(b"/* setup.js */", js)
+        self.assertIn(b"//# sourceURL=/pages/setup.js", js)
         _, css = self.srv.request("GET", "/pages.css")
-        self.assertIn(b".setup-sheet", css)
+        self.assertIn(b"/* setup.css */\n" + (PAGES_DIR / "setup.css").read_bytes(), css)
+
+    def test_the_look_step_saves_where_settings_reads_it(self):
+        # Setup's look step and Settings › General share one localStorage
+        # key; each page names it in its own script, so both must agree.
+        def key(page, pattern):
+            found = re.findall(pattern, (PAGES_DIR / page).read_text(encoding="utf-8"))
+            self.assertEqual(len(found), 1, page)
+            return found[0]
+
+        self.assertEqual(key("setup.js", r'APPEARANCE_KEY\s*=\s*"([^"]+)"'),
+                         key("settings.js", r'\bappearance:\s*"([^"]+)"'))
 
 
 

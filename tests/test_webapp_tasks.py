@@ -448,19 +448,32 @@ class TestTaskGroupNames(unittest.TestCase):
     name, spelled as the Mac and iOS spell it."""
 
     def test_scopeless_rows_group_under_their_source_name(self):
-        import re
-
-        from tests.test_webapp_launch_sheets import PAGES
-        src = (PAGES / "tasks.js").read_text(encoding="utf-8")
-        helpers = "\n".join(re.search(r"^  const %s = .*?;$" % name, src, re.M | re.S).group(0)
-                            for name in ("SOURCE_NAMES", "sourceName", "groupName"))
-        rows = [{"source": "linear"}, {"source": "github", "repo": ""}, {"source": "jira"},
-                {}, {"source": "linear", "repo": "", "project": "QUI"}, {"source": "github", "repo": "o/a"}]
-        done = subprocess.run(["node", "-e", helpers + "\nprocess.stdout.write(JSON.stringify("
-                               + json.dumps(rows) + ".map(groupName)));"],
-                              capture_output=True, text=True, timeout=30)
+        # The page itself, painted under the launch-sheet stub: each group
+        # is a rail row whose data-shown is its name.
+        from tests.test_webapp_launch_sheets import MENU_JS, PAGES, STUB
+        flow = r"""
+globalThis.pageHeader = (title, subtitle, actions = "") => `<header>${actions}</header>`;
+const task = (id, extra) => ({ id, kind: "issue", ref: id, title: "T" + id, state: "open",
+  status: "Open", sessions: [], ...extra });
+const rows = [task("1", { source: "linear" }), task("2", { source: "github", repo: "" }),
+  task("3", { source: "jira" }), task("4", {}), task("5", { source: "linear", repo: "", project: "QUI" }),
+  task("6", { source: "github", repo: "o/a" })];
+apiAnswers.push(["/v1/app/tasks", { status: 200, data: { machine: "hub", github: { status: "ok" }, tasks: rows } }]);
+(async () => {
+  location.hash = "#/tasks";
+  PAGES.tasks();
+  await tick();
+  const html = panel.innerHTML;
+  const rail = html.slice(html.indexOf('<aside class="gh-rail"'), html.indexOf("</aside>"));
+  process.stdout.write(JSON.stringify([...rail.matchAll(/data-shown="([^"]+)"/g)].map((m) => m[1])));
+})().catch((e) => { console.error(e && e.stack || e); process.exit(1); });
+"""
+        script = (STUB + MENU_JS.read_text(encoding="utf-8") + "\n"
+                  + (PAGES / "github.js").read_text(encoding="utf-8") + "\n"
+                  + (PAGES / "tasks.js").read_text(encoding="utf-8") + "\n" + flow)
+        done = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(json.loads(done.stdout), ["Linear", "GitHub", "Jira", "Other", "QUI", "o/a"])
+        self.assertEqual(sorted(json.loads(done.stdout)), sorted(["Linear", "GitHub", "Jira", "Other", "QUI", "o/a"]))
 
 if __name__ == "__main__":
     unittest.main()

@@ -185,14 +185,23 @@ class TestPageScripts(unittest.TestCase):
         """The bundle runs every page script in its own scope, so
         agents.js can't call a helper skills.js defines, or the other way
         round (the AGENTS.md page once threw on skillsPath)."""
+        # Read from the source: a call into the other script only fails
+        # when that line runs, which a load under node would not reach.
+        # A helper is a function declaration or a function-valued const,
+        # let or var (an arrow or a function expression), at any depth.
         import re
         folder = page.Path(pages_dir())
-        defs = re.compile(r"^\s*(?:async )?function (\w+)", re.M)
+        defs = re.compile(r"^\s*(?:async\s+)?function\s*\*?\s*(\w+)"
+                          r"|^\s*(?:const|let|var)\s+(\w+)\s*=\s*(?:async\b\s*)?"
+                          r"(?:function\b|\([^()]*\)\s*=>|\w+\s*=>)", re.M)
         scripts = {n: (folder / n).read_text() for n in ("agents.js", "skills.js")}
-        defined = {n: set(defs.findall(t)) for n, t in scripts.items()}
+        defined = {n: {a or b for a, b in defs.findall(t)} for n, t in scripts.items()}
+        for name in scripts:
+            self.assertGreater(len(defined[name]), 5, f"no helpers found in {name}: the pattern is stale")
         for name, other in (("agents.js", "skills.js"), ("skills.js", "agents.js")):
             for fn in defined[other] - defined[name]:
-                self.assertNotRegex(scripts[name], rf"(?<![\w.$]){fn}\(", f"{name} calls {fn} from {other}")
+                self.assertIsNone(re.search(rf"(?<![\w.$]){fn}\s*\(", scripts[name]),
+                                  f"{name} calls {fn} from {other}")
 
 
 def pages_dir():
@@ -595,10 +604,13 @@ class TestWriteRoute(_WriteHome, HubBase):
         self.assertEqual(self.srv.request("POST", "/v1/app/skills/link", body=["codex"], headers=auth)[0], 400)
 
     def test_page_script_carries_the_writes(self):
+        # The bundle carries skills.js whole, compiled on its own; what its
+        # writes do is covered by the node tests of the page below.
         status, data = self.srv.request("GET", "/pages.js")
         self.assertEqual(status, 200)
-        for needle in (b"/v1/app/skills/", b"Link to shared skills", b"Link all (", b"sk-confirm-go"):
-            self.assertIn(needle, data)
+        self.assertIn(b"/* skills.js */", data)
+        self.assertIn(b"//# sourceURL=/pages/skills.js", data)
+        self.assertIn(b"/v1/app/skills/", data)
 
 
 

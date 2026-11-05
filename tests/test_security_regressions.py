@@ -6,6 +6,7 @@ deleted with no copy anywhere. None of them raised, so none would have
 surfaced without a test pinning the behaviour.
 """
 
+import ast
 import json
 import os
 import ssl
@@ -18,6 +19,17 @@ from swe.paths import atomic_write_text, backup_tree
 
 from tests._tempdir import temp_dir
 
+SRC = Path(__file__).resolve().parents[1] / "src" / "swe"
+
+
+def _names(node) -> set[str]:
+    """Every name and attribute name inside ``node`` (``ssl.CERT_NONE``
+    gives ``{"ssl", "CERT_NONE"}``)."""
+    if node is None:
+        return set()
+    return {n.id if isinstance(n, ast.Name) else n.attr
+            for n in ast.walk(node) if isinstance(n, (ast.Name, ast.Attribute))}
+
 
 class SslVerificationTest(unittest.TestCase):
     """Requests carry `Authorization: Bearer`, so verification must stay on.
@@ -27,14 +39,36 @@ class SslVerificationTest(unittest.TestCase):
     """
 
     def test_no_code_path_disables_verification(self):
-        source = Path("src/swe/harness/rate_limits.py").read_text()
-        code = "\n".join(
-            ln for ln in source.splitlines()
-            if not ln.lstrip().startswith("#")
-        )
-        # Keep docstrings out of it; this is about executable statements.
-        for banned in ("verify_mode = ssl.CERT_NONE", "check_hostname = False"):
-            self.assertNotIn(banned, code, f"{banned} is back in rate_limits")
+        """No statement anywhere in the package turns verification off.
+
+        Read from the syntax tree, so comments and docstrings that
+        describe the old fallback don't count, and any spelling of the
+        assignment (``ssl.CERT_NONE`` or a bare ``CERT_NONE``, on any
+        context name) does.
+        """
+        def disables(node) -> bool:
+            if isinstance(node, ast.Attribute):
+                return node.attr == "_create_unverified_context"
+            if not isinstance(node, ast.Assign):
+                return False
+            for target in node.targets:
+                if isinstance(target, ast.Attribute):
+                    if target.attr == "verify_mode" and "CERT_NONE" in _names(node.value):
+                        return True
+                    if target.attr == "check_hostname" and isinstance(node.value, ast.Constant) \
+                            and node.value.value is False:
+                        return True
+            return False
+
+        offenders = []
+        for path in sorted(SRC.rglob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            # Only a file that names one of them can do it; skip parsing the rest.
+            if not any(word in text for word in ("verify_mode", "check_hostname", "_create_unverified_context")):
+                continue
+            offenders += [f"{path.relative_to(SRC)}:{node.lineno}"
+                          for node in ast.walk(ast.parse(text)) if disables(node)]
+        self.assertEqual(offenders, [], "TLS verification is switched off")
 
     def test_fallback_context_still_verifies(self):
         from swe.harness.rate_limits import _verified_context
@@ -257,20 +291,25 @@ class ParserFailuresAreReportedTest(unittest.TestCase):
         own try, while the deeper ones are per-file or per-row and are meant
         to skip quietly. The `conn.close()` cleanup is nested and exempt.
         """
-        import re
-
         # The whole-tool shape exactly: a function-level handler that then
         # hands back the session list. Deeper handlers (per file, per row)
         # and ones returning a title or a filename list are meant to be
-        # quiet, because one bad record should not blank a harness.
-        pattern = re.compile(
-            r"^    except Exception:\n        pass\n    return sessions$", re.M
-        )
-        offenders = [
-            f.name
-            for f in Path("src/swe/sessions/engines").glob("*.py")
-            if pattern.search(f.read_text())
-        ]
+        # quiet, because one bad record should not blank a harness. Read
+        # from the syntax tree, so formatting can't hide one.
+        def silent(handler):
+            caught = _names(handler.type) if handler.type is not None else {"BaseException"}
+            return bool(caught & {"Exception", "BaseException"}) and \
+                all(isinstance(stmt, ast.Pass) for stmt in handler.body)
+
+        offenders = []
+        for path in sorted((SRC / "sessions" / "engines").glob("*.py")):
+            for fn in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                for stmt, after in zip(fn.body, fn.body[1:]):
+                    if isinstance(stmt, ast.Try) and any(silent(h) for h in stmt.handlers) \
+                            and isinstance(after, ast.Return) and _names(after.value) == {"sessions"}:
+                        offenders.append(f"{path.name}:{fn.name}")
         self.assertEqual(offenders, [], f"whole-tool failures still silent: {offenders}")
 
 
