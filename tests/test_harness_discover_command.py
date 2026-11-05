@@ -133,12 +133,13 @@ class HarnessDiscoverCommandTest(unittest.TestCase):
         self.assertIn("! goose: binary does not answer", out)
         self.assertNotIn("Nothing to add", out)
 
-    def test_a_refused_pick_is_flagged_in_json(self):
+    def test_a_refused_pick_is_flagged_in_json_and_fails(self):
         skipped = [{"name": "goose", "reason": "binary does not answer"}]
         code, out = self.run_cmd(["--json", "--apply", "goose"],
                                  applied=([], skipped))
         doc = json.loads(out)["data"]
-        self.assertEqual(code, 0)
+        # Exits 1 like text mode, with the body still saying why.
+        self.assertEqual(code, 1)
         self.assertTrue(doc["applied"]["refused"])
         self.assertEqual(doc["applied"]["skipped"], skipped)
 

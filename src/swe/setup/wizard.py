@@ -253,7 +253,7 @@ def _stage_harnesses(
     if not _ask_yes_no("Register these harnesses?", default=True, input_fn=input_fn):
         return StageOutcome("harnesses", SECTION_LABELS["harnesses"], "skipped", f"{len(new)} available")
 
-    backup = backup_file(HARNESS_FILE)
+    backup = backup_file(HARNESS_FILE, home=home)
     added, _ = apply_findings(new, min_confidence="high")
     print(c("green", f"  Saved {len(added)} harness(es): {', '.join(added) or 'none'}"))
     return StageOutcome(
@@ -306,7 +306,7 @@ def _stage_mcp(
     home: Path,
     quick: bool,
 ) -> StageOutcome:
-    del home, quick
+    del quick
     _stage_header(number, total, SECTION_LABELS["mcp"])
     new = [item for item in discover_mcp_servers() if item.status == "new"]
     if not new:
@@ -321,7 +321,7 @@ def _stage_mcp(
     if not _ask_yes_no("Import them into the MCP source-of-truth?", default=True, input_fn=input_fn):
         return StageOutcome("mcp", SECTION_LABELS["mcp"], "skipped", f"{len(new)} available")
 
-    backup = backup_file(MCP_SOURCE_FILE)
+    backup = backup_file(MCP_SOURCE_FILE, home=home)
     added = apply_mcp_findings(new).added
     print(c("green", f"  Saved {len(added)} MCP server(s): {', '.join(added) or 'none'}"))
     return StageOutcome(
@@ -391,7 +391,6 @@ def _stage_report(
     home: Path,
     quick: bool,
 ) -> StageOutcome:
-    del home
     _stage_header(number, total, SECTION_LABELS["report"])
     resolved = load_resolved_config()
     complete = report_setup_complete(resolved)
@@ -410,7 +409,7 @@ def _stage_report(
 
     try:
         configured = interactive_report_setup(load_config(), input_fn=input_fn)
-        backup = backup_file(CONFIG_FILE)
+        backup = backup_file(CONFIG_FILE, home=home)
         save_config(configured)
     except ConfigurationError as exc:
         # Not EOFError or KeyboardInterrupt: Ctrl-D / Ctrl-C at a runner

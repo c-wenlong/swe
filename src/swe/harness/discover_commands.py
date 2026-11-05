@@ -170,6 +170,7 @@ def cmd_discover(args):
             )
             print()
 
+    refused = False
     if opts["apply"] or opts["apply_all"] or names is not None:
         # --apply-all means every tier, including the home scan's "low";
         # the floor map in apply_findings treats "low" as accept-everything.
@@ -192,13 +193,14 @@ def cmd_discover(args):
         if names is not None and any(s["name"] in names and s["name"] not in added
                                      for s in skipped):
             data["applied"]["refused"] = True
-            if not opts["json"]:
-                return 1
+            refused = True
     elif not opts["json"] and findings and findings[0].status == "new":
         actionable = [f for f in findings if f.status == "new"]
         if actionable and not sys.stdin.isatty():
             print(c("dim", "  Tip: pass --apply to write matches to harness.json\n"))
 
     if opts["json"]:
-        return emit(data)
-    return 0
+        # Same exit as text mode: the body says what was refused, the
+        # status says it failed.
+        emit(data)
+    return 1 if refused else 0
