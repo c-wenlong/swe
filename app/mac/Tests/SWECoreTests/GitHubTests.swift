@@ -1010,6 +1010,27 @@ import Testing
         #expect(views == [["gh", "pr", "view", "3", "--repo=o/a", "--json"]])
     }
 
+    /// A repo that once fit one short page and has since outgrown it
+    /// still gets its remembered open pulls rechecked; and failed reads
+    /// count against the cap, so a broken `gh pr view` costs five calls,
+    /// not one per row.
+    @Test func aRepoThatOutgrewItsFirstPageIsStillRecheckedWithCappedReads() async {
+        let calls = focusRouter(repo: "o/a", pulls: prRows(1...20))
+        let swe = SweClient(runner: calls)
+        let model = GitHubModel()
+        await model.loadFocusTab(.pulls, repo: "o/a", swe: swe)
+        calls.replies["gh pr --state=all --limit=50 --repo=o/a --json"] = .init(
+            status: 0, stdout: envelope("\(env),\"results\":[{\"repo\":\"o/a\",\"status\":\"ok\",\"pull_requests\":\(prRows(21...70))}]"),
+            stderr: "")
+        // None of 1...20 is open any more; every read fails.
+        calls.replies["gh pr --state=open --limit=100 --repo=o/a --json"] = .init(
+            status: 0, stdout: envelope("\(env),\"results\":[{\"repo\":\"o/a\",\"status\":\"ok\",\"pull_requests\":\(prRows(21...70))}]"),
+            stderr: "")
+        await model.loadFocusTab(.pulls, repo: "o/a", swe: swe)
+        let views = calls.calls.filter { $0.starts(with: ["gh", "pr", "view"]) }
+        #expect(views.count == GitHubModel.recheckViews)
+    }
+
     /// An issue remembered open that a complete open-only listing leaves
     /// out has closed: no per-issue read needed.
     @Test func aRememberedOpenIssueMissingFromTheOpenListingIsClosed() async {

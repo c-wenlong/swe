@@ -623,6 +623,13 @@ public final class GitHubModel {
         storedBoards[repo] = board
     }
 
+    /// Re-read the store's board, off main, when `tab` did not load: the
+    /// copy `prime` took may predate writes since.
+    private func refreshStoredBoard(unlessLoaded tab: RepoTab, repo: String) async {
+        guard !focusBoard(for: repo).isLoaded(tab), let store = historyStore else { return }
+        storedBoards[repo] = await onHistoryQueue { store.board(repo: repo) }
+    }
+
     /// `work` on the history queue, awaited: a store read that keeps
     /// the main actor free and lands after the writes before it.
     private func onHistoryQueue<Value: Sendable>(_ work: @escaping @Sendable () -> Value) async -> Value {
@@ -718,13 +725,19 @@ public final class GitHubModel {
                       to: key, \.branches, store: .focus,
                       persist: persist(repo: repo, surface: .branches)) { $0.branches ?? [] }
             }
+            // A surface whose reply came back as an error (upstream-error,
+            // no result) restores remembered rows: read the store's latest
+            // board for it first, off main.
+            await refreshStoredBoard(unlessLoaded: tab, repo: repo)
             remember(tab, repo: repo)
             // A short page means the listing ended — the scroll loader
             // stops growing the window on this surface.
             if let fetched, fetched < limit {
                 focusExhausted.insert(key)
             }
-            if let window, !focusExhausted.contains(key) {
+            // Judged on this reply, not the sticky exhaustion: a repo that
+            // once fit one page can outgrow it later.
+            if let window, let fetched, fetched >= limit {
                 await recheckStaleOpen(tab, repo: repo, swe: swe, window: window)
             }
         } catch is CancellationError {
@@ -733,11 +746,8 @@ public final class GitHubModel {
             board.fail(tab, message: error.localizedDescription)
             focusBoards[repo] = board
             // Remembered rows stand in for the error — a blip must not
-            // blank a listing the app already knows. The store's latest
-            // board is read off main for the list surfaces.
-            if let store = historyStore {
-                storedBoards[repo] = await onHistoryQueue { store.board(repo: repo) }
-            }
+            // blank a listing the app already knows.
+            await refreshStoredBoard(unlessLoaded: tab, repo: repo)
             remember(tab, repo: repo)
         }
     }
@@ -828,8 +838,12 @@ public final class GitHubModel {
                                                repo: repo, rows: { $0.pullRequests?.map(\.number) })
             else { return }
             var moved: [GhPr] = []
+            var reads = 0
             for pr in stale where open.closed(pr.number) {
-                guard moved.count < Self.recheckViews else { break }
+                // Reads, not successes, are capped: failing reads must not
+                // run through the whole list one timeout at a time.
+                guard reads < Self.recheckViews else { break }
+                reads += 1
                 guard let detail = try? await swe.ghPrView(repo: repo, ref: String(pr.number)).pr,
                       detail.state != .open else { continue }
                 moved.append(GhPr(detail))
