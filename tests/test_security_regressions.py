@@ -208,10 +208,6 @@ class BackupTreeHardeningTest(unittest.TestCase):
         self.assertTrue(a.exists() and b.exists())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ParserFailuresAreReportedTest(unittest.TestCase):
     """A crashing parser must read as an error, not as an unused harness.
 
@@ -330,3 +326,7 @@ class UnknownRootRefTest(unittest.TestCase):
         with self.assertRaises(self.error):
             link_skill_root("codx", home=self.home, cwd=self.home, force=True)
         self.assertTrue((self.work / "codx").is_dir(), "cwd folder was touched")
+
+
+if __name__ == "__main__":
+    unittest.main()
