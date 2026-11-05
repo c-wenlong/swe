@@ -534,6 +534,132 @@ class HarnessTargetsTest(unittest.TestCase):
         result = build_run(self.home)
         self.assertTrue(claude.exists())
 
+    def test_a_relative_link_into_the_hub_is_repointed(self):
+        # `ln -s ../.swe/AGENTS.md`: the first hop is resolved against the
+        # link's own folder, not the process's working directory.
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        (self.home / ".claude").mkdir()
+        link = self.home / ".claude" / "CLAUDE.md"
+        link.symlink_to(Path("..") / ".swe" / "AGENTS.md")
+        result = build_run(self.home)
+        claude = harness_agents_file_for(self.home, "claude")
+        self.assertEqual(link.resolve(), claude.resolve())
+        self.assertIn((str(link), str(claude)), result.relinked)
+
+    def test_a_link_that_cannot_be_moved_keeps_its_stale_output(self):
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        (self.home / ".claude").mkdir()
+        link = self.home / ".claude" / "CLAUDE.md"
+        link.symlink_to(self.output)
+        build(self.home)
+        claude = harness_agents_file_for(self.home, "claude")
+        self.write_targets({})
+        with patch("swe.instructions.links._repoint",
+                   side_effect=PermissionError("read-only")):
+            result = build_run(self.home)
+        # The link still names the retired output, so it must survive.
+        self.assertEqual(result.relinked, [])
+        self.assertEqual(os.readlink(link), str(claude))
+        self.assertTrue(claude.exists())
+        self.assertTrue(any("a link still points at it" in n
+                            for n in result.notes))
+
+    def test_an_ignored_chain_into_a_retired_output_keeps_it(self):
+        # An ignored link is never moved, but what it reaches through a
+        # middle link is in use and must not be deleted.
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        build(self.home)
+        claude = harness_agents_file_for(self.home, "claude")
+        (self.home / ".claude").mkdir()
+        middle = self.home / "nix-entry"
+        middle.symlink_to(claude)
+        link = self.home / ".claude" / "CLAUDE.md"
+        link.symlink_to(middle)
+        (self.home / ".swe" / ".linkignore").write_text(".claude\n")
+        self.write_targets({})
+        result = build_run(self.home)
+        self.assertTrue(claude.exists())
+        self.assertEqual(result.removed, [])
+        self.assertEqual(os.readlink(link), str(middle))
+
+    def test_a_link_loop_is_skipped(self):
+        (self.home / ".claude").mkdir()
+        link = self.home / ".claude" / "CLAUDE.md"
+        other = self.home / ".claude" / "loop.md"
+        link.symlink_to(other)
+        other.symlink_to(link)
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        result = build_run(self.home)
+        self.assertEqual(result.relinked, [])
+        self.assertEqual(os.readlink(link), str(other))
+
+    def _account_link(self) -> Path:
+        """A Claude account profile whose CLAUDE.md swe linked to AGENTS.md
+        with instruction sync switched on, as ``swe init`` leaves it."""
+        import json
+        from swe.init import accounts
+        from swe.paths import config_file_for
+
+        (self.home / ".claude").mkdir(exist_ok=True)
+        config = config_file_for(self.home)
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(json.dumps({"accounts": {"sync": {"instructions": True}}}))
+        root = accounts.accounts_root(self.home)
+        root.mkdir(parents=True)
+        (root / "profiles.json").write_text(json.dumps(
+            {"profiles": [{"vendor": "claude", "id": "work"}]}))
+        account_home = root / "claude" / "work" / "home"
+        account_home.mkdir(parents=True)
+        link = account_home / "CLAUDE.md"
+        link.symlink_to(self.output)
+        accounts.save_manifest(self.home, [{
+            "path": str(link), "source": str(self.output),
+            "primitive": "instructions", "account": "claude/work"}])
+        return link
+
+    def test_an_account_link_follows_its_harness_and_the_record_too(self):
+        from swe.init import accounts
+
+        link = self._account_link()
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        result = build_run(self.home)
+        claude = harness_agents_file_for(self.home, "claude")
+        self.assertEqual(os.readlink(link), str(claude))
+        self.assertIn((str(link), str(claude)), result.relinked)
+        # A later sync-off compares against the record, so it must follow.
+        self.assertEqual(accounts.load_manifest(self.home)[0]["source"],
+                         str(claude))
+        self.assertEqual(result.notes, [])
+
+    def test_unreadable_account_profiles_leave_stale_outputs_alone(self):
+        link = self._account_link()
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        build(self.home)
+        claude = harness_agents_file_for(self.home, "claude")
+        from swe.init import accounts
+        (accounts.accounts_root(self.home) / "profiles.json").write_text("{bad")
+        self.write_targets({})
+        result = build_run(self.home)
+        self.assertTrue(any("account instruction links not re-pointed" in n
+                            for n in result.notes))
+        # The pass is incomplete, so nothing it might not have seen is deleted.
+        self.assertTrue(claude.exists())
+        self.assertEqual(result.removed, [])
+        self.assertEqual(os.readlink(link), str(claude))
+
+    def test_a_damaged_account_record_is_a_note_not_a_failure(self):
+        from swe.init import accounts
+
+        link = self._account_link()
+        accounts.manifest_file(self.home).write_text('{"links": [7]}')
+        self.write_targets({"one.md": {"only": ["claude"]}})
+        result = build_run(self.home)
+        claude = harness_agents_file_for(self.home, "claude")
+        # The link still moves; only the record could not be updated.
+        self.assertEqual(os.readlink(link), str(claude))
+        self.assertTrue(any("account link record not updated" in n
+                            for n in result.notes))
+
     def test_markerless_per_harness_destination_is_never_overwritten(self):
         self.write_targets({"one.md": {"only": ["claude"]}})
         own = harness_agents_file_for(self.home, "claude")

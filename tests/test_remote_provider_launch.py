@@ -123,6 +123,99 @@ class TestProviderExec(unittest.TestCase):
             {"GROQ_API_KEY": GROQ, "OPENAI_API_KEY": OPENAI})
         self.assertEqual(env, {"PATH": "/bin", "GROQ_API_KEY": GROQ, "X": "1"})
 
+    def test_build_env_takes_the_first_source_with_a_value(self):
+        # An empty first source falls through to the next one.
+        env = provider_exec.build_env(
+            {}, {"keys": {"TARGET": ["EMPTY", "SECOND", "THIRD"]}},
+            {"EMPTY": "", "SECOND": "two", "THIRD": "three"})
+        self.assertEqual(env, {"TARGET": "two"})
+        with self.assertRaises(ValueError) as caught:
+            provider_exec.build_env({}, {"keys": {"T": ["A", "B"]}}, {"A": ""})
+        self.assertIn("A or B", str(caught.exception))
+
+
+class TestProviderExecMain(unittest.TestCase):
+    """``main`` in this process, with ``execvpe`` patched: the subprocess
+    tests above run it under ``-I``, which coverage cannot follow."""
+
+    SPEC = json.dumps({"keys": {"GROQ_API_KEY": ["GROQ_API_KEY"]},
+                       "set": {"BASE": "https://x"}})
+
+    def setUp(self):
+        self.home = temp_dir(self)
+        self.keys = _write_keys(self.home)
+
+    def _main(self, *opts, command=("opencode", "run")):
+        argv = [*opts, "--", *command]
+        # main puts its package root on sys.path; keep that out of the run.
+        with patch("sys.stderr") as err, \
+                patch.object(sys, "path", list(sys.path)), \
+                patch.dict(os.environ, {"OPENAI_API_KEY": OPENAI}), \
+                patch.object(provider_exec.os, "execvpe") as execvpe:
+            code = provider_exec.main(argv)
+        printed = "".join(call.args[0] for call in err.write.call_args_list)
+        return code, execvpe, printed
+
+    def test_execs_the_command_with_the_built_env(self):
+        code, execvpe, printed = self._main(
+            f"--keys={self.keys}", f"--spec={self.SPEC}")
+        self.assertEqual(code, 0)
+        self.assertEqual(printed, "")
+        file, argv, env = execvpe.call_args.args
+        self.assertEqual((file, argv), ("opencode", ["opencode", "run"]))
+        self.assertEqual(env["GROQ_API_KEY"], GROQ)
+        self.assertEqual(env["BASE"], "https://x")
+        # The inherited key the file also names is stripped.
+        self.assertNotIn("OPENAI_API_KEY", env)
+
+    def test_missing_options_or_command_are_usage_errors(self):
+        for argv in ([f"--keys={self.keys}"],
+                     [f"--spec={self.SPEC}"],
+                     []):
+            with self.subTest(argv=argv):
+                code, execvpe, printed = self._main(*argv)
+                self.assertEqual(code, 2)
+                execvpe.assert_not_called()
+                self.assertIn("needs --keys, --spec and a command", printed)
+        code, execvpe, _ = self._main(
+            f"--keys={self.keys}", f"--spec={self.SPEC}", command=())
+        self.assertEqual(code, 2)
+        execvpe.assert_not_called()
+
+    def test_bad_spec_or_keys_file_refuses_without_exec(self):
+        folder = self.home / "keys-folder"
+        folder.mkdir()
+        cases = {
+            "not json": (f"--keys={self.keys}", "--spec={not json"),
+            "spec is a list": (f"--keys={self.keys}", "--spec=[1]"),
+            "keys file is a folder": (f"--keys={folder}",
+                                      f"--spec={self.SPEC}"),
+            "key missing": (f"--keys={self.home / 'absent'}",
+                            f"--spec={self.SPEC}"),
+        }
+        for label, opts in cases.items():
+            with self.subTest(label):
+                code, execvpe, printed = self._main(*opts)
+                self.assertEqual(code, 1)
+                execvpe.assert_not_called()
+                self.assertIn("can't start with this provider", printed)
+                _assert_no_secret(self, printed)
+
+    def test_exec_failure_names_the_command_and_exits_127(self):
+        with patch("sys.stderr") as err, \
+                patch.object(sys, "path", list(sys.path)), \
+                patch.object(provider_exec.os, "execvpe",
+                             side_effect=FileNotFoundError(
+                                 2, "No such file or directory")):
+            code = provider_exec.main(
+                [f"--keys={self.keys}", f"--spec={self.SPEC}", "--",
+                 "no-such-harness"])
+        printed = "".join(call.args[0] for call in err.write.call_args_list)
+        self.assertEqual(code, 127)
+        self.assertIn("can't start no-such-harness: No such file or directory",
+                      printed)
+        _assert_no_secret(self, printed)
+
 
 class TestLaunchNew(unittest.TestCase):
     def setUp(self):
