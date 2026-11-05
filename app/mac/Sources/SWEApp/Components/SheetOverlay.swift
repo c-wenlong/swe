@@ -6,7 +6,7 @@ import SwiftUI
 // included), and a click on the scrim or Esc closes the card. A system
 // sheet ignores clicks outside it, which made the app's popups feel stuck.
 //
-// A page presents with `.quiverSheet(isPresented:)` or `.quiverSheet(item:)`,
+// A page presents with `.cardSheet(isPresented:)` or `.cardSheet(item:)`,
 // the same shape as `.sheet`. The card travels up the view tree as a
 // preference to the window's `.sheetHost()`, which draws it on top of
 // everything. While a card is up, the window underneath is disabled, so its
@@ -19,7 +19,7 @@ extension View {
     /// true. `modal` keeps it up until its own buttons close it: no scrim
     /// click, no Esc. In a view with no sheet host above it (a window
     /// other than the main one), this falls back to a system sheet.
-    func quiverSheet<Sheet: View>(isPresented: Binding<Bool>, modal: Bool = false,
+    func cardSheet<Sheet: View>(isPresented: Binding<Bool>, modal: Bool = false,
                                   onDismiss: (() -> Void)? = nil,
                                   @ViewBuilder content: @escaping () -> Sheet) -> some View {
         modifier(FlagSheetPresenter(isPresented: isPresented, modal: modal,
@@ -28,7 +28,7 @@ extension View {
 
     /// Presents `content` for `item` while it is non-nil, like
     /// `.sheet(item:)`. A different item is a different card.
-    func quiverSheet<Item: Identifiable, Sheet: View>(item: Binding<Item?>, modal: Bool = false,
+    func cardSheet<Item: Identifiable, Sheet: View>(item: Binding<Item?>, modal: Bool = false,
                                                       onDismiss: (() -> Void)? = nil,
                                                       @ViewBuilder content: @escaping (Item) -> Sheet) -> some View {
         modifier(ItemSheetPresenter(item: item, modal: modal, onDismiss: onDismiss, sheet: content))

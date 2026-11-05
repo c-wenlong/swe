@@ -310,6 +310,22 @@ fetchRoutes.push(["/v1/inbox/dismiss", { status: 200, body: { ok: true } }]);
   await tick();
   out.failText = /Couldn&#39;t clear &quot;Shipped&quot;: disk full/.test(html());
   out.restored = rowKeys().includes("m:d1");
+  // Two notification reads answering out of order (Refresh during the
+  // minute poll): the older must not paint over the newer.
+  const realApi2 = api;
+  const heldNotes = [];
+  globalThis.api = (path) => (path.startsWith("/v1/app/inbox")
+    ? new Promise((resolve) => heldNotes.push(resolve)) : realApi2(path));
+  PAGES.inbox("inbox");
+  PAGES.inbox("inbox");
+  await tick();
+  globalThis.api = realApi2;
+  const note = { id: "n1", title: "NEWER-NOTE", unread: true, type: "Issue", reason: "mention", repo: "o/r", updated_at: "2026-11-01T00:00:00Z" };
+  heldNotes[1]({ status: 200, data: { github: { status: "ok" }, status: "ok", notifications: [note] } });
+  await tick();
+  heldNotes[0]({ status: 200, data: { github: { status: "ok" }, status: "ok", notifications: [] } });
+  await tick();
+  out.notesNewestWins = html().includes("NEWER-NOTE");
   // Nothing left: the empty card.
   items = [];
   PAGES.inbox("inbox");
@@ -340,6 +356,7 @@ class TestNeedsYou(unittest.TestCase):
         # iOS order; the GitHub row stays in the list below, not here;
         # an unknown status lands in Waiting on you.
         self.assertEqual(out["heads"], ["Waiting on you", "Errors", "Finished today"])
+        self.assertTrue(out["notesNewestWins"])
         self.assertEqual(out["rows"], ["m:w1", "m:a1", "m:x1", "m:e1", "m:i1", "m:d1"])
         self.assertTrue(out["githubHeading"])
         # The approval has Review and no Clear.

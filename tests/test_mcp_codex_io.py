@@ -120,15 +120,25 @@ NODE_REPL_NODE_PATH = "/Applications/Codex.app/..."
         self.assertEqual(node_repl["startup_timeout_sec"], 120)
         self.assertEqual(node_repl["env"]["NODE_REPL_NODE_PATH"], "/Applications/Codex.app/...")
 
-    def test_parser_returns_deep_copies(self):
-        """Caller mutating nested dicts must not affect parse internals."""
-        servers = parse_codex_mcp_region(SAMPLE_CODEX_MCP_BLOCK)
-        servers["fathom"]["args"].append("EXTRA")
-        # Re-parse from a fresh region parse: called regions must be independent.
-        servers2 = parse_codex_mcp_region(SAMPLE_CODEX_MCP_BLOCK)
-        self.assertEqual(servers2["fathom"]["args"], [
-            "--directory", "/tmp/fathom", "run", "python3", "server.py"
-        ])
+    def test_each_parse_returns_its_own_objects(self):
+        """Mutating one parse's nested values leaves the next parse alone.
+
+        The parser keeps no cache, so this holds by construction today; it
+        guards against one being added that hands out shared dicts.
+        """
+        # A server with an [env] table, so the dict mutated below is one
+        # the parser itself built.
+        region = ('[mcp_servers.svc]\ncommand = "node"\nargs = ["a"]\n\n'
+                  '[mcp_servers.svc.env]\nTOKEN = "orig"\n')
+        servers = parse_codex_mcp_region(region)
+        servers["svc"]["args"].append("EXTRA")
+        servers["svc"]["env"]["TOKEN"] = "changed"
+        servers2 = parse_codex_mcp_region(region)
+        self.assertIsNot(servers2["svc"], servers["svc"])
+        self.assertIsNot(servers2["svc"]["args"], servers["svc"]["args"])
+        self.assertIsNot(servers2["svc"]["env"], servers["svc"]["env"])
+        self.assertEqual(servers2["svc"], {"command": "node", "args": ["a"],
+                                           "env": {"TOKEN": "orig"}})
 
 
 # ── renderer ─────────────────────────────────────────────────────────
@@ -147,6 +157,14 @@ class ServerRendererTest(unittest.TestCase):
         self.assertEqual(srv["command"], "node")
         self.assertEqual(srv["args"], ["/tmp/server.js"])
         self.assertEqual(srv["env"]["API_KEY"], "secret-value-1")
+
+    def test_control_characters_round_trip(self):
+        # json.dumps leaves DEL raw, which TOML forbids: the whole
+        # config.toml then failed to parse on every later read.
+        value = "a\x7fb\x01\t\"q\"\\é"
+        text = render_codex_server("odd\x7fname", {"command": "x", "env": {"K": value}})
+        srv = tomllib.loads(text)["mcp_servers"]["odd\x7fname"]
+        self.assertEqual(srv["env"]["K"], value)
 
     def test_remote_server_with_headers(self):
         canonical = {

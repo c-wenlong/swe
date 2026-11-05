@@ -359,9 +359,7 @@ final class TaskRowTests: XCTestCase {
     }
 
     func testKeyedSourceBlockedReason() throws {
-        func env(_ json: String) throws -> GhEnv {
-            try Hub.decoder.decode(GhEnv.self, from: Data(json.utf8))
-        }
+        func env(_ json: String) throws -> GhEnv { try decodeHub(GhEnv.self, json) }
         // Off, fine or absent (an older hub) is no banner.
         XCTAssertNil(TasksModel.blocked(nil, source: "Notion"))
         XCTAssertNil(TasksModel.blocked(try env(#"{"status": "ok"}"#), source: "Notion"))

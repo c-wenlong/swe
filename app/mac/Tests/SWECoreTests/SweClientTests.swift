@@ -83,6 +83,15 @@ func fixture(_ name: String) throws -> Data {
         }
     }
 
+    @Test func aMissingSweOnAPlainRunReadsAsNotInstalled() async throws {
+        // Doctor's Run on an init row goes through runPlain, not call.
+        let runner = FakeRunner(.init(status: 127, stdout: Data(),
+                                      stderr: "env: /gone/swe: No such file or directory\n"))
+        await #expect(throws: SweError.notInstalled("/gone/swe")) {
+            try await SweClient(runner: runner).runInit()
+        }
+    }
+
     @Test func a127WithoutEnvsMessageIsNotNotInstalled() async throws {
         // swe itself failing hard keeps its real message.
         let runner = FakeRunner(.init(status: 127, stdout: Data(), stderr: "swe blew up"))

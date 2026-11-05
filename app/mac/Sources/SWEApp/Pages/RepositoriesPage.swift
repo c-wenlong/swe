@@ -111,13 +111,13 @@ struct RepositoriesPage: View {
                 } }
             }
         }
-        .quiverSheet(isPresented: $adding) {
+        .cardSheet(isPresented: $adding) {
             AddRepoSheet()
         }
-        .quiverSheet(item: $detail) { selection in
+        .cardSheet(item: $detail) { selection in
             PrDetailSheet(selection: selection)
         }
-        .quiverSheet(item: $issue) { selection in
+        .cardSheet(item: $issue) { selection in
             IssueSheet(selection: selection) { issue = $0 }
         }
     }

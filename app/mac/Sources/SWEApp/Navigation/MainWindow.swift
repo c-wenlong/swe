@@ -122,7 +122,7 @@ struct MainWindow: View {
         .onScreenChange { model.mainWindowOnScreen = $0 }
         // Modal: a setup you can't click away from mid-way. Its own
         // buttons finish or skip it.
-        .quiverSheet(isPresented: Binding(
+        .cardSheet(isPresented: Binding(
             get: { model.showsFirstRunSetup },
             set: { if !$0 { model.closeFirstRunSetup() } }), modal: true) {
             FirstRunSetupSheet()

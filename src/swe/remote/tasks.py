@@ -489,11 +489,6 @@ def unlink_request(state, key: str, body) -> tuple[int, dict]:
     return 200, {"ok": True, "unlinked": left}
 
 
-def _refresh(args) -> bool:
-    """A query dict's ``refresh=1``/``refresh=true``, as pulls.py's."""
-    return str((args.get("refresh") or [""])[0]) in {"1", "true"}
-
-
 def list_view(state, args) -> tuple[int, dict]:
     """``GET /v1/tasks``: the store over what the sources list.
 
@@ -516,7 +511,7 @@ def list_view(state, args) -> tuple[int, dict]:
     Notion database that fails names itself in ``error`` while the
     other databases' rows still list.
     """
-    refresh = _refresh(args)
+    refresh = G.refresh_asked(args)
     stored = _load(state.home)
     sources = {"github": GitHubTasks(state.home, refresh=refresh),
                "linear": linear_mod.LinearTasks(state.home,

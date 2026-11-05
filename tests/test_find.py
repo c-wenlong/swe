@@ -12,6 +12,7 @@ from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+from swe.console import strip_ansi
 from swe.find import commands as find_commands
 from swe.find.tree import agents_tree, flat_skills, plugin_tree, skills_tree
 from swe.harness import registry
@@ -423,18 +424,46 @@ class ScopeFlagTest(unittest.TestCase):
                 code = find_commands.cmd_find(args)
         return code, buf.getvalue()
 
+    def _scoped_home(self, tmp):
+        """One project file (local) and one in a plugin cache (vendored),
+        so each scope shows a different set of other files."""
+        home = _home(tmp)
+        (home / "proj").mkdir()
+        (home / "proj/AGENTS.md").write_text("local\n")
+        cache = home / ".codex/plugins/cache/x"
+        cache.mkdir(parents=True)
+        (cache / "AGENTS.md").write_text("vendored\n")
+        return home
+
+    @staticmethod
+    def _other_files(out):
+        plain = strip_ansi(out)
+        return next(ln for ln in plain.splitlines() if "Other files" in ln)
+
     def test_default_is_global(self):
         with tempfile.TemporaryDirectory() as tmp:
-            home = _home(tmp)
+            home = self._scoped_home(tmp)
             _, out = self._run(home, ["amd", "--root"])
             self.assertIn("--scope=global", out)
+            # Neither the project file nor the vendored one is global.
+            self.assertIn("none here", self._other_files(out))
+            self.assertIn("1 more inside harness directories", strip_ansi(out))
 
     def test_scope_can_be_set(self):
         with tempfile.TemporaryDirectory() as tmp:
-            home = _home(tmp)
-            for want in ("local", "all"):
-                _, out = self._run(home, ["amd", "--root", f"--scope={want}"])
-                self.assertIn(f"--scope={want}", out)
+            home = self._scoped_home(tmp)
+            _, out = self._run(home, ["amd", "--root", "--scope=local"])
+            self.assertIn("--scope=local", out)
+            other = self._other_files(out)
+            self.assertIn("proj/AGENTS.md", other)
+            self.assertNotIn("codex", other)
+
+            _, out = self._run(home, ["amd", "--root", "--scope=all"])
+            self.assertIn("--scope=all", out)
+            other = self._other_files(out)
+            self.assertIn("proj/AGENTS.md", other)
+            self.assertIn("codex", other)
+            self.assertNotIn("more inside harness directories", strip_ansi(out))
 
     def test_unknown_scope_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -585,37 +614,50 @@ class TreeRenderTest(unittest.TestCase):
 class ColumnWidthTest(unittest.TestCase):
     """Elide only when something genuinely overruns the cap."""
 
-    def _width(self, home: Path, rels):
-        from swe.find.commands import (
-            PATH_WIDTH, _build_trie, _collapse, _walk_trie)
-
+    def _cells(self, home: Path, rels):
+        """Render the tree the way cmd_find does and return each row's
+        path cell (everything before the status word) plus the full
+        unelided length of the longest row."""
+        from swe.find.commands import STATE_WORD, _render_tree
         from swe.find.tree import Node
+
         nodes = [Node("x", home / r, "file", "unlinked") for r in rels]
-        rows = list(_walk_trie(_collapse(_build_trie(nodes, home, home))))
-        lengths = sorted(len(i + l) for i, l, _ in rows)
-        if lengths[-1] <= PATH_WIDTH:
-            return lengths[-1], lengths
-        p95 = lengths[min(len(lengths) - 1, int(len(lengths) * 0.95))]
-        return max(min(p95, PATH_WIDTH), 24), lengths
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _render_tree(nodes, home, home)
+        word = "  " + STATE_WORD["unlinked"]
+        lines = strip_ansi(buf.getvalue()).splitlines()
+        return [ln[:ln.index(word)] for ln in lines if word in ln]
 
     def test_short_rows_are_never_elided(self):
         # Everything fits, so the column is the true max and nothing is cut.
-        home = Path("/h")
-        width, lengths = self._width(home, [
+        cells = self._cells(Path("/h"), [
             ".pi/skills", ".codeium/windsurf/skills", ".tabnine/agent/skills",
         ])
-        self.assertEqual(width, lengths[-1])
-        self.assertEqual(sum(1 for x in lengths if x > width), 0)
+        self.assertEqual(len(cells), 3)
+        self.assertFalse(any("\u2026" in cell for cell in cells), cells)
+        # One aligned column, exactly as wide as the longest row.
+        self.assertEqual({len(cell) for cell in cells},
+                         {max(len(cell.rstrip()) for cell in cells)})
 
     def test_one_outlier_does_not_stretch_every_row(self):
         from swe.find.commands import PATH_WIDTH
 
-        home = Path("/h")
         rels = [f".t{i}/AGENTS.md" for i in range(40)]
-        rels.append(".t0/" + "deep/" * 60 + "AGENTS.md")
-        width, lengths = self._width(home, rels)
+        outlier = "deep/" * 60 + "AGENTS.md"
+        rels.append(".t0/" + outlier)
+        cells = self._cells(Path("/h"), rels)
+        widths = {len(cell) for cell in cells}
+        self.assertEqual(len(widths), 1, "the column is not aligned")
+        width = widths.pop()
         self.assertLessEqual(width, PATH_WIDTH)
-        self.assertLess(width, lengths[-1])
+        # Sized for the ordinary rows, not the outlier: only it is elided,
+        # keeping both of its ends.
+        self.assertLess(width, len(outlier) // 4)
+        elided = [cell for cell in cells if "\u2026" in cell]
+        self.assertEqual(len(elided), 1, elided)
+        self.assertTrue(elided[0].rstrip().endswith(".md"), elided[0])
+        self.assertIn("deep/", elided[0])
 
 
 class DeepSkillCountTest(unittest.TestCase):

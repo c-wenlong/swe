@@ -27,6 +27,21 @@ from swe.harness import remedies
 from swe.harness.models import _window
 
 
+def _held_open(case: unittest.TestCase):
+    """An event a stand-in fetch waits on, set when ``case`` ends.
+
+    A fetch that should outlast its budget blocks on this instead of a
+    fixed sleep: it stays slow for as long as the test looks, and the
+    worker thread exits as soon as the test is done instead of sleeping
+    on into the next one.
+    """
+    import threading
+
+    release = threading.Event()
+    case.addCleanup(release.set)
+    return release
+
+
 class RateLimitInfoTest(unittest.TestCase):
     _NOW = 1784758000.0  # fixed "current time" for deterministic tests
 
@@ -179,6 +194,29 @@ class RateLimitInfoTest(unittest.TestCase):
 
 
 class RateLimitCacheTest(unittest.TestCase):
+    def test_cache_writes_are_atomic_and_private(self):
+        """Several swe processes write these files at once. An in-place
+        write let a reader see a half-written file; a new file now lands
+        whole, by rename, at 0600."""
+        import stat
+        from swe.harness import rate_limits as rl
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_file = Path(tmp) / "rate_limits_cache.json"
+            with patch("swe.harness.rate_limits.RATE_LIMITS_CACHE_FILE", cache_file), \
+                 patch("swe.harness.rate_limits.atomic_write_text",
+                       wraps=rl.atomic_write_text) as atomic:
+                rl._save_cached({"codex": {"tool_name": "codex", "used_percent": 1}})
+                rl._save_claude_state(None, retry_at=5.0)
+            self.assertEqual(
+                [call.args[0] for call in atomic.call_args_list],
+                [cache_file, cache_file.with_name("claude_usage_cache.json")])
+            for path in (cache_file, cache_file.with_name("claude_usage_cache.json")):
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path)
+                json.loads(path.read_text())
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()),
+                             ["claude_usage_cache.json", "rate_limits_cache.json"])
+
     def test_cache_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             cache_file = Path(tmp) / "rate_limits_cache.json"
@@ -390,13 +428,15 @@ class RateLimitCacheTest(unittest.TestCase):
             self.assertEqual(_env_cache_ttl(default=300.0), 300.0)
 
     def test_default_ttl_is_five_minutes(self):
-        """The module-level ``_CACHE_TTL`` default is 300s (5 minutes)."""
-        from swe.harness.rate_limits import _CACHE_TTL
-        # Clear any env override so the import-time default is exercised.
-        # (If the env var is set in the test shell, just assert it's a
-        # positive float — the exact value is env-driven.)
-        self.assertIsInstance(_CACHE_TTL, float)
-        self.assertGreater(_CACHE_TTL, 0.0)
+        """With no override, the TTL ``_CACHE_TTL`` is built from is 300s.
+
+        ``_CACHE_TTL`` itself is read once at import, from whatever
+        ``SWE_RATE_LIMITS_TTL`` the test shell has, so the default is
+        checked through the no-argument call the module makes.
+        """
+        from swe.harness.rate_limits import _env_cache_ttl
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(_env_cache_ttl(), 300.0)
 
 
 class RateLimitRegistryTest(unittest.TestCase):
@@ -1466,6 +1506,32 @@ class CodexFetcherTest(unittest.TestCase):
                 self.assertEqual(info.plan_type, "—")
                 info.format_column()          # renders without raising
 
+    def test_fetch_codex_drops_a_non_finite_reset_at(self):
+        """JSON ``1e999`` and ``NaN`` parse to inf and nan. Stored as is,
+        the reset column raised ValueError out of `swe list` and to_json
+        wrote Infinity/NaN, which the Mac app's decoder rejects."""
+        from swe.harness.rate_limits import _fetch_codex
+
+        auth_data = {"tokens": {"access_token": "fake-token"}}
+        for raw in (b"1e999", b"-1e999", b"NaN"):
+            body = (b'{"plan_type": "plus", "rate_limit": {"primary_window": '
+                    b'{"used_percent": 10, "reset_at": ' + raw + b'}}}')
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = body
+            mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            with self.subTest(raw=raw), tempfile.TemporaryDirectory() as tmp:
+                auth_path = Path(tmp) / "auth.json"
+                auth_path.write_text(json.dumps(auth_data))
+                with patch("swe.harness.rate_limits.os.path.expanduser",
+                           side_effect=lambda p: str(auth_path) if p == "~/.codex/auth.json" else p), \
+                     patch("swe.harness.rate_limits.urllib.request.urlopen",
+                           return_value=mock_resp):
+                    info = _fetch_codex()
+                self.assertEqual(info.reset_at, 0.0)
+                info.format_column()          # renders without raising
+                json.dumps(info.to_json(), allow_nan=False)
+
     def test_fetch_codex_reads_the_email_off_the_id_token(self):
         """The sign-in's address is an ``id_token`` claim, as the app
         reads it; a missing or un-JWT id_token just means no email."""
@@ -1615,7 +1681,7 @@ class CodexFetcherTest(unittest.TestCase):
                                              f"{label}: bool must not leak numeric")
                         else:
                             self.assertAlmostEqual(
-                                info.reset_at, expected, delta=86400,
+                                info.reset_at, expected, delta=1.0,
                                 msg=f"{label}: {reset_value!r} → expected {expected}, got {info.reset_at}",
                             )
 
@@ -1706,9 +1772,9 @@ class GitHubCopilotFetcherTest(unittest.TestCase):
         # 100 - 88.5 = 11.5 → rounded to 12
         self.assertEqual(info.used_percent, 12)
         self.assertFalse(info.limit_reached)
-        # Should preserve UTC reset date as epoch.  2026-08-01T00:00:00Z
-        # = 1785542400; allow ±1 day to absorb DST/leap boundaries.
-        self.assertAlmostEqual(info.reset_at, 1785542400.0, delta=86400)
+        # Should preserve UTC reset date as epoch: 2026-08-01T00:00:00Z
+        # = 1785542400. UTC has no DST, so a timezone slip shows here.
+        self.assertAlmostEqual(info.reset_at, 1785542400.0, delta=1.0)
         # Educational quota suffix added when plan is "individual" + educational SKU
         self.assertEqual(info.plan_type, "individual/edu")
 
@@ -1769,7 +1835,7 @@ class GitHubCopilotFetcherTest(unittest.TestCase):
         self.assertEqual(info.used_percent, 0)
         self.assertFalse(info.limit_reached)
         self.assertEqual(info.plan_type, "individual/edu")
-        self.assertAlmostEqual(info.reset_at, 1785542400.0, delta=86400)
+        self.assertAlmostEqual(info.reset_at, 1785542400.0, delta=1.0)
 
     def test_fetch_copilot_missing_reset_date(self):
         """Missing reset date → reset_at=0 (renders as '—' in UI)."""
@@ -1798,23 +1864,31 @@ class GitHubCopilotFetcherTest(unittest.TestCase):
         """gh returns non-zero exit (not authenticated) → return None."""
         from swe.harness.rate_limits import _fetch_github_copilot
 
-        with patch(
+        # gh must look installed, or the fetcher stops before running it
+        # and this would only repeat the gh-missing test.
+        with patch("swe.harness.rate_limits.shutil.which",
+                   return_value="/usr/bin/gh"), patch(
             "swe.harness.rate_limits.subprocess.run",
             return_value=_CompletedProc(returncode=1, stdout="", stderr="not logged in"),
-        ):
+        ) as run, patch("swe.harness.rate_limits._fetch_json") as fetch:
             info = _fetch_github_copilot()
         self.assertIsNone(info)
+        self.assertEqual(run.call_args[0][0], ["gh", "auth", "token"])
+        fetch.assert_not_called()
 
     def test_fetch_copilot_gh_empty_token(self):
         """gh succeeds but stdout is empty → return None."""
         from swe.harness.rate_limits import _fetch_github_copilot
 
-        with patch(
+        with patch("swe.harness.rate_limits.shutil.which",
+                   return_value="/usr/bin/gh"), patch(
             "swe.harness.rate_limits.subprocess.run",
             return_value=_CompletedProc(returncode=0, stdout="  \n"),
-        ):
+        ) as run, patch("swe.harness.rate_limits._fetch_json") as fetch:
             info = _fetch_github_copilot()
         self.assertIsNone(info)
+        self.assertEqual(run.call_args[0][0], ["gh", "auth", "token"])
+        fetch.assert_not_called()
 
     def test_fetch_copilot_http_error(self):
         """HTTP 4xx/5xx from GitHub → return None."""
@@ -1827,6 +1901,28 @@ class GitHubCopilotFetcherTest(unittest.TestCase):
         ):
             info = _fetch_github_copilot()
         self.assertIsNone(info)
+
+    def test_fetch_copilot_non_dict_bodies(self):
+        """A JSON list body, or quota_snapshots / premium_interactions that
+        are not objects, raised AttributeError instead of reading as no
+        data like the other fetchers."""
+        from swe.harness.rate_limits import _fetch_github_copilot
+
+        for body, expect_info in (
+            ([1, 2], False),
+            ({"copilot_plan": "individual", "quota_snapshots": [1]}, True),
+            ({"copilot_plan": "individual",
+              "quota_snapshots": {"premium_interactions": "x"}}, True),
+        ):
+            with self.subTest(body=body), self._patch_token(), patch(
+                "swe.harness.rate_limits.urllib.request.urlopen",
+                return_value=self._mock_response(body),
+            ):
+                info = _fetch_github_copilot()
+            if expect_info:
+                self.assertEqual((info.used_percent, info.limit_reached), (0, False))
+            else:
+                self.assertIsNone(info)
 
     def test_fetch_copilot_malformed_json(self):
         """Invalid JSON response → return None."""
@@ -1928,10 +2024,9 @@ class CopilotDerivationTest(unittest.TestCase):
     def test_parse_iso8601(self):
         from swe.harness.rate_limits import _parse_iso8601_to_epoch
 
-        # 2026-08-01T00:00:00 UTC = 1785542400 (verify against datetime
-        # round-trip; allow ±1 day to absorb DST/leap boundaries).
+        # 2026-08-01T00:00:00 UTC = 1785542400 (calendar.timegm).
         epoch = _parse_iso8601_to_epoch("2026-08-01T00:00:00.000Z")
-        self.assertAlmostEqual(epoch, 1785542400.0, delta=86400)
+        self.assertAlmostEqual(epoch, 1785542400.0, delta=1.0)
 
         self.assertEqual(_parse_iso8601_to_epoch(""), 0.0)
         self.assertEqual(_parse_iso8601_to_epoch(None), 0.0)
@@ -1940,9 +2035,9 @@ class CopilotDerivationTest(unittest.TestCase):
     def test_parse_iso8601_all_variants(self):
         """All five accepted formats must yield the same epoch.
 
-        Kept as a smoke check only.  The ``delta=86400`` below is a full
-        day of slack, so this cannot detect a parsing regression;
-        ``Iso8601ParseTest`` pins the exact values instead.
+        The one-second slack only absorbs the ``.123`` fraction; a
+        timezone slip of an hour or more fails. ``Iso8601ParseTest`` pins
+        the exact values.
         """
         from swe.harness.rate_limits import _parse_iso8601_to_epoch
 
@@ -1957,7 +2052,7 @@ class CopilotDerivationTest(unittest.TestCase):
             self.assertAlmostEqual(
                 _parse_iso8601_to_epoch(variant),
                 expected,
-                delta=86400,
+                delta=1.0,
                 msg=f"failed for {variant!r}",
             )
 
@@ -1983,8 +2078,8 @@ class CopilotDerivationTest(unittest.TestCase):
 
         naive = _parse_iso8601_to_epoch("2026-08-01T00:00:00")          # → UTC
         offset = _parse_iso8601_to_epoch("2026-07-31T20:00:00-04:00")    # -04:00
-        self.assertAlmostEqual(naive, 1785542400.0, delta=86400)
-        self.assertAlmostEqual(offset, 1785542400.0, delta=86400)
+        self.assertAlmostEqual(naive, 1785542400.0, delta=1.0)
+        self.assertAlmostEqual(offset, 1785542400.0, delta=1.0)
         self.assertAlmostEqual(naive, offset, delta=1.0)
 
     def test_derive_copilot_fields_null_remains_unknown(self):
@@ -2024,9 +2119,7 @@ class Iso8601ParseTest(unittest.TestCase):
     move.  Every expectation here is an exact literal derived from
     ``calendar.timegm``, not from the function under test, and was
     confirmed identical on real 3.10.17 and 3.12.8 interpreters before
-    being committed.  The older sibling tests in ``CopilotDerivationTest``
-    use ``delta=86400`` and so cannot detect a parsing regression at all;
-    these can.
+    being committed.
     """
 
     BASE = 1785542400.0  # 2026-08-01T00:00:00Z, via calendar.timegm
@@ -3156,6 +3249,22 @@ class DroidFetcherTest(unittest.TestCase):
         self.assertIsNone(info)
         self.assertLess(time.monotonic() - began, 0.5)
 
+    def test_droid_fetch_carries_a_401_back_to_the_caller_thread(self):
+        """``_fetch_json`` notes failure kinds on the thread it runs on. The
+        Droid worker thread kept the 401's "auth" to itself, so fetch_one
+        saw no kinds and reported an outage instead of auth-required."""
+        from swe.harness import rate_limits as rl
+
+        def fail_401(*args, **kwargs):
+            rl._note_json_failure("auth")
+            return None
+
+        rl._reset_json_failures()
+        with patch("swe.harness.rate_limits._fetch_json", side_effect=fail_401):
+            self.assertIsNone(rl._droid_fetch(MagicMock()))
+        self.assertEqual(rl._json_failure_kinds(), ["auth"])
+        rl._reset_json_failures()
+
     # 1. Env var priority — bypasses decryption + keychain entirely.
     def test_factory_key_env_var_takes_priority(self):
         from swe.harness.rate_limits import _fetch_droid
@@ -3525,8 +3634,8 @@ class DroidFetcherTest(unittest.TestCase):
         ):
             info = _fetch_droid()
         self.assertIsNotNone(info)
-        # 2026-08-01T00:00:00Z = 1785542400; allow ±1 day.
-        self.assertAlmostEqual(info.reset_at, 1785542400.0, delta=86400)
+        # 2026-08-01T00:00:00Z = 1785542400.
+        self.assertAlmostEqual(info.reset_at, 1785542400.0, delta=1.0)
 
     # 14b. reset_at belongs to the selected fiveHour window, not an
     #      unrelated weekly/monthly window.
@@ -4129,6 +4238,10 @@ class CursorFetcherTest(unittest.TestCase):
                 "swe.harness.rate_limits._CURSOR_STATE_DB_CANDIDATES",
                 (path,),
             ), patch(
+                # Unpatched, a live ~/.config/cursor/auth.json wins first.
+                "swe.harness.rate_limits._read_cursor_cli_token",
+                return_value=None,
+            ), patch(
                 "swe.harness.rate_limits.shutil.which",
                 return_value="/usr/bin/security",
             ), patch(
@@ -4244,6 +4357,9 @@ class CursorFetcherTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch(
             "swe.harness.rate_limits._CURSOR_STATE_DB_CANDIDATES",
             (os.path.join(tmp, "state.vscdb"),),
+        ), patch(
+            "swe.harness.rate_limits._CURSOR_CLI_AUTH_FILE",
+            os.path.join(tmp, "auth.json"),
         ), patch(
             "swe.harness.rate_limits.shutil.which", return_value=None,
         ), patch("swe.harness.rate_limits._fetch_json") as fetch:
@@ -4493,6 +4609,14 @@ class CursorFetcherTest(unittest.TestCase):
         ):
             self.assertIsNone(grok(reply), reply)
 
+    def test_grok_bot_huge_integer_percent_has_no_window(self):
+        """math.isfinite converts to float, so a 400-digit int raised
+        OverflowError and lost the whole Cursor reading."""
+        from swe.harness.rate_limits import _cursor_grok_bot_window as grok
+
+        self.assertIsNone(grok({"usagePercent": 10 ** 400}))
+        self.assertIsNone(grok({"usagePercent": float("inf")}))
+
     def test_fetch_adds_grok_bot_with_the_bearer_token(self):
         from swe.harness.rate_limits import _CURSOR_GROK_BOT_URL, _CURSOR_USAGE_URL, _fetch_cursor
 
@@ -4542,9 +4666,11 @@ class CursorFetcherTest(unittest.TestCase):
     def test_a_grok_bot_call_past_its_budget_marks_the_window_unavailable(self):
         from swe.harness.rate_limits import _CURSOR_GROK_BOT_URL, _CURSOR_USAGE_URL, _fetch_cursor
 
+        release = _held_open(self)
+
         def reply(request, **_):
             if request.full_url == _CURSOR_GROK_BOT_URL:
-                time.sleep(0.2)
+                release.wait(5)
                 return {"usagePercent": 5}
             return copy.deepcopy(self._SAMPLE_RESPONSE) if request.full_url == _CURSOR_USAGE_URL else None
 
@@ -4599,10 +4725,12 @@ class CursorFetcherTest(unittest.TestCase):
         usage = copy.deepcopy(self._SAMPLE_RESPONSE)
         usage["spendLimitUsage"] = {"limitType": "team", "pooledLimit": "500000"}
 
+        release = _held_open(self)
+
         def reply(request, **_):
             if request.full_url == _CURSOR_USAGE_URL:
                 return usage
-            time.sleep(2)
+            release.wait(5)
             return {"hardLimit": 0}
 
         with patch(
@@ -4626,10 +4754,12 @@ class CursorFetcherTest(unittest.TestCase):
 
         usage = copy.deepcopy(self._SAMPLE_RESPONSE)
 
+        release = _held_open(self)
+
         def reply(request, **_):
             if request.full_url == _CURSOR_USAGE_URL:
                 return usage
-            time.sleep(2)
+            release.wait(5)
             return None
 
         with tempfile.TemporaryDirectory() as tmp, patch(
@@ -5732,7 +5862,8 @@ class IssueStatusTest(unittest.TestCase):
             self.assertEqual(reasons[name], "error")
 
     def test_a_timeout_is_an_issue_on_the_marker(self):
-        register("slow", lambda: time.sleep(0.5))
+        release = _held_open(self)
+        register("slow", lambda: release.wait(5))
         issues: dict = {}
         result = get_all_rate_limits(
             use_cache=False, deadline=0.05, issues=issues)
