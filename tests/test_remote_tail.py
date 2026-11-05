@@ -946,7 +946,9 @@ class TestDevinChainIncremental(unittest.TestCase):
         for i in range(30):
             self._set_head(self._new(self.head, {"role": "human", "content": f"m{i}"}))
         self.conn.commit()
-        self.assertEqual(self._same(chain, 10), ("full", 10 + self.tr._DEVIN_NAME_MARGIN if 30 >= 10 + self.tr._DEVIN_NAME_MARGIN else 30))
+        # The first read asks for 10 plus a margin for a rename further
+        # back (64 today), which covers the whole 30-node chain.
+        self.assertEqual(self._same(chain, 10), ("full", 30))
         # Streamed copies of the newest reply: only the head is new.
         for i in range(3):
             self._set_head(self._new(self.parents[self.head], {"role": "assistant", "content": "x" * (i + 1)}))
@@ -2139,14 +2141,30 @@ class TestSweepStale(unittest.TestCase):
         sess = Session(timestamp=0, agent="Claude Code", path="/tmp",
                        session_id=str(sess_path), tool_name="claude")
         started = threading.Event()
+        ensure_waiting = threading.Event()
         real = self.journal.sweep
+        files_lock = self.mgr._files_lock
+
+        class Lock:
+            """The manager's files lock, signalling when ensure asks."""
+
+            def __enter__(self):
+                if threading.current_thread() is threading.main_thread():
+                    ensure_waiting.set()
+                files_lock.acquire()
+                return self
+
+            def __exit__(self, *exc):
+                files_lock.release()
 
         def slow_sweep(cutoff, keep):
             started.set()
-            time.sleep(0.2)  # the ensure below runs meanwhile
+            # Hold the sweep open until the ensure below is at the lock.
+            ensure_waiting.wait(5)
             return real(cutoff, keep)
 
-        with patch.object(self.journal, "sweep", side_effect=slow_sweep):
+        with patch.object(self.mgr, "_files_lock", Lock()), \
+                patch.object(self.journal, "sweep", side_effect=slow_sweep):
             t = threading.Thread(
                 target=self.mgr.sweep_stale, args=(self.journal,),
                 kwargs={"now": self.now})

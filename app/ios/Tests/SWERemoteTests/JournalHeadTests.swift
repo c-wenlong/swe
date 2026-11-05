@@ -5,10 +5,6 @@ import XCTest
 /// and says so with `journal.truncated` carrying the new head; a cursor
 /// left above that head would never hear another event.
 final class JournalHeadTests: XCTestCase {
-    private func env(_ json: String) -> Envelope {
-        try! Hub.decoder.decode(Envelope.self, from: Data(json.utf8))
-    }
-
     func testTheStreamResumesFromATruncatedHeadEvenWhenLower() {
         XCTAssertEqual(EventStream.resume(after: env(#"{"type":"message.appended","seq":40}"#), from: 500), 500,
                        "an ordinary event never moves the cursor back")

@@ -65,7 +65,7 @@ import AppKit
     /// Sheets have a `sheetParent`, popovers are child windows, and
     /// panels (menu-bar panel, app-modal alerts) are `NSPanel`s — the
     /// only key-capable windows left are real ones. A real window with a
-    /// `quiverSheet` card up counts too: ⌘W closes the card, as it would
+    /// `cardSheet` card up counts too: ⌘W closes the card, as it would
     /// a system sheet, instead of the window under it.
     static func isPopupWindow(_ window: NSWindow) -> Bool {
         window.sheetParent != nil || window.parent != nil || window is NSPanel

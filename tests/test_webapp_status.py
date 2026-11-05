@@ -671,8 +671,12 @@ class TestCatalogue(unittest.TestCase):
                  / "app/mac/Sources/SWECore/Status/StatusCatalogue.swift")
         if not swift.exists():
             self.skipTest("no app/mac/ in this checkout")
-        rows = re.findall(r'statuspage\("([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*\.(\w+)\)',
-                          swift.read_text(encoding="utf-8"))
+        source = swift.read_text(encoding="utf-8")
+        rows = re.findall(r'statuspage\("([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*\.(\w+)\)', source)
+        # Every row call is read: one written another way (labels, a
+        # constant) would otherwise drop out of the comparison unseen.
+        self.assertEqual(len(rows), len(re.findall(r"^\s*statuspage\(", source, re.M)),
+                         "a StatusCatalogue.swift row no longer matches the row pattern")
         self.assertEqual([(e.id, e.name, e.page_url, e.group) for e in catalogue.CATALOGUE], rows)
         for e in catalogue.CATALOGUE:
             self.assertTrue(e.page_url.startswith("https://"), e.id)
@@ -843,7 +847,7 @@ class TestTrackRoute(HubBase):
     def test_catalogue_view(self):
         status, body = self.get("/v1/app/status?view=catalogue")
         self.assertEqual(status, 200, body)
-        self.assertEqual(len(body["entries"]), 104)
+        self.assertEqual([e["id"] for e in body["entries"]], [e.id for e in catalogue.CATALOGUE])
         groq = next(e for e in body["entries"] if e["id"] == "groq")
         self.assertEqual((groq["name"], groq["host"], groq["group"], groq["logo"]),
                          ("Groq", "groqstatus.com", "modelProviders", "groq"))

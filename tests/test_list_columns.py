@@ -90,14 +90,19 @@ class MultiselectTest(unittest.TestCase):
         self.assertIsNone(got)
 
     def test_locked_choices_start_selected_even_if_not_passed(self):
+        # Drive the widget with a stand-in terminal: Enter at once saves
+        # the starting selection, which must hold the locked choice.
         choices = [Choice("mark", "*", locked=True), Choice("desc", "D")]
-        with mock.patch("swe.multiselect._supported", return_value=False):
-            with redirect_stdout(io.StringIO()):
-                multiselect(choices, [])
-        # Nothing to assert on the return, but the locked seeding happens
-        # before the terminal check, so exercise it directly.
-        seeded = set([]) | {c.key for c in choices if c.locked}
-        self.assertEqual(seeded, {"mark"})
+        stdin = mock.Mock()
+        stdin.fileno.return_value = 0
+        with mock.patch("swe.multiselect._supported", return_value=True), \
+             mock.patch("sys.stdout", io.StringIO()), \
+             mock.patch("sys.stdin", stdin), \
+             mock.patch("termios.tcgetattr", return_value=["saved"]), \
+             mock.patch("termios.tcsetattr"), \
+             mock.patch("tty.setraw"), \
+             mock.patch("swe.multiselect._read_key", side_effect=["enter"]):
+            self.assertEqual(multiselect(choices, []), ["mark"])
 
     def test_every_column_has_a_description(self):
         for col in C.COLUMNS:
@@ -265,24 +270,51 @@ class InteractionTest(unittest.TestCase):
                 os.execv(sys.executable, [sys.executable, "-c", script])
             finally:
                 os._exit(127)
-        time.sleep(0.6)
+        reaped = []
+
+        def cleanup():
+            # Runs whether the test passed or timed out: a child stalled
+            # before drawing or exiting is killed and reaped, and the pty
+            # closed, so nothing outlives the test.
+            if not reaped:
+                try:
+                    os.kill(pid, 9)
+                except ProcessLookupError:
+                    pass
+                os.waitpid(pid, 0)
+            os.close(fd)
+
+        self.addCleanup(cleanup)
+        out = b""
+
+        def read_until(done, timeout=10.0):
+            # Read the pty until ``done(out)`` or EOF, so the test waits
+            # for what the widget printed instead of sleeping on a guess.
+            nonlocal out
+            deadline = time.monotonic() + timeout
+            while not done(out):
+                left = deadline - time.monotonic()
+                r, _, _ = select.select([fd], [], [], max(0.0, left))
+                if not r:
+                    self.fail(f"pty went quiet; got {out[-300:]!r}")
+                try:
+                    chunk = os.read(fd, 65536)
+                except OSError:
+                    return
+                if not chunk:
+                    return
+                out += chunk
+
+        # The first frame is drawn after the terminal is in raw mode, so
+        # keys sent once it shows are read as keys, not cooked input.
+        read_until(lambda o: b"cc" in o)
         # down, down (onto 'b'), toggle it on, up (onto 'a'), toggle it off, save
         for key in (b"\x1b[B", b"\x1b[B", b" ", b"\x1b[A", b" ", b"\r"):
             os.write(fd, key)
-            time.sleep(0.2)
-        out = b""
-        while True:
-            r, _, _ = select.select([fd], [], [], 0.6)
-            if not r:
-                break
-            try:
-                chunk = os.read(fd, 65536)
-            except OSError:
-                break
-            if not chunk:
-                break
-            out += chunk
+        # The child prints its result and exits; read to that EOF.
+        read_until(lambda o: False)
         os.waitpid(pid, 0)
+        reaped.append(pid)
         text = out.decode(errors="replace")
         self.assertIn("RESULT:mark,b", text)
 
@@ -892,17 +924,26 @@ class ListWidthTest(unittest.TestCase):
     def test_a_narrow_terminal_still_leaves_a_usable_description(self):
         from swe.harness import commands
 
-        with mock.patch.object(commands, "load_registry", return_value=dict(self.REGISTRY)), \
+        reg = dict(self.REGISTRY)
+        reg["claude"] = {**reg["claude"], "description":
+                         "Claude Code by Anthropic, the agentic coding tool in your terminal"}
+        with mock.patch.object(commands, "load_registry", return_value=reg), \
              mock.patch.object(commands, "load_columns",
                                return_value=["mark", "name", "desc"]), \
              mock.patch.object(commands, "_session_counts", return_value={}), \
              mock.patch.object(commands, "_broken_tools", return_value=set()), \
              mock.patch("swe.harness.archive.load_archive", return_value={}), \
-             mock.patch("swe.harness.commands.terminal_width", return_value=40):
+             mock.patch("swe.harness.commands.terminal_width", return_value=30):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 code = commands.cmd_list([])
-        self.assertEqual(code, None if code is None else code)
+        self.assertEqual(code, 0)
+        # Thirty columns leave almost nothing after NAME, but the
+        # description keeps its 24-character floor instead of shrinking
+        # to a few letters.
+        out = re.sub(r"\x1b\[[0-9;]*m", "", buf.getvalue())
+        row = next(ln for ln in out.splitlines() if "│ claude" in ln)
+        self.assertEqual(row.split("│")[-1].strip(), "Claude Code by Anthro...")
 
 
 class MultiselectMouseTest(unittest.TestCase):
