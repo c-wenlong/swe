@@ -17,7 +17,6 @@ full-power credential.
 from __future__ import annotations
 
 import email.message
-import ipaddress
 import json
 import os
 import queue
@@ -428,11 +427,6 @@ class HubState:
         # these (filled by serve() from the bind host + whois); empty
         # disables both checks.
         self.allowed_hosts: set[str] = set()
-        # Set for a wildcard bind, which answers on every interface:
-        # any IP-literal Host on ``allowed_port`` passes too. A rebound
-        # page always arrives under its own domain name, never an IP,
-        # so this keeps LAN addresses working without a name check gap.
-        self.allowed_ip_port: int | None = None
         # The hub's reachable base — set by serve() before start() so
         # ntfy action buttons can point back at this host.
         self.base_url = ""
@@ -1693,7 +1687,10 @@ class _Handler(BaseHTTPRequestHandler):
         this hub actually answers (DNS-rebinding check)."""
         if (self.headers.get("X-Quiver-Pair") or "") != "1":
             return False
-        return self._local_host_ok()
+        allowed = self._state.allowed_hosts
+        if allowed and (self.headers.get("Host") or "") not in allowed:
+            return False
+        return True
 
     def _pair_meta(self, body: dict | None, node_name: str = "") -> dict:
         """kind/model/client/os for the pairing device: the body's own
@@ -1732,7 +1729,8 @@ class _Handler(BaseHTTPRequestHandler):
         this hub's — a page that rebound its domain to this address.
         Browsers can't forge Host, so the check is quiet for clients
         that dialed the hub's own address."""
-        return _host_allowed(self._state, self.headers.get("Host") or "")
+        allowed = self._state.allowed_hosts
+        return not allowed or (self.headers.get("Host") or "") in allowed
 
     def _attempt_ok(self, bucket: dict[str, list[float]]) -> bool:
         """The per-source attempt cap on the unauthenticated pair
@@ -4229,36 +4227,10 @@ def make_server(
     return server
 
 
-# Bind values that listen on every interface rather than one address.
-WILDCARD_HOSTS = frozenset({"0.0.0.0", "::", ""})
-
-
-def _host_allowed(state: HubState, host: str) -> bool:
-    """Whether a request's Host names this hub: anything while
-    ``allowed_hosts`` is empty (a state ``configure`` never filled), a
-    listed name, or, on a wildcard bind, an IP literal on its port."""
-    allowed = state.allowed_hosts
-    if not allowed or host in allowed:
-        return True
-    port = state.allowed_ip_port
-    if port is None:
-        return False
-    name, sep, tail = host.rpartition(":")
-    if not sep or tail != str(port):
-        return False
-    if name.startswith("[") and name.endswith("]"):
-        name = name[1:-1]
-    try:
-        ipaddress.ip_address(name)
-    except ValueError:
-        return False
-    return True
-
-
 def _advertise_url(host: str, port: int) -> str:
     """The base URL handed to phones/ntfy — never a wildcard bind."""
     advertised = host
-    if host in WILDCARD_HOSTS:
+    if host in ("0.0.0.0", "::", ""):
         advertised = (
             catalog_mod.tailscale_ip()
             or socket.gethostname()
@@ -4379,7 +4351,6 @@ def configure(state: HubState, host: str, port: int,
     # a wildcard bind without --unsafe-bind-any; _advertise_url still
     # turns one into something reachable.)
     state.base_url = public_url or _advertise_url(host, port)
-    state.allowed_ip_port = None
     # Owner identity for pair-request approval: the tailnet login that
     # owns this node. A plain loopback bind and tagged nodes get none;
     # behind serve the node is looked up by its own tailnet IP.
@@ -4413,11 +4384,8 @@ def configure(state: HubState, host: str, port: int,
         # local client would use.
         state.allowed_hosts = _loopback_hosts(port)
         return
-    if host not in {"127.0.0.1", "::1", "localhost"}:
-        # A wildcard bind ("--unsafe-bind-any") has no address of its
-        # own to look up or allow; it answers every name this node has.
-        wildcard = host in WILDCARD_HOSTS
-        peer = None if wildcard else state.whois(host)
+    if host not in {"127.0.0.1", "::1", "localhost", "0.0.0.0"}:
+        peer = state.whois(host)
         own_ip = catalog_mod.tailscale_ip()
         if peer is None and own_ip and own_ip != host:
             # whois wants an IP; a bind by MagicDNS name is looked up
@@ -4430,17 +4398,7 @@ def configure(state: HubState, host: str, port: int,
             # remote pair` defaults the phone address to the tailnet
             # IP). The names belong to the node even when it is
             # tagged; a tag only means there is no owner login.
-            if wildcard:
-                # Loopback, and the hostname _advertise_url falls back
-                # to off the tailnet, next to the tailnet names below;
-                # a LAN address dialed directly passes as an IP literal.
-                state.allowed_ip_port = port
-                state.allowed_hosts = _loopback_hosts(port)
-                if socket.gethostname():
-                    state.allowed_hosts.add(
-                        _hostport(socket.gethostname(), port))
-            else:
-                state.allowed_hosts = {_hostport(host, port)}
+            state.allowed_hosts = {_hostport(host, port)}
             if own_ip:
                 state.allowed_hosts.add(_hostport(own_ip, port))
             if peer:
@@ -4464,11 +4422,8 @@ def serve(state: HubState, host: str, port: int,
     # ``gh``.
     state.catalog.fetch_github = state._fetch_github_rows
     state.catalog.on_github_alert = state._github_alert
-    # Bind first: a second serve on a taken port must fail before
-    # start() registers this machine, reconciles kept sessions, retires
-    # ntfy credentials and starts loops that would fight the running hub.
-    server = make_server(state, host, port)
     state.start()
+    server = make_server(state, host, port)
     # Auto clean quits orphans without a browser ever opening Compute:
     # its switch is hub state, so the background sampler starts at boot
     # while it is on rather than wait for a page request.

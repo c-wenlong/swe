@@ -916,18 +916,9 @@ final class AppModel {
         process.waitUntilExit()
         deadline.cancel()
         guard process.terminationStatus == 0 else { return [] }
-        return launchctlListPIDs(String(decoding: data, as: UTF8.self))
-    }
-
-    /// The pids in `launchctl list` output. Columns are tab-separated: PID
-    /// (or "-" for a job that is not running), status, label; the first
-    /// line is the header. Pid 0 and 1 are never a service to spare.
-    nonisolated static func launchctlListPIDs(_ text: String) -> Set<Int32> {
-        Set(text.split(whereSeparator: \.isNewline)
-            .compactMap { line in
-                line.split(separator: "\t", omittingEmptySubsequences: false).first
-                    .flatMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
-            }
+        // Columns are tab-separated: PID (or "-"), status, label.
+        return Set(String(decoding: data, as: UTF8.self).split(separator: "\n")
+            .compactMap { Int32($0.split(separator: "\t").first ?? "") }
             .filter { $0 > 1 })
     }
 
@@ -1169,15 +1160,10 @@ final class AppModel {
     /// terminal gets `cd <checkout> && <harness cli>`.
     func openPrSession(repo: String, number: Int, harness: Harness) async {
         guard let path = await github.prWorktree(repo: repo, pr: number, swe: swe) else { return }
-        try? await accounts.runInTerminal(line: Self.prSessionLine(path: path, command: harness.command))
-    }
-
-    /// `cd <checkout> && <harness cli>`. The registry command is pasted
-    /// into a shell line: quote it word by word like a resume argv, so a
-    /// metacharacter inside it can't break out of the `cd` chain. A
-    /// leading ~ still expands.
-    nonisolated static func prSessionLine(path: String, command: String) -> String {
-        let quoted = command
+        // The registry command is pasted into a shell line: quote it word
+        // by word like a resume argv, so a metacharacter inside it can't
+        // break out of the `cd` chain. A leading ~ still expands.
+        let command = harness.command
             .split(whereSeparator: \.isWhitespace)
             .map { word -> String in
                 let word = String(word)
@@ -1186,8 +1172,9 @@ final class AppModel {
                 return LaunchPlanner.shellQuote(expanded)
             }
             .joined(separator: " ")
-        return "cd \(LaunchPlanner.shellQuote(path))"
-            + (quoted.isEmpty ? "" : " && \(quoted)")
+        let line = "cd \(LaunchPlanner.shellQuote(path))"
+            + (command.isEmpty ? "" : " && \(command)")
+        try? await accounts.runInTerminal(line: line)
     }
 
     static func keysFile(path: String) -> URL {

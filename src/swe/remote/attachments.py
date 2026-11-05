@@ -55,7 +55,7 @@ ALLOWED_EXTS = {
 ATTACH_FALLBACK: dict[str, dict] = {
     "claude": {"at_refs": True},
     "gemini": {"at_refs": True},
-    "qwen-code": {"at_refs": True},
+    "qwen": {"at_refs": True},
 }
 
 

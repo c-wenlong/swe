@@ -201,8 +201,7 @@ class TestDetail(_Base):
         self.assertEqual(issue["branch"], "quiver/issue-5")
         self.assertTrue(issue["worktree"].endswith("o__r-issue5"))
         self.assertTrue(issue["suggested_prompt"].startswith(
-            "Resolve o/r#5.\n"))
-        self.assertIn("> Title: Fix the thing", issue["suggested_prompt"])
+            "Resolve o/r#5 — Fix the thing"))
         self.assertIn(issue["worktree"], issue["suggested_prompt"])
         self.assertIn("fetched_at", body)
 
@@ -510,8 +509,7 @@ class TestResolveRoute(unittest.TestCase):
         self.assertEqual(wt.call_args[0][2], self.srv.home)
         args, kw = ln.call_args
         self.assertEqual(args[1:3], ("claude", self.tree))
-        self.assertTrue(args[3].startswith("Resolve o/r#5.\n"))
-        self.assertIn("> Title: Fix the thing", args[3])
+        self.assertTrue(args[3].startswith("Resolve o/r#5 — Fix the thing"))
         self.assertIn(f"at {self.tree}.", args[3])
         self.assertEqual(kw["launch_id"], lid)
         self.assertEqual(kw["binary"], "claude")

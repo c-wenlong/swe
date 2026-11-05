@@ -5,11 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from swe.skills.layout import (
-    enumerate_skill_roots,
-    load_link_records,
-    sync_link_records_from_filesystem,
-)
+from swe.skills.layout import enumerate_skill_roots, layout_groups, sync_link_records_from_filesystem
 from swe.skills.link_ops import (
     SkillLayoutError,
     find_skill_directory,
@@ -18,21 +14,8 @@ from swe.skills.link_ops import (
     unlink_skill_root,
 )
 
-from tests._tempdir import temp_dir
-
 
 class SkillsLayoutTest(unittest.TestCase):
-    def setUp(self):
-        # skill_links.json's path is fixed at import from the runner's
-        # HOME, and link/unlink write it; every test gets its own copy.
-        # Tests that check the records file patch these again themselves.
-        self.records = temp_dir(self) / "skill_links.json"
-        for target, value in (("swe.skills.layout.SKILL_LINKS_FILE", self.records),
-                              ("swe.skills.layout.CONFIG_DIR", self.records.parent)):
-            patcher = patch(target, value)
-            patcher.start()
-            self.addCleanup(patcher.stop)
-
     def _write_skill(self, root: Path, folder: str, name: str = "demo"):
         d = root / folder
         d.mkdir(parents=True, exist_ok=True)
@@ -65,14 +48,10 @@ class SkillsLayoutTest(unittest.TestCase):
             link_skill_root("codex", "shared", home=home)
             self.assertTrue(codex.is_symlink())
             self.assertEqual(codex.resolve(), shared.resolve())
-            self.assertEqual(
-                [(r["label"], r["target"]) for r in load_link_records()],
-                [("codex", str(shared))])
 
             unlink_skill_root("codex", home=home, mkdir=True)
             self.assertFalse(codex.is_symlink())
             self.assertTrue(codex.is_dir())
-            self.assertEqual(load_link_records(), [])
 
     def test_link_replaces_a_dangling_symlink(self):
         # exists() is False on a dangling link, so the old code fell

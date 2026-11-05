@@ -56,13 +56,11 @@ half never mix:
   .linkignore        paths `swe init` must leave alone
   skills/            the shared skill tree, symlinked into every skills root
   hooks/<harness>/   hook scripts, each file symlinked into that harness only
-  plugins/           the hub's own plugin marketplaces
   config/            registry (harness.json), catalogs, link records (versioned)
   secrets/providers/.api_keys  provider API keys, mode 600    (gitignored)
   secrets/mcp/.api_keys        MCP credential values, mode 600 (gitignored)
   mcp.json           server definitions, ${REF} placeholders    (versioned)
   mcp/servers/       server checkouts, ~2.7 GB of nested repos (gitignored)
-  worktrees/         per-PR and per-issue checkouts `swe gh` makes   (gitignored)
   reports/           generated daily and weekly reports
   completions/       generated shell completion scripts
   data/              this machine's stores: ledgers, catalog,   (gitignored)
@@ -100,10 +98,9 @@ so a machine's actual state can never land in this repo by accident.
 machine's stores, anchored so a skill's or plugin's own `data/` folder still syncs; which the app and swe rewrite while they run: the usage
 ledgers, the model catalog, the FTS index of session message text, Devin
 session titles, remote state, account link records and their lock files),
-`worktrees/` (the checkouts `swe gh pr worktree` and `swe gh issue worktree`
-make, each with its own `.git`), `skills/.system/` (the bundled skills Codex
-writes into its linked skills folder), `secrets/` (provider API keys and MCP
-credential values) and `mcp/servers/` —
+`skills/.system/` (the bundled skills Codex writes into its linked skills
+folder), `secrets/` (provider API keys and MCP credential values) and
+`mcp/servers/` —
 plus its own git history, independent of this one. `swe init` writes that
 file only when there is none, so it never rewrites one the operator has
 edited; a root created before `secrets/` joined the list has to add the line
@@ -466,19 +463,15 @@ URL never flows back into the hub.
 `swe doctor` used to check one thing: Node/PATH mismatches hiding a
 globally installed harness. `harness/drift.py` adds a second, unrelated
 kind of check — places where two parts of swe that are supposed to
-agree have quietly drifted apart. The checks are all read-only and cheap
+agree have quietly drifted apart. Four checks, all read-only and cheap
 enough to run on every invocation:
 
 | check | compares |
 |---|---|
 | help vs dispatch | `help_text.py`'s HELP topics against `cli.py`'s COMMANDS |
-| subcommand help | the `mcp` and `instructions` subcommands against their help and completion lists, and the subcommands the help prose names |
-| completion | `completion.py`'s tables against `cli.py`'s COMMANDS |
 | registry schema | every `harness.json` entry's shape (state, pin, archived, capabilities) |
 | code-table vs data | `HARNESS_ROOTS` / `PLUGIN_FALLBACK` against the registry's capabilities |
 | dangling symlinks | top-level symlinks in the repo root and `~/.swe` pointing nowhere |
-| data root | a real `~/.quiver` left beside `~/.swe`, or still in use because the move to `~/.swe` could not run |
-| hook drift | declared hooks, link states and the files on disk |
 
 Every check exists as a pure `check_*` function (plain data in, findings
 out, no I/O) for unit testing, and `run_drift_checks()` wires the real
@@ -496,7 +489,7 @@ links a synced file may still want elsewhere: `undeclare`,
 broken MCP entry with the hub's) run only for one named finding. Plain `swe doctor`
 never writes.
 
-The principle behind all of them, made explicit once capabilities-first
+The principle behind all four, made explicit once capabilities-first
 landed: a warning must be actionable. Before that change, a registry entry
 the fallback table didn't know about, or a table entry the registry
 happened to override, both read as drift — which meant `swe doctor` warned
@@ -555,9 +548,7 @@ swe <domain> <verb>                 domains: everything else
   session    use · index
   setup      harnesses · providers · mcp · skills · report · check
   config     get · set · unset · edit · check · setup
-  instructions  init · build · check · watch
   hooks      list · info · new · edit · enable · disable · delete · check · sync
-  sync       status
   gh         pr · issue · run · inbox · repo · board · sync · pages · releases · tags · branches
   remote     serve · agent · setup · pair · status · devices · attach · notify · ssh
 ```

@@ -8,7 +8,7 @@ import re
 import sqlite3
 from datetime import datetime
 from typing import Any
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import unquote, urlparse
 
 
 def get_mtime(path: str) -> float:
@@ -91,23 +91,12 @@ def expand_path(path: str) -> str:
     return path
 
 
-def sqlite_uri(path, mode: str = "ro") -> str:
-    """A ``file:`` URI for ``path`` that opens exactly that file.
-
-    The path is percent-quoted: a bare ``#`` starts the URI fragment and
-    ``?`` the query, so ``file:/x/C#proj/crush.db?mode=ro`` opened ``/x/C``
-    read-write, creating an empty database there, and dropped ``mode=ro``
-    for a store that belongs to another app.
-    """
-    return f"file:{quote(os.fspath(path))}?mode={mode}"
-
-
 def open_sqlite_ro(path: str) -> sqlite3.Connection | None:
     expanded = expand_path(path)
     if not os.path.exists(expanded):
         return None
     try:
-        return sqlite3.connect(sqlite_uri(expanded), uri=True)
+        return sqlite3.connect(f"file:{expanded}?mode=ro", uri=True)
     except Exception:
         return None
 

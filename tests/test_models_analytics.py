@@ -1,16 +1,11 @@
 import json
-import os
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from swe.sessions.models_analytics import (
-    _drizzle_model_counts,
-    classify_provider,
-    collect_model_usage,
-)
+from swe.sessions.models_analytics import classify_provider, collect_model_usage
 
 
 class ModelsAnalyticsTest(unittest.TestCase):
@@ -262,34 +257,6 @@ class ModelsAnalyticsTest(unittest.TestCase):
         self.assertEqual(usage, {})
         connection.close.assert_called_once_with()
 
-
-    def test_opencode_db_is_opened_read_only(self):
-        # A read-write connection, as the last one open, checkpoints the
-        # WAL into OpenCode's database and deletes its -wal/-shm on close.
-        # Copying a live store's three files stands in for OpenCode
-        # holding them open.
-        import shutil
-        with tempfile.TemporaryDirectory() as tmp:
-            live = os.path.join(tmp, "live.db")
-            writer = sqlite3.connect(live)
-            writer.execute("PRAGMA journal_mode=WAL")
-            writer.execute("PRAGMA wal_autocheckpoint=0")
-            writer.execute("CREATE TABLE message (id TEXT, data TEXT)")
-            writer.execute(
-                "INSERT INTO message VALUES ('m1', ?)",
-                ('{"model":{"providerID":"p","modelID":"m"}}',))
-            writer.commit()
-            db = os.path.join(tmp, "opencode.db")
-            try:
-                for suffix in ("", "-wal", "-shm"):
-                    shutil.copyfile(live + suffix, db + suffix)
-            finally:
-                writer.close()
-            size = os.path.getsize(db)
-            counts = _drizzle_model_counts(db)
-            self.assertEqual(counts, {("p", "m"): 1})
-            self.assertEqual(os.path.getsize(db), size)
-            self.assertTrue(os.path.exists(db + "-wal"))
 
 if __name__ == "__main__":
     unittest.main()

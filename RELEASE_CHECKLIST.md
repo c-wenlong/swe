@@ -9,22 +9,16 @@ covers everything around it.
 
 ## Scene 0 — What a release ships
 
-A SWE release delivers these to one GitHub Release page:
+A SWE release delivers three products to one GitHub Release page:
 
 1. **The Python package** — an sdist and a wheel for the `swe` CLI, built
-   from `pyproject.toml`, plus a `SHA256SUMS` for them and the Linux
-   one-liner `scripts/install.sh`. This is what `pip install swe-*.whl` and
-   `releases/latest/download/install.sh` users get.
+   from `pyproject.toml`. This is what `pip install swe-*.whl` users get.
 2. **The macOS app** — `SWE.app`, built on a macOS 26 runner, signed
    with a Developer ID certificate, notarized by Apple, and packaged into
-   a `SWE-<version>.dmg`, also attached under the stable name `SWE.dmg`.
+   a `SWE-<version>.dmg`.
 3. **The Sparkle appcast** — an `appcast.xml` signed with an EdDSA private
    key, so every installed copy of the app can discover and cryptographically
    verify the update.
-
-After the attachment, the workflow also points the Homebrew tap
-(`c-wenlong/homebrew-swe`) at the new DMG and wheel, when the release is the
-latest one and carries a signed DMG.
 
 The one thing the pipeline deliberately does **not** do is create the
 GitHub Release itself. A human publishes the release notes; the workflow
@@ -83,7 +77,7 @@ host's. Extra steps for that one release:
   Quiver.app) or run the script. A Quiver.app that checks the feed will
   see the new appcast entry and fail validation — that is expected, not
   a bug.
-- [ ] **The release notes tell `quiver` cask users to switch to `swe`.**
+- [ ] **The release notes tell `swe` cask users to switch to `swe`.**
   The first SWE release materializes `Casks/swe.rb` in
   `c-wenlong/homebrew-swe` (`bump_tap` writes it whole, then bumps
   version and sha256 on later releases). `Casks/quiver.rb` stays frozen
@@ -92,7 +86,7 @@ host's. Extra steps for that one release:
 - [ ] **The stable DMG link changes name.** `releases/latest/download/
   SWE.dmg` replaces `…/Quiver.dmg` anywhere it is documented.
 
-## Scene 2 — The eight secrets
+## Scene 2 — The seven secrets
 
 Signing and notarization run entirely on GitHub-hosted runners, so all
 credentials live as repository secrets — never in the tree, never in a
@@ -108,7 +102,6 @@ and variables → Actions and survive every release.
 | `NOTARY_KEY_ID` | The key's ID, e.g. `P3VHYCSWKN` | App Store Connect → Integrations → App Store Connect API |
 | `NOTARY_ISSUER` | The issuer UUID | Same page as the key ID |
 | `SPARKLE_PRIVATE_KEY` | The EdDSA private key matching the `SUPublicEDKey` baked into the app | Sparkle's `generate_keys`; stored locally at `~/.swe/secrets/` |
-| `HOMEBREW_TAP_TOKEN` | A fine-grained token with Contents read and write on `c-wenlong/homebrew-swe` only | GitHub → Settings → Developer settings → Fine-grained tokens |
 
 Three failure-mode notes that change how this scene ends:
 
@@ -120,9 +113,6 @@ Three failure-mode notes that change how this scene ends:
 - A **missing `SPARKLE_PRIVATE_KEY` does hard-fail** the appcast step,
   because Sparkle refuses to serve unsigned enclosures to existing
   installs.
-- A missing `HOMEBREW_TAP_TOKEN` does not fail the run: the tap job leaves
-  a notice and the tap stays on its current version. Bump it by re-running
-  the workflow once the token is set.
 - The `.p12`, its password, and the Sparkle private key should also live
   in a password manager. The private key especially: losing it means no
   future appcast signature can ever verify against shipped installs.
@@ -136,10 +126,9 @@ git tag -a v1.1.0 -m "v1.1.0"
 git push origin v1.1.0
 ```
 
-The push fires the `Release` workflow, which runs seven jobs. The package,
+The push fires the `Release` workflow, which runs five jobs. The package,
 app, and Nix builds start in parallel; the macOS wheel check waits for the
-package build, the attachment job waits for all four, and the two Homebrew
-jobs follow it:
+package build, and the attachment job waits for all four:
 
 - **`Build sdist and wheel`** (Ubuntu) — checks the tag looks like `v*`,
   checks it matches `pyproject.toml` exactly, runs `python3 -m build`,
@@ -166,15 +155,9 @@ jobs follow it:
   venv on a Mac and runs the Darwin-only `path_health` unittest that
   needs real macOS paths.
 - **`Attach artifacts to the GitHub release`** — waits on all four, then
-  uploads `dist/*` (with a `SHA256SUMS`), `scripts/install.sh`, the DMG and
-  `appcast.xml` to the release **if one exists**. If none does, it leaves a
-  notice and the artifacts stay on the workflow run.
-- **`Check whether the Homebrew tap should follow`** and **`Bump the
-  Homebrew tap`** — run only when a signed DMG was attached to a published
-  release, the release is the latest one and `HOMEBREW_TAP_TOKEN` is set.
-  They hash the uploaded DMG and wheel and push the bump to
-  `c-wenlong/homebrew-swe` through `scripts/bump_tap.py`, which never moves
-  the tap to an older version.
+  uploads `dist/*`, the DMG, and `appcast.xml` to the release **if one
+  exists**. If none does, it leaves a notice and the artifacts stay on
+  the workflow run.
 
 Because the workflow never creates the release, the human half of this
 scene is:

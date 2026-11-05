@@ -67,6 +67,7 @@ def _seed_registry(test, names=("claude",)):
     return registry
 
 
+
 class InspectTest(unittest.TestCase):
     def test_skips_harness_that_is_not_installed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -328,6 +329,10 @@ class CmdInitTest(unittest.TestCase):
             code, out = self._run(home, ["--wat"])
             self.assertEqual(code, 1)
             self.assertIn("Unknown option", out)
+
+
+if __name__ == "__main__":
+    unittest.main()
 
 
 class LinkStatesTest(unittest.TestCase):
@@ -710,7 +715,3 @@ class InitRegistryReadTest(unittest.TestCase):
                 tmp, '{"claude": {"command": "claude"}}')
             self.assertEqual(
                 load_registry(home), {"claude": {"command": "claude"}})
-
-
-if __name__ == "__main__":
-    unittest.main()

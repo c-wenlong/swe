@@ -60,7 +60,7 @@ _swe_completion() {
     cur="${COMP_WORDS[COMP_CWORD]}"
 
     # Build word list (everything after "swe" up to cursor)
-    local -a swe_words lines
+    local -a swe_words lines comps
     swe_words=("${COMP_WORDS[@]:1:COMP_CWORD}")
 
     # Call swe's __complete command
@@ -86,17 +86,16 @@ _swe_completion() {
         directive=0
     fi
 
-    # Keep the candidate names (before tab) that start with the current
-    # word. Filtered here rather than by `compgen -W`, which expands its
-    # word list: a server or tag named `$(...)` in a config would run as
-    # a command on TAB, and a name with a space would split in two.
-    COMPREPLY=()
+    # Extract just the candidate names (before tab)
+    comps=()
     for line in "${lines[@]}"; do
         local cand="${line%%$'\t'*}"
-        if [[ -n "${cand}" && "${cand}" == "${cur}"* ]]; then
-            COMPREPLY+=("${cand}")
+        if [[ -n "${cand}" ]]; then
+            comps+=("${cand}")
         fi
     done
+
+    COMPREPLY=($(compgen -W "${comps[*]}" -- "${cur}"))
 
     # Directive 4 = NoFileComp. This completion is registered without file
     # fallback, so the directive is already satisfied for bash.

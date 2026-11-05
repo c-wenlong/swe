@@ -120,15 +120,22 @@ NODE_REPL_NODE_PATH = "/Applications/Codex.app/..."
         self.assertEqual(node_repl["startup_timeout_sec"], 120)
         self.assertEqual(node_repl["env"]["NODE_REPL_NODE_PATH"], "/Applications/Codex.app/...")
 
-    def test_parser_returns_deep_copies(self):
-        """Caller mutating nested dicts must not affect parse internals."""
+    def test_each_parse_returns_its_own_objects(self):
+        """Mutating one parse's nested values leaves the next parse alone.
+
+        The parser keeps no cache, so this holds by construction today; it
+        guards against one being added that hands out shared dicts.
+        """
         servers = parse_codex_mcp_region(SAMPLE_CODEX_MCP_BLOCK)
         servers["fathom"]["args"].append("EXTRA")
-        # Re-parse from a fresh region parse: called regions must be independent.
+        servers["fathom"].setdefault("env", {})["LEAK"] = "1"
         servers2 = parse_codex_mcp_region(SAMPLE_CODEX_MCP_BLOCK)
+        self.assertIsNot(servers2["fathom"], servers["fathom"])
+        self.assertIsNot(servers2["fathom"]["args"], servers["fathom"]["args"])
         self.assertEqual(servers2["fathom"]["args"], [
             "--directory", "/tmp/fathom", "run", "python3", "server.py"
         ])
+        self.assertNotIn("LEAK", servers2["fathom"].get("env", {}))
 
 
 # ── renderer ─────────────────────────────────────────────────────────

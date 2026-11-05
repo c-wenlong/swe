@@ -2,7 +2,7 @@
 
 Status: shipped. R1–R5 all landed — `swe remote serve|setup|agent|pair|
 status|devices|attach|notify|ssh`, the hub-served web app, the iOS app and
-the macOS app's Settings › Integrations › Remote checklist all exist. This doc stays as
+the macOS app's Settings › Remote checklist all exist. This doc stays as
 the design record: what follows describes the build as it is, and the
 milestones table at the end is history, not a plan.
 
@@ -46,7 +46,7 @@ queued commands until it reconnects.
 Tailscale is the transport because the relay is our own server: nothing
 third-party stores transcripts (Claude RC stores them on Anthropic
 servers; we don't need to). v1 is tailnet-only: the hub binds its
-Tailscale IP, never `0.0.0.0` unless `swe remote serve --unsafe-bind-any` is passed. A TLS fallback with a cert pinned at
+Tailscale IP, never `0.0.0.0`. A TLS fallback with a cert pinned at
 pairing is deferred until a non-tailnet device actually needs in.
 
 ### Setting it up — `setup.py`
@@ -54,7 +54,7 @@ pairing is deferred until a non-tailnet device actually needs in.
 `swe remote setup` checks every step from nothing to a paired phone, in
 order, and says for each whether it is done, something SWE does
 itself, or something a person must do, with the page to open. The Mac
-app's Settings › Integrations › Remote shows the same list from `--json`. On a fresh
+app's Settings › Remote shows the same list from `--json`. On a fresh
 Linux box, running the installer's `--hub` variant
 (`... | sh -s -- --hub`, see the README's install section) installs swe
 and then runs this list with `--apply`.
@@ -447,7 +447,6 @@ GET  /v1/status                      reachability check {ok, v}; no credential n
 GET  /v1/events                      SSE stream of every session's events; Last-Event-ID or ?last=seq resumes
 GET  /v1/sessions                    catalog: SessionRow shape + machine + ownership
 GET  /v1/sessions/{id}/events        SSE stream; ?last=seq replays journal
-GET  /v1/sessions/{id}/messages      journal backfill {session, messages, next_before, has_more}; ?before=seq&limit=N (default 500, at most 2000)
 GET  /v1/sessions/{id}/commands      the "/" menu: commands this session's harness will run
 POST /v1/sessions/{id}/message       {text, mode: queue|steer, attachments[]}
 GET  /v1/sessions/{id}/queue         queue-mode sends still waiting for idle
@@ -472,21 +471,16 @@ DELETE /v1/sessions/{id}/task        {task_ref}? unlink one task, or all without
 GET  /v1/folders?path=                subfolders of one folder on the hub machine (new-session browser)
 GET  /v1/sessions/{id}/files?q=     paths under the session's folder for the prompt box's @ menu
 GET  /v1/sessions/{id}/preview?path= one .html/.htm/.svg file from the session's folder, for Preview
-GET  /v1/launches/{launch_id}        pending|started|failed|untracked; started carries the session key
+GET  /v1/launches/{launch_id}        pending|started|failed; started carries the session key
 GET  /v1/machines · /v1/usage · /v1/search?q=
 GET  /v1/inbox                       pending decisions; ?done=1 adds finished-today
 GET  /v1/app/overview                the web app's Overview (docs/web-app.md)
 GET  /v1/app/sessions                the web app's Sessions: catalog rows + usage
 GET  /v1/app/harnesses               the web app's Harnesses: swe list --scope=all rows
-GET  /v1/app/<page> · POST /v1/app/<page>/<action>   every other web app page (webapp/pages/<page>.py), see docs/web-app/<page>.md; POST also passes the Origin check
 GET  /                               the web app's page; its assets are flat names beside it (/app.js); /app/… 301s to the same name here, query and fragment intact
 POST /v1/inbox/dismiss               {key, last_active_at} → cleared for this device
 POST /v1/sessions/{id}/read          {at?} → this device's last-read cursor; rows carry unread
 POST /v1/pair                        QR payload → device credential; optional {device:{kind,model,client,os}} metadata
-POST /v1/pair/request                a device asks to be paired; identified by tailscale whois, no credential needed → {request_id, poll_secret, code, ...}
-GET  /v1/pair/request/{id}?secret=   the requester's poll: pending|denied|approved (approved answers once with the credential)
-GET  /v1/pair/requests               pending pair requests; a paired bearer or the hub owner's tailnet login
-POST /v1/pair/requests/approve|deny  {code, request_id?}; the owner's yes or no
 GET  /v1/devices                     every paired device (device_view rows + paired_via + this_device) and the pending pair requests, for the pair-requests-and-devices screen
 POST /v1/devices/revoke              {device_id, confirm_this_device?} sign one device out → {revoked, this_device, devices}
 GET  /v1/devices/me                  this device's row: kind, model, client, os, node_name, display_name, timestamps
@@ -1065,13 +1059,7 @@ while the others answer; a missing or signed-out `gh` answers
 plus `body`, `comments`, `branch` (`quiver/issue-<n>`), `worktree`
 (where a resolve puts the checkout) and `suggested_prompt` (the resolve
 brief `github/issues.build_prompt` writes — what the resolve sheet
-prefills). Anyone can write on a public issue, so the brief quotes the
-issue's title, body and comments line by line (`> `) behind a note that
-they are untrusted data the agent must not take instructions from, and
-it keeps only comments whose `association` (gh's `authorAssociation`)
-is `OWNER`, `MEMBER` or `COLLABORATOR`; the rest become one line, "N
-comments from others, not included". Every client prefills this brief
-rather than building its own. `400 bad_repo` for a malformed owner/repo, `422 bad_issue`
+prefills). `400 bad_repo` for a malformed owner/repo, `422 bad_issue`
 for a non-number, `404 not_pinned` for a repo the hub doesn't pin; a
 `gh` failure answers `200 {status, issue: null, error}` — the row's
 `status` carries `gh`'s word (`not-found`, `upstream-error`), so the
@@ -1522,7 +1510,7 @@ commands wait in the hub journal until reconnect.
 
 `swe remote agent --install` keeps it running across reboots and
 logouts (see "Keeping a satellite up" above). The macOS app side is a
-Settings › Integrations › Remote switch, "Keep this Mac's agent running", that calls
+Settings › Remote switch, "Keep this Mac's agent running", that calls
 `swe remote agent --install|--uninstall --json` (`RemoteAgentModel`). It
 shows only on a satellite of another hub: `agent --status --json` says
 the Mac is paired (`configured`) and its own hub is not installed
@@ -1673,8 +1661,7 @@ usage/limits dashboard (`swe list` data); transcript FTS across machines
 
 - Tailnet membership is the transport boundary: the hub binds its
   Tailscale IP only (or loopback behind `tailscale serve`), so no
-  LAN/WAN port opens unless `swe remote serve --unsafe-bind-any` is passed
-  for a `--host` that is not one of those. Tailscale's OAuth
+  LAN/WAN port ever opens. Tailscale's OAuth
   login is how a device joins the tailnet; this feature does not
   re-implement it.
 - Owner devices: a request without a bearer is still let in when its

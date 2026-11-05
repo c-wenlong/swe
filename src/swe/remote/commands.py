@@ -38,7 +38,6 @@ from swe.remote import setup as setup_mod
 from swe.remote import systemd
 from swe.remote.hub import (
     DEFAULT_PORT,
-    WILDCARD_HOSTS,
     HubState,
     check_public_url,
     load_hub_config,
@@ -591,7 +590,7 @@ def _cmd_status(flags: dict, json_view: bool) -> int:
         # which the tailnet IP default would miss.
         host = saved["host"]
         port = saved["port"]
-        if host in WILDCARD_HOSTS:
+        if host in {"0.0.0.0", "::"}:
             host = "127.0.0.1"
     if not host:
         host = _tailscale_ip() or "127.0.0.1"

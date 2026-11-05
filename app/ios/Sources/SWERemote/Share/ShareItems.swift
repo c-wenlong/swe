@@ -200,14 +200,10 @@ enum ShareInbox {
     }
 
     /// `folder/<index>/<name>`: one subfolder per item, so two shared
-    /// files with the same name both survive. A name that isn't one plain
-    /// path part (`..` would be the share folder itself, which the
-    /// overwrite below would delete) copies nothing.
+    /// files with the same name both survive.
     static func copy(_ url: URL, into folder: URL, index: Int, name: String? = nil) -> URL? {
-        let leaf = name ?? url.lastPathComponent
-        guard isPlainName(leaf) else { return nil }
         let dir = folder.appendingPathComponent("\(index)", isDirectory: true)
-        let dest = dir.appendingPathComponent(leaf)
+        let dest = dir.appendingPathComponent(name ?? url.lastPathComponent)
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try? FileManager.default.removeItem(at: dest)
@@ -242,16 +238,9 @@ enum ShareInbox {
     static func fileName(suggested: String?, provided: URL, type: String) -> String {
         guard let suggested, !suggested.isEmpty else { return provided.lastPathComponent }
         let safe = suggested.replacingOccurrences(of: "/", with: "-")
-        // The sharing app picks the name: "." or ".." is no file name.
-        guard isPlainName(safe) else { return provided.lastPathComponent }
         guard (safe as NSString).pathExtension.isEmpty else { return safe }
         let ext = provided.pathExtension.isEmpty ? UTType(type)?.preferredFilenameExtension : provided.pathExtension
         return ext.map { "\(safe).\($0)" } ?? safe
-    }
-
-    /// One path part that names a file: not empty, `.` or `..`, no `/`.
-    static func isPlainName(_ name: String) -> Bool {
-        !name.isEmpty && name != "." && name != ".." && !name.contains("/")
     }
 
     /// Loads the first registered type that conforms to `kind`: a provider

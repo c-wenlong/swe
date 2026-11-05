@@ -17,7 +17,6 @@ from typing import Any, Callable, Iterable
 from swe.console import sanitize, sanitize_document
 from swe.paths import expand_user
 from swe.sessions import opencode_store
-from swe.sessions.engines.common import sqlite_uri
 from swe.sessions.models import Session
 
 
@@ -617,7 +616,7 @@ def _open_ro(path: Path) -> sqlite3.Connection | None:
     if not path.exists():
         return None
     try:
-        return sqlite3.connect(sqlite_uri(path), uri=True)
+        return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     except sqlite3.Error:
         return None
 

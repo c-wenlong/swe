@@ -144,6 +144,10 @@ class InstallerTableTest(unittest.TestCase):
                          "curl -fsSL https://aider.chat/install.sh | sh")
 
 
+if __name__ == "__main__":
+    unittest.main()
+
+
 class UninstallerTest(unittest.TestCase):
     def test_reads_the_package_off_the_resolved_path(self):
         cases = {
@@ -192,7 +196,3 @@ class UninstallerTest(unittest.TestCase):
         self.assertIsNone(uninstaller_for("claude", "/Users/me/.local/share/claude/versions/2.1/claude"))
         self.assertIsNone(uninstaller_for("claude", None))
         self.assertIsNone(uninstaller_for("claude", ""))
-
-
-if __name__ == "__main__":
-    unittest.main()

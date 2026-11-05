@@ -206,6 +206,10 @@ class PluginRootsTest(unittest.TestCase):
             self.assertIsInstance(fn(home=home, scope="nonsense"), list)
 
 
+if __name__ == "__main__":
+    unittest.main()
+
+
 class ThreePaneLayoutTest(unittest.TestCase):
     """Parent, current, preview.
 
@@ -603,7 +607,3 @@ class BrowserMouseTest(unittest.TestCase):
         # a footer check would pass on the first frame alone, so count
         # the redraws the ticks forced.
         self.assertEqual(renders, 3)
-
-
-if __name__ == "__main__":
-    unittest.main()

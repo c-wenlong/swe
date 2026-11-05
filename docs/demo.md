@@ -28,9 +28,9 @@ Part of [#524](https://github.com/c-wenlong/swe/issues/524).
 
 ## Prerequisites
 
-- **swe 1.2.0 or newer**, which has `swe sync` (check: `swe sync --help`
-  prints the sync help). Install the latest from `main` with
-  `pipx install --force git+https://github.com/c-wenlong/swe.git`.
+- **swe from `main`**, with `swe sync` in it (check: `swe sync --help`
+  prints the sync help). `swe sync` is not in a tagged release yet. Install
+  with `pipx install --force git+https://github.com/c-wenlong/swe.git`.
 - **git**, **Python 3.11 or newer** (`python3`), and **Node.js** (`npx`,
   which the `context7` MCP server runs on).
 - **Claude Code** (`claude`) and **Codex** (`codex`) on `PATH`. Neither has

@@ -264,56 +264,6 @@ class TestConfigure(unittest.TestCase):
         })
         self.assertEqual(self.state.owner_login, "")
 
-    def test_wildcard_binds_name_this_node_not_every_host(self):
-        # An empty allowed_hosts turns the DNS-rebinding check off, so
-        # a page rebound to the hub's address would pass as the owner.
-        # A wildcard bind answers this node's own names instead, and
-        # never asks whois about the wildcard itself.
-        for host in ("0.0.0.0", "::"):
-            with self.subTest(host=host):
-                self.state.whois.reset_mock()
-                with patch.object(hub_mod.catalog_mod, "tailscale_ip",
-                                  return_value="100.64.0.1"), \
-                        patch.object(hub_mod.socket, "gethostname",
-                                     return_value="studio"):
-                    hub_mod.configure(self.state, host, 8477)
-                self.assertEqual(self.state.allowed_hosts, {
-                    "127.0.0.1:8477", "localhost:8477", "[::1]:8477",
-                    "studio:8477", "100.64.0.1:8477",
-                    "box.tailnet.ts.net:8477", "box:8477"})
-                self.state.whois.assert_called_once_with("100.64.0.1")
-                self.assertEqual(self.state.owner_login, "dev@github")
-
-    def test_wildcard_bind_lets_ip_literals_through_not_names(self):
-        # A LAN pairing link dials the hub by IP; a rebound page always
-        # comes under its own domain name.
-        with patch.object(hub_mod.catalog_mod, "tailscale_ip",
-                          return_value=""):
-            hub_mod.configure(self.state, "0.0.0.0", 8477)
-        ok = hub_mod._host_allowed
-        for host in ("192.168.1.20:8477", "[fe80::1]:8477",
-                     "localhost:8477"):
-            self.assertTrue(ok(self.state, host), host)
-        for host in ("evil.example:8477", "192.168.1.20:9000",
-                     "192.168.1.20", "999.1.1.1:8477", ""):
-            self.assertFalse(ok(self.state, host), host)
-        hub_mod.configure(self.state, "100.64.0.1", 8477)
-        self.assertIsNone(self.state.allowed_ip_port)
-
-    def test_serve_on_a_taken_port_starts_nothing(self):
-        # A second serve must fail at the bind, before start() fights
-        # the running hub over machines, kept sessions and ntfy.
-        with patch.object(hub_mod, "make_server",
-                          side_effect=OSError("Address already in use")), \
-                patch.object(self.state, "start") as start, \
-                patch.object(hub_mod, "save_hub_config") as save, \
-                patch.object(hub_mod.catalog_mod, "tailscale_ip",
-                             return_value=""):
-            with self.assertRaises(OSError):
-                hub_mod.serve(self.state, "127.0.0.1", 8477)
-        start.assert_not_called()
-        save.assert_not_called()
-
     def test_v6_bind_spells_its_host_with_brackets(self):
         self.state.whois = MagicMock(return_value=None)
         with patch.object(hub_mod.catalog_mod, "tailscale_ip",

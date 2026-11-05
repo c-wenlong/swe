@@ -2,6 +2,7 @@
 reach the harness, and no key value reaches argv, markers, launch
 records, machine rows, the command journal or the hub's replies."""
 
+import inspect
 import json
 import os
 import shutil
@@ -143,15 +144,19 @@ class TestLaunchNew(unittest.TestCase):
     def test_provider_wraps_the_argv_without_secrets(self):
         (ok, note, _name), lt = self._launch(provider="groq", model="groq/m")
         self.assertTrue(ok, note)
-        argv = lt.call_args[0][1]
-        env = lt.call_args[0][3] if len(lt.call_args[0]) > 3 else \
-            lt.call_args[1].get("env")
+        # Bind the call to launch_tmux's own signature, so argv and env
+        # are found whether they came positionally or by keyword.
+        launch = inspect.signature(supervise.launch_tmux).bind(
+            *lt.call_args.args, **lt.call_args.kwargs).arguments
+        argv = launch["argv"]
         self.assertEqual(argv[0], sys.executable)
         self.assertTrue(argv[2].endswith("provider_exec.py"))
         self.assertEqual(argv[argv.index("--") + 1:],
                          ["opencode", "mini", "-m", "groq/m"])
-        _assert_no_secret(self, argv)
-        _assert_no_secret(self, env or {})
+        # provider_exec reads the key file itself: the launch hands tmux
+        # no env of its own, and nothing it passes carries a key.
+        self.assertIsNone(launch.get("env"))
+        _assert_no_secret(self, launch)
         marker = (supervise._pending_dir(self.home) / "qv-p.json").read_text()
         self.assertEqual(json.loads(marker)["provider"], "groq")
         _assert_no_secret(self, marker)

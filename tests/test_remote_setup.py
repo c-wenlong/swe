@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import plistlib
+import ssl
 import subprocess
 import time
 import unittest
@@ -461,9 +462,22 @@ class GatherTest(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *a): return False
 
-        with patch.object(agent, "_urlopen", lambda req, timeout: seen.append(req.full_url) or Resp()):
+        ctx = object()
+
+        def urlopen(req, timeout=None, context=None):
+            seen.append((req.full_url, context))
+            if context is None:
+                # Python's own store has no CA for the cert.
+                raise urllib.error.URLError(ssl.SSLCertVerificationError("no CA"))
+            return Resp()
+
+        # _fallback_ctx is sticky module state: start clean, restore after.
+        with patch.object(agent, "_fallback_ctx", None), \
+                patch("urllib.request.urlopen", urlopen), \
+                patch("swe.harness.rate_limits._verified_context", return_value=ctx):
             self.assertEqual(setup._get(URL + "/v1/status", 5), (True, ""))
-        self.assertEqual(seen, [URL + "/v1/status"])
+        self.assertEqual(seen, [(URL + "/v1/status", None),
+                                (URL + "/v1/status", ctx)])
 
 
 class DefaultActionsTest(unittest.TestCase):
