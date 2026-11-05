@@ -19,8 +19,9 @@ import Testing
         defer { withExtendedLifetime(temp) {} }
         let claude = try claudeHome(temp, sessions: 3)
         let codex = try temp.copyFixture("codex-home")
-        let codexFiles = Ledger.jsonlFiles(under: codex.appendingPathComponent("sessions")).count
-            + Ledger.jsonlFiles(under: codex.appendingPathComponent("archived_sessions")).count
+        // The fixture holds two rollouts under sessions/ and two under
+        // archived_sessions/.
+        let codexFiles = 4
         let ledger = try Ledger(directory: temp.path("cache"))
         #expect(ledger.scanProgress() == nil)
 

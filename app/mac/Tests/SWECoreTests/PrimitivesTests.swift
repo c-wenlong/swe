@@ -213,7 +213,9 @@ final class PrimitiveHome {
         var edited = try JSONTextEdit.set("https://example.com/a/b", at: ["homepage"], in: text)
         edited = try JSONTextEdit.set(["url": "https://github.com/o/r"], at: ["repository"], in: edited)
         #expect(edited.contains(#""homepage": "https://example.com/a/b""#))
-        #expect(edited.contains(#""url" : "https://github.com/o/r""#) || edited.contains(#""url": "https://github.com/o/r""#))
+        // A new object goes through JSONSerialization's pretty printer,
+        // which spaces both sides of the colon; a scalar is written by hand.
+        #expect(edited.contains(#""url" : "https://github.com/o/r""#))
         #expect(!edited.contains(#"\/"#))
     }
 

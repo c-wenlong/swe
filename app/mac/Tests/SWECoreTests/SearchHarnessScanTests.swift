@@ -118,28 +118,33 @@ import Testing
         let s = try Setup()
         await s.attach()
         let factory = s.temp.path("factory")
-        let body = """
-            {"type":"session_start","id":"d-1","title":"Fix the parser","cwd":"/repo/x"}
+        // Each file carries its own id, named apart from the file, so each
+        // session row proves its own file was read.
+        func body(_ id: String) -> String {
+            """
+            {"type":"session_start","id":"\(id)","title":"Fix the parser","cwd":"/repo/x"}
             {"type":"message","timestamp":"2026-10-05T12:00:00Z","message":{"role":"user","content":[{"type":"text","text":"why is it failing?"}]}}
             {"type":"message","timestamp":"2026-10-05T12:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"Checking."},{"type":"tool_use","name":"Read","input":{"file_path":"/repo/x/a.swift"}}]}}
             {"type":"completion","finalText":"All sorted.","timestamp":"2026-10-05T12:00:02Z"}
             """ + "\n"
-        try s.write(body, to: factory.appendingPathComponent("sessions/-repo-x/d-1.jsonl"))
+        }
+        try s.write(body("d-1"), to: factory.appendingPathComponent("sessions/-repo-x/first.jsonl"))
         // The second droid root — `projects` — indexes identically.
-        try s.write(body, to: factory.appendingPathComponent("projects/-repo-y/d-2.jsonl"))
+        try s.write(body("d-2"), to: factory.appendingPathComponent("projects/-repo-y/second.jsonl"))
 
         let report = try await s.ledger.scan(roots: LedgerRoots(droidHomes: [factory]))
 
         #expect(report.filesIndexed == 2)
         #expect(try s.fts("failing").count == 2)
         #expect(try s.fts("swift").count == 2)
-        let session = try #require(try s.session(agent: "droid"))
-        #expect(session.fields.sessionID == "d-1" || session.fields.sessionID == "d-2")
-        #expect(session.fields.title == "Fix the parser")
-        #expect(session.fields.cwd == "/repo/x")
-        #expect(session.fields.createdAt == "2026-10-05T12:00:00Z")
-        #expect(session.fields.updatedAt == "2026-10-05T12:00:02Z")
-        #expect(session.fields.messageCount == 4)
+        for id in ["d-1", "d-2"] {
+            let session = try #require(try s.session(agent: "droid", sessionID: id), "\(id)")
+            #expect(session.fields.title == "Fix the parser")
+            #expect(session.fields.cwd == "/repo/x")
+            #expect(session.fields.createdAt == "2026-10-05T12:00:00Z")
+            #expect(session.fields.updatedAt == "2026-10-05T12:00:02Z")
+            #expect(session.fields.messageCount == 4)
+        }
     }
 
     @Test func clineSessionsIndexTheManifestAndMessagesPair() async throws {
@@ -337,7 +342,10 @@ import Testing
             roots: LedgerRoots(transcriptRoots: [.gemini: [s.temp.path("gemini/tmp")]]))
 
         #expect(report.filesIndexed == 2)
-        #expect(try s.session(agent: "gemini") != nil)
+        // Each file's own id: the document's top-level one, the stream's
+        // per-record one.
+        #expect(try s.session(agent: "gemini", sessionID: "g-json") != nil)
+        #expect(try s.session(agent: "gemini", sessionID: "g-l") != nil)
         #expect(try s.fts("document").count == 1)
         #expect(try s.fts("stream").count == 2)  // both turn records' text
         #expect(try s.store.status().sessionCount == 2)
