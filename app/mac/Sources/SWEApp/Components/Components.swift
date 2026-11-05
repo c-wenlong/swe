@@ -233,7 +233,7 @@ private struct SecondaryButtonBody: View {
             .background(hovering ? Theme.hover : Theme.secondaryBackground, in: .rect(cornerRadius: Theme.controlRadius))
             .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).strokeBorder(Theme.borderStrong, lineWidth: 1))
             .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.45)
-            .animation(.easeOut(duration: 0.2), value: hovering)
+            .animation(.easeOut(duration: Theme.fadeDuration), value: hovering)
             .contentShape(.rect(cornerRadius: Theme.controlRadius))
             .onHover { hovering = $0 }
     }
