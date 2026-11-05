@@ -107,7 +107,9 @@ def backup_file(path: Path, *, home: Path | None = None) -> Path | None:
 
     if not path.exists():
         return None
-    return backup_tree(path, home)
+    # The contents, not a linked file's link: the wizard then writes
+    # through the link, which would change what a copied link shows.
+    return backup_tree(path.resolve() if path.is_symlink() else path, home)
 
 
 def _stage_header(number: int, total: int, label: str) -> None:

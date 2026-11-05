@@ -53,6 +53,20 @@ class SetupWizardTest(unittest.TestCase):
             self.assertIn("backups/", GITIGNORE_BODY.splitlines())
             self.assertIsNone(backup_file(home / "missing.json", home=home))
 
+    def test_backup_of_a_symlinked_file_keeps_the_old_contents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            real = home / "dotfiles" / "harness.json"
+            real.parent.mkdir()
+            real.write_text("old")
+            link = home / ".swe" / "config" / "harness.json"
+            link.parent.mkdir(parents=True)
+            link.symlink_to(real)
+            backup = backup_file(link, home=home)
+            link.write_text("new")  # the wizard writes through the link
+            self.assertFalse(backup.is_symlink())
+            self.assertEqual(backup.read_text(), "old")
+
     def test_yes_no_reprompts_then_accepts_default(self):
         answers = iter(["maybe", ""])
         output = io.StringIO()
