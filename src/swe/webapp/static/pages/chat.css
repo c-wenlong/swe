@@ -357,7 +357,6 @@ dialog.sheet.preview-sheet[open] { display: flex; flex-direction: column; }
 }
 .cr-btn:hover { background: var(--hover); }
 .cr-btn svg { width: 14px; height: 14px; }
-.cr-btn.spinning svg { animation: spin 1s linear infinite; }
 .cr-list { display: flex; flex-direction: column; }
 .cr-day {
   font-size: 12px; color: var(--text-muted); padding: 14px 8px 4px;
@@ -459,8 +458,7 @@ dialog.sheet.preview-sheet[open] { display: flex; flex-direction: column; }
 .tray-row.editing .tray-mark { border: 0; }
 .tray-mark svg { width: 14px; height: 14px; }
 .tray-mark.spin { border: 1.6px solid var(--text-secondary); border-right-color: transparent;
-  animation: tray-spin .9s linear infinite; }
-@keyframes tray-spin { to { transform: rotate(360deg); } }
+  animation: spin .9s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .tray-mark.spin { animation: none; } }
 .tray-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .tray-text { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

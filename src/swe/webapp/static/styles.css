@@ -34,7 +34,7 @@
     --text-primary: rgba(255,255,255,.9); --text-secondary: rgba(255,255,255,.52); --text-nav: rgba(255,255,255,.52);
     --text-muted: rgba(255,255,255,.52); --text-label: rgba(255,255,255,.52); --text-tab: rgba(255,255,255,.52); --table-header: rgba(255,255,255,.52);
     --border: rgba(255,255,255,.08); --border-strong: rgba(255,255,255,.16); --row-divider: rgba(255,255,255,.04);
-    --interactive: #4489ff; --link: #49b0ff;
+    --interactive: #4489ff; --link: rgba(73,176,255,.85);
     --tk-keyword: #ff7b72; --tk-string: #a5d6ff; --tk-number: #79c0ff;
     --tk-builtin: #d2a8ff; --tk-variable: #ffa657; --tk-comment: #8b949e; --tk-meta: #7ee787;
     --success: #00ec7e; --warning: #f58e3a; --danger: #f53b3a;
@@ -111,8 +111,59 @@ button { font: inherit; color: inherit; }
 }
 .icon-button:hover { background: var(--tab-hover); }
 .icon-button svg { width: 15px; height: 15px; }
-.icon-button.spinning svg { animation: spin 1s linear infinite; }
+.icon-button.spinning svg, .cr-btn.spinning svg, .gh-rail-btn.spinning svg { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* Spinner: a ring that turns beside a running label. .ink draws it in the
+ * text colour (inside a button), .sm is the 9px dot of a list row. */
+.spinner {
+  display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid var(--border-strong); border-top-color: var(--text-secondary);
+  animation: spin 1s linear infinite;
+}
+.spinner.ink { border-color: currentColor; border-top-color: transparent; }
+.spinner.sm { width: 9px; height: 9px; border: 1.5px solid var(--text-muted); border-top-color: transparent; }
+
+/* Switch: the Mac's GreenSwitchStyle on a button (aria-checked) or a
+ * checkbox (:checked). --k is the knob; .sm is the compact one. */
+.switch {
+  --k: 16px; appearance: none; -webkit-appearance: none; position: relative; flex: none; margin: 0; padding: 0; border: 0;
+  width: calc(var(--k) * 2 + 4px); height: calc(var(--k) + 4px); border-radius: 999px;
+  background: var(--border-strong); cursor: pointer; transition: background .15s;
+}
+.switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: var(--k); height: var(--k); border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s;
+}
+.switch:checked, .switch[aria-checked="true"] { background: var(--interactive); }
+.switch:checked::after, .switch[aria-checked="true"]::after { transform: translateX(var(--k)); }
+.switch:disabled { opacity: .5; cursor: default; }
+.switch.sm { --k: 14px; }
+.switch.sm:disabled { opacity: .45; }
+
+/* Button: 30 tall, 13px, on the card. Modifiers change one
+ * thing each (.lg is 32 tall, .hairline a lighter border, .on-panel another
+ * surface, .medium a heavier label, .secondary the Mac's
+ * SecondaryButtonStyle); .primary is the inked action, .danger the red
+ * one. A page adds a class only for what is its own. */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none;
+  height: 30px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 8px;
+  background: var(--card); color: var(--text-primary); font-size: 13px;
+  text-decoration: none; white-space: nowrap; cursor: pointer;
+}
+:where(.btn) svg { width: 14px; height: 14px; flex: none; }
+.btn.lg { height: 32px; }
+.btn.hairline { border-color: var(--border); }
+.btn.on-panel { background: var(--panel); }
+.btn.medium { font-weight: 500; }
+.btn.secondary { height: 32px; background: var(--subtle); font-size: 12px; font-weight: 500; }
+.btn:hover:not(:disabled) { background: var(--hover); }
+.btn.primary { background: var(--text-primary); color: var(--card); border-color: var(--text-primary); }
+.btn.primary:hover:not(:disabled) { background: var(--text-primary); opacity: .9; }
+.btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.danger:hover:not(:disabled) { background: var(--danger); opacity: .9; }
+.btn.danger-text { color: var(--danger-text); }
+.btn:disabled { opacity: .45; cursor: default; }
 /* Fmt.copyTick: the copy icon swaps for a green tick for a moment. */
 .copied { color: var(--success) !important; border-color: color-mix(in srgb, var(--success) 45%, var(--border)) !important; }
 
