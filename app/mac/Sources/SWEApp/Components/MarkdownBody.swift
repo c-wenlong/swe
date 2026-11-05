@@ -227,8 +227,8 @@ private struct MarkdownTableView: View {
             .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).strokeBorder(Theme.border, lineWidth: 1))
             .clipShape(.rect(cornerRadius: Theme.controlRadius))
             if hiddenRows > 0 || hiddenColumns > 0 {
-                Text([hiddenRows > 0 ? "\(hiddenRows) more rows" : nil,
-                      hiddenColumns > 0 ? "\(hiddenColumns) more columns" : nil]
+                Text([hiddenRows > 0 ? "\(hiddenRows) more \(hiddenRows == 1 ? "row" : "rows")" : nil,
+                      hiddenColumns > 0 ? "\(hiddenColumns) more \(hiddenColumns == 1 ? "column" : "columns")" : nil]
                     .compactMap { $0 }.joined(separator: " and ") + " not shown")
                     .font(Theme.caption).foregroundStyle(Theme.textMuted)
             }
