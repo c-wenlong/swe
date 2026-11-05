@@ -220,10 +220,6 @@ class PluginRootsTest(unittest.TestCase):
             self.assertIsInstance(fn(home=home, scope="nonsense"), list)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ThreePaneLayoutTest(unittest.TestCase):
     """Parent, current, preview.
 
@@ -641,3 +637,7 @@ class BrowserMouseTest(unittest.TestCase):
         self.assertEqual(rlist, [0])
         self.assertIsNotNone(timeout)
         self.assertGreater(timeout, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
