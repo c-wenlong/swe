@@ -243,6 +243,18 @@ import Testing
         #expect(try dir.read("index.txt").contains("a.md"))
     }
 
+    @Test func moveAnchorsBeforeAnOffChapter() {
+        #expect(ChapterIndex.move("a.md\n# off.md\nb.md\nc.md\n",
+                                name: "c.md", before: "off.md")
+                == "a.md\nc.md\n# off.md\nb.md\n")
+    }
+
+    @Test func moveCarriesAnOffChapterKeepingItsState() {
+        #expect(ChapterIndex.move("a.md\n# off.md\nb.md\n",
+                                name: "off.md", before: nil)
+                == "a.md\nb.md\n# off.md\n")
+    }
+
     @Test func treeListsFilesInIndexOrder() {
         let tree = ChapterTree.build(
             files: ["a.md", "b.md", "eng/m.md", "eng/z.md", "eng/loose.md"],

@@ -940,7 +940,7 @@ private struct ChaptersEditor: View {
                 .plainButton()
                 .accessibilityLabel("New chapter")
             }
-            if let moveError {
+            if let moveError = moveError ?? chapters.moveError {
                 Label(moveError, systemImage: "exclamationmark.triangle")
                     .font(Theme.caption).foregroundStyle(Theme.dangerText)
                     .fixedSize(horizontal: false, vertical: true)
