@@ -529,14 +529,19 @@ class ReportCommandEdgeTest(unittest.TestCase):
         config = resolve_config({"report": {
             "session": {"harness": "claude", "model": "haiku"},
             "writer": {"harness": "claude", "model": "opus"},
-            "max_workers": 2, "batch": {"max_sessions": 7}}})
+            "max_workers": 2, "batch": {"max_sessions": 7, "max_chars": 9_000},
+            "max_summary_calls": 4, "max_estimated_input_tokens": 50_000,
+            "transcript": {"max_chars": 12_345}}})
         with patch("swe.reports.commands.ReportPipeline") as pipeline:
             _pipeline(config, "store", _parse_generate_args([]))
         args, kwargs = pipeline.call_args
         self.assertEqual((args[0].model, args[1].model), ("haiku", "opus"))
         self.assertEqual(kwargs["max_workers"], 2)
         self.assertEqual(kwargs["max_batch_sessions"], 7)
-        self.assertEqual(kwargs["max_transcript_chars"], 240_000)
+        self.assertEqual(kwargs["max_batch_chars"], 9_000)
+        self.assertEqual(kwargs["max_summary_calls"], 4)
+        self.assertEqual(kwargs["max_estimated_input_tokens"], 50_000)
+        self.assertEqual(kwargs["max_transcript_chars"], 12_345)
         self.assertEqual(kwargs["store"], "store")
 
     def test_a_custom_range_never_advances_the_cursor(self):
