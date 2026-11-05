@@ -294,6 +294,28 @@ class ParseCrushTest(unittest.TestCase):
             self.assertEqual(sessions[0].session_id, "sess1")
 
 
+class ParseCrushFailureTest(unittest.TestCase):
+    def test_a_crash_is_recorded_not_swallowed(self):
+        # Swallowed, it read as "no Crush history" and the aggregator
+        # pruned Crush's cached sessions.
+        from swe.sessions import failures
+        from swe.sessions.parsers import parse_crush
+
+        with tempfile.TemporaryDirectory() as tmp:
+            projects = Path(tmp) / "projects.json"
+            projects.write_text("{not json")
+            failures.clear()
+            try:
+                with mock.patch(
+                    "swe.sessions.parsers.os.path.expanduser",
+                    side_effect=lambda p: str(projects) if p.endswith("projects.json") else p,
+                ):
+                    self.assertEqual(parse_crush(), [])
+                self.assertIn("crush", failures.snapshot())
+            finally:
+                failures.clear()
+
+
 class ParseGrokTest(unittest.TestCase):
     def test_reads_encoded_cwd_and_summary(self):
         with tempfile.TemporaryDirectory() as tmp:

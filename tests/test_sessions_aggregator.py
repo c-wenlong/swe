@@ -103,6 +103,20 @@ class SessionsAggregatorTest(unittest.TestCase):
                 self.assertEqual(loaded[0].tool_name, "claude")
                 self.assertEqual(loaded[1].timestamp, 200)
 
+    def test_cache_file_is_private(self):
+        # It holds every session's first prompt and project path.
+        import os
+        import stat
+        from swe.sessions.aggregator import _save_cached_sessions
+
+        fake = [Session(timestamp=1, agent="a", path="/a", title="secret plan",
+                        session_id="s1", tool_name="claude")]
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_file = Path(tmp) / "session_cache.json"
+            with patch("swe.sessions.aggregator.SESSION_CACHE_FILE", cache_file):
+                _save_cached_sessions(fake)
+            self.assertEqual(stat.S_IMODE(os.stat(cache_file).st_mode), 0o600)
+
     def test_cache_keeps_title_source_and_tolerates_old_payloads(self):
         import json
         from swe.sessions.aggregator import _save_cached_sessions, _load_cached_sessions
