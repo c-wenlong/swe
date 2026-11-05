@@ -25,7 +25,7 @@ const computePage = {
   limits: computeLimits(computeStoredJSON("limits", {})),
   collapsed: new Set(), showAll: new Set(), hover: null,
   // The settings sheet's hub write in flight and its last error.
-  acBusy: false, acError: null,
+  acBusy: false, acError: null, pendingAge: null,
 };
 
 const COMPUTE_VISIBLE_ROWS = 5;
@@ -51,8 +51,18 @@ function computeStoredJSON(key, fallback) {
  * minute to a year (a day by default). A bad stored value falls back. */
 function computeLimits(saved) {
   const gb = [1, 2, 4, 8].includes(Number(saved && saved.memoryGB)) ? Number(saved.memoryGB) : 2;
-  const age = Number(saved && saved.orphanAge);
+  // Whole seconds, as the hub keeps them: a fractional age would never
+  // match the hub's answer.
+  const age = Math.round(Number(saved && saved.orphanAge));
   return { memoryGB: gb, orphanAge: age > 0 ? Math.min(Math.max(age, 60), 365 * 86400) : 24 * 3600 };
+}
+
+/* After an auto clean write lands: the age to send next, or null. Only
+ * an age commitAge dropped while that write was out is owed, and only
+ * when the hub doesn't already hold it; this browser's own threshold is
+ * never pushed over another browser's choice. */
+function computeAgeFollowUp(pendingAge, savedAge) {
+  return pendingAge != null && pendingAge !== savedAge ? pendingAge : null;
 }
 
 function computeStore(key, value) {
@@ -861,10 +871,12 @@ function openComputeLimits() {
         // An age typed while the request was out never reached the hub
         // (commitAge drops its own write while busy), so send it now —
         // carrying the switches just saved, not the stale request's.
-        if (hasHub && p.limits.orphanAge !== data.autoclean.orphan_age_seconds) {
+        const owed = computeAgeFollowUp(p.pendingAge, data.autoclean.orphan_age_seconds);
+        p.pendingAge = null;
+        if (hasHub && owed != null) {
           postClean({ enabled: data.autoclean.enabled === true,
                       force: data.autoclean.force === true,
-                      orphan_age_seconds: p.limits.orphanAge }, refocus);
+                      orphan_age_seconds: owed }, refocus);
           return;
         }
       } else {
@@ -896,7 +908,8 @@ function openComputeLimits() {
   const commitAge = () => {
     const before = p.limits.orphanAge;
     const seconds = resolveAge();
-    if (!hasHub || seconds === before || p.acBusy) return;
+    if (!hasHub || seconds === before) return;
+    if (p.acBusy) { p.pendingAge = seconds; return; }
     const cur = ac();
     postClean({ enabled: cur.enabled === true, force: cur.force === true,
                 orphan_age_seconds: seconds });
