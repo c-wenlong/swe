@@ -215,5 +215,77 @@ class TestLoading(unittest.TestCase):
         self.assertEqual(cat.resolve("claude-opus-5", None)[0], "priced")
 
 
+    def test_a_running_download_never_blocks_a_read_or_a_save(self):
+        # The daily fetch can take its full socket timeout; a page load
+        # (download=False) and a price save meanwhile go ahead at once.
+        import threading
+
+        home = temp_dir(self)
+        started, release = threading.Event(), threading.Event()
+
+        class Slow:
+            def __enter__(self):
+                started.set()
+                release.wait(10)
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        with patch.object(pricing.urllib.request, "urlopen",
+                          return_value=Slow()):
+            fetch = threading.Thread(target=load_catalog, args=(home,))
+            fetch.start()
+            done = threading.Event()
+            seen = []
+
+            def others():
+                seen.append(load_catalog(home, download=False)
+                            .resolve("claude-opus-5", None)[0])
+                # A second download attempt returns instead of waiting.
+                load_catalog(home)
+                pricing.save_override(home, "my-model", {"input": 1,
+                                                         "output": 2})
+                done.set()
+
+            try:
+                self.assertTrue(started.wait(10))
+                threading.Thread(target=others).start()
+                # All three finish while the fetch is still parked.
+                self.assertTrue(done.wait(5))
+                self.assertFalse(release.is_set())
+                self.assertEqual(seen, ["priced"])
+            finally:
+                release.set()
+                fetch.join(10)
+                done.wait(10)
+        self.assertIn("my-model", load_catalog(home, download=False)
+                      .overrides)
+
+    def test_a_cut_short_download_is_remembered_as_tried(self):
+        import http.client
+
+        home = temp_dir(self)
+
+        class Cut:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                raise http.client.IncompleteRead(b"{")
+
+        with patch.object(pricing.urllib.request, "urlopen",
+                          return_value=Cut()) as fetch:
+            cat = load_catalog(home)
+            load_catalog(home)
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(cat.resolve("claude-opus-5", None)[0], "priced")
+
 if __name__ == "__main__":
     unittest.main()

@@ -71,6 +71,36 @@ class TestStatuspageParser(unittest.TestCase):
         self.assertEqual(incident.url, "https://stspg.io/sjkw7njwf0mt")
         self.assertFalse(incident.maintenance)
 
+    def test_non_finite_times_read_as_unknown(self):
+        # json.loads takes NaN, Infinity and 1e400; served back they
+        # break the page's JSON.parse, so they read as no time and the
+        # incident falls back to its next known one.
+        created = iso(json.loads(fixture("statuspage-claude"))
+                      ["incidents"][0]["created_at"])
+        for raw in ("NaN", "Infinity", "-Infinity", "1e400"):
+            feed = json.loads(fixture("statuspage-claude"))
+            feed["incidents"][0]["started_at"] = "__T__"
+            text = json.dumps(feed).replace('"__T__"', raw)
+            report = parsers.statuspage(text.encode())
+            self.assertAlmostEqual(report.incidents[0].started_at, created)
+            json.dumps(report.to_dict(), allow_nan=False)
+            # With no other time to fall back to, it is unknown.
+            feed["incidents"][0].pop("created_at")
+            text = json.dumps(feed).replace('"__T__"', raw)
+            report = parsers.statuspage(text.encode())
+            self.assertIsNone(report.incidents[0].started_at, raw)
+
+    def test_a_cached_non_finite_time_reads_as_unknown(self):
+        # A report cached before the parser refused NaN keeps being
+        # served on every 304, so the cache read cleans it too.
+        raw = {"id": "i", "name": "n", "impact": "major",
+               "started_at": float("nan"), "updated_at": float("inf")}
+        incident = parsers.Incident.from_dict(raw)
+        self.assertIsNone(incident.started_at)
+        self.assertIsNone(incident.updated_at)
+        raw["started_at"] = 1.5e9
+        self.assertEqual(parsers.Incident.from_dict(raw).started_at, 1.5e9)
+
     def test_incident_io_flavour(self):
         """OpenAI's page is incident.io serving the Statuspage shape, without
         `started_at`, incident components or a maintenance list."""
