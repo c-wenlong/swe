@@ -15,6 +15,8 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+from swe.console import strip_ansi
+
 
 # ── 1. `swe session use` on a file path ────────────────────────────
 
@@ -169,7 +171,7 @@ class DoctorHostilePathsTest(unittest.TestCase):
                 "capabilities": {
                     "skills": {
                         "supported": True,
-                        "root": "~quiver-no-such-user-392/data",
+                        "root": "~swe-no-such-user-392/data",
                     },
                 },
             },
@@ -481,8 +483,8 @@ class MissingUserExpansionTest(unittest.TestCase):
     def test_expand_user_leaves_missing_user_literal(self):
         from swe.paths import expand_user
 
-        out = expand_user("~quiver-no-such-user-392/x")
-        self.assertEqual(str(out), "~quiver-no-such-user-392/x")
+        out = expand_user("~swe-no-such-user-392/x")
+        self.assertEqual(str(out), "~swe-no-such-user-392/x")
 
     def test_expand_user_still_expands_own_home(self):
         from swe.paths import expand_user
@@ -498,7 +500,7 @@ class MissingUserExpansionTest(unittest.TestCase):
             providers_commands, "load_registry", return_value={}
         ), redirect_stdout(out):
             rc = providers_commands.cmd_list(
-                ["--api-keys-dir=~quiver-no-such-user-392/x"])
+                ["--api-keys-dir=~swe-no-such-user-392/x"])
         self.assertEqual(rc, 1)
         self.assertIn("Cannot expand --api-keys-dir", out.getvalue())
 
@@ -510,7 +512,7 @@ class MissingUserExpansionTest(unittest.TestCase):
         findings = check_registry_schema({
             "x": {"capabilities": {
                 "sessions": {"supported": True,
-                             "root": "~quiver-no-such-user-392/s"},
+                             "root": "~swe-no-such-user-392/s"},
             }},
         })
         self.assertTrue(
@@ -521,8 +523,8 @@ class MissingUserExpansionTest(unittest.TestCase):
     def test_resolve_project_root_keeps_missing_user_literal(self):
         from swe.sessions.query import resolve_project_root
 
-        got = resolve_project_root("~quiver-no-such-user-392/proj")
-        self.assertIn("quiver-no-such-user-392", got)
+        got = resolve_project_root("~swe-no-such-user-392/proj")
+        self.assertIn("swe-no-such-user-392", got)
 
 
 # ── 8. Guard-branch pin-down ───────────────────────────────────────
@@ -538,7 +540,7 @@ class PathGuardBranchesTest(unittest.TestCase):
         from swe.find import mcps as find_mcps
 
         view = find_mcps.ToolView(
-            name="claude", path="~quiver-no-such-user-392/x",
+            name="claude", path="~swe-no-such-user-392/x",
             present={"srv"})
         hub = find_mcps.HubView(servers={"srv": {"command": "echo"}})
         with mock.patch.object(find_mcps, "hub_view", return_value=hub), \
@@ -550,8 +552,12 @@ class PathGuardBranchesTest(unittest.TestCase):
                                   return_value={}), \
                 mock.patch.object(find_commands, "load_registry_if_present",
                                   return_value={}):
-            with redirect_stdout(io.StringIO()):
-                find_commands.cmd_find_mcps()   # must not raise
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = find_commands.cmd_find_mcps()
+        self.assertEqual(code, 0)
+        # The unexpandable path does not drop the harness from the count.
+        self.assertIn("1 up to date", strip_ansi(out.getvalue()))
 
     def test_doctor_preferred_npm_symlink_loop_falls_back(self):
         from types import SimpleNamespace
@@ -576,14 +582,14 @@ class PathGuardBranchesTest(unittest.TestCase):
             home = Path(tmp)
             bindir = home / ".npm-global" / "bin"
             bindir.mkdir(parents=True)
-            tool = bindir / "quiver-nosuch-cmd-392"
+            tool = bindir / "swe-nosuch-cmd-392"
             tool.write_text("#!/bin/sh\n")
             tool.chmod(0o755)
             with mock.patch.object(
                 Path, "resolve", side_effect=RuntimeError("loop")
             ):
                 hits = path_health.search_dirs_for_command(
-                    "quiver-nosuch-cmd-392", home)
+                    "swe-nosuch-cmd-392", home)
         self.assertEqual(hits, [])
 
     def test_mcp_registered_paths_missing_user(self):
@@ -591,7 +597,7 @@ class PathGuardBranchesTest(unittest.TestCase):
 
         with mock.patch.object(
             mcp_discover, "get_tool_config",
-            return_value={"path": "~quiver-no-such-user-392/x"},
+            return_value={"path": "~swe-no-such-user-392/x"},
         ):
             self.assertEqual(
                 mcp_discover._registered_paths(["claude"]), set())
@@ -607,7 +613,7 @@ class PathGuardBranchesTest(unittest.TestCase):
             providers_commands, "resolve", return_value="openai",
         ), redirect_stdout(out):
             rc = providers_commands.cmd_info(
-                ["openai", "--api-keys-dir=~quiver-no-such-user-392/x"])
+                ["openai", "--api-keys-dir=~swe-no-such-user-392/x"])
         self.assertEqual(rc, 1)
         self.assertIn("Cannot expand --api-keys-dir", out.getvalue())
 
@@ -638,13 +644,18 @@ class PathGuardBranchesTest(unittest.TestCase):
         from swe.skills import catalog_discover
 
         with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp) / "catalog"
+            real.mkdir()
             with mock.patch.object(
                 catalog_discover, "load_skill_catalogs",
-                return_value=[{"label": "x"}],   # no "path" key
-            ):
+                return_value=[{"label": "x"},   # no "path" key
+                              {"label": "y", "path": str(real)}],
+            ), mock.patch("swe.skills.discovery.skill_roots",
+                          return_value=[]):
                 known = catalog_discover._known_root_paths(
                     Path(tmp), Path(tmp))
-        self.assertIsInstance(known, set)
+            # The pathless entry is skipped; the next one still counts.
+            self.assertEqual(known, {real.resolve()})
 
     def test_skill_layout_survives_looping_link_target(self):
         from swe.skills.layout import enumerate_skill_roots
@@ -679,23 +690,30 @@ class ReportGuardBranchesTest(unittest.TestCase):
         from swe.reports.runners import _stdout_error_detail
 
         # Neither the blob nor any reversed line parses as JSON.
-        out = _stdout_error_detail("{not json at all")
-        self.assertIsInstance(out, str)
+        self.assertEqual(_stdout_error_detail("{not json at all"), "")
+        # The scan reads from the last line up: a corrupt trailing line
+        # is skipped, not fatal, and the earlier error record still found.
+        self.assertEqual(_stdout_error_detail(
+            '{"is_error": true, "result": "boom"}\n{not json'), "boom")
 
     def test_tool_message_keeps_undecodable_arguments(self):
         from swe.reports.transcripts import _tool_message
 
         msg = _tool_message("runner", "{not json")
-        self.assertIsNotNone(msg)
+        self.assertEqual((msg.role, msg.kind, msg.text),
+                         ("tool", "tool", "runner: {not json"))
 
     def test_read_jsonl_skips_corrupt_lines(self):
         from swe.reports.transcripts import _read_jsonl
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "t.jsonl"
-            path.write_text("{bad\n{}\n")
+            path.write_text(
+                '{bad\n{}\n'
+                '{"type": "user", "message": {"role": "user", "content": "hi"}}\n')
             msgs = _read_jsonl(path)
-        self.assertIsInstance(msgs, list)
+        # The corrupt and empty lines are dropped; the real one survives.
+        self.assertEqual([(m.role, m.text) for m in msgs], [("human", "hi")])
 
     def test_cline_reader_survives_corrupt_history_file(self):
         from swe.reports import transcripts
