@@ -371,8 +371,10 @@ class TestChatContract(unittest.TestCase):
         self.emit("approval.requested", {"request_id": "r1", "prompt": "Run tests?"})
         status, data = self.srv.request(
             "GET", "/v1/sessions/claude%3As1/messages?limit=500", headers=self.hdr)
+        self.assertEqual(status, 200, data)
         messages = json.loads(data)["messages"]
         status, data = self.srv.request("GET", "/v1/sessions", headers=self.hdr)
+        self.assertEqual(status, 200, data)
         row = next(r for r in json.loads(data)["sessions"] if r["key"] == self.key)
         self.assertEqual((row["ownership"], row["attachable"]), ("attached", True))
         self.assertEqual([m["data"]["kind"] for m in messages], ["user", "assistant"])
@@ -438,14 +440,15 @@ class TestChatContract(unittest.TestCase):
         from swe.remote import catalog as catalog_mod
         whole = json.loads(self.srv.request("GET", "/v1/sessions", headers=self.hdr)[1])
         row = next(r for r in whole["sessions"] if r["key"] == self.key)
+        # The row names its machine, so the answer has exactly one to give.
+        self.assertTrue(row.get("machine_id"), row)
         catalog_mod.upsert_machine(self.srv.state.home, {"id": "elsewhere", "name": "Other"})
-        if row.get("machine_id"):
-            catalog_mod.upsert_machine(self.srv.state.home, {"id": row["machine_id"], "name": "Here"})
+        catalog_mod.upsert_machine(self.srv.state.home, {"id": row["machine_id"], "name": "Here"})
         status, data = self.srv.request("GET", "/v1/sessions?key=claude%3As1", headers=self.hdr)
         self.assertEqual(status, 200)
         one = json.loads(data)
         self.assertEqual(one["sessions"], [row])
-        self.assertEqual([m["id"] for m in one["machines"]], [row["machine_id"]] if row.get("machine_id") else [])
+        self.assertEqual([(m["id"], m["name"]) for m in one["machines"]], [(row["machine_id"], "Here")])
         self.assertIn("server_time", one)
         status, data = self.srv.request("GET", "/v1/sessions?key=claude%3Anope", headers=self.hdr)
         self.assertEqual((status, json.loads(data)["error"]["code"]), (404, "unknown_session"))

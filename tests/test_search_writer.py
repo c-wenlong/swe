@@ -534,7 +534,7 @@ class ReviewFixTests(_Home):
     def test_bad_text_and_deep_nesting_never_stop_a_pass(self):
         self.write(self.projects / "a.jsonl",
                    '{"type":"user","sessionId":"s","message":{"content":"bad \\ud800 surrogate"}}\n'
-                   + '{"type":"user",' + '"x":' * 0 + '"a":' + "[" * 100000 + "]" * 100000 + "}\n")
+                   + '{"type":"user","a":' + "[" * 100000 + "]" * 100000 + "}\n")
         self.write(self.projects / "b.jsonl", claude_line("user", "fine", session="s2"))
         result = self.run_pass()
         self.assertEqual((result.indexed, result.failed), (2, 0))
