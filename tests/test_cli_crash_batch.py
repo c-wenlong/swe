@@ -673,10 +673,10 @@ class ReportGuardBranchesTest(unittest.TestCase):
 
         # Neither the blob nor any reversed line parses as JSON.
         self.assertEqual(_stdout_error_detail("{not json at all"), "")
-        # An undecodable line is skipped, not fatal: the error record
-        # after it is still found.
+        # The scan reads from the last line up: a corrupt trailing line
+        # is skipped, not fatal, and the earlier error record still found.
         self.assertEqual(_stdout_error_detail(
-            '{not json\n{"is_error": true, "result": "boom"}'), "boom")
+            '{"is_error": true, "result": "boom"}\n{not json'), "boom")
 
     def test_tool_message_keeps_undecodable_arguments(self):
         from swe.reports.transcripts import _tool_message
