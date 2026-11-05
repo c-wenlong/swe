@@ -151,7 +151,7 @@ enum DatabaseSources {
     /// an id that has a slash itself, like OpenRouter's
     /// `nvidia/nemotron-...`, keeps it), the bare id when no provider is
     /// recorded. Pricing strips the prefix again (`PricingCatalog.forms`).
-    /// Keep in step with `opencode_model` in `quiver/ledger/parsers.py`.
+    /// Keep in step with `opencode_model` in `src/swe/ledger/parsers.py`.
     static func openCodeModel(provider: String?, id: String?) -> String {
         guard let id else { return "unknown" }
         guard let provider, !provider.isEmpty, !id.isEmpty else { return id }

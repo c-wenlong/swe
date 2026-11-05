@@ -1005,5 +1005,24 @@ const shape = (n) => n.nodeType === 3 ? n.nodeValue
         self.assertEqual(out, {"parsed": 2, "shape": ["DIV", {}, "other"]})
 
 
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestAutoCleanAge(unittest.TestCase):
+    """The settings sheet sends the hub an orphan age only when someone
+    typed one: flipping a switch never pushes this browser's own stored
+    age over the hub's, and a stored age is whole seconds."""
+
+    def test_only_an_owed_age_follows_a_write(self):
+        js = Path(__file__).resolve().parents[1] / "src/swe/webapp/static/pages/compute.js"
+        script = (app_js_function("computeLimits", js) + app_js_function("computeAgeFollowUp", js)
+                  + "process.stdout.write(JSON.stringify(["
+                  "computeAgeFollowUp(null, 7200), computeAgeFollowUp(7200, 7200),"
+                  "computeAgeFollowUp(86400, 7200), computeLimits({ orphanAge: 90.5 }).orphanAge,"
+                  "computeLimits({}).orphanAge]));")
+        done = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout), [None, None, 86400, 91, 86400])
+
+
 if __name__ == "__main__":
     unittest.main()
