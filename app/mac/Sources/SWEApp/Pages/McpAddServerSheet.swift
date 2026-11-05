@@ -331,25 +331,15 @@ struct McpAddServerSheet: View {
             // with the values filled in.
             var values = stored.map { (mcpSecretName(server: name, key: $0.key), $0.value) }
             if bearer { values.append((tokenRef, token.trimmingCharacters(in: .whitespaces))) }
-            // Names this add stored for the first time, so a failed add
-            // removes them again instead of leaving them in the store.
-            var created: [String] = []
-            do {
-                for (secret, value) in values {
-                    let result = try await app.swe.mcpSecretSet(name: secret, value: value)
-                    if result.replaced == false { created.append(secret) }
-                }
-                _ = try await app.swe.mcpAdd(spec, to: picked.sorted(), force: force)
-            } catch {
-                // swe saves the hub before the harness files, so once the
-                // hub holds the server its ${NAME}s must keep their values.
-                // A list that can't be read keeps them too.
-                let hub = try? await app.swe.mcpServers(health: false)
-                if let hub, !hub.servers.contains(where: { $0.name == name && $0.inHub }) {
-                    for secret in created { _ = try? await app.swe.mcpSecretRemove(name: secret) }
-                }
-                throw error
-            }
+            let swe = app.swe
+            try await McpAddCommit(
+                setSecret: { try await swe.mcpSecretSet(name: $0, value: $1).replaced },
+                add: { _ = try await swe.mcpAdd(spec, to: picked.sorted(), force: force) },
+                hubEntry: { [name] in
+                    try await swe.mcpServers(health: false).servers.first { $0.name == name && $0.inHub }
+                },
+                removeSecret: { _ = try? await swe.mcpSecretRemove(name: $0) }
+            ).run(values: values)
             // Kept until the add lands, so a refused one can be retried
             // without typing the token again.
             token = ""
@@ -358,6 +348,46 @@ struct McpAddServerSheet: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+}
+
+/// Stores an add's secrets, then runs the add. When the add fails, the
+/// secrets it stored for the first time are removed again, but only while
+/// the hub's entry for the server is what it was before: swe saves the hub
+/// before the harness files, so a hub that changed now refers to those
+/// `${NAME}`s and must keep their values. A hub that can't be read, before
+/// or after, keeps them too. A value that replaced an older one stays
+/// replaced; swe has no way to read the old value back.
+@MainActor
+struct McpAddCommit {
+    /// Stores one value; answers whether it replaced one (nil: unknown).
+    var setSecret: (_ name: String, _ value: String) async throws -> Bool?
+    var add: () async throws -> Void
+    /// The hub's entry for the server being added, nil when it has none.
+    var hubEntry: () async throws -> McpServer?
+    var removeSecret: (_ name: String) async -> Void
+
+    func run(values: [(String, String)]) async throws {
+        // No values, nothing to take back: skip the extra hub read.
+        let before: McpServer?? = values.isEmpty ? .none : await snapshot()
+        var created: [String] = []
+        do {
+            for (secret, value) in values {
+                if try await setSecret(secret, value) == false { created.append(secret) }
+            }
+            try await add()
+        } catch {
+            if !created.isEmpty, case .some(let was) = before,
+               case .some(let now) = await snapshot(), now == was {
+                for secret in created { await removeSecret(secret) }
+            }
+            throw error
+        }
+    }
+
+    /// `.some(entry)` when the hub could be read, `.none` when it couldn't.
+    private func snapshot() async -> McpServer?? {
+        do { return .some(try await hubEntry()) } catch { return .none }
     }
 }
 
