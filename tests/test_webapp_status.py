@@ -20,6 +20,7 @@ import time
 import unittest
 import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from swe.status import catalog, catalogue, parsers, poller, tracked
@@ -236,6 +237,8 @@ class FakeTransport:
         self.requests = []
         self.clock, self.advance = clock, advance
         self.gate = None
+        # Set as a request comes in, before it waits at the gate.
+        self.entered = threading.Event()
 
     def reply(self, status, body=b"", headers=None):
         self.replies.append(poller.Response(status, body, headers or {}))
@@ -245,6 +248,7 @@ class FakeTransport:
 
     def __call__(self, url, headers, timeout):
         self.requests.append((url, dict(headers), timeout))
+        self.entered.set()
         if self.gate is not None:
             self.gate.wait(5)
         if self.clock is not None:
@@ -417,8 +421,7 @@ class TestPoller(PollerBase):
         results = {}
         first = threading.Thread(target=lambda: results.update(a=self.one(p, "github")))
         first.start()
-        while not self.transport.requests:
-            time.sleep(0.01)
+        self.assertTrue(self.transport.entered.wait(5), "the first call never asked")
         second = threading.Thread(target=lambda: results.update(b=self.one(p, "github", force=True)))
         second.start()
         self.transport.gate.set()
@@ -431,17 +434,15 @@ class TestPoller(PollerBase):
     def test_a_slow_page_does_not_hold_the_answer(self):
         self.transport.reply(200, fixture("statuspage-github"))
         self.transport.gate = threading.Event()
-        p = self.make(wait=0.2)
-        started = time.monotonic()
+        # No wait at all: the answer comes back while the request is still
+        # held at the gate, so it can only have left without the reading.
+        p = self.make(wait=0)
         waiting = self.one(p, "github")
-        self.assertLess(time.monotonic() - started, 2)
         self.assertIsNone(waiting.report)
         # It finishes in the background and the next load has it.
+        flight = p._in_flight["github"]
         self.transport.gate.set()
-        for _ in range(100):
-            if p.cached([catalog.service("github")])[0].report is not None:
-                break
-            time.sleep(0.02)
+        self.assertTrue(flight.done.wait(5), "the request never finished")
         self.assertEqual(p.cached([catalog.service("github")])[0].report.health, Health.OPERATIONAL)
         self.assertEqual(len(self.transport.requests), 1)
 
@@ -551,15 +552,22 @@ class TestHttpGet(unittest.TestCase):
         self.assertEqual(response.status, 304)
 
     def test_a_trickling_feed_gives_up(self):
+        # A clock that moves one second per chunk read: a 1 s timeout
+        # bounds the whole download to DOWNLOAD_LIMIT_FACTOR seconds, so
+        # the read stops after that many chunks, not at MAX_BODY.
+        clock = Clock(now=0.0)
+        reads = []
+
         class Trickle(_Resp):
             def read(self, limit=-1):
-                time.sleep(0.02)
-                return b"x"
-        with patch("urllib.request.urlopen", return_value=Trickle(b"")):
-            started = time.monotonic()
-            with self.assertRaises(OSError):
-                poller.http_get("https://example.test/", {}, 0.1)
-        self.assertLess(time.monotonic() - started, 2)
+                reads.append(limit)
+                clock.now += 1
+                return b"x" * 1024
+        with patch.object(poller, "time", SimpleNamespace(monotonic=clock)), \
+                patch("urllib.request.urlopen", return_value=Trickle(b"")):
+            with self.assertRaises(TimeoutError):
+                poller.http_get("https://example.test/", {}, 1)
+        self.assertEqual(len(reads), poller.DOWNLOAD_LIMIT_FACTOR + 1)
 
     def test_reads_a_body_in_chunks(self):
         class Chunks(_Resp):
@@ -766,15 +774,12 @@ class TestPollerForget(PollerBase):
         """An answer already in flight when the page is removed is dropped."""
         self.transport.reply(200, fixture("statuspage-github"))
         self.transport.gate = threading.Event()
-        p = self.make(wait=0.2)
+        p = self.make(wait=0)
         self.one(p, "github")  # leaves the flight running in the background
+        flight = p._in_flight["github"]
         p.forget("github")
         self.transport.gate.set()
-        for _ in range(50):
-            if self.transport.gate.is_set() and len(self.transport.requests) == 1:
-                break
-            time.sleep(0.01)
-        time.sleep(0.05)  # let the landing attempt run
+        self.assertTrue(flight.done.wait(5), "the landing attempt never ran")
         self.assertIsNone(p.cached([catalog.service("github")])[0].report)
         saved = json.loads((self.dir / "web-service-status.json").read_text())
         self.assertIsInstance(saved["services"]["github"]["removed_at"], float)
@@ -785,15 +790,13 @@ class TestPollerForget(PollerBase):
         in that poller's own reads."""
         self.transport.reply(200, fixture("statuspage-github"))
         self.transport.gate = threading.Event()
-        other = self.make(wait=0.2)  # another hub, same cache file
+        other = self.make(wait=0)  # another hub, same cache file
         self.one(other, "github")  # its flight starts, held at the gate
+        flight = other._in_flight["github"]
         p = self.make()
         p.forget("github")
         self.transport.gate.set()
-        for _ in range(100):
-            if "github" not in other._in_flight:  # the landing ran
-                break
-            time.sleep(0.01)
+        self.assertTrue(flight.done.wait(5), "the landing never ran")
         self.assertIsNone(p.cached([catalog.service("github")])[0].report)
         self.assertIsNone(other.cached([catalog.service("github")])[0].report)
         saved = json.loads((self.dir / "web-service-status.json").read_text())

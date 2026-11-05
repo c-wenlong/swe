@@ -1003,13 +1003,13 @@ class TestLaunchModelMenu(unittest.TestCase):
         self.assertTrue(out["yoloFlipOff"],
                         "a folder re-defaulting to a non-yolo harness turns the box off")
         self.assertTrue(out["folderNodeKeptOff"],
-                        "the folder input is rebuilt on a model-row flip, so focus is lost")
+                        "a model-row flip keeps the folder input, so typing in it keeps focus")
         self.assertEqual(out["flipShowsRow"], "opus",
                          "a folder re-defaulting back re-fills the row")
         self.assertTrue(out["yoloFlipOn"],
                         "a folder re-defaulting to a yolo harness ticks the box again")
         self.assertTrue(out["folderNodeKeptOn"],
-                        "the folder input is rebuilt when the row returns, so focus is lost")
+                        "the model row coming back keeps the folder input, so typing in it keeps focus")
         self.assertTrue(out["typedFlipHides"], "/tmp/gem flips the harness to gemini")
         self.assertEqual(out["typedFlipBack"], "sonnet",
                          "typing on past /tmp/gem brings claude and the pick back")
