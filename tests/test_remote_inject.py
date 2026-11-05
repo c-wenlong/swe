@@ -974,10 +974,6 @@ class TestHubWrites(unittest.TestCase):
         self.assertIn("shot.png", sent)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestAttachmentCapability(unittest.TestCase):
     """``capabilities.attachments`` over ``ATTACH_FALLBACK``."""
 
@@ -1045,3 +1041,7 @@ class TestAttachmentCapability(unittest.TestCase):
         with patch.object(registry, "load_registry_readonly",
                           side_effect=ValueError):
             self.assertTrue(attachments.at_refs("claude"))
+
+
+if __name__ == "__main__":
+    unittest.main()

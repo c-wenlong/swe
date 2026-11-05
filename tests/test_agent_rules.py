@@ -6,9 +6,12 @@ paragraph (#751). This file holds the ones that need nothing but the repo:
 - the full suite runs against a throwaway HOME, because integration tests
   spawn ``swe`` and write registries and caches into whatever HOME they get;
 - AGENTS.md stays small, since every session loads it, and every relative
-  link in it resolves, since its reference material lives in the docs.
+  link in it resolves, since its reference material lives in the docs;
+- a test module's ``if __name__ == "__main__"`` guard is its last
+  statement, since running the file directly skips every class below it.
 """
 
+import ast
 import os
 import pathlib
 import re
@@ -85,6 +88,33 @@ class AgentsMdTest(unittest.TestCase):
             elif anchor and path.suffix == ".md" and anchor not in _anchors(path):
                 broken.append(target)
         self.assertEqual(broken, [], "AGENTS.md links to missing files or headings")
+
+
+def _is_main_guard(node: ast.stmt) -> bool:
+    test = getattr(node, "test", None)
+    return (
+        isinstance(node, ast.If)
+        and isinstance(test, ast.Compare)
+        and isinstance(test.left, ast.Name)
+        and test.left.id == "__name__"
+    )
+
+
+class MainGuardLastTest(unittest.TestCase):
+    def test_main_guard_is_the_last_statement(self):
+        misplaced = []
+        for path in sorted((ROOT / "tests").rglob("test_*.py")):
+            body = ast.parse(path.read_text(), filename=str(path)).body
+            guards = [i for i, node in enumerate(body) if _is_main_guard(node)]
+            if guards and guards != [len(body) - 1]:
+                misplaced.append(str(path.relative_to(ROOT)))
+        self.assertEqual(
+            misplaced, [],
+            "these test modules have code after their "
+            "`if __name__ == \"__main__\"` guard, or more than one guard, "
+            "so running the file directly skips it. Move the guard to the "
+            "end of the file.",
+        )
 
 
 if __name__ == "__main__":
