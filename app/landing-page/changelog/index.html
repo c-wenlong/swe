@@ -147,6 +147,11 @@ but the notification tokens were retired only by exact request id, so
 the buttons of the cleared prompts stayed spendable until they expired
 and could answer the next prompt on the session.</p>
 </li>
+<li><p><strong>An opencode approval's request id can no longer reach another serve
+route.</strong> The hub put the client's request id into the opencode serve
+URL as typed, so an id like <code>../../&lt;session&gt;/abort</code> posted to a
+different route; ids and session ids are now one quoted path segment.</p>
+</li>
 <li><p><strong>A wildcard hub bind no longer turns off the Host check, and a
 second <code>swe remote serve</code> on a taken port no longer disturbs the
 running hub.</strong> <code>--host=0.0.0.0 --unsafe-bind-any</code> left the hub's
