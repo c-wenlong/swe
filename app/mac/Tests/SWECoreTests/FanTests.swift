@@ -1137,6 +1137,21 @@ import Testing
         #expect(FanControlFile.request(at: url) == nil)
     }
 
+    /// Off picked while the install prompt is still up wins: the enable
+    /// finishing afterwards must not switch the rule back on.
+    @MainActor @Test func switchingTheThresholdOffDuringTheInstallPromptWins() async {
+        let installer = FakeInstaller()
+        let (fans, _) = control(FakeSMC.twoFans(), installer: installer)
+        installer.duringInstall = { fans.thresholdEnabled = false }
+        await fans.enableThreshold()
+        #expect(installer.installs == 1)
+        #expect(!fans.thresholdEnabled)
+        // A later enable, with nothing in its way, still switches it on.
+        installer.duringInstall = nil
+        await fans.enableThreshold()
+        #expect(fans.thresholdEnabled)
+    }
+
     @MainActor @Test func switchingTheThresholdOffWhileHoldingHandsTheFansBack() async {
         let (fans, url, _) = await installedControl()
         fans.thresholdEnabled = true
@@ -1515,9 +1530,13 @@ import Testing
         var lastControl: URL?
         var error: FanHelperInstallError?
 
+        /// Runs while the install "prompt" is up.
+        var duringInstall: (@MainActor () async -> Void)?
+
         func install(executable: String, control: URL) async throws {
             installs += 1
             lastControl = control
+            await duringInstall?()
             if let error { throw error }
             installed.value = true
             outdated.value = false
