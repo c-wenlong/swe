@@ -11,11 +11,6 @@ private func inbox(_ key: String, status: String, at: Double, github: Bool = fal
               status: status, lastActiveAt: at, requestId: nil, kind: github ? "github" : nil)
 }
 
-private func hub(_ host: String = "mac.tail.ts.net") -> PairedHub {
-    PairedHub(baseURL: URL(string: "http://\(host):8477")!,
-              credential: Credential(deviceId: "d", credential: "c", name: nil))
-}
-
 private extension XCTestCase {
     /// A snapshot store in its own temp folder, removed when the test ends.
     func tempStore() -> WidgetSnapshotStore {

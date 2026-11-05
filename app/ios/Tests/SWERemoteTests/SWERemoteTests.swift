@@ -349,10 +349,6 @@ final class GroupingTests: XCTestCase {
 
 @MainActor
 final class ChatModelTests: XCTestCase {
-    private func env(_ json: String) -> Envelope {
-        try! Hub.decoder.decode(Envelope.self, from: Data(json.utf8))
-    }
-
     func testToolResultMergesIntoCallAndDuplicatesAreDropped() {
         let chat = ChatModel(key: "claude:1", app: AppModel(hub: nil))
         let use = env(#"{"type":"message.appended","seq":1,"data":{"kind":"tool_use","text":"","tool":{"name":"Bash","call_id":"t1","args_summary":"Bash · ls"}}}"#)
