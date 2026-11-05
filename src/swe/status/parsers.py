@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -60,8 +61,9 @@ class Incident:
         if impact is None or not isinstance(raw.get("id"), str) or not isinstance(raw.get("name"), str):
             return None
         return cls(id=raw["id"], name=raw["name"], impact=impact, stage=raw.get("stage"),
-                   started_at=raw.get("started_at"), latest_update=raw.get("latest_update"),
-                   updated_at=raw.get("updated_at"), url=raw.get("url"),
+                   started_at=_cached_time(raw.get("started_at")),
+                   latest_update=raw.get("latest_update"),
+                   updated_at=_cached_time(raw.get("updated_at")), url=raw.get("url"),
                    maintenance=bool(raw.get("maintenance")))
 
 
@@ -131,7 +133,21 @@ def _date(value: Any) -> float | None:
         return parsed.timestamp() if parsed.tzinfo is not None else None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
+    # json.loads reads NaN, Infinity and 1e400 (inf); served back they
+    # break the client's JSON.parse. Swift's JSONSerialization refuses
+    # them when it reads the feed, so this matches it.
+    if not math.isfinite(value):
+        return None
     return float(value) / 1000 if value > 100_000_000_000 else float(value)
+
+
+def _cached_time(value: Any) -> float | None:
+    """A time read back from the report cache: a finite number, else
+    None. A report cached before ``_date`` refused NaN would otherwise
+    keep serving it on every 304."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
 
 
 def _first(*values: float | None) -> float | None:
