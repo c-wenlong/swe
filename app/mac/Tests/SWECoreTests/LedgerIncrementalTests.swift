@@ -180,6 +180,64 @@ func claudeLine(
         await #expect(throws: CancellationError.self) { try await task.value }
     }
 
+    /// Makes the ledger's own store refuse any event with `output` 666, the
+    /// way a full disk or a corrupt page fails a write partway through a
+    /// file: the lines before it were already upserted in the same
+    /// transaction.
+    private func refuseOutput666(_ s: Setup) throws -> SQLiteDatabase {
+        let db = try SQLiteDatabase(url: s.temp.path("cache").appending(path: LedgerLocation.fileName))
+        try db.execute("""
+            CREATE TRIGGER refuse BEFORE INSERT ON events WHEN NEW.output = 666
+            BEGIN SELECT RAISE(ABORT, 'refused by the test'); END
+            """)
+        return db
+    }
+
+    /// A store failure mid-file throws, and rolls the whole file back: no
+    /// line of it counts, its cursor stays where it was, and the ledger is
+    /// left with no transaction open, so the next scan reads the file
+    /// again from that cursor and counts every line exactly once.
+    @Test func aStoreFailureMidFileRollsTheWholeFileBack() async throws {
+        let s = try Setup()
+        try s.write(claudeLine(message: "m1"))
+        try await s.ledger.scan(roots: s.roots)
+        #expect(await s.total() == 11)
+
+        let db = try refuseOutput666(s)
+        try s.append(claudeLine(message: "m2") + claudeLine(message: "m3", output: 665)
+                     + claudeLine(message: "m4", output: 666))
+        do {
+            try await s.ledger.scan(roots: s.roots)
+            Issue.record("a refused write must fail the scan")
+        } catch let failure as SQLiteDatabase.Failure {
+            #expect(failure.message.contains("refused by the test"))
+        }
+        // m2 and m3 were written before m4 failed; none of them stays.
+        #expect(await s.total() == 11)
+
+        try db.execute("DROP TRIGGER refuse")
+        let report = try await s.ledger.scan(roots: s.roots)
+        // Resumed from the old cursor: an append, not a rescan.
+        #expect(report.filesRead == 1)
+        #expect(report.filesRescanned == 0)
+        #expect(await s.total() == 11 + 11 + 666 + 667)
+    }
+
+    /// The same on a file's first read: nothing of it lands, and with no
+    /// cursor saved the retry reads it whole.
+    @Test func aStoreFailureOnAFirstReadLeavesNoCursor() async throws {
+        let s = try Setup()
+        let db = try refuseOutput666(s)
+        try s.write(claudeLine(message: "m1") + claudeLine(message: "m2", output: 666))
+        await #expect(throws: SQLiteDatabase.Failure.self) { try await s.ledger.scan(roots: s.roots) }
+        #expect(await s.total() == 0)
+        try db.execute("DROP TRIGGER refuse")
+        let report = try await s.ledger.scan(roots: s.roots)
+        #expect(report.filesRead == 1)
+        #expect(report.filesUnchanged == 0)
+        #expect(await s.total() == 11 + 667)
+    }
+
     /// A rewrite that preserves size and mtime still moves ctime, which the
     /// unchanged check now compares.
     @Test func aMetadataPreservedRewriteIsCaughtByTheChangeTime() async throws {
