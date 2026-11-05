@@ -193,21 +193,26 @@ public final class ProfileStore: @unchecked Sendable {
     /// directory means nothing without its entry in the store. A default
     /// profile is the vendor's own login and is never removed.
     public func remove(id: String) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        let held = try FileLock(at: lockFile())
-        defer { held.release() }
-        var profiles = try loadLocked()
-        guard let index = profiles.firstIndex(where: { $0.id == id }) else { throw ProfileStoreError.notFound(id) }
-        let profile = profiles[index]
-        guard !profile.isDefault else { throw ProfileStoreError.cannotRemoveDefault }
+        let directory: URL = try {
+            lock.lock()
+            defer { lock.unlock() }
+            let held = try FileLock(at: lockFile())
+            defer { held.release() }
+            var profiles = try loadLocked()
+            guard let index = profiles.firstIndex(where: { $0.id == id }) else { throw ProfileStoreError.notFound(id) }
+            let profile = profiles[index]
+            guard !profile.isDefault else { throw ProfileStoreError.cannotRemoveDefault }
 
-        // The entry goes first. If deleting the directory then fails, the
-        // leftover is never adopted by a new profile (see `add`).
-        profiles.remove(at: index)
-        try save(profiles, retired: retiredIds() + [profile.id])
-        let directory = root.appendingPathComponent(profile.vendor.rawValue, isDirectory: true)
-            .appendingPathComponent(profile.id, isDirectory: true)
+            // The entry goes first. If deleting the directory then fails, the
+            // leftover is never adopted by a new profile (see `add`).
+            profiles.remove(at: index)
+            try save(profiles, retired: retiredIds() + [profile.id])
+            return root.appendingPathComponent(profile.vendor.rawValue, isDirectory: true)
+                .appendingPathComponent(profile.id, isDirectory: true)
+        }()
+        // Outside the locks: the folder can hold a whole Chromium profile
+        // and take seconds to delete, and every load, add and rename waits
+        // on the lock. The id is retired, so nothing adopts it meanwhile.
         try FileManager.default.removeItem(at: directory)
     }
 
