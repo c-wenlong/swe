@@ -771,6 +771,12 @@ def pending_approval(key: str) -> str | None:
     return entry[0] if entry else None
 
 
+def pending_entry(key: str) -> tuple[str, str | None] | None:
+    """``(request_id, fingerprint)`` of the outstanding prompt, read as
+    one value so a reply can tell whether it changed meanwhile."""
+    return _PENDING_APPROVALS.get(key)
+
+
 def pending_approval_fp(key: str) -> str | None:
     entry = _PENDING_APPROVALS.get(key)
     return entry[1] if entry else None

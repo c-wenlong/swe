@@ -388,20 +388,61 @@ class TestTmuxInjector(unittest.TestCase):
     def test_a_steered_message_waits_for_an_approval_walk(self):
         # The walk and send_text share one pane lock: text typed
         # between the arrow keys would land in the menu.
-        lock = supervise._pane_lock(self.inj.name)
-        typed = []
-        with patch.object(supervise, "_tmux",
-                          side_effect=lambda *a: typed.append(a) or
-                          MagicMock(returncode=0)):
-            with lock:
-                t = threading.Thread(target=supervise.send_text,
+        first_key, release = threading.Event(), threading.Event()
+        order = []
+
+        def key(_name, k):
+            order.append(k)
+            if len(order) == 1:
+                first_key.set()
+                release.wait(5)
+            return True
+
+        def tmux(*args):
+            order.append("text")
+            return MagicMock(returncode=0)
+
+        with patch.object(supervise, "capture_pane",
+                          return_value=self.DEVIN_QUESTION), \
+                patch.object(supervise, "send_key", side_effect=key), \
+                patch.object(supervise, "_tmux", side_effect=tmux):
+            walk = threading.Thread(target=self.inj.approval,
+                                    args=(self.session, "r1", "2"))
+            walk.start()
+            self.assertTrue(first_key.wait(5))
+            steer = threading.Thread(target=supervise.send_text,
                                      args=(self.inj.name, "hi"))
-                t.start()
-                t.join(0.2)
-                self.assertTrue(t.is_alive())
-                self.assertEqual(typed, [])
-            t.join(2)
-        self.assertEqual(len(typed), 2)
+            steer.start()
+            steer.join(0.2)
+            self.assertTrue(steer.is_alive())  # parked behind the walk
+            release.set()
+            walk.join(5)
+            steer.join(5)
+        self.assertEqual(order, ["Down", "Enter", "text", "text"])
+
+    def test_a_reply_in_flight_stops_when_the_prompt_changes(self):
+        # The id passed its checks for prompt A, then the watcher named
+        # prompt B while the pane was captured: A's answer must not go.
+        key = self.key
+        pane_b = "Do you want to run rm -rf?\n1. Yes\n2. No"
+        supervise.set_pending_approval(key, "req-a", None)
+
+        def capture(_name):
+            supervise.set_pending_approval(
+                key, "req-b", supervise.approval_fingerprint(pane_b))
+            return pane_b
+
+        try:
+            with patch.object(supervise, "capture_pane",
+                              side_effect=capture), \
+                    patch.object(supervise, "send_key") as sk:
+                out = self.inj.approval(self.session, "req-a", "allow")
+            self.assertFalse(out.ok)
+            self.assertIn("changed", out.note)
+            sk.assert_not_called()
+        finally:
+            supervise.set_pending_approval(key, None)
+            supervise._RETIRED_APPROVALS.pop(key, None)
 
     def test_interrupt_escape(self):
         with patch.object(supervise, "send_key", return_value=True) as sk:
