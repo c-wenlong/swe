@@ -339,6 +339,22 @@ class SkillsCatalogRegistryEdgeTest(unittest.TestCase):
                          ["notes", "team"])
         self.assertEqual(desktop, Path(load_skill_catalogs()[1]["path"]))
 
+    def test_a_home_reached_through_a_link_still_labels_its_finds(self):
+        # Discovery hands back resolved paths; with the home itself behind
+        # a link (macOS /var, /home -> /usr/home) they only sit under it
+        # once it is resolved too.
+        real_home = self.home / "real-home"
+        (real_home / "Desktop" / "team" / "skills" / "a").mkdir(parents=True)
+        (real_home / "Desktop" / "team" / "skills" / "a" / "SKILL.md").write_text("x")
+        (real_home / "Documents" / "notes" / "skills" / "b").mkdir(parents=True)
+        (real_home / "Documents" / "notes" / "skills" / "b" / "SKILL.md").write_text("x")
+        linked_home = self.home / "linked-home"
+        linked_home.symlink_to(real_home)
+        found = discover_skill_catalogs(home=linked_home, cwd=linked_home)
+        self.assertEqual(sorted((f.label, f.source) for f in found),
+                         [("notes", "documents"), ("team", "desktop")])
+        self.assertTrue(all(f.path.is_relative_to(real_home.resolve()) for f in found))
+
     def test_a_catalog_outside_home_is_labelled_catalog(self):
         from swe.skills.catalog_discover import _source_for_path
 
