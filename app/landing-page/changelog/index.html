@@ -113,7 +113,19 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a><a href="https://github.com/c-wenlong/swe/compare/v1.2.2...HEAD">Unreleased</a></h2>
 <h3 id="security"><a class="anchor" href="#security"></a>Security</h3>
 <ul>
-<li><strong>A resolve prompt no longer carries strangers' comments.</strong> Anyone can
+<li><p><strong>The hub's session journals are private to your account.</strong> Every
+prompt, reply and tool call a remote session sees is journaled under
+<code>~/.swe/data/remote/journal/</code>, which was created 0755 with 0644 files,
+so any other local account could read them. The folder is now 0700
+(an existing one is tightened) and its files 0600.</p>
+</li>
+<li><p><strong>A pairing poll's secret no longer travels in the URL.</strong> The web
+app polled <code>/v1/pair/request/&lt;id&gt;?secret=…</code>, so the secret that
+collects a new device's credential could land in proxy and access
+logs. It now goes in an <code>X-Pair-Secret</code> header; the hub still reads
+<code>?secret=</code> for iPhone builds already out.</p>
+</li>
+<li><p><strong>A resolve prompt no longer carries strangers' comments.</strong> Anyone can
 comment on a public issue, and every comment went word for word into
 the first prompt of the agent resolving it. The prompt now quotes the
 issue's title, body and comments line by line behind a note that they
@@ -122,15 +134,69 @@ only comments whose <code>authorAssociation</code> is <code>OWNER</code>, <code>
 <code>COLLABORATOR</code>, and replaces the rest with &quot;N comments from others,
 not included&quot;. Every client prefills the hub's <code>suggested_prompt</code>, so
 the Mac, iPhone and web resolve sheets all get the new prompt; issue
-comments in <code>--json</code> gain <code>association</code>.</li>
+comments in <code>--json</code> gain <code>association</code>.</p>
+</li>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>The web app's model search and price edits no longer wait on the
+daily price download.</strong> The LiteLLM price list was fetched while
+holding the lock every catalog read and price save takes, so a slow
+network stalled the Models search and the Pricing page. The fetch now
+runs outside it, and a download cut short counts as tried for the day.</p>
+</li>
+<li><p><strong>A model or effort switch is no longer typed into a TUI that can't
+take it.</strong> On a tmux session the hub typed <code>/model &lt;v&gt;</code> or <code>/effort &lt;v&gt;</code> into any harness's pane, so opencode or codex (for effort) got the
+line as a prompt to the model. It now refuses with <code>unsupported_control</code>
+unless the harness's TUI is known to run the command, the rule the
+session's <code>model_modes</code> and a launch already follow.</p>
+</li>
+<li><p><strong>A status feed with a <code>NaN</code> or out-of-range time no longer blanks
+the web Status page.</strong> Python's JSON reader takes <code>NaN</code>, <code>Infinity</code>
+and <code>1e400</code>, and the incident time went back out as bare <code>NaN</code>, which
+the browser refuses to parse. Such a time now reads as unknown, as it
+does in the Mac app.</p>
+</li>
+<li><p><strong>A late approval tap can no longer answer the next terminal prompt.</strong>
+Once a prompt was answered at the terminal, its request id stopped
+being checked, so a phone's delayed tap on it could answer the next
+prompt the agent showed before the hub had named it. A replaced or
+cleared id is now refused. An approval's key walk also shares the
+pane's write lock, so a message steered in at the same moment can't
+land between its arrow keys.</p>
+</li>
+<li><p><strong>One odd message from codex no longer stalls a Codex session.</strong> An
+app-server message the hub couldn't read (an approval with list
+<code>params</code>, an unhashable id) ended the reader while codex kept running,
+so every later send waited its full 60 s and failed until a detach.
+The reader now skips such a message, and a server whose reader did
+die is replaced on the next send.</p>
+</li>
 <li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
 The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its
 command, but sessions carry the registry id <code>qwen-code</code>, so a file
 sent from a phone arrived as an <code>[Attached file: …]</code> line instead of
 an <code>@</code> reference.</p>
+</li>
+<li><p><strong>A satellite's malformed push no longer breaks the hub's routes.</strong>
+<code>/v1/agent/register</code> answered 500 when <code>machine</code> was not an object; an
+uploaded event whose <code>data</code> was not an object failed its whole batch,
+which the agent then resent forever, journaling the good events again;
+a &quot;/&quot; menu push with the wrong shapes turned that satellite's menu
+route into a 500; and <code>NaN</code>/<code>Infinity</code> (or <code>1e400</code>) in any request
+body was stored and served back, which no client's JSON parser
+accepts. Each is now a 422, a skipped event, a skipped row or a 400.</p>
+</li>
+<li><p><strong>An approval resolved without a request id now kills its ntfy
+buttons.</strong> The hub clears every pending approval on such a resolve,
+but the notification tokens were retired only by exact request id, so
+the buttons of the cleared prompts stayed spendable until they expired
+and could answer the next prompt on the session.</p>
+</li>
+<li><p><strong>An opencode approval's request id can no longer reach another serve
+route.</strong> The hub put the client's request id into the opencode serve
+URL as typed, so an id like <code>../../&lt;session&gt;/abort</code> posted to a
+different route; ids and session ids are now one quoted path segment.</p>
 </li>
 <li><p><strong>A wildcard hub bind no longer turns off the Host check, and a
 second <code>swe remote serve</code> on a taken port no longer disturbs the

@@ -410,8 +410,10 @@ public enum ComputeSummary {
     /// process goes alone (the app or CLI shuts its helpers down itself);
     /// anything else goes descendants deepest-first, then the root, so
     /// children do not die as zombies waiting on a parent that already
-    /// went. Never pid 1, the caller, or the caller's ancestors: SWE
-    /// can never quit itself. A pid the item recorded is only signalled
+    /// went. Never pid 1, the caller, the caller's ancestors or anything
+    /// running under the caller: SWE can never quit itself, nor the
+    /// `swe`, `claude` or `codex` runs it started for its own reads
+    /// (attributed to a harness, they would go with "Quit all"). A pid the item recorded is only signalled
     /// when the current sample still has it with the same startedAt: a
     /// pid that died and got reused is somebody else's process now. A
     /// tree's membership comes from the current sample, so a worker the
@@ -451,10 +453,12 @@ public enum ComputeSummary {
         }
         let ordered = members.sorted { (depth[$0.pid] ?? 0) > (depth[$1.pid] ?? 0) }
             + (rootIsLive ? [root] : [])
+        let own = Set(descendants(of: selfPID, under: children).map(\.pid))
         var out: [Int32] = []
         var seen: Set<Int32> = []
         for p in ordered {
-            guard p.pid > 1, p.pid != selfPID, !ancestors.contains(p.pid), !seen.contains(p.pid) else { continue }
+            guard p.pid > 1, p.pid != selfPID, !ancestors.contains(p.pid), !own.contains(p.pid),
+                  !seen.contains(p.pid) else { continue }
             out.append(p.pid)
             seen.insert(p.pid)
         }

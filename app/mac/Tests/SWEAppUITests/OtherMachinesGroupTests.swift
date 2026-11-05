@@ -5,7 +5,7 @@ import Testing
 @testable import SWEApp
 
 /// The Sessions page's Other machines group draws from fixture rows. Set
-/// QUIVER_SNAPSHOT_DIR to also write it as other-machines.png there.
+/// SWE_SNAPSHOT_DIR to also write it as other-machines.png there.
 @Suite @MainActor struct OtherMachinesGroupTests {
     static func fixture(now: Date = .now) -> OtherMachines {
         let t = now.timeIntervalSince1970
@@ -41,7 +41,7 @@ import Testing
         renderer.scale = 2
         let image = try #require(renderer.nsImage)
         #expect(image.size.width > 0)
-        guard let dir = ProcessInfo.processInfo.environment["QUIVER_SNAPSHOT_DIR"] else { return }
+        guard let dir = ProcessInfo.processInfo.environment["SWE_SNAPSHOT_DIR"] else { return }
         let rep = try #require(image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
         let png = try #require(rep.representation(using: .png, properties: [:]))
         try png.write(to: URL(fileURLWithPath: dir).appending(path: "other-machines.png"))

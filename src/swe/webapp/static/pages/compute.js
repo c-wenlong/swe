@@ -312,7 +312,7 @@ function computeRest(d) {
     // Only a successful read of the stars can say there are none.
     parts.push(d.matchers_loaded && !d.starred.length
       ? emptyCard("Nothing is starred. Star a harness to watch what it runs.",
-        `<a class="compute-button" href="#/harnesses">Open Harnesses</a>`)
+        `<a class="btn secondary" href="#/harnesses">Open Harnesses</a>`)
       : emptyCard("Nothing a starred harness runs is up right now."));
   }
   for (const usage of d.harnesses) parts.push(harnessCard(usage));
@@ -763,12 +763,12 @@ function splitAge(seconds) {
   return [minutes, "minute"];
 }
 
-/* The settings page's set-switch as a button: the same markup so the
+/* The settings page's switch as a button: the same markup so the
  * shared stylesheet draws the Mac's switch. `type="button"` matters —
  * the sheet is a form, and a bare button would submit and close it. */
 function computeSwitch(id, on, opts = {}) {
-  return `<button type="button" class="set-switch" role="switch" aria-checked="${on}" data-cswitch="${esc(id)}"
-    aria-label="${esc(opts.label || id)}"${opts.disabled ? " disabled" : ""}><span></span></button>`;
+  return `<button type="button" class="switch" role="switch" aria-checked="${on}" data-cswitch="${esc(id)}"
+    aria-label="${esc(opts.label || id)}"${opts.disabled ? " disabled" : ""}></button>`;
 }
 
 function openComputeLimits() {
@@ -808,7 +808,7 @@ function openComputeLimits() {
       <p class="caption">${hasHub
         ? "Thresholds are kept in this browser; auto clean is kept on the hub. Quitting processes and Clean up are in the Mac app."
         : "Kept in this browser. Quitting processes and Clean up are in the Mac app."}</p>
-      <div class="sheet-actions"><button class="compute-button" value="done">Done</button></div>
+      <div class="sheet-actions"><button class="btn secondary" value="done">Done</button></div>
     </form>`;
   const age = dialog.querySelector("#compute-age"), ageUnit = dialog.querySelector("#compute-age-unit");
   const memory = dialog.querySelector("#compute-memory");

@@ -7,8 +7,8 @@
         "harness": "claude",
         "tier": "harness",
         "enabled": true,
-        "source_path": "/tmp/quiver-fixture-home/.swe/hooks/claude/prose-guard.py",
-        "dest_path": "/tmp/quiver-fixture-home/.claude/hooks/prose-guard.py",
+        "source_path": "/tmp/swe-fixture-home/.swe/hooks/claude/prose-guard.py",
+        "dest_path": "/tmp/swe-fixture-home/.claude/hooks/prose-guard.py",
         "link_status": "linked",
         "detail": "",
         "summary": "Blocks prompt submissions that ask for edits to prose files.",
@@ -33,7 +33,7 @@
             "matcher": "Bash",
             "timeout": 10,
             "command": "~/.claude/hooks/prose-guard.py",
-            "file": "/tmp/quiver-fixture-home/.claude/settings.json"
+            "file": "/tmp/swe-fixture-home/.claude/settings.json"
           }
         ]
       }
