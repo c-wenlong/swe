@@ -144,8 +144,7 @@ struct EllipsisMenu<Content: View>: View {
         .plainButton()
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("More")
-        .accessibilityLabel("More")
+        .hoverTip("More", pinsOnClick: false)
     }
 }
 
@@ -635,7 +634,7 @@ struct ExpandRow: View {
         .overlay(ring.opacity(focused && FocusVisibility.shared.fromKeyboard ? 1 : 0)
             .allowsHitTesting(false))
         .onHover { hovering = $0 }
-        .help(isExpanded ? help.collapse : help.expand)
+        .hoverTip(isExpanded ? help.collapse : help.expand, replacesLabel: false, pinsOnClick: false)
     }
 
     @ViewBuilder private var ring: some View {
@@ -1403,8 +1402,7 @@ struct RailIconButton: View {
                 .contentShape(.rect)
         }
         .plainButton(cornerRadius: Theme.controlRadius)
-        .help(help)
-        .accessibilityLabel(help)
+        .hoverTip(help, pinsOnClick: false)
     }
 }
 
