@@ -21,12 +21,16 @@ class CursorSessionDirTest(unittest.TestCase):
         self.enc_entry = self.cursor_home / "projects" / "some-encoded-name"
         self.enc_entry.mkdir(parents=True)
 
+        # Captured before the patch: inside it, os.path.expanduser is this
+        # fake, so falling back to it would recurse forever.
+        real_expanduser = os.path.expanduser
+
         def fake_expanduser(path: str) -> str:
             if path == "~":
                 return str(self.home)
             if path.startswith("~/"):
                 return str(self.home / path[2:])
-            return os.path.expanduser(path)
+            return real_expanduser(path)
 
         self._patch = patch(
             "swe.sessions.parsers.os.path.expanduser", side_effect=fake_expanduser

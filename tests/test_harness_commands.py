@@ -185,7 +185,12 @@ def _pin_columns(test):
         lambda *_: list(_columns.DEFAULT_COLUMNS))
     patch2.start()
     test.addCleanup(patch2.stop)
-
+    # cmd_list reads config.json's list section once and hands it to
+    # load_window too, so the session window (the "100d" label) also has
+    # to come from the defaults rather than the developer's config.
+    patch3 = mock.patch("swe.harness.commands.list_section", lambda: {})
+    patch3.start()
+    test.addCleanup(patch3.stop)
 
 
 class CmdListGhostRowTest(unittest.TestCase):
@@ -492,12 +497,11 @@ class CmdListSessColumnTest(unittest.TestCase):
     """SESS column shows the three documented visual states."""
 
     def setUp(self):
+        # The header reads the developer's saved session window and column
+        # set; pin both so the column really is "100d" and is shown,
+        # whatever ~/.swe/config.json says.
+        _pin_columns(self)
         _setup_patches(self)
-        # The header reads the developer's saved session window; pin it so
-        # the column really is "100d" whatever ~/.swe/config.json says.
-        p = patch("swe.harness.commands.load_window", return_value=100)
-        p.start()
-        self.addCleanup(p.stop)
 
     def test_sess_three_states_shift_colors(self):
         output = _run_cmd_list()
