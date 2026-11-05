@@ -1072,6 +1072,8 @@ class TestCodexAppServerEdges(unittest.TestCase):
         # List params on an approval and an unhashable id used to raise
         # out of the loop, ending the reader while codex kept running.
         proc = _FakeAppProc()
+        proc.stdout.close()  # the fake's pipe; this test reads BytesIO
+        self.addCleanup(proc.kill)
         server = inject._AppServer(proc, "thr")
         import queue as qmod
         reply_q = qmod.Queue()
@@ -1087,6 +1089,7 @@ class TestCodexAppServerEdges(unittest.TestCase):
 
     def test_server_for_replaces_a_server_whose_reader_died(self):
         stale = _FakeAppProc()
+        self.addCleanup(stale.kill)
         old = inject._AppServer(stale, "old-thread")
         old.dead = True
         inject.CodexAppServerInjector._servers["codex:k"] = old
@@ -1094,6 +1097,8 @@ class TestCodexAppServerEdges(unittest.TestCase):
             "initialize": {"result": {}},
             "thread/resume": {"result": {"thread": {"id": "t-new"}}},
         })
+        # Ends the fresh server's reader thread with its pipe.
+        self.addCleanup(proc.kill)
         with self._spawn_patch(proc):
             server = self._injector()._server_for(self.session)
         self.assertIs(server.proc, proc)
