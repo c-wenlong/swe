@@ -331,25 +331,15 @@ struct McpAddServerSheet: View {
             // with the values filled in.
             var values = stored.map { (mcpSecretName(server: name, key: $0.key), $0.value) }
             if bearer { values.append((tokenRef, token.trimmingCharacters(in: .whitespaces))) }
-            // Names this add stored for the first time, so a failed add
-            // removes them again instead of leaving them in the store.
-            var created: [String] = []
-            do {
-                for (secret, value) in values {
-                    let result = try await app.swe.mcpSecretSet(name: secret, value: value)
-                    if result.replaced == false { created.append(secret) }
-                }
-                _ = try await app.swe.mcpAdd(spec, to: picked.sorted(), force: force)
-            } catch {
-                // swe saves the hub before the harness files, so once the
-                // hub holds the server its ${NAME}s must keep their values.
-                // A list that can't be read keeps them too.
-                let hub = try? await app.swe.mcpServers(health: false)
-                if let hub, !hub.servers.contains(where: { $0.name == name && $0.inHub }) {
-                    for secret in created { _ = try? await app.swe.mcpSecretRemove(name: secret) }
-                }
-                throw error
-            }
+            let swe = app.swe
+            try await McpAddCommit(
+                setSecret: { try await swe.mcpSecretSet(name: $0, value: $1).replaced },
+                add: { _ = try await swe.mcpAdd(spec, to: picked.sorted(), force: force) },
+                hubEntry: { [name] in
+                    try await swe.mcpServers(health: false).servers.first { $0.name == name && $0.inHub }
+                },
+                removeSecret: { _ = try? await swe.mcpSecretRemove(name: $0) }
+            ).run(values: values)
             // Kept until the add lands, so a refused one can be retried
             // without typing the token again.
             token = ""
@@ -357,6 +347,53 @@ struct McpAddServerSheet: View {
             dismiss()
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+}
+
+/// Stores an add's secrets, then runs the add. When the add fails, the
+/// secrets it stored for the first time come back out, except any the
+/// hub's saved entry still refers to: swe saves the hub before the harness
+/// files, so a failure after that leaves a hub entry that needs them. The
+/// hub's row can't show that directly (a harness-defined server's row is
+/// built from the first harness's copy), but its `secretsMissing` is read
+/// from the hub's own entry: whatever this removal left missing there is
+/// put back. A hub that can't be read afterwards gets every value back. A
+/// value that replaced an older one stays replaced; swe has no way to read
+/// the old value back.
+@MainActor
+struct McpAddCommit {
+    /// Stores one value; answers whether it replaced one (nil: unknown).
+    var setSecret: (_ name: String, _ value: String) async throws -> Bool?
+    var add: () async throws -> Void
+    /// The hub's entry for the server being added, nil when it has none.
+    var hubEntry: () async throws -> McpServer?
+    var removeSecret: (_ name: String) async -> Void
+
+    func run(values: [(String, String)]) async throws {
+        var created: [String] = []
+        do {
+            for (secret, value) in values {
+                if try await setSecret(secret, value) == false { created.append(secret) }
+            }
+            try await add()
+        } catch {
+            await takeBack(created, values: values)
+            throw error
+        }
+    }
+
+    private func takeBack(_ created: [String], values: [(String, String)]) async {
+        guard !created.isEmpty else { return }
+        for secret in created { await removeSecret(secret) }
+        let needed: Set<String>
+        do {
+            needed = Set(try await hubEntry()?.secretsMissing ?? [])
+        } catch {
+            needed = Set(created)
+        }
+        for (secret, value) in values where created.contains(secret) && needed.contains(secret) {
+            _ = try? await setSecret(secret, value)
         }
     }
 }

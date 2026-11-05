@@ -175,7 +175,7 @@ const SessionChat = (() => {
 
   /* ------------------------------------------------------------ markdown */
   /* Rich Markdown for agent messages, a port of the phone's Markdown
-   * (app/ios/Sources/QuiverRemote/Hub/Markdown.swift): the subset the
+   * (app/ios/Sources/SWERemote/Hub/Markdown.swift): the subset the
    * harnesses actually write — headings, lists, tables, quotes, rules,
    * fenced code — as blocks, with inline spans inside each. Text is
    * escaped; only web links open, so a link to the agent's own files
@@ -1541,7 +1541,7 @@ const SessionChat = (() => {
      (GET /v1/sessions/{key}/preview?path=, remote/preview.py) and draws
      it in a locked frame. Which calls count and how a path becomes the
      route's is a port of the phone's PagePreview.swift
-     (app/ios/Sources/QuiverRemote/Hub/PagePreview.swift); keep them in
+     (app/ios/Sources/SWERemote/Hub/PagePreview.swift); keep them in
      step. */
 
   const PAGE_EXTENSIONS = new Set(["html", "htm", "svg"]);
@@ -4960,7 +4960,7 @@ const SessionChat = (() => {
       isPage, patchPageFiles, pageFiles, relativePath, pageTargets, previewUrl, previewKind,
       pageDocument, previewDocument, previewFrameAttrs, previewMessage, PREVIEW_CSP, linkUrls, linkHost, linkPath, linkCardsHtml,
       barSub, refreshModel, railDay, railGroups, slashToken, commandInsert, sourceLabel, filterCommands, insertCommand, menuKey,
-      cmds, cmdLists, warmCommands, loadCommands, resetMenus, chat, LOG_KEEP, trimLog, showEarlier, revealSeq, appendEvent, scrollBottom, resync,
+      cmds, cmdLists, warmCommands, loadCommands, resetMenus, LOG_KEEP, trimLog, showEarlier, revealSeq, appendEvent, scrollBottom, resync,
       ATTACH, fileExt, attachProblem, formatBytes, uploadError, uploads, addFiles, removeUpload,
       messageBody, send, updateOwnership, restoreUploads, failBubble,
       mentionToken, insertMention, splitPath, filesError, files, FILES, searchFiles, trackMenus, menu,

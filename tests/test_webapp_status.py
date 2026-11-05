@@ -950,6 +950,36 @@ class TestLateWriteGate(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestLoadingAfterAWrite(unittest.TestCase):
+    """pages/status.js under node: an Untrack that lands while the full
+    read is out drops that read's reply, and the spinner (which disables
+    Refresh and the five-minute check) goes with it."""
+
+    def test_the_spinner_stops(self):
+        page = Path(__file__).resolve().parents[1] / "src/swe/webapp/static/pages/status.js"
+        prelude = ("globalThis.location = { hash: '#/status' };\n"
+                   "let routeGen = 1; globalThis.setInterval = () => 1;\n"
+                   "function registerPage() {}\n" + app_js_function("currentRoute")
+                   + "const reads = []; const api = () => new Promise((r) => reads.push(r));\n"
+                   "const apiPost = async () => ({ status: 200, data: { services: [] } });\n")
+        tail = ("const painted = []; paintStatus = () => { painted.push(statusPage.loading); };\n"
+                "statusKeep = (d) => { statusPage.data = d; };\n"
+                "(async () => {\n"
+                "  statusPage.data = { services: [] };\n"
+                "  const load = renderStatus('status');\n"
+                "  const during = statusPage.loading;\n"
+                "  await statusUntrack('x');\n"
+                "  reads[0]({ status: 200, data: { services: [] } }); await load;\n"
+                "  process.stdout.write(JSON.stringify([during, statusPage.loading, painted[painted.length - 1]]));\n"
+                "})();\n")
+        done = subprocess.run(["node", "-e", prelude + page.read_text(encoding="utf-8") + "\n" + tail],
+                              capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        # The last paint is the read's own, with the spinner off.
+        self.assertEqual(json.loads(done.stdout), [True, False, False])
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
 class TestUntrackOnce(unittest.TestCase):
     """pages/status.js under node: a double-click on Stop tracking sends
     one write (the second used to move the generation past the first's

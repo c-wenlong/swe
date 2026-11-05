@@ -604,9 +604,6 @@ def first_user_title(
 ) -> str:
     """Generic title extractor; adapters can wrap with tool-specific checks."""
     t = data.get(type_field)
-    if type_values and t is not None and t not in type_values and role_path:
-        # still allow role-based match
-        pass
 
     # role at top level
     if data.get("role") == role_value:
