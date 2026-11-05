@@ -68,9 +68,12 @@ def _setup(tmp_path: Path, *, create_keys_dir: bool = True):
 
 
 def _run_cmd_list(args):
+    """``cmd_list``'s stdout; every list these tests run succeeds."""
     buf = io.StringIO()
     with redirect_stdout(buf):
-        cmd_list(list(args))
+        rc = cmd_list(list(args))
+    if rc != 0:
+        raise AssertionError(f"cmd_list({args!r}) returned {rc!r}:\n{buf.getvalue()}")
     return buf.getvalue()
 
 
@@ -1353,10 +1356,7 @@ class CmdStoreWordingTest(unittest.TestCase):
             patches = self._patches(tmp_path)
             missing_dir = tmp_path / "keys"
             with patches[0], patches[1]:
-                buf = io.StringIO()
-                with redirect_stdout(buf):
-                    cmd_list([f"--api-keys-dir={missing_dir}"])
-                output = buf.getvalue()
+                output = _run_cmd_list([f"--api-keys-dir={missing_dir}"])
             self.assertIn("No key store", output)
             self.assertIn("one bare-key file per provider", output)
             self.assertIn("export NAME=<key>", output)
