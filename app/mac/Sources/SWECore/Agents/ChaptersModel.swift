@@ -901,11 +901,6 @@ public final class ChaptersModel {
         return NSApp.keyWindow?.undoManager ?? NSApp.mainWindow?.undoManager
     }
 
-    /// ⌘Z / ⇧⌘Z from the Edit menu: pops whatever the window's manager
-    /// holds — a chapter move or a text edit, whichever came later.
-    public func undoMove() { movesUndoManager?.undo() }
-    public func redoMove() { movesUndoManager?.redo() }
-
     /// Why the last undo/redo move failed, shown under the rail's header
     /// alongside the drag refusals the page collects itself.
     public var moveError: String?
