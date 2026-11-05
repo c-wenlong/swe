@@ -56,7 +56,7 @@ class TestDispatch(unittest.TestCase):
 
 class TestPair(unittest.TestCase):
     def test_pair_mints_and_prints_url(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         with patch.object(pairing, "mint_pair_token",
                           return_value="tok123") as mint, \
              patch.object(commands.pairing, "mint_pair_token", mint):
@@ -80,7 +80,7 @@ class TestStatus(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_unreachable_hub(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         with patch("swe.remote.commands._probe", return_value=None), \
              patch.object(commands.pairing, "load_devices",
                           lambda *a: {}), \
@@ -135,7 +135,7 @@ class TestDevices(unittest.TestCase):
         self.assertIn("no paired", out)
 
     def test_revoke(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         tok = pairing.mint_pair_token(home)
         cred = pairing.exchange(home, tok, "phone")
         real_revoke = pairing.revoke_device
@@ -156,7 +156,7 @@ class TestDevices(unittest.TestCase):
 
 class TestAttachCmd(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.session = Session(timestamp=0, agent="Claude Code",
                                path="/tmp/p", session_id="abc",
                                tool_name="claude")
@@ -788,7 +788,7 @@ class TestDeviceRequests(unittest.TestCase):
 
     def setUp(self):
         import os
-        home = tempfile.mkdtemp()
+        home = str(temp_dir(self))
         self._env = patch.dict(os.environ, {"HOME": home})
         self._env.start()
         self.addCleanup(self._env.stop)

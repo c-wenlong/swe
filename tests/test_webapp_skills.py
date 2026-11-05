@@ -18,6 +18,8 @@ from swe.webapp.pages import skills as page
 from tests.test_remote_hub import HubBase
 from tests.test_webapp import app_js_function
 
+from tests._tempdir import temp_dir
+
 
 def _skill(name, path, source="harness", harnesses=("codex",), root="codex"):
     return {"name": name, "description": f"{name} does things", "path": str(path),
@@ -46,7 +48,7 @@ class TestFrontmatter(unittest.TestCase):
 
 class TestReadText(unittest.TestCase):
     def setUp(self):
-        self.dir = Path(tempfile.mkdtemp())
+        self.dir = temp_dir(self)
 
     def test_text_binary_and_big(self):
         (self.dir / "a.md").write_text("héllo")
@@ -65,7 +67,7 @@ class TestReadText(unittest.TestCase):
 
 class TestPlacement(unittest.TestCase):
     def test_plugin_skills_owned_by_one_plugin_move(self):
-        base = Path(tempfile.mkdtemp())
+        base = temp_dir(self)
         plugin = base / "tools"
         (plugin / "skills" / "lint").mkdir(parents=True)
         own = _skill("lint", plugin / "skills" / "lint", source="plugin", harnesses=["claude"])
@@ -80,7 +82,7 @@ class TestPlacement(unittest.TestCase):
         # build_catalog walks every marketplace: one read serves both
         # pages until it expires or a plugin change drops it.
         from swe.webapp.pages import plugins
-        base = Path(tempfile.mkdtemp())
+        base = temp_dir(self)
         self.addCleanup(plugins.clear_cache)
         skills = [_skill("lint", base / "lint", source="plugin")]
         with patch("swe.plugins.catalog.build_catalog",
@@ -101,7 +103,7 @@ class TestPlacement(unittest.TestCase):
 
 class TestDetail(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.root = self.home / ".codex" / "skills" / "tdd"
         (self.root / "references").mkdir(parents=True)
         (self.root / "SKILL.md").write_text("---\nname: tdd\ndescription: Test first\n---\n# TDD <b>\n")
@@ -286,7 +288,7 @@ class _WriteHome:
 
 class TestWrites(_WriteHome, unittest.TestCase):
     def setUp(self):
-        self.make_home(Path(tempfile.mkdtemp()))
+        self.make_home(temp_dir(self))
         self.ctx = SimpleNamespace(home=self.home, machine={"name": "box"})
 
     def post(self, action, body):
@@ -483,7 +485,7 @@ class TestNewSkill(_WriteHome, unittest.TestCase):
     """New skill: swe skills new, writing ~/.swe/skills/<name>/SKILL.md."""
 
     def setUp(self):
-        self.make_home(Path(tempfile.mkdtemp()))
+        self.make_home(temp_dir(self))
         self.ctx = SimpleNamespace(home=self.home, machine={"name": "box"})
 
     def test_writes_the_skeleton_and_lists_it(self):

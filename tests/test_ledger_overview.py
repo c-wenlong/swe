@@ -1,6 +1,5 @@
 """ledger/overview.py: periods, local days, quick figures, heatmap."""
 
-import tempfile
 import unittest
 import unittest.mock
 from datetime import datetime
@@ -11,6 +10,8 @@ from swe.ledger import overview
 from swe.ledger.models import LedgerRecord, UsageEvent
 from swe.ledger.pricing import PricingCatalog, rates_from_entry
 from swe.ledger.store import LedgerStore
+
+from tests._tempdir import temp_dir
 
 SG = ZoneInfo("Asia/Singapore")
 NOW = datetime(2026, 10, 23, 12, 0, tzinfo=SG).timestamp()
@@ -24,7 +25,7 @@ def _at(y, m, d, h=10):
 
 class TestOverview(unittest.TestCase):
     def setUp(self):
-        self.store = LedgerStore(Path(tempfile.mkdtemp()) / "l.sqlite")
+        self.store = LedgerStore(temp_dir(self) / "l.sqlite")
         self.addCleanup(self.store.close)
         self.n = 0
 

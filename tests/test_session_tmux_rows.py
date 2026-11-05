@@ -3,7 +3,6 @@ Sessions page plugin opens a terminal on a tmux pane."""
 
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -13,6 +12,8 @@ from swe.remote import supervise
 from swe.sessions.models import Session
 from swe.webapp.pages import PageContext, PageError
 from swe.webapp.pages import sessions as sessions_page
+
+from tests._tempdir import temp_dir
 
 
 def _session(sid="s1", tool="claude", path="/tmp", ts=0):
@@ -59,7 +60,7 @@ class TestRowSupervisedFields(unittest.TestCase):
 
 class TestOpenTerminal(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.ctx = PageContext(home=self.home, state=None)
 
     def test_rejects_non_tmux(self):

@@ -32,6 +32,8 @@ from swe.sessions.status import (
     session_statuses,
 )
 
+from tests._tempdir import temp_dir
+
 NOW = 1_700_000_000.0  # seconds
 NOW_MS = NOW * 1000
 
@@ -98,7 +100,7 @@ def _codex_msg(role, text):
 
 class StatusTestBase(unittest.TestCase):
     def setUp(self):
-        self.home = tempfile.mkdtemp()
+        self.home = str(temp_dir(self))
         self._patch = patch.dict(os.environ, {"HOME": self.home})
         self._patch.start()
         self.addCleanup(self._patch.stop)

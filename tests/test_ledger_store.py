@@ -10,6 +10,8 @@ from swe.ledger.models import LedgerRecord, UsageEvent
 from swe.ledger.scan import scan
 from swe.ledger.store import LedgerStore, ledger_path_for
 
+from tests._tempdir import temp_dir
+
 
 def _rec(key, total, msg=None, sidechain=False, ts=1000.0):
     ev = UsageEvent(harness="claude", account="/h", session="s", cwd=None,
@@ -23,7 +25,7 @@ def _inputs(store):
 
 class TestUpsert(unittest.TestCase):
     def setUp(self):
-        self.store = LedgerStore(Path(tempfile.mkdtemp()) / "l.sqlite")
+        self.store = LedgerStore(temp_dir(self) / "l.sqlite")
         self.addCleanup(self.store.close)
 
     def test_larger_total_wins_and_tie_keeps_first(self):
@@ -88,7 +90,7 @@ def _line(mid, req, inp, ts="2026-10-03T10:00:00Z"):
 
 class TestScan(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.proj = self.home / ".claude" / "projects" / "p"
         self.proj.mkdir(parents=True)
         self.store = LedgerStore(ledger_path_for(self.home))
@@ -180,7 +182,7 @@ class TestDatabaseSources(unittest.TestCase):
     """OpenCode and Devin read through scan(), against minimal schemas."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.store = LedgerStore(ledger_path_for(self.home))
         self.addCleanup(self.store.close)
 
@@ -224,7 +226,8 @@ class TestDatabaseSources(unittest.TestCase):
     def test_a_home_whose_name_holds_uri_characters_still_reads(self):
         # The database opens as a file: URI; "#", "?" and "%20" in the
         # folder name must be encoded, not end the path or decode away.
-        self.home = Path(tempfile.mkdtemp(suffix=" a#b?c%20d"))
+        self.home = Path(self.enterContext(tempfile.TemporaryDirectory(
+            suffix=" a#b?c%20d", ignore_cleanup_errors=True)))
         self.store = LedgerStore(ledger_path_for(self.home))
         self.addCleanup(self.store.close)
         reply = json.dumps({"role": "assistant", "modelID": "gpt-x", "tokens": {
@@ -454,7 +457,7 @@ class TestReadsLeaveNoTransaction(unittest.TestCase):
     the connection inside a transaction holding a read snapshot."""
 
     def test_groups_and_session_groups_end_their_transaction(self):
-        path = Path(tempfile.mkdtemp()) / "l.sqlite"
+        path = temp_dir(self) / "l.sqlite"
         store = LedgerStore(path)
         self.addCleanup(store.close)
         store.upsert(_rec("k", 5))

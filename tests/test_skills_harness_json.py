@@ -11,9 +11,10 @@ construction, and asserts those literal states.
 """
 
 import json
-import tempfile
 import unittest
 from pathlib import Path
+
+from tests._tempdir import temp_dir
 
 try:
     from test_json_output import REGISTRY, decode, run_swe, write_registry
@@ -30,7 +31,7 @@ def write_description(folder: Path, name: str, description: str) -> None:
 
 class SkillsListJsonTest(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.shared = build_machine(self.home)
         write_description(self.shared / "alpha", "alpha", "Does the alpha thing")
 
@@ -173,7 +174,7 @@ class SkillsListJsonTest(unittest.TestCase):
 
 class SkillsLinkJsonTest(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.shared = build_machine(self.home)
 
     def test_unlink_then_link_round_trips_in_the_envelope(self):
@@ -253,7 +254,7 @@ def write_marketplace(home: Path) -> Path:
 
 class SkillsHubJsonTest(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         write_registry(self.home, REGISTRY)
         self.market = write_marketplace(self.home)
         plugins = self.home / ".claude" / "plugins"
@@ -398,7 +399,7 @@ class SkillsListLivePluginTest(unittest.TestCase):
     """
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         build_machine(self.home)
         # The plugin lives at ./src/probe-dir, not ./toolkit: the path comes
         # from the marketplace manifest, never from the plugin's name.
@@ -564,7 +565,7 @@ class SkillsListLivePluginTest(unittest.TestCase):
 
 class HarnessJsonTest(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         write_registry(self.home, REGISTRY)
 
     def run_json(self, *args):

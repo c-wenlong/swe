@@ -1,13 +1,14 @@
 """ledger/pricing.py: LiteLLM entries, name resolution and cost."""
 
 import json
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from swe.ledger import pricing
 from swe.ledger.pricing import PricingCatalog, forms, load_catalog, rates_from_entry
+
+from tests._tempdir import temp_dir
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -108,7 +109,7 @@ class TestLoading(unittest.TestCase):
                              (REPO / "src" / "swe" / "ledger" / name).read_bytes(), name)
 
     def test_offline_falls_back_to_the_snapshot_and_overrides_win(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         cfg = home / ".swe" / "config"
         cfg.mkdir(parents=True)
         (cfg / "pricing.json").write_text(json.dumps(
@@ -127,7 +128,7 @@ class TestLoading(unittest.TestCase):
         self.assertEqual(cat.resolve("bad", None)[0], "unpriced")
 
     def test_an_unsupported_override_shape_is_ignored(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         cfg = home / ".swe" / "config"
         cfg.mkdir(parents=True)
         (cfg / "pricing.json").write_text(json.dumps({"models": [{"model": "x", "input": 1}]}))
@@ -135,7 +136,7 @@ class TestLoading(unittest.TestCase):
         self.assertEqual(cat.resolve("claude-opus-5", None)[0], "priced")
 
     def test_download_is_cached_for_a_day(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         listing = {f"model-{i}": {"input_cost_per_token": 1e-06, "output_cost_per_token": 2e-06}
                    for i in range(120)}
 
@@ -166,7 +167,7 @@ class TestLoading(unittest.TestCase):
 
         from swe.remote import agent as agent_mod
 
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         listing = {f"model-{i}": {"input_cost_per_token": 1e-06, "output_cost_per_token": 2e-06}
                    for i in range(120)}
 
@@ -197,7 +198,7 @@ class TestLoading(unittest.TestCase):
         self.assertEqual(cat.resolve("model-7", None)[0], "priced")
 
     def test_a_short_or_broken_download_keeps_the_snapshot(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
 
         class Resp:
             def __enter__(self):
