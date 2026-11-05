@@ -4940,7 +4940,7 @@ const SessionChat = (() => {
       isPage, patchPageFiles, pageFiles, relativePath, pageTargets, previewUrl, previewKind,
       pageDocument, previewDocument, previewFrameAttrs, previewMessage, PREVIEW_CSP, linkUrls, linkHost, linkPath, linkCardsHtml,
       barSub, refreshModel, railDay, railGroups, slashToken, commandInsert, sourceLabel, filterCommands, insertCommand, menuKey,
-      cmds, cmdLists, warmCommands, loadCommands, resetMenus, chat, LOG_KEEP, trimLog, showEarlier, revealSeq, appendEvent, scrollBottom, resync,
+      cmds, cmdLists, warmCommands, loadCommands, resetMenus, LOG_KEEP, trimLog, showEarlier, revealSeq, appendEvent, scrollBottom, resync,
       ATTACH, fileExt, attachProblem, formatBytes, uploadError, uploads, addFiles, removeUpload,
       messageBody, send, updateOwnership, restoreUploads, failBubble,
       mentionToken, insertMention, splitPath, filesError, files, FILES, searchFiles, trackMenus, menu,

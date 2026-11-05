@@ -38,6 +38,8 @@ Writes, ``POST /v1/app/repositories/<action>``, in process:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from swe.github import cli as ghcli
 from swe.github import gh, manage, repos
 
