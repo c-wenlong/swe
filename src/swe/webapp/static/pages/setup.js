@@ -581,7 +581,7 @@ function hubCard() {
     ${demo}
     <form class="setup-hub-form" id="setup-hub-form">
       <input class="field" id="setup-hub-url" type="text" inputmode="url" autocomplete="off" spellcheck="false"
-        aria-label="Hub repo URL" placeholder="https://github.com/you/quiver-hub.git"
+        aria-label="Hub repo URL" placeholder="https://github.com/you/swe-hub.git"
         value="${esc(page.hubUrl)}"${locked ? " disabled" : ""}>
       <button class="setup-button" type="submit" id="setup-hub-clone"${locked || !page.hubUrl.trim() ? " disabled" : ""}>Clone</button>
     </form>
