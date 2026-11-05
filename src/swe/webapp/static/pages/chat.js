@@ -175,7 +175,7 @@ const SessionChat = (() => {
 
   /* ------------------------------------------------------------ markdown */
   /* Rich Markdown for agent messages, a port of the phone's Markdown
-   * (app/ios/Sources/QuiverRemote/Hub/Markdown.swift): the subset the
+   * (app/ios/Sources/SWERemote/Hub/Markdown.swift): the subset the
    * harnesses actually write — headings, lists, tables, quotes, rules,
    * fenced code — as blocks, with inline spans inside each. Text is
    * escaped; only web links open, so a link to the agent's own files
@@ -1541,7 +1541,7 @@ const SessionChat = (() => {
      (GET /v1/sessions/{key}/preview?path=, remote/preview.py) and draws
      it in a locked frame. Which calls count and how a path becomes the
      route's is a port of the phone's PagePreview.swift
-     (app/ios/Sources/QuiverRemote/Hub/PagePreview.swift); keep them in
+     (app/ios/Sources/SWERemote/Hub/PagePreview.swift); keep them in
      step. */
 
   const PAGE_EXTENSIONS = new Set(["html", "htm", "svg"]);
