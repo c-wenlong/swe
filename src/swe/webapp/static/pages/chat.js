@@ -1403,9 +1403,12 @@ const SessionChat = (() => {
 
   /* Common-affix diff: identical leading and trailing lines collapse to
      context; the differing middle renders removed, then added. */
+  /* An empty side has no lines, as the Swift ToolDiff.diff reads it: a
+   * Write's missing old text must not show a removed blank line, nor the
+   * file's trailing newline a blank context row. */
   function diffLines(oldText, newText) {
-    const a = (oldText || "").split("\n");
-    const b = (newText || "").split("\n");
+    const a = oldText ? oldText.split("\n") : [];
+    const b = newText ? newText.split("\n") : [];
     let pre = 0;
     while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
     let suf = 0;
