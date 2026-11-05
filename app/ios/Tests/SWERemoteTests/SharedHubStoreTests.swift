@@ -66,11 +66,6 @@ final class SharedHubStoreTests: XCTestCase {
         return UserDefaults(suiteName: suite)!
     }
 
-    private func hub(_ host: String, _ cred: String = "c") -> PairedHub {
-        PairedHub(baseURL: URL(string: "http://\(host):8477")!,
-                  credential: Credential(deviceId: "d-\(host)", credential: cred, name: "phone"))
-    }
-
     private func account(_ hub: PairedHub) -> String { "device-credential \(hub.id)" }
 
     /// The app as it stored a hub before the shared group: the index in

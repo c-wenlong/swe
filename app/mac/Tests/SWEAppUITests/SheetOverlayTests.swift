@@ -3,7 +3,7 @@ import SwiftUI
 import Testing
 @testable import SWEApp
 
-/// A `quiverSheet` card lives in the main window, so Esc and ⌘W have to
+/// A `cardSheet` card lives in the main window, so Esc and ⌘W have to
 /// reach it the way they reached a system sheet.
 @Suite @MainActor struct SheetOverlayTests {
     private func window() -> NSWindow {
@@ -91,7 +91,7 @@ private struct Host: View {
     var body: some View {
         Color.clear
             .frame(width: 600, height: 400)
-            .quiverSheet(isPresented: $flag.isPresented) {
+            .cardSheet(isPresented: $flag.isPresented) {
                 Text("A card").frame(width: 200, height: 100)
             }
             .sheetHost()

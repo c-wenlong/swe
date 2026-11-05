@@ -193,10 +193,6 @@ class RenderTest(unittest.TestCase):
         self.assertIn("two of a kind is not", out)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ScanTest(unittest.TestCase):
     """The registered-paths view cannot see a config nobody registered.
 
@@ -408,3 +404,7 @@ class FlowLayoutTest(unittest.TestCase):
     def test_one_very_long_name_does_not_loop(self):
         lines = self._lines(["x" * 300], 60)
         self.assertEqual(len(lines), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
