@@ -278,10 +278,10 @@ public enum GitHubMarkdown {
     /// `#`–`###### ` ATX heading → (level, text); trailing `#`s strip.
     private static func heading(_ line: String) -> (Int, String)? {
         let t = line.trimmingCharacters(in: .whitespaces)
-        var level = 0
-        while level < t.count, t[t.index(t.startIndex, offsetBy: level)] == "#" {
-            level += 1
-        }
+        // At most seven characters looked at: counting with an offset from
+        // the start each step was quadratic, and a body line of 64K `#`s
+        // (anyone can file one) held the main thread for seconds.
+        let level = t.prefix(7).prefix(while: { $0 == "#" }).count
         guard level >= 1, level <= 6 else { return nil }
         let rest = t.dropFirst(level)
         guard rest.isEmpty || rest.hasPrefix(" ") || rest.hasPrefix("\t")

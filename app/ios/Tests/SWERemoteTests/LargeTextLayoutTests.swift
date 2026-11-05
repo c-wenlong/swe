@@ -62,6 +62,47 @@ final class LargeTextLayoutTests: XCTestCase {
                              size(twoLines.dynamicTypeSize(.accessibility1)).height)
     }
 
+    /// The `@` and `/` menu rows and the queued tray's rows keep their
+    /// height at the default size and grow with the text above it; a
+    /// fixed height clipped their words at accessibility sizes.
+    func testPromptMenuAndTrayRowsGrowWithTheText() {
+        let mention = MentionRow(entry: FileEntry(path: "src/app/main.py"))
+        let command = CommandRow(command: SlashCommand(name: "review", description: "Review the open diff",
+                                                       source: "project", argumentHint: "[file]"))
+        let queued = QueuedRow(send: QueuedSend(clientId: "a", text: "run the tests again", phase: .waiting),
+                               editing: false, onEdit: {}, onRemove: {}, onSendNow: {})
+        XCTAssertEqual(size(mention.frame(width: 340).dynamicTypeSize(.large)).height, MentionMenu.rowHeight)
+        XCTAssertEqual(size(command.frame(width: 340).dynamicTypeSize(.large)).height, CommandMenuView.rowHeight)
+        XCTAssertEqual(size(queued.frame(width: 340).dynamicTypeSize(.large)).height, QueuedTray.rowHeight)
+        for (name, large, huge) in [
+            ("mention", size(mention.frame(width: 340).dynamicTypeSize(.large)).height,
+             size(mention.frame(width: 340).dynamicTypeSize(.accessibility3)).height),
+            ("command", size(command.frame(width: 340).dynamicTypeSize(.large)).height,
+             size(command.frame(width: 340).dynamicTypeSize(.accessibility3)).height),
+            ("queued", size(queued.frame(width: 340).dynamicTypeSize(.large)).height,
+             size(queued.frame(width: 340).dynamicTypeSize(.accessibility3)).height),
+        ] {
+            XCTAssertGreaterThan(huge, large * 1.5, name)
+        }
+    }
+
+    /// The menu over the keyboard grows for a grown row or two, but
+    /// never past its default height: more grown rows scroll inside it.
+    func testThePromptMenuWindowNeverOutgrowsItsDefaultHeight() {
+        func card(_ n: Int) -> some View {
+            PromptMenuCard(count: n, rowHeight: CommandMenuView.rowHeight, visibleRows: 5) {
+                ForEach(0..<n, id: \.self) { i in
+                    CommandRow(command: SlashCommand(name: "command\(i)", description: "What it does"))
+                }
+            }
+            .frame(width: 340)
+        }
+        let full = size(card(5).dynamicTypeSize(.large)).height
+        XCTAssertLessThanOrEqual(size(card(5).dynamicTypeSize(.accessibility5)).height, full)
+        XCTAssertGreaterThan(size(card(1).dynamicTypeSize(.accessibility3)).height,
+                             size(card(1).dynamicTypeSize(.large)).height)
+    }
+
     @ViewBuilder private var details: some View {
         Text("#1214")
         Text("· c-wenlong")
