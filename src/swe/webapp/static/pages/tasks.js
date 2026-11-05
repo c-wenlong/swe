@@ -109,27 +109,35 @@
     return ico("issueOpen", "gh-success", "Open");
   }
 
-  /* The derived ladder as rungs: open → in progress → (PR open) →
-   * merged|closed. Only a GitHub issue's own PR can stand between "an
-   * agent is on it" and "done" — a pull IS its PR, and the other
-   * sources' ladders end at started. */
-  const rungs = (t) => {
-    const list = ["open", "in_progress"];
-    if (t.source === "github" && t.kind === "issue") list.push("pr_open");
-    list.push(t.state === "closed" ? "closed" : "merged");
-    return list;
-  };
+  /* The stepper's rungs, TaskStepper.steps on the Mac and the iPhone:
+   * open → in progress → (PR open) → merged. Only a GitHub issue's own
+   * PR can stand between "an agent is on it" and done — a pull IS its
+   * PR — and Linear and Notion read open → started → done. ``closed``
+   * keeps the ladder's shape with "Closed" as the last rung: how far a
+   * hand-closed task got isn't known, so only its two ends are reached.
+   * A state the ladder doesn't know sits on the first rung. */
+  function steps(t) {
+    const viaPR = t.source === "github" && t.kind === "issue";
+    const order = viaPR ? ["open", "in_progress", "pr_open", "merged"] : ["open", "in_progress", "merged"];
+    const words = t.source === "github" ? RUNG_WORDS : OTHER_RUNG_WORDS;
+    const titles = order.map((r) => words[r]);
+    const last = order.length - 1;
+    if (t.state === "closed") {
+      titles[last] = words.closed;
+      return titles.map((title, i) => ({ title, reached: i === 0 || i === last, current: i === last }));
+    }
+    const at = Math.max(0, order.indexOf(t.state || "open"));
+    return titles.map((title, i) => ({ title, reached: i <= at, current: i === at }));
+  }
 
   function stepper(t) {
-    const list = rungs(t);
-    let at = list.indexOf(t.state);
-    if (at < 0) at = t.state === "open" ? 0 : 1;
-    return `<div class="tk-steps" role="list">${list.map((r, i) => {
-      const cls = i < at ? "done" : i === at ? "at" : "";
-      const mark = i < at ? ico("checkFill", "tk-step-check")
+    // A closed task's ladder is drawn muted, as the iPhone draws it.
+    return `<div class="tk-steps${t.state === "closed" ? " closed" : ""}" role="list">${steps(t).map((s, i) => {
+      const cls = s.current ? "at" : s.reached ? "done" : "";
+      const mark = s.reached && !s.current ? ico("checkFill", "tk-step-check")
         : `<span class="tk-num num">${i + 1}</span>`;
       return `${i ? '<span class="tk-line" aria-hidden="true"></span>' : ""}
-      <span class="tk-step ${cls}" role="listitem"${i === at ? ' aria-current="step"' : ""}>${mark}<span>${(t.source === "github" ? RUNG_WORDS : OTHER_RUNG_WORDS)[r]}</span></span>`;
+      <span class="tk-step ${cls}" role="listitem"${s.current ? ' aria-current="step"' : ""}>${mark}<span>${esc(s.title)}</span></span>`;
     }).join("")}</div>`;
   }
 

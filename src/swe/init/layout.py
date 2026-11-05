@@ -744,6 +744,9 @@ def load_linkignore(home: Path | None = None) -> list[str]:
         return []
     except OSError as exc:
         raise LinkIgnoreError(f"cannot read {path}: {exc.strerror or exc}") from exc
+    except UnicodeDecodeError as exc:
+        # Unreadable all the same: refused, never read as "no patterns".
+        raise LinkIgnoreError(f"cannot read {path}: not UTF-8 text") from exc
     patterns: list[str] = []
     for raw in text.splitlines():
         line = raw.strip()
@@ -777,7 +780,8 @@ def _chain_lands_on(path: Path, canonical: Path) -> bool:
     """True when a symlink chain fully resolves to the canonical file."""
     try:
         return path.resolve() == canonical.resolve()
-    except OSError:
+    except (OSError, RuntimeError):
+        # A symlink loop: RuntimeError before Python 3.13, OSError after.
         return False
 
 
