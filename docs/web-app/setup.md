@@ -210,9 +210,9 @@ page shows them.
 - **Opening at first launch.** The Mac app opens the sheet when it starts
   on a Mac with no shared AGENTS.md, and remembers per Mac that it was
   finished or skipped. The web app only shows the card on this page.
-  A later change links it from Overview (when `first_run`) and from
-  Settings (being built in parallel; it links to `#/setup`). So there is
-  no "done" flag: the card keeps offering setup until AGENTS.md exists.
+  Overview links to it (when `first_run`) and so does Settings
+  (`#/setup`). So there is no "done" flag: the card keeps offering setup
+  until AGENTS.md exists.
 - **Install runs on the hub with no terminal.** The Mac sheet runs an
   install command in Terminal, where a cask or script can ask for a
   password. The web one runs it on the hub in process; one that needs a
