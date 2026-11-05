@@ -955,19 +955,21 @@ class TestLoadingAfterAWrite(unittest.TestCase):
                    "function registerPage() {}\n" + app_js_function("currentRoute")
                    + "const reads = []; const api = () => new Promise((r) => reads.push(r));\n"
                    "const apiPost = async () => ({ status: 200, data: { services: [] } });\n")
-        tail = ("paintStatus = () => {}; statusKeep = (d) => { statusPage.data = d; };\n"
+        tail = ("const painted = []; paintStatus = () => { painted.push(statusPage.loading); };\n"
+                "statusKeep = (d) => { statusPage.data = d; };\n"
                 "(async () => {\n"
                 "  statusPage.data = { services: [] };\n"
                 "  const load = renderStatus('status');\n"
                 "  const during = statusPage.loading;\n"
                 "  await statusUntrack('x');\n"
                 "  reads[0]({ status: 200, data: { services: [] } }); await load;\n"
-                "  process.stdout.write(JSON.stringify([during, statusPage.loading]));\n"
+                "  process.stdout.write(JSON.stringify([during, statusPage.loading, painted[painted.length - 1]]));\n"
                 "})();\n")
         done = subprocess.run(["node", "-e", prelude + page.read_text(encoding="utf-8") + "\n" + tail],
                               capture_output=True, text=True, timeout=30)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(json.loads(done.stdout), [True, False])
+        # The last paint is the read's own, with the spinner off.
+        self.assertEqual(json.loads(done.stdout), [True, False, False])
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
