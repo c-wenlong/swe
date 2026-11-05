@@ -425,6 +425,25 @@ class TestCommands(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("o/r", out)
 
+    def test_overview_names_a_gh_that_did_not_answer(self):
+        # A timed-out `gh auth status` is not a sign-out.
+        env = gh.GhEnv(installed=True, authenticated=False,
+                       error="timed out")
+        _rc, out, _ = self._run_cli([], env=env)
+        self.assertIn("gh is not responding (timed out)", out)
+        self.assertNotIn("not authenticated", out)
+
+    def test_numbers_must_be_ascii_digits(self):
+        # "²".isdigit() is True but int("²") raises: each is refused
+        # with the command's own message, never a traceback.
+        for args in (["run", "rerun", "²", "--repo=o/r", "--json"],
+                     ["pr", "worktree", "²", "--repo=o/r", "--json"],
+                     ["inbox", "read", "²"],
+                     ["pr", "worktree", "https://github.com/o/r/pull/٣",
+                      "--repo=o/r", "--json"]):
+            rc, _out, _err = self._run_cli(args)
+            self.assertEqual(rc, 1, args)
+
     def test_gh_missing(self):
         env = gh.GhEnv(installed=False)
         rc, out, _ = self._run_cli(["pr"], env=env)

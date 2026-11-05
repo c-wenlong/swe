@@ -103,7 +103,7 @@ function header() {
   if (page.tab === "health" && (fixAllIds().length || page.fixing === "all")) {
     const label = page.fixing === "all"
       ? `Fixing ${count(page.fixingCount, "finding", "findings")}…` : "Fix all";
-    fixAll = `<button class="pl-button primary" id="pl-fix-all" title="Run every fix swe can run, one at a time"${
+    fixAll = `<button class="btn lg on-panel medium primary" id="pl-fix-all" title="Run every fix swe can run, one at a time"${
       fixing ? " disabled" : ""}${page.confirming === "all" ? ' aria-expanded="true"' : ""}>${label}</button>`;
   }
   const off = page.tab === "health" && fixing;
@@ -260,8 +260,8 @@ function confirmAllCard() {
         <span class="badge">${esc(f.kind_title)}</span></div>
       <pre class="pl-code">${esc(f.fix)}</pre></li>`).join("")}</ol>
     <div class="pl-confirm-buttons">
-      <button class="pl-button" data-pl-cancel${busy ? " disabled" : ""}>Cancel</button>
-      <button class="pl-button primary" data-pl-run-all${busy || !n ? " disabled" : ""}>${
+      <button class="btn lg on-panel medium" data-pl-cancel${busy ? " disabled" : ""}>Cancel</button>
+      <button class="btn lg on-panel medium primary" data-pl-run-all${busy || !n ? " disabled" : ""}>${
         page.fixing === "all" ? "Running…" : "Run all"}</button>
     </div>
   </div>`;
@@ -275,8 +275,8 @@ function confirmRow(f) {
     <p class="caption">swe will check the finding still applies, then run:</p>
     <pre class="pl-code">${esc(f.fix)}</pre>
     <div class="pl-confirm-buttons">
-      <button class="pl-button" data-pl-cancel${busy ? " disabled" : ""}>Cancel</button>
-      <button class="pl-button primary" data-pl-run="${esc(f.id)}"${busy ? " disabled" : ""}>${
+      <button class="btn lg on-panel medium" data-pl-cancel${busy ? " disabled" : ""}>Cancel</button>
+      <button class="btn lg on-panel medium primary" data-pl-run="${esc(f.id)}"${busy ? " disabled" : ""}>${
         page.fixing === f.id ? "Running…" : "Run"}</button>
     </div>
   </div>`;
@@ -288,8 +288,8 @@ function driftRow(f) {
     ? paths.slice(0, 3).join(", ") + (paths.length > 3 ? ` and ${paths.length - 3} more` : "") : "";
   const running = page.fixing === f.id;
   const fixBtn = !f.runnable ? "" : running
-    ? '<span class="pl-running" role="status" aria-label="Fixing"><span class="pl-spinner"></span></span>'
-    : `<button class="pl-button" data-pl-fix="${esc(f.id)}" aria-label="Fix ${esc(f.ref)}"${
+    ? '<span class="pl-running" role="status" aria-label="Fixing"><span class="spinner"></span></span>'
+    : `<button class="btn lg on-panel medium" data-pl-fix="${esc(f.id)}" aria-label="Fix ${esc(f.ref)}"${
       page.confirming === f.id ? ' aria-expanded="true"' : ""}${page.fixing != null ? " disabled" : ""}>Fix</button>`;
   return `<div class="pl-drift${f.runnable ? " runnable" : ""}">
     <span class="pl-dot ${f.severe ? "danger" : "warning"}"></span>
@@ -700,16 +700,16 @@ function actionsSection(p, d) {
     const st = p.harnesses[h], acts = st.actions || [];
     const running = page.actRunning && page.actRunning.ref === p.ref && page.actRunning.harness === h;
     let side;
-    if (running) side = `<span class="pl-act-running" role="status"><span class="pl-spinner" aria-hidden="true"></span>${esc(VERB[page.actRunning.verb][2])}</span>`;
+    if (running) side = `<span class="pl-act-running" role="status"><span class="spinner" aria-hidden="true"></span>${esc(VERB[page.actRunning.verb][2])}</span>`;
     else if (!(d.actions || []).includes(h)) side = `<span class="caption">swe can't change ${esc(Fmt.harnessName(h))} plugins</span>`;
-    else side = acts.map((verb, i) => `<button type="button" class="pl-act${i === 0 && verb === "install" ? " primary" : ""}"
+    else side = acts.map((verb, i) => `<button type="button" class="btn pl-act${i === 0 && verb === "install" ? " primary" : ""}"
         data-pl-act="${esc(verb)}" data-pl-harness="${esc(h)}"${busy ? " disabled" : ""}>${esc(VERB[verb][0])}</button>`).join("");
     const a = page.actConfirm;
     const confirm = a && a.ref === p.ref && a.harness === h && !running ? `<div class="pl-act-confirm" role="group" aria-label="${esc(VERB[a.verb][0])} ${esc(a.ref)}?">
         <span>${esc(VERB[a.verb][0])} ${esc(a.ref)} ${esc(actionWhere(a))} on ${esc(where)}?</span>
         <code class="pl-path">${esc(actionCommand(a))}</code>
-        <div class="pl-act-buttons"><button type="button" class="pl-act" data-pl-act-cancel>Cancel</button>
-          <button type="button" class="pl-act primary${a.verb === "uninstall" ? " danger" : ""}" data-pl-act-go>${esc(VERB[a.verb][0])}</button></div></div>` : "";
+        <div class="pl-act-buttons"><button type="button" class="btn pl-act" data-pl-act-cancel>Cancel</button>
+          <button type="button" class="btn pl-act primary${a.verb === "uninstall" ? " danger" : ""}" data-pl-act-go>${esc(VERB[a.verb][0])}</button></div></div>` : "";
     return `<div class="pl-act-row"><span class="pl-act-name">${Fmt.logo(h, "logo logo-sm")}${esc(Fmt.harnessName(h))}
       <span class="caption">· ${esc(STATUS_TITLE[st.status] || st.status)}</span></span>${side}</div>${confirm}`;
   }).join("");

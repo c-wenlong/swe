@@ -128,7 +128,7 @@ parallel without touching a shared file. A page with the sidebar id
 |---|---|
 | `src/swe/webapp/pages/skills.py` | `get(ctx, args) -> dict` answers `GET /v1/app/skills` (`args`: each query parameter's first value). An optional `post(ctx, action, body) -> dict` answers `POST /v1/app/skills/<action>`. Raise `PageError(status, code, message)` to refuse. `ctx.state` is the hub's `HubState`, `ctx.home` its home. |
 | `src/swe/webapp/static/pages/skills.js` | `registerPage("skills", render)`. The bundle runs each script in its own function scope, so private names never collide with another page's. `render(id)` paints `#panel` with the shared helpers in `app.js` (`api`, `esc`, `icon`, `pageHeader`, `renderGate`) and `manage.js` (`pageError`, `bindRefresh`); take `const gen = routeGen` before awaiting and drop the reply when it changed. |
-| `src/swe/webapp/static/pages/skills.css` | Optional styles, using the tokens in `styles.css`. |
+| `src/swe/webapp/static/pages/skills.css` | Optional styles, using the tokens in `styles.css`. Buttons, spinners and switches are shared there (`.btn` with `.primary`, `.danger`, `.lg`, `.hairline`, `.on-panel`, `.medium`, `.secondary`; `.spinner`; `.switch`), so a page rule only says what is its own, never a copy of them. |
 | `tests/test_webapp_skills.py` | The page's data, and the route with auth. |
 | `docs/web-app/skills.md` | What the page shows, its payload, and what differs from the Mac app. |
 

@@ -422,6 +422,21 @@ extension HubStubbed {
                                                  options: [], picked: "deny", state: .resolved("deny")))
     }
 
+    /// A menu with no row the hub takes draws Allow, Always and Deny
+    /// (ApprovalRows), so a resolved "allow" lights that button; the
+    /// label-only rule left the card with nothing lit.
+    @Test func aMenuWithoutUsableRowsLightsTheSemanticDecision() {
+        let chat = model()
+        chat.apply(event("approval.requested",
+                         #"{"request_id": "r2", "prompt": "Run?", "options": [{"label": "Yes"}, {"n": "abc", "label": "No"}]}"#))
+        chat.apply(event("approval.resolved", #"{"request_id": "r2", "decision": "allow"}"#))
+        guard case .approval(_, _, _, let picked, let state) = chat.items.last?.kind else {
+            Issue.record("expected an approval card"); return
+        }
+        #expect(picked == "allow")
+        #expect(state == .resolved("allow"))
+    }
+
     @Test func anOlderPageBringsTheCallForAnOrphanResult() {
         let chat = model()
         chat.load(HubMessagesPage(messages: [

@@ -49,6 +49,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import NamedTuple
@@ -585,6 +586,13 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
+def _seg(value: str) -> str:
+    """``value`` as one URL path segment. The approval's request id is
+    the client's string: unquoted, ``../abort`` or ``x?y`` would aim the
+    POST at another opencode serve route."""
+    return urllib.parse.quote(str(value), safe="")
+
+
 def _serve_call(
     base: str, method: str, path: str, payload: dict | None,
     timeout: float = _SERVE_REQ_TIMEOUT,
@@ -631,8 +639,6 @@ class _ServeProc:
 
 def _serve_event_loop(serve: _ServeProc) -> None:
     """Read ``GET /event``; permission asks become approval events."""
-    from swe.remote import protocol
-
     try:
         req = urllib.request.Request(
             serve.base + "/event", headers={"Accept": "text/event-stream"}
@@ -944,7 +950,7 @@ class OpencodeServeInjector:
             payload["variant"] = effort
         status_code, body = _serve_call(
             serve.base, "POST",
-            f"/session/{session.session_id}/prompt_async",
+            f"/session/{_seg(session.session_id)}/prompt_async",
             payload,
         )
         if status_code not in (200, 204):
@@ -967,14 +973,14 @@ class OpencodeServeInjector:
         session_id = serve.permissions.get(request_id) or session.session_id
         status_code, _ = _serve_call(
             serve.base, "POST",
-            f"/session/{session_id}/permissions/{request_id}",
+            f"/session/{_seg(session_id)}/permissions/{_seg(request_id)}",
             {"response": response},
         )
         if status_code in (404, 405):
             # Older opencode: /permission/{id}/reply {reply}.
             status_code, _ = _serve_call(
                 serve.base, "POST",
-                f"/permission/{request_id}/reply",
+                f"/permission/{_seg(request_id)}/reply",
                 {"reply": response},
             )
         if status_code not in (200, 204):
@@ -993,7 +999,7 @@ class OpencodeServeInjector:
                 return InjectResult(False, "opencode serve failed to start")
             status_code, _ = _serve_call(
                 serve.base, "POST",
-                f"/session/{session.session_id}/abort", {},
+                f"/session/{_seg(session.session_id)}/abort", {},
             )
             if status_code not in (200, 204):
                 return InjectResult(

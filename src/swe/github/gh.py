@@ -46,6 +46,13 @@ class GhEnv:
         return "ok"
 
 
+def digits(text: str) -> bool:
+    """Plain ASCII digits: an issue, PR, run or notification number.
+    ``str.isdigit`` alone also takes "²", which ``int`` refuses, and
+    other scripts' digits, which gh doesn't read as a number."""
+    return text.isascii() and text.isdigit()
+
+
 def env_error(env: GhEnv) -> str:
     """Why ``env`` blocks a ``gh`` call, in the words every surface shows."""
     if not env.installed:
