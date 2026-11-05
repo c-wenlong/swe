@@ -18,7 +18,7 @@
 # bundle.
 #
 # The download is pinned by version and checksum and kept in
-# QUIVER_PYTHON_CACHE (default ~/.swe/cache/build/python), so rebuilds
+# SWE_PYTHON_CACHE (default ~/.swe/cache/build/python), so rebuilds
 # don't fetch it again. It matches the host architecture, as the swift build
 # does. build-app.sh signs the binaries afterwards.
 set -euo pipefail

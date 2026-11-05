@@ -143,10 +143,6 @@ class McpDiscoverTest(unittest.TestCase):
                 self.assertEqual(data["mcpServers"]["linear"]["command"], "npx")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ThreeWayMergeTest(unittest.TestCase):
     """The hub must track harness edits, not just grow.
 
@@ -912,3 +908,7 @@ class VersionPinnedTest(unittest.TestCase):
 
         self.assertEqual(version_pinned(None), "")
         self.assertEqual(version_pinned({"args": [None, 3]}), "")
+
+
+if __name__ == "__main__":
+    unittest.main()

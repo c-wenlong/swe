@@ -20,6 +20,7 @@ import time
 import unittest
 import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from swe.status import catalog, catalogue, parsers, poller, tracked
@@ -69,6 +70,36 @@ class TestStatuspageParser(unittest.TestCase):
         self.assertAlmostEqual(incident.updated_at, iso("2026-10-07T21:44:41.466Z"))
         self.assertEqual(incident.url, "https://stspg.io/sjkw7njwf0mt")
         self.assertFalse(incident.maintenance)
+
+    def test_non_finite_times_read_as_unknown(self):
+        # json.loads takes NaN, Infinity and 1e400; served back they
+        # break the page's JSON.parse, so they read as no time and the
+        # incident falls back to its next known one.
+        created = iso(json.loads(fixture("statuspage-claude"))
+                      ["incidents"][0]["created_at"])
+        for raw in ("NaN", "Infinity", "-Infinity", "1e400"):
+            feed = json.loads(fixture("statuspage-claude"))
+            feed["incidents"][0]["started_at"] = "__T__"
+            text = json.dumps(feed).replace('"__T__"', raw)
+            report = parsers.statuspage(text.encode())
+            self.assertAlmostEqual(report.incidents[0].started_at, created)
+            json.dumps(report.to_dict(), allow_nan=False)
+            # With no other time to fall back to, it is unknown.
+            feed["incidents"][0].pop("created_at")
+            text = json.dumps(feed).replace('"__T__"', raw)
+            report = parsers.statuspage(text.encode())
+            self.assertIsNone(report.incidents[0].started_at, raw)
+
+    def test_a_cached_non_finite_time_reads_as_unknown(self):
+        # A report cached before the parser refused NaN keeps being
+        # served on every 304, so the cache read cleans it too.
+        raw = {"id": "i", "name": "n", "impact": "major",
+               "started_at": float("nan"), "updated_at": float("inf")}
+        incident = parsers.Incident.from_dict(raw)
+        self.assertIsNone(incident.started_at)
+        self.assertIsNone(incident.updated_at)
+        raw["started_at"] = 1.5e9
+        self.assertEqual(parsers.Incident.from_dict(raw).started_at, 1.5e9)
 
     def test_incident_io_flavour(self):
         """OpenAI's page is incident.io serving the Statuspage shape, without
@@ -236,6 +267,8 @@ class FakeTransport:
         self.requests = []
         self.clock, self.advance = clock, advance
         self.gate = None
+        # Set as a request comes in, before it waits at the gate.
+        self.entered = threading.Event()
 
     def reply(self, status, body=b"", headers=None):
         self.replies.append(poller.Response(status, body, headers or {}))
@@ -245,6 +278,7 @@ class FakeTransport:
 
     def __call__(self, url, headers, timeout):
         self.requests.append((url, dict(headers), timeout))
+        self.entered.set()
         if self.gate is not None:
             self.gate.wait(5)
         if self.clock is not None:
@@ -417,8 +451,7 @@ class TestPoller(PollerBase):
         results = {}
         first = threading.Thread(target=lambda: results.update(a=self.one(p, "github")))
         first.start()
-        while not self.transport.requests:
-            time.sleep(0.01)
+        self.assertTrue(self.transport.entered.wait(5), "the first call never asked")
         second = threading.Thread(target=lambda: results.update(b=self.one(p, "github", force=True)))
         second.start()
         self.transport.gate.set()
@@ -431,17 +464,15 @@ class TestPoller(PollerBase):
     def test_a_slow_page_does_not_hold_the_answer(self):
         self.transport.reply(200, fixture("statuspage-github"))
         self.transport.gate = threading.Event()
-        p = self.make(wait=0.2)
-        started = time.monotonic()
+        # No wait at all: the answer comes back while the request is still
+        # held at the gate, so it can only have left without the reading.
+        p = self.make(wait=0)
         waiting = self.one(p, "github")
-        self.assertLess(time.monotonic() - started, 2)
         self.assertIsNone(waiting.report)
         # It finishes in the background and the next load has it.
+        flight = p._in_flight["github"]
         self.transport.gate.set()
-        for _ in range(100):
-            if p.cached([catalog.service("github")])[0].report is not None:
-                break
-            time.sleep(0.02)
+        self.assertTrue(flight.done.wait(5), "the request never finished")
         self.assertEqual(p.cached([catalog.service("github")])[0].report.health, Health.OPERATIONAL)
         self.assertEqual(len(self.transport.requests), 1)
 
@@ -551,15 +582,22 @@ class TestHttpGet(unittest.TestCase):
         self.assertEqual(response.status, 304)
 
     def test_a_trickling_feed_gives_up(self):
+        # A clock that moves one second per chunk read: a 1 s timeout
+        # bounds the whole download to DOWNLOAD_LIMIT_FACTOR seconds, so
+        # the read stops after that many chunks, not at MAX_BODY.
+        clock = Clock(now=0.0)
+        reads = []
+
         class Trickle(_Resp):
             def read(self, limit=-1):
-                time.sleep(0.02)
-                return b"x"
-        with patch("urllib.request.urlopen", return_value=Trickle(b"")):
-            started = time.monotonic()
-            with self.assertRaises(OSError):
-                poller.http_get("https://example.test/", {}, 0.1)
-        self.assertLess(time.monotonic() - started, 2)
+                reads.append(limit)
+                clock.now += 1
+                return b"x" * 1024
+        with patch.object(poller, "time", SimpleNamespace(monotonic=clock)), \
+                patch("urllib.request.urlopen", return_value=Trickle(b"")):
+            with self.assertRaises(TimeoutError):
+                poller.http_get("https://example.test/", {}, 1)
+        self.assertEqual(len(reads), poller.DOWNLOAD_LIMIT_FACTOR + 1)
 
     def test_reads_a_body_in_chunks(self):
         class Chunks(_Resp):
@@ -663,8 +701,12 @@ class TestCatalogue(unittest.TestCase):
                  / "app/mac/Sources/SWECore/Status/StatusCatalogue.swift")
         if not swift.exists():
             self.skipTest("no app/mac/ in this checkout")
-        rows = re.findall(r'statuspage\("([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*\.(\w+)\)',
-                          swift.read_text(encoding="utf-8"))
+        source = swift.read_text(encoding="utf-8")
+        rows = re.findall(r'statuspage\("([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*\.(\w+)\)', source)
+        # Every row call is read: one written another way (labels, a
+        # constant) would otherwise drop out of the comparison unseen.
+        self.assertEqual(len(rows), len(re.findall(r"^\s*statuspage\(", source, re.M)),
+                         "a StatusCatalogue.swift row no longer matches the row pattern")
         self.assertEqual([(e.id, e.name, e.page_url, e.group) for e in catalogue.CATALOGUE], rows)
         for e in catalogue.CATALOGUE:
             self.assertTrue(e.page_url.startswith("https://"), e.id)
@@ -762,15 +804,12 @@ class TestPollerForget(PollerBase):
         """An answer already in flight when the page is removed is dropped."""
         self.transport.reply(200, fixture("statuspage-github"))
         self.transport.gate = threading.Event()
-        p = self.make(wait=0.2)
+        p = self.make(wait=0)
         self.one(p, "github")  # leaves the flight running in the background
+        flight = p._in_flight["github"]
         p.forget("github")
         self.transport.gate.set()
-        for _ in range(50):
-            if self.transport.gate.is_set() and len(self.transport.requests) == 1:
-                break
-            time.sleep(0.01)
-        time.sleep(0.05)  # let the landing attempt run
+        self.assertTrue(flight.done.wait(5), "the landing attempt never ran")
         self.assertIsNone(p.cached([catalog.service("github")])[0].report)
         saved = json.loads((self.dir / "web-service-status.json").read_text())
         self.assertIsInstance(saved["services"]["github"]["removed_at"], float)
@@ -781,15 +820,13 @@ class TestPollerForget(PollerBase):
         in that poller's own reads."""
         self.transport.reply(200, fixture("statuspage-github"))
         self.transport.gate = threading.Event()
-        other = self.make(wait=0.2)  # another hub, same cache file
+        other = self.make(wait=0)  # another hub, same cache file
         self.one(other, "github")  # its flight starts, held at the gate
+        flight = other._in_flight["github"]
         p = self.make()
         p.forget("github")
         self.transport.gate.set()
-        for _ in range(100):
-            if "github" not in other._in_flight:  # the landing ran
-                break
-            time.sleep(0.01)
+        self.assertTrue(flight.done.wait(5), "the landing never ran")
         self.assertIsNone(p.cached([catalog.service("github")])[0].report)
         self.assertIsNone(other.cached([catalog.service("github")])[0].report)
         saved = json.loads((self.dir / "web-service-status.json").read_text())
@@ -840,7 +877,7 @@ class TestTrackRoute(HubBase):
     def test_catalogue_view(self):
         status, body = self.get("/v1/app/status?view=catalogue")
         self.assertEqual(status, 200, body)
-        self.assertEqual(len(body["entries"]), 104)
+        self.assertEqual([e["id"] for e in body["entries"]], [e.id for e in catalogue.CATALOGUE])
         groq = next(e for e in body["entries"] if e["id"] == "groq")
         self.assertEqual((groq["name"], groq["host"], groq["group"], groq["logo"]),
                          ("Groq", "groqstatus.com", "modelProviders", "groq"))
@@ -940,6 +977,36 @@ class TestLateWriteGate(unittest.TestCase):
     def test_only_on_the_page(self):
         self.assertEqual(self.gates_after_untrack("#/overview"), 0)
         self.assertEqual(self.gates_after_untrack("#/status"), 1)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestLoadingAfterAWrite(unittest.TestCase):
+    """pages/status.js under node: an Untrack that lands while the full
+    read is out drops that read's reply, and the spinner (which disables
+    Refresh and the five-minute check) goes with it."""
+
+    def test_the_spinner_stops(self):
+        page = Path(__file__).resolve().parents[1] / "src/swe/webapp/static/pages/status.js"
+        prelude = ("globalThis.location = { hash: '#/status' };\n"
+                   "let routeGen = 1; globalThis.setInterval = () => 1;\n"
+                   "function registerPage() {}\n" + app_js_function("currentRoute")
+                   + "const reads = []; const api = () => new Promise((r) => reads.push(r));\n"
+                   "const apiPost = async () => ({ status: 200, data: { services: [] } });\n")
+        tail = ("const painted = []; paintStatus = () => { painted.push(statusPage.loading); };\n"
+                "statusKeep = (d) => { statusPage.data = d; };\n"
+                "(async () => {\n"
+                "  statusPage.data = { services: [] };\n"
+                "  const load = renderStatus('status');\n"
+                "  const during = statusPage.loading;\n"
+                "  await statusUntrack('x');\n"
+                "  reads[0]({ status: 200, data: { services: [] } }); await load;\n"
+                "  process.stdout.write(JSON.stringify([during, statusPage.loading, painted[painted.length - 1]]));\n"
+                "})();\n")
+        done = subprocess.run(["node", "-e", prelude + page.read_text(encoding="utf-8") + "\n" + tail],
+                              capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        # The last paint is the read's own, with the spinner off.
+        self.assertEqual(json.loads(done.stdout), [True, False, False])
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")

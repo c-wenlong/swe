@@ -263,26 +263,11 @@ struct TaskDetailPage: View {
             Text("It runs under tmux in a worktree the hub prepares. The chat opens once the session shows up.")
                 .font(Theme.caption).foregroundStyle(Theme.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
-            launchStatus
+            LaunchStatus(flow: flow)
             HStack(spacing: 8) {
-                Button(flow.cancelTitle) {
-                    launchTask?.cancel()
-                    panel = nil
-                }
-                .secondaryButton()
-                .keyboardShortcut(.cancelAction)
-                Button {
-                    launchTask = Task { await start(task) }
-                } label: {
-                    HStack(spacing: 6) {
-                        if flow.busy {
-                            ProgressView().controlSize(.small).tint(Theme.primaryForeground)
-                        }
-                        Text(flow.busy ? "Starting" : "Start")
-                    }
-                }
-                .primaryButton()
-                .disabled(harness == nil || flow.busy)
+                LaunchFormButtons(flow: flow, ready: harness != nil, startTip: "Start the session",
+                              cancel: { launchTask?.cancel(); panel = nil },
+                              start: { launchTask = Task { await start(task) } })
             }
         }
         .padding(12)
@@ -307,27 +292,6 @@ struct TaskDetailPage: View {
     /// takes its newest model; a pick survives as `ModelPick.refit` says.
     private func prefillModel() {
         modelPick.refit(LaunchOptions.recentModels(of: pickedHarness))
-    }
-
-    /// The hub's step while the launch works, then why it stopped.
-    @ViewBuilder private var launchStatus: some View {
-        switch flow.phase {
-        case .failed(let message):
-            Text(message).font(Theme.caption).foregroundStyle(Theme.dangerText)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-        case .unconfirmed(let message):
-            Text(message).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        default:
-            if let note = flow.note {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(note).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                        .lineLimit(2)
-                }
-            }
-        }
     }
 
     private func openNewPanel() {
@@ -436,6 +400,11 @@ struct TaskDetailPage: View {
                         LinkRow(session: session,
                                 busy: model.busy.contains("link:\(session.key)")) {
                             Task {
+                                // A second click before the button greys
+                                // out: `link` answers nil for "already
+                                // linking" too, which must not close the
+                                // panel as if the first had succeeded.
+                                guard !model.busy.contains("link:\(session.key)") else { return }
                                 if await model.link(task: task, key: session.key, hub: app.hub) == nil {
                                     panel = nil
                                 }

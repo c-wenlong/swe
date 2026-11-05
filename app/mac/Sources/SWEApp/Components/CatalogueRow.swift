@@ -88,7 +88,8 @@ struct CatalogueRow: View {
         // Both lines clamp to one line of width; the tip keeps the full
         // name and detail readable ("Atlas Cloud Coding Plan",
         // "HUGGINGFACE_HUB_TOKEN, HF_TOKEN").
-        .help(detail.map { "\(name)\n\($0)" } ?? name)
+        .hoverTip(detail ?? name, title: detail == nil ? nil : name,
+                  replacesLabel: false, pinsOnClick: false)
         .animation(.easeOut(duration: Theme.fadeDuration), value: hovering)
         .onHover { hovering = $0 }
     }

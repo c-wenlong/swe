@@ -94,6 +94,14 @@ class TestSearch(_Base):
         self.assertEqual((found["source"], found["scoped"]), ("github", False))
         self.assertNotIn("--owner", fake.calls()[0])
 
+    def test_a_query_that_looks_like_a_flag_stays_the_query(self):
+        fake = FakeGh(self, found=["x/y"])
+        manage.search_repos("--owner=evil", 15, self.probe, self.home,
+                            everywhere=True)
+        search = [c for c in fake.calls() if c[:2] == ["search", "repos"]][0]
+        self.assertEqual(search[-2:], ["--", "--owner=evil"])
+        self.assertNotIn("--owner", search[:-1])
+
     def test_a_blocked_gh_and_a_refused_search(self):
         FakeGh(self, search_error="HTTP 422: Validation Failed")
         signed_out = manage.search_repos(

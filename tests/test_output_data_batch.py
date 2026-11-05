@@ -425,8 +425,8 @@ class TablePlaceholderTest(unittest.TestCase):
                      formatter=lambda v: f"{v}s")
         t.add_row({"unrelated": True})
         lines = t.render()
-        self.assertIn("-", lines[-1])
-        self.assertNotIn("raceback", lines[-1])
+        # Every column shows the marker, nothing else.
+        self.assertEqual(lines[-1].split(), ["-", "-", "-"])
 
 
 class CodexPluginEnabledPlacementTest(unittest.TestCase):
@@ -470,33 +470,42 @@ class CrLfReadLineTest(unittest.TestCase):
     """18: a paste-split CRLF does not hand back a phantom empty line."""
 
     def test_crlf_split_across_chunks_is_one_break(self):
-        import threading
-        import time
+        import select
 
         from swe import prompt
 
         r, w = os.pipe()
         os.write(w, b"a\r")
+        real_select = select.select
+        peeks = []
+        writer_open = [True]
 
-        def _rest():
-            time.sleep(0.02)
-            try:
-                os.write(w, b"\nb\r\n")
+        def close_writer():
+            if writer_open[0]:
+                writer_open[0] = False
                 os.close(w)
-            except OSError:
-                pass
 
-        threading.Thread(target=_rest, daemon=True).start()
+        def peek(rlist, wlist, xlist, timeout=None):
+            # The second chunk lands while the reader peeks for an LF after
+            # the CR: written here, at the peek, instead of by a thread
+            # racing a sleep against the 50ms window.
+            if timeout == prompt._CRLF_PEEK_TIMEOUT and not peeks:
+                peeks.append(timeout)
+                os.write(w, b"\nb\r\n")
+                close_writer()
+            return real_select(rlist, wlist, xlist, timeout)
+
         try:
-            # Pad the 50ms production window: on a loaded builder the writer
-            # thread's 20ms nap can slip past it and the leftover LF reads as
-            # a phantom empty line. The test pins the branch, not the race.
-            with patch.object(prompt, "_CRLF_PEEK_TIMEOUT", 1.0):
+            with patch.object(select, "select", peek):
                 self.assertEqual(prompt._read_line_bytes(r, echo=False), "a")
+                # Checked before reading on: without the peek the rest was
+                # never written and the next read would block for good.
+                self.assertEqual(peeks, [prompt._CRLF_PEEK_TIMEOUT])
                 self.assertEqual(prompt._read_line_bytes(r, echo=False), "b")
                 with self.assertRaises(EOFError):
                     prompt._read_line_bytes(r, echo=False)
         finally:
+            close_writer()
             os.close(r)
 
 
@@ -518,8 +527,11 @@ class WideGlyphTableTest(unittest.TestCase):
     def test_truncate_cells_never_exceeds_budget(self):
         from swe.console import cell_len, truncate_cells
 
+        # One 2-cell glyph plus "..." fills the 5 cells; a second glyph
+        # would make 7.
         cut = truncate_cells("開発テスト", 5)
-        self.assertLessEqual(cell_len(cut), 5)
+        self.assertEqual(cut, "開...")
+        self.assertEqual(cell_len(cut), 5)
 
     def test_vs16_promotion_counts_in_the_cut(self):
         from swe.console import cell_len, truncate_cells
@@ -527,7 +539,8 @@ class WideGlyphTableTest(unittest.TestCase):
         # ❤ + VS16 renders 2 cells each; a naive per-char scan let the
         # ellipsis push the result to 7 cells and shifted later columns.
         cut = truncate_cells("❤️❤️❤️", 5)
-        self.assertLessEqual(cell_len(cut), 5)
+        self.assertEqual(cut, "❤️...")
+        self.assertEqual(cell_len(cut), 5)
 
 
 class C1StStripTest(unittest.TestCase):
@@ -617,8 +630,11 @@ class JsoncEdgeCasesTest(unittest.TestCase):
         # A /* */ before the root, ahead of the value, and mid-value.
         text = ('/* head */\n{\n  "mcp": /* inline */ '
                 '{"a": /* mid */ 1}\n}\n')
-        span = _jsonc_key_span(text, "mcp")
-        self.assertIsNotNone(span)
+        start, end = _jsonc_key_span(text, "mcp")
+        # The value starts after the inline comment and keeps the one
+        # inside it.
+        self.assertEqual(start, text.index('{"a"'))
+        self.assertEqual(text[start:end].rstrip(), '{"a": /* mid */ 1}')
         self.assertIsNone(_jsonc_key_span('{/* never closed', "mcp"))
 
     def test_slice_save_insert_paths_and_failures(self):
@@ -845,6 +861,25 @@ class CodexPluginNoFlagTest(unittest.TestCase):
             )
             found = _from_codex_toml(home)
         self.assertEqual([p.name for p in found], ["nested"])
+
+    def test_newest_cached_version_wins_not_the_last_by_name(self):
+        # By name, an old 2.0.0 sorted after the 10.0.0 just installed;
+        # plugin drift and the catalog pick the most recently written.
+        import os
+        from swe.find.plugins import _from_codex_toml
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".codex").mkdir()
+            (home / ".codex" / "config.toml").write_text(
+                '[plugins."tool@mk"]\nenabled = true\n')
+            cache = home / ".codex" / "plugins" / "cache" / "mk" / "tool"
+            (cache / "2.0.0").mkdir(parents=True)
+            (cache / "10.0.0").mkdir()
+            (cache / ".in_use").mkdir()
+            os.utime(cache / "2.0.0", (1_000_000, 1_000_000))
+            found = _from_codex_toml(home)
+        self.assertEqual([p.version for p in found], ["10.0.0"])
 
     def test_block_without_enabled_is_skipped(self):
         from swe.find.plugins import _from_codex_toml

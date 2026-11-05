@@ -200,6 +200,10 @@ function closeRouteSheets() {
 function renderGate(message = CREDENTIAL_REFUSED, always = false) {
   // A page's open sheet would stay modal above the gate.
   closeRouteSheets();
+  // The gate is the view now: a page's read or poll still out compares
+  // routeGen before it paints, so it drops its reply instead of drawing
+  // over the pair form.
+  routeGen++;
   const lead = credential() || always ? message
     : "This device isn't signed in to the hub owner's Tailscale account, so it needs pairing.";
   document.getElementById("panel").innerHTML = `<div class="page"><div class="card gate">
@@ -208,13 +212,13 @@ function renderGate(message = CREDENTIAL_REFUSED, always = false) {
     <div id="pair-start">
       <input class="field gate-field" id="pair-name" type="text" autocomplete="off"
         placeholder="Name for this device" aria-label="Name for this device">
-      <button class="set-button primary" id="pair-ts">Pair with Tailscale</button>
+      <button class="btn medium set-button primary" id="pair-ts">Pair with Tailscale</button>
       <p class="gate-error" id="pair-error"></p>
       <details class="gate-token">
         <summary>Have a pair token?</summary>
         <input class="field gate-field" id="pair-token" type="text" inputmode="text"
           autocomplete="off" placeholder="pair token" spellcheck="false">
-        <button class="set-button" id="pair-go">Pair with token</button>
+        <button class="btn medium set-button" id="pair-go">Pair with token</button>
       </details>
     </div>
     <div id="pair-code-card" hidden>
@@ -224,7 +228,7 @@ function renderGate(message = CREDENTIAL_REFUSED, always = false) {
         <code>swe remote devices --approve=<span id="pair-code-flat"></span></code>,
         or in Settings &rsaquo; Integrations &rsaquo; Remote on a signed-in browser.</p>
       <p class="caption" id="pair-code-status"></p>
-      <button class="set-button" id="pair-retry" hidden>Try again</button>
+      <button class="btn medium set-button" id="pair-retry" hidden>Try again</button>
     </div>
   </div></div>`;
   const el = (id) => document.getElementById(id);

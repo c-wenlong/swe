@@ -105,7 +105,7 @@ class FirstRunScaffoldingTest(unittest.TestCase):
             for p in patches:
                 p.stop()
 
-    def test_unknown_command_does_not_scaffold_quiver_dir(self):
+    def test_unknown_command_does_not_scaffold_swe_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = pathlib.Path(tmp)
             status, out, err = self._run_with_fresh_paths(home, ["bogus-cmd"])
@@ -113,7 +113,7 @@ class FirstRunScaffoldingTest(unittest.TestCase):
             self.assertIn("Unknown command: 'bogus-cmd'", out)
             self.assertFalse((home / ".swe").exists())
 
-    def test_version_does_not_scaffold_quiver_dir(self):
+    def test_version_does_not_scaffold_swe_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = pathlib.Path(tmp)
             status, out, _err = self._run_with_fresh_paths(home, ["--version"])

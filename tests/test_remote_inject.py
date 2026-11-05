@@ -6,7 +6,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from swe.remote import attachments, inject, protocol, supervise
 from swe.sessions.models import Session
@@ -277,8 +277,25 @@ class TestTmuxInjector(unittest.TestCase):
         # A second answer cannot even capture the pane until the first
         # walk's keys have all landed — interleaved arrows would select
         # a row nobody asked for.
-        lock = inject.TmuxInjector._pane_locks.setdefault(
-            self.key, threading.Lock())
+        class Lock:
+            """The pane lock, signalling when another thread asks for it."""
+
+            def __init__(self):
+                self.real, self.asked = threading.Lock(), threading.Event()
+
+            def __enter__(self):
+                if threading.current_thread() is not threading.main_thread():
+                    self.asked.set()
+                self.real.acquire()
+                return self
+
+            def __exit__(self, *exc):
+                self.real.release()
+
+        lock = Lock()
+        # The walk takes supervise's own per-pane lock (send_text's).
+        supervise._PANE_LOCKS[self.inj.name] = lock
+        self.addCleanup(supervise._PANE_LOCKS.pop, self.inj.name, None)
         sent = []
 
         def _key(_name, key):
@@ -286,16 +303,21 @@ class TestTmuxInjector(unittest.TestCase):
             return True
 
         with patch.object(supervise, "capture_pane",
-                          return_value=self.DEVIN_QUESTION), \
+                          return_value=self.DEVIN_QUESTION) as capture, \
              patch.object(supervise, "send_key", side_effect=_key):
             with lock:
                 t = threading.Thread(
                     target=self.inj.approval,
                     args=(self.session, "r1", "2"))
                 t.start()
-                time.sleep(0.1)
-                self.assertEqual(sent, [])  # parked on the lock
+                # Wait until the walk is at the lock, then check it is
+                # parked there: nothing captured, nothing sent.
+                self.assertTrue(lock.asked.wait(5))
+                self.assertTrue(t.is_alive())
+                capture.assert_not_called()
+                self.assertEqual(sent, [])
             t.join(2)
+        self.assertFalse(t.is_alive())
         self.assertEqual(sent, ["Down", "Enter"])
 
     def test_approval_choice_unreachable_mid_walk(self):
@@ -362,6 +384,89 @@ class TestTmuxInjector(unittest.TestCase):
         finally:
             supervise.set_pending_approval(key, None)
 
+    def test_a_retired_id_cannot_answer_the_next_prompt(self):
+        # Prompt A was answered at the terminal, so the watcher cleared
+        # its id; prompt B is up before B's id is minted. A late tap on
+        # A's id must not answer B.
+        key = self.key
+        pane_b = "Do you want to run rm -rf?\n1. Yes\n2. No"
+        supervise.set_pending_approval(key, "req-a", "fp-a")
+        supervise.set_pending_approval(key, None)
+        try:
+            with patch.object(supervise, "capture_pane",
+                              return_value=pane_b), \
+                    patch.object(supervise, "send_key") as sk:
+                out = self.inj.approval(self.session, "req-a", "allow")
+            self.assertFalse(out.ok)
+            self.assertIn("stale", out.note)
+            sk.assert_not_called()
+            # The same prompt back under its old id answers again.
+            supervise.set_pending_approval(
+                key, "req-a", supervise.approval_fingerprint(pane_b))
+            self.assertFalse(supervise.approval_retired(key, "req-a"))
+        finally:
+            supervise.set_pending_approval(key, None)
+            supervise._RETIRED_APPROVALS.pop(key, None)
+
+    def test_a_steered_message_waits_for_an_approval_walk(self):
+        # The walk and send_text share one pane lock: text typed
+        # between the arrow keys would land in the menu.
+        first_key, release = threading.Event(), threading.Event()
+        order = []
+
+        def key(_name, k):
+            order.append(k)
+            if len(order) == 1:
+                first_key.set()
+                release.wait(5)
+            return True
+
+        def tmux(*args):
+            order.append("text")
+            return MagicMock(returncode=0)
+
+        with patch.object(supervise, "capture_pane",
+                          return_value=self.DEVIN_QUESTION), \
+                patch.object(supervise, "send_key", side_effect=key), \
+                patch.object(supervise, "_tmux", side_effect=tmux):
+            walk = threading.Thread(target=self.inj.approval,
+                                    args=(self.session, "r1", "2"))
+            walk.start()
+            self.assertTrue(first_key.wait(5))
+            steer = threading.Thread(target=supervise.send_text,
+                                     args=(self.inj.name, "hi"))
+            steer.start()
+            steer.join(0.2)
+            self.assertTrue(steer.is_alive())  # parked behind the walk
+            release.set()
+            walk.join(5)
+            steer.join(5)
+        self.assertEqual(order, ["Down", "Enter", "text", "text"])
+
+    def test_a_reply_in_flight_stops_when_the_prompt_changes(self):
+        # The id passed its checks for prompt A, then the watcher named
+        # prompt B while the pane was captured: A's answer must not go.
+        key = self.key
+        pane_b = "Do you want to run rm -rf?\n1. Yes\n2. No"
+        supervise.set_pending_approval(key, "req-a", None)
+
+        def capture(_name):
+            supervise.set_pending_approval(
+                key, "req-b", supervise.approval_fingerprint(pane_b))
+            return pane_b
+
+        try:
+            with patch.object(supervise, "capture_pane",
+                              side_effect=capture), \
+                    patch.object(supervise, "send_key") as sk:
+                out = self.inj.approval(self.session, "req-a", "allow")
+            self.assertFalse(out.ok)
+            self.assertIn("changed", out.note)
+            sk.assert_not_called()
+        finally:
+            supervise.set_pending_approval(key, None)
+            supervise._RETIRED_APPROVALS.pop(key, None)
+
     def test_interrupt_escape(self):
         with patch.object(supervise, "send_key", return_value=True) as sk:
             out = self.inj.control(self.session, "interrupt", "")
@@ -373,6 +478,25 @@ class TestTmuxInjector(unittest.TestCase):
             out = self.inj.control(self.session, "compact", "")
         self.assertTrue(out.ok)
         self.assertEqual(st.call_args[0][1], "/compact")
+
+    def test_model_and_effort_only_where_the_tui_takes_them(self):
+        # Typed into a TUI without /model or /effort, the line would be
+        # sent to the model as a prompt.
+        import dataclasses
+        for tool, op, ok in (("claude", "model", True),
+                             ("claude", "effort", True),
+                             ("codex", "model", True),
+                             ("codex", "effort", False),
+                             ("opencode", "model", False),
+                             ("gemini", "model", False)):
+            session = dataclasses.replace(self.session, tool_name=tool)
+            with patch.object(supervise, "send_text",
+                              return_value=True) as st:
+                out = self.inj.control(session, op, "x")
+            self.assertEqual(out.ok, ok, (tool, op))
+            self.assertEqual(st.called, ok, (tool, op))
+            if not ok:
+                self.assertTrue(out.note.startswith("unsupported_control:"))
 
     def test_send_empty_and_unreachable(self):
         out = self.inj.send(self.session, {"text": "", "mode": "steer"}, "done")
@@ -953,10 +1077,6 @@ class TestHubWrites(unittest.TestCase):
         self.assertIn("shot.png", sent)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestAttachmentCapability(unittest.TestCase):
     """``capabilities.attachments`` over ``ATTACH_FALLBACK``."""
 
@@ -1024,3 +1144,7 @@ class TestAttachmentCapability(unittest.TestCase):
         with patch.object(registry, "load_registry_readonly",
                           side_effect=ValueError):
             self.assertTrue(attachments.at_refs("claude"))
+
+
+if __name__ == "__main__":
+    unittest.main()

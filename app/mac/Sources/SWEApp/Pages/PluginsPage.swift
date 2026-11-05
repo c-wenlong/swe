@@ -76,7 +76,7 @@ struct PluginsPage: View {
             // Health's report stays warm behind Explore, the tab on show.
             await model.loadIfStale(swe: app.swe, for: app.swePath)
         }
-        .quiverSheet(isPresented: $addingMarketplace) {
+        .cardSheet(isPresented: $addingMarketplace) {
             AddMarketplaceSheet()
         }
         .task(id: ExploreLoad(swePath: app.swePath, open: app.pluginsTab == .explore)) {

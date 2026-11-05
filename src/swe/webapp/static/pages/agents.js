@@ -145,13 +145,13 @@ function agentsGlobal(d) {
   const blocked = d.blocked || [];
   const needsInit = rows.some((h) => agentInitFixes(h.instructions.state)) || !d.agents_file_exists;
   const link = needsInit || p.running === "link"
-    ? `<button class="sk-button primary ag-run" data-agents="link"${p.running ? " disabled" : ""}
+    ? `<button class="btn hairline primary ag-run" data-agents="link"${p.running ? " disabled" : ""}
         title="Runs swe init on the hub, which links what is missing and never replaces a real file.">${
-        p.running === "link" ? '<span class="ag-spinner" aria-hidden="true"></span>Linking…' : `${AGENTS_LINK_ICON}Link with swe init`}</button>` : "";
+        p.running === "link" ? '<span class="spinner" aria-hidden="true"></span>Linking…' : `${AGENTS_LINK_ICON}Link with swe init`}</button>` : "";
   const replace = blocked.length || p.running === "replace" ? `<div class="ag-blocked">
       <p class="caption">A real file or folder is in the way for some harnesses. swe init leaves those alone.</p>
-      <button class="sk-button ag-run" data-agents="ask" aria-expanded="${p.confirming}"${p.running ? " disabled" : ""}>${
-        p.running === "replace" ? '<span class="ag-spinner" aria-hidden="true"></span>Replacing…' : "Replace and back up…"}</button></div>
+      <button class="btn hairline ag-run" data-agents="ask" aria-expanded="${p.confirming}"${p.running ? " disabled" : ""}>${
+        p.running === "replace" ? '<span class="spinner" aria-hidden="true"></span>Replacing…' : "Replace and back up…"}</button></div>
     ${p.confirming && !p.running ? agentsConfirm(d, blocked) : ""}` : "";
   const strip = `<div class="ag-strip"><div class="ag-strip-row">
       <span class="card-title" title="From swe init --check">Harnesses</span>
@@ -174,8 +174,8 @@ function agentsConfirm(d, blocked) {
     <p class="caption">This runs swe init --force on ${esc(machine)}. Each of these is copied to ~/.swe/backups, then replaced with a link to the shared copy:</p>
     <ul class="ag-confirm-paths">${blocked.map((path) => `<li><code>${esc(path)}</code></li>`).join("")}</ul>
     <div class="ag-confirm-buttons">
-      <button class="sk-button" data-agents="cancel">Cancel</button>
-      <button class="sk-button danger" data-agents="replace">Replace and back up</button>
+      <button class="btn hairline" data-agents="cancel">Cancel</button>
+      <button class="btn hairline danger" data-agents="replace">Replace and back up</button>
     </div></div>`;
 }
 
@@ -233,7 +233,7 @@ function agentsProject() {
     <input class="field search" id="ag-folder" list="ag-folders" type="text" spellcheck="false" autocomplete="off"
       placeholder="A project folder on the hub, like ~/dev/app" aria-label="Project folder" value="${esc(p.folder || "")}">
     <datalist id="ag-folders">${suggestions}</datalist>
-    <button class="sk-button" type="submit">Open</button>
+    <button class="btn hairline" type="submit">Open</button>
   </form>`;
   if (!p.folder) {
     return `${strip}<p class="caption">Choose a project folder to read its AGENTS.md and CLAUDE.md.${

@@ -5,7 +5,7 @@ import math
 import os
 import time
 
-from swe.paths import SESSION_COUNTS_CACHE_FILE
+from swe.paths import SESSION_COUNTS_CACHE_FILE, atomic_write_text
 from swe.sessions.aggregator import PARSER_REGISTRY, get_all_sessions
 from swe.sessions.identity import COUNT_TO_REGISTRY, registry_tool
 
@@ -52,9 +52,16 @@ def _read_cache() -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _windows(data: dict) -> dict:
+    """The cache's per-window entries; anything else a hand edit left reads
+    as none, so ``{"windows": [1]}`` is a miss rather than a crash."""
+    windows = data.get("windows")
+    return windows if isinstance(windows, dict) else {}
+
+
 def _load_cached_counts(days: int | None) -> dict[str, int] | None:
     # Keyed by window: switching 100d to 30d must not read the old number.
-    entry = (_read_cache().get("windows") or {}).get(_window_key(days))
+    entry = _windows(_read_cache()).get(_window_key(days))
     if not isinstance(entry, dict):
         return None
     try:
@@ -88,24 +95,24 @@ def _save_cached_counts(days: int | None, counts: dict[str, int],
                         merge_prior: bool = False) -> None:
     try:
         data = _read_cache()
-        windows = dict(data.get("windows") or {})
+        windows = dict(_windows(data))
         # Union, don't replace — but only when this pass was fed by the
         # sessions cache and so parsed nothing: overwriting the list then
         # would forget which transcripts were actually broken. After a
         # fresh scan the new list is authoritative, so a recovered file
         # stops reading as broken.
-        prior = (windows.get(_window_key(days), {}).get("broken") or []
-                 if merge_prior else [])
+        entry = windows.get(_window_key(days))
+        prior = (entry.get("broken") if merge_prior and isinstance(entry, dict) else None)
+        prior = prior if isinstance(prior, list) else []
         windows[_window_key(days)] = {
             "cached_at": time.time(),
             "counts": counts,
             "broken": sorted(set(broken or ()) | set(prior)),
         }
-        SESSION_COUNTS_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        tmp = SESSION_COUNTS_CACHE_FILE.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"windows": windows}), encoding="utf-8")
-        tmp.replace(SESSION_COUNTS_CACHE_FILE)
-    except OSError:
+        # A unique temp name: two swe processes saving at once used to
+        # share session_counts.tmp and swap each other's half-written file.
+        atomic_write_text(SESSION_COUNTS_CACHE_FILE, json.dumps({"windows": windows}))
+    except (OSError, TypeError, ValueError):
         pass
 
 

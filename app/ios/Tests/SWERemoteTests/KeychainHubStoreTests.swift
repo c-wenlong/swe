@@ -17,11 +17,6 @@ final class KeychainHubStoreTests: XCTestCase {
         UserDefaults().removePersistentDomain(forName: suite)
     }
 
-    private func hub(_ host: String, _ cred: String = "c") -> PairedHub {
-        PairedHub(baseURL: URL(string: "http://\(host):8477")!,
-                  credential: Credential(deviceId: "d-\(host)", credential: cred, name: "phone"))
-    }
-
     func testTwoHubsRoundTripWithNamesAndTheActiveOne() {
         var list = HubList()
         list.adopt(hub("mac", "c1"))
