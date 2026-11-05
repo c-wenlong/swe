@@ -105,6 +105,24 @@ class FollowUpLedgerTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.ledger.list(status="maybe")
 
+    def test_relative_project_is_stored_absolute(self):
+        # Stored as typed, `--project=.` was later resolved against the
+        # folder `followup work` ran from and launched in the wrong place.
+        import os
+
+        here = os.getcwd()
+        item = self.ledger.add("Relative", ".")
+        self.assertEqual(item.project_root, here)
+        sub = self.ledger.add("Sub", "sub")
+        self.assertEqual(sub.project_root, os.path.join(here, "sub"))
+        self.assertEqual(self.ledger.list(project_root=".")[0].id, item.id)
+        moved = self.ledger.edit(item.id, project_root="other")
+        self.assertEqual(moved.project_root, os.path.join(here, "other"))
+        with self.assertRaises(ValueError):
+            self.ledger.add("Empty", "")
+        with self.assertRaises(ValueError):
+            self.ledger.edit(item.id, project_root=" ")
+
     def test_unknown_and_invalid_edits_fail_without_mutation(self):
         item = self.ledger.add("Add report CLI", "/repo")
         before = self.ledger.path.read_bytes()
