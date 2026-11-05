@@ -509,6 +509,9 @@ public actor Ledger {
             }
         }
         if let indexer {
+            // Every Kimi session reads the same session_index.jsonl; parse
+            // it once per scan rather than once per session (N² lines).
+            var kimiWorkDirs: [String: [String: String]] = [:]
             for job in indexJobs {
                 for file in job.files {
                     if Task.isCancelled { throw CancellationError() }
@@ -526,7 +529,7 @@ public actor Ledger {
                         indexGrokFile(file, sessionID: pathSessionID,
                                       indexer: indexer, report: &report)
                     case .kimi:
-                        indexKimiFile(file, sessionID: pathSessionID,
+                        indexKimiFile(file, sessionID: pathSessionID, workDirs: &kimiWorkDirs,
                                       indexer: indexer, report: &report)
                     case .cursor:
                         indexCursorFile(file, metaIndex: job.cursorMeta,
@@ -973,7 +976,8 @@ public actor Ledger {
     /// manifest commits `.none`; a missing wire transcript still yields the
     /// metadata-only session.
     private func indexKimiFile(
-        _ url: URL, sessionID: String?, indexer: SearchIndexer, report: inout ScanReport
+        _ url: URL, sessionID: String?, workDirs: inout [String: [String: String]],
+        indexer: SearchIndexer, report: inout ScanReport
     ) {
         let path = url.resolvingSymlinksInPath().path
         guard let info = FileInfo(path: path) else { return }
@@ -1008,7 +1012,11 @@ public actor Ledger {
                     // `lastPrompt` is the last-resort title — it fills a
                     // session the wire transcript never retitled.
                     title: manifest["lastPrompt"],
-                    cwd: sessionID.flatMap { Self.kimiWorkDirs(forStateFile: path)[$0] }))
+                    cwd: sessionID.flatMap { id in
+                        let map = workDirs[indexURL.path] ?? Self.kimiWorkDirs(forStateFile: path)
+                        workDirs[indexURL.path] = map
+                        return map[id]
+                    }))
                 if FileManager.default.fileExists(atPath: wireURL.path) {
                     let result = try reader.read(wireURL, from: 0) { indexer.consume(line: $0) }
                     report.skippedLines += result.skippedLines

@@ -476,6 +476,29 @@ import Testing
         #expect(try s.fts("reply").count == 1)
     }
 
+    /// The shared index is parsed once per scan; each session still gets
+    /// its own work dir from it.
+    @Test func kimiSessionsSharingAnIndexEachGetTheirWorkDir() async throws {
+        let s = try Setup()
+        await s.attach()
+        let kimiHome = s.temp.path("kimi-code")
+        for id in ["session_a", "session_b"] {
+            try s.write(#"{"title":"\#(id)"}"#,
+                        to: kimiHome.appendingPathComponent("sessions/wd_ws/\(id)/state.json"))
+        }
+        try s.write("""
+            {"sessionId":"session_a","workDir":"/repo/a"}
+            {"sessionId":"session_b","workDir":"/repo/b"}
+            """ + "\n", to: kimiHome.appendingPathComponent("session_index.jsonl"))
+
+        let report = try await s.ledger.scan(
+            roots: LedgerRoots(transcriptRoots: [.kimi: [kimiHome.appendingPathComponent("sessions")]]))
+
+        #expect(report.filesIndexed == 2)
+        #expect(try s.session(agent: "kimi", sessionID: "session_a")?.fields.cwd == "/repo/a")
+        #expect(try s.session(agent: "kimi", sessionID: "session_b")?.fields.cwd == "/repo/b")
+    }
+
     @Test func kimiPrefersTheMainAgentWithoutAParent() async throws {
         let s = try Setup()
         await s.attach()
