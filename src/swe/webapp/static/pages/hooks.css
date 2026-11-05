@@ -3,27 +3,8 @@
  * hook rows, the detail view and the New hook sheet. Reuses the shared
  * .card/.badge/.caption/.sheet/.field classes from styles.css. */
 
-.hk-button {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border);
-  background: var(--card); color: var(--text-primary); font: inherit; font-size: 13px; cursor: pointer;
-}
-.hk-button svg { width: 14px; height: 14px; }
-.hk-button:hover { background: var(--tab-hover); }
-.hk-button:disabled { opacity: .55; cursor: default; }
-.hk-button:disabled:hover { background: var(--card); }
-.hk-button.primary { background: var(--text-primary); border-color: var(--text-primary); color: var(--card); }
-.hk-button.primary:hover:not(:disabled) { background: var(--text-primary); opacity: .9; }
-.hk-button.primary:disabled:hover { background: var(--text-primary); }
-.hk-button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
-.hk-button.danger:hover:not(:disabled) { background: var(--danger); opacity: .9; }
+.hk-button:disabled { opacity: .55; }
 .hk-new-button svg { width: 12px; height: 12px; }
-
-.hk-spinner {
-  width: 12px; height: 12px; border-radius: 50%;
-  border: 2px solid currentColor; border-top-color: transparent;
-  animation: spin 1s linear infinite; display: inline-block; flex: none;
-}
 
 /* The init strip: pending links and the blocked-files note, like
  * agents.css's .ag-strip. */

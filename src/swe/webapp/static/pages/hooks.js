@@ -92,7 +92,7 @@ async function renderHooksList() {
 function hooksHeader(busy) {
   return pageHeader("Hooks",
     "Scripts in ~/.swe/hooks that run when a harness fires an event, and which harnesses each is linked and declared for.",
-    `<button class="hk-button primary hk-new-button" id="hk-new" type="button" title="Write a new hook script into ~/.swe/hooks">${HK_PLUS}New hook</button>
+    `<button class="btn hairline hk-button primary hk-new-button" id="hk-new" type="button" title="Write a new hook script into ~/.swe/hooks">${HK_PLUS}New hook</button>
      <button class="icon-button${busy ? " spinning" : ""}" id="page-refresh" aria-label="Refresh" title="Refresh">${icon("rescan")}</button>`);
 }
 
@@ -107,7 +107,7 @@ function paintHooks() {
   let body;
   if (!d.hooks.length) {
     body = `<div class="card hk-empty"><p class="empty">No hooks in ~/.swe/hooks yet. A hook script runs when its harness fires an event.</p>
-      <div><button class="hk-button primary" id="hk-new-empty" type="button">New hook</button></div></div>`;
+      <div><button class="btn hairline hk-button primary" id="hk-new-empty" type="button">New hook</button></div></div>`;
   } else {
     body = hkGroups(d.hooks).map(hkGroupCard).join("");
   }
@@ -156,13 +156,13 @@ function hkLinksStrip(d) {
   const blocked = d.hooks.filter((h) => hkBlocked(h.link_status));
   if (!pending.length && !blocked.length && !p.running) return "";
   const link = pending.length || p.running === "link"
-    ? `<button class="hk-button primary hk-run" data-hk="link"${p.running ? " disabled" : ""}
+    ? `<button class="btn hairline hk-button primary hk-run" data-hk="link"${p.running ? " disabled" : ""}
         title="Runs swe init, which also links the shared skills and instructions and never replaces a real file.">${
-        p.running === "link" ? '<span class="hk-spinner" aria-hidden="true"></span>Linking…' : `${HK_LINK_ICON}Link with swe init`}</button>` : "";
+        p.running === "link" ? '<span class="spinner ink" aria-hidden="true"></span>Linking…' : `${HK_LINK_ICON}Link with swe init`}</button>` : "";
   const replace = blocked.length || p.running === "replace" ? `<div class="hk-blocked">
       <p class="caption">A real file is in the way for ${blocked.length === 1 ? "a hook" : `${blocked.length} hooks`}. swe init leaves those alone.</p>
-      <button class="hk-button hk-run" data-hk="ask" aria-expanded="${p.confirming}"${p.running ? " disabled" : ""}>${
-        p.running === "replace" ? '<span class="hk-spinner" aria-hidden="true"></span>Replacing…' : "Replace and back up…"}</button></div>
+      <button class="btn hairline hk-button hk-run" data-hk="ask" aria-expanded="${p.confirming}"${p.running ? " disabled" : ""}>${
+        p.running === "replace" ? '<span class="spinner ink" aria-hidden="true"></span>Replacing…' : "Replace and back up…"}</button></div>
     ${p.confirming && !p.running ? hkConfirm(d) : ""}` : "";
   return `<div class="hk-strip"><div class="hk-strip-row">
       <span class="card-title" title="From swe init --check">Links</span>
@@ -181,8 +181,8 @@ function hkConfirm(d) {
     <p class="caption">This runs swe init --force on ${esc(machine)}. Each of these is copied to ~/.swe/backups, then replaced with a link to the shared copy:</p>
     <ul class="hk-confirm-paths">${(d.blocked || []).map((path) => `<li><code>${esc(path)}</code></li>`).join("")}</ul>
     <div class="hk-confirm-buttons">
-      <button class="hk-button" data-hk="cancel">Cancel</button>
-      <button class="hk-button danger" data-hk="replace">Replace and back up</button>
+      <button class="btn hairline hk-button" data-hk="cancel">Cancel</button>
+      <button class="btn hairline hk-button danger" data-hk="replace">Replace and back up</button>
     </div></div>`;
 }
 
@@ -394,8 +394,8 @@ function openNewHook() {
       <span class="caption" id="hk-new-hint"></span></label>
     <p class="error" id="hk-new-error" role="alert" hidden></p>
     <div class="sheet-actions" id="hk-new-actions">
-      <button class="hk-button" type="button" id="hk-new-close">Cancel</button>
-      <button class="hk-button primary" type="submit" id="hk-new-create" disabled>Create</button>
+      <button class="btn hairline hk-button" type="button" id="hk-new-close">Cancel</button>
+      <button class="btn hairline hk-button primary" type="submit" id="hk-new-create" disabled>Create</button>
     </div></form>`;
   const $ = (id) => document.getElementById(id);
   const sync = () => {
@@ -486,7 +486,7 @@ function hkCreated(sheet, c) {
     <p class="caption">Created ${esc(hkPath(c.path, home))}</p>
     ${block}
     <p class="caption">Then swe init links it into place.</p>
-    <div class="sheet-actions"><button class="hk-button primary" type="button" id="hk-new-done">Done</button></div>`;
+    <div class="sheet-actions"><button class="btn hairline hk-button primary" type="button" id="hk-new-done">Done</button></div>`;
   document.getElementById("hk-new-done").onclick = () => sheet.close();
   // copyTick awaits the write before the tick; a failed copy (plain http
   // has no clipboard API) selects the stanza to grab by hand.

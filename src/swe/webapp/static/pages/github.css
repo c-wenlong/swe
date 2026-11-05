@@ -24,18 +24,11 @@
 .gh-spin { animation: spin 1.2s linear infinite; }
 .gh-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-.gh-button {
-  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 10px;
-  border: 1px solid var(--border); background: var(--card); color: var(--text-primary); font-size: 13px;
-  cursor: pointer; text-decoration: none; white-space: nowrap;
-}
-.gh-button:hover { background: var(--tab-hover); }
-.gh-button:disabled { opacity: .5; cursor: default; }
-.gh-button:disabled:hover { background: var(--card); }
+.gh-button { border-radius: 10px; }
+.gh-button:disabled { opacity: .5; }
 /* The app's successButton: the one green, outward-facing action. */
 .gh-button.gh-primary { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; font-weight: 500; }
 .gh-button.gh-primary:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
-.gh-button.gh-primary:disabled:hover { background: var(--accent-fill); }
 
 /* An inline confirm naming exactly what a write will do. */
 .gh-confirm { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--border-strong); border-radius: 12px; padding: 12px 14px; background: var(--subtle); }
@@ -145,7 +138,6 @@ a.icon-button { color: inherit; }
   display: grid; place-items: center; cursor: pointer;
 }
 .gh-rail-btn:hover { background: var(--hover); }
-.gh-rail-btn.spinning svg { animation: spin 1s linear infinite; }
 .gh-rail-list { display: flex; flex-direction: column; }
 .gh-rail-row {
   display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border: 0; border-radius: 8px;

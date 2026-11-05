@@ -90,7 +90,7 @@ function skillsLinkDot(link) {
 function skillsChip(name, link, { compact = false, root = "", busy = false } = {}) {
   const tag = root ? "button" : "span";
   const data = root ? ` data-root="${esc(root)}" type="button"` : "";
-  const dot = busy ? '<span class="sk-spin" aria-label="Working"></span>' : skillsLinkDot(link);
+  const dot = busy ? '<span class="spinner sm" aria-label="Working"></span>' : skillsLinkDot(link);
   return `<${tag} class="sk-chip ${link}${compact ? " compact" : ""}"${data}
     title="${esc(Fmt.harnessName(name))}: ${LINK_TITLE[link].toLowerCase()}">${dot}${skillsMark(name, compact ? "logo logo-sm" : "logo")}</${tag}>`;
 }
@@ -195,7 +195,7 @@ function skillsHeader(busy) {
       ${skillsPage.links !== null ? skillsLinksPanel(d) : ""}
     </div>`;
   }
-  const add = p.onDetail ? "" : `<button class="sk-button primary sk-new-button" id="sk-new" type="button"
+  const add = p.onDetail ? "" : `<button class="btn hairline primary sk-new-button" id="sk-new" type="button"
       title="Write a new SKILL.md into ~/.swe/skills on ${esc(where)}">${SKILLS_PLUS}New skill</button>`;
   return pageHeader("Skills", `Every skill on ${where} outside a plugin, and which harnesses load it.`,
     `${links}${add}<button class="icon-button${busy ? " spinning" : ""}" id="page-refresh" aria-label="Refresh" title="Refresh">${icon("rescan")}</button>`);
@@ -222,7 +222,7 @@ function skillsLinksPanel(d) {
   if (confirmAll) {
     all = skillsConfirm(confirmAll, d, `Link ${confirmAll.paths.length}`, p.busy.size > 0);
   } else if (targets.length) {
-    all = `<div class="sk-actions"><button class="sk-button" type="button" id="sk-link-all"${p.busy.size ? " disabled" : ""}>Link all (${targets.length})</button></div>`;
+    all = `<div class="sk-actions"><button class="btn hairline" type="button" id="sk-link-all"${p.busy.size ? " disabled" : ""}>Link all (${targets.length})</button></div>`;
   }
   const body = roots.length
     ? `<div class="sk-chips">${roots.map((r) => skillsChip(r.name, rootLink(r), { root: r.path, busy: p.busy.has(r.path) })).join("")}</div>
@@ -230,7 +230,7 @@ function skillsLinksPanel(d) {
          `<span>${skillsLinkDot(l)}${LINK_TITLE[l]}</span>`).join("")}<span class="muted">Click one to link or unlink it.</span></div>
        ${all}`
     : `<div class="sk-none"><span>No harness skills folders found. Register a harness first.</span>
-       <a class="sk-button" href="#/harnesses">Open Harnesses</a></div>`;
+       <a class="btn hairline" href="#/harnesses">Open Harnesses</a></div>`;
   return `<div class="sk-popover" role="dialog" aria-label="Harness links">
     <div><div class="card-title">Harness links</div>
       <p class="caption">Each harness reads one skills folder. A linked folder points at ${esc(skillsPath(d.shared_dir, d.home))}, so every shared skill reaches it.</p></div>
@@ -249,10 +249,10 @@ function skillsRootActions(root, d, link) {
   const c = p.confirm && p.confirm.path === root.path ? p.confirm : null;
   if (c) return skillsConfirm(c, d, c.kind === "unlink" ? "Unlink" : "Link", busy);
   if (link === "linked") {
-    return `<div class="sk-actions"><button class="sk-button" type="button" data-sk-ask="unlink"${busy ? " disabled" : ""}>Unlink</button></div>`;
+    return `<div class="sk-actions"><button class="btn hairline" type="button" data-sk-ask="unlink"${busy ? " disabled" : ""}>Unlink</button></div>`;
   }
   if (link === "notLinked") {
-    return `<div class="sk-actions"><button class="sk-button primary" type="button" data-sk-ask="link"${busy ? " disabled" : ""}>Link to shared skills</button></div>`;
+    return `<div class="sk-actions"><button class="btn hairline primary" type="button" data-sk-ask="link"${busy ? " disabled" : ""}>Link to shared skills</button></div>`;
   }
   return "";
 }
@@ -261,8 +261,8 @@ function skillsConfirm(c, d, go, busy) {
   return `<div class="sk-confirm" role="group" aria-label="Confirm">
     <p class="sk-body">${esc(skillsConfirmText(c, d))}</p>
     <div class="sk-actions">
-      <button class="sk-button" type="button" id="sk-confirm-cancel">Cancel</button>
-      <button class="sk-button primary" type="button" id="sk-confirm-go"${busy ? " disabled" : ""}>${esc(go)}</button>
+      <button class="btn hairline" type="button" id="sk-confirm-cancel">Cancel</button>
+      <button class="btn hairline primary" type="button" id="sk-confirm-go"${busy ? " disabled" : ""}>${esc(go)}</button>
     </div></div>`;
 }
 
@@ -339,8 +339,8 @@ function openNewSkill() {
     <p class="caption" id="sk-new-where"></p>
     <p class="error" id="sk-new-error" role="alert" hidden></p>
     <div class="sheet-actions" id="sk-new-actions">
-      <button class="sk-button" type="button" id="sk-new-close">Cancel</button>
-      <button class="sk-button primary" type="submit" id="sk-new-create" disabled>Create</button>
+      <button class="btn hairline" type="button" id="sk-new-close">Cancel</button>
+      <button class="btn hairline primary" type="submit" id="sk-new-create" disabled>Create</button>
     </div></form>`;
   const $ = (id) => document.getElementById(id);
   const sync = () => {
@@ -398,10 +398,10 @@ async function createSkill(sheet) {
     err.hidden = false;
     return;
   }
-  const open = data.skill ? `<a class="sk-button" href="#/skills?skill=${esc(encodeURIComponent(data.skill.path))}" id="sk-new-open">Open it</a>` : "";
+  const open = data.skill ? `<a class="btn hairline" href="#/skills?skill=${esc(encodeURIComponent(data.skill.path))}" id="sk-new-open">Open it</a>` : "";
   $("sk-new-form").innerHTML = `<div class="sheet-title">New skill</div>
     <p class="caption">Created ${esc(skillsPath(data.created))}</p>
-    <div class="sheet-actions">${open}<button class="sk-button primary" type="button" id="sk-new-done">Done</button></div>`;
+    <div class="sheet-actions">${open}<button class="btn hairline primary" type="button" id="sk-new-done">Done</button></div>`;
   $("sk-new-done").onclick = () => sheet.close();
   if ($("sk-new-open")) $("sk-new-open").onclick = () => sheet.close();
   $("sk-new-done").focus();
@@ -602,7 +602,7 @@ function paintSkillRows() {
     const text = empty ? `No skills on ${where} yet.`
       : !listed.length ? `Every skill on ${where} ships inside a plugin.` : "No skills match.";
     list.innerHTML = `<div class="card sk-empty"><p class="empty">${esc(text)}</p>${empty
-      ? '<div><button class="sk-button primary" id="sk-new-empty" type="button">New skill</button></div>' : ""}</div>`;
+      ? '<div><button class="btn hairline primary" id="sk-new-empty" type="button">New skill</button></div>' : ""}</div>`;
     const add = document.getElementById("sk-new-empty");
     if (add) add.onclick = () => openNewSkill();
     return;
@@ -794,7 +794,7 @@ async function openSkillFile(d, name) {
   const head = (inner) => `<form method="dialog" class="sheet-body">
     <div class="sk-sheet-head"><div class="titles"><div class="card-title">${esc(name.split("/").pop())}</div>
       <div class="card-subtitle sk-mono-sub">${esc(skillsPath(path, d.home))}</div></div>
-      <button class="sk-button" value="close">Close</button></div>${inner}</form>`;
+      <button class="btn hairline" value="close">Close</button></div>${inner}</form>`;
   sheet.innerHTML = head('<p class="caption">Reading…</p>');
   // Each opening has its own token: the same file name in another skill,
   // opened after this one closed, must not take this read's answer.

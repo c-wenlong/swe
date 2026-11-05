@@ -111,7 +111,7 @@ struct NewSessionSheet: View {
             } else {
                 form
             }
-            status
+            LaunchStatus(flow: flow)
             footer
         }
         .sheetScaffold(width: 700)
@@ -410,27 +410,7 @@ struct NewSessionSheet: View {
         }
     }
 
-    // MARK: - status + footer
-
-    @ViewBuilder private var status: some View {
-        switch flow.phase {
-        case .failed(let message):
-            Text(message).font(Theme.caption).foregroundStyle(Theme.dangerText)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-        case .unconfirmed(let message):
-            Text(message).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        default:
-            if let note = flow.note {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(note).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                        .lineLimit(2)
-                }
-            }
-        }
-    }
+    // MARK: - footer
 
     private var footer: some View {
         HStack(spacing: 10) {
@@ -447,28 +427,9 @@ struct NewSessionSheet: View {
                     .fixedSize()
                     .disabled(browse?.loading != false)
             } else {
-                Button("Cancel") {
-                    launchTask?.cancel()
-                    dismiss()
-                }
-                .secondaryButton()
-                .fixedSize()
-                .keyboardShortcut(.cancelAction)
-                Button {
-                    launchTask = Task { await start() }
-                } label: {
-                    HStack(spacing: 6) {
-                        if flow.busy {
-                            ProgressView().controlSize(.small).tint(Theme.primaryForeground)
-                        }
-                        Text(flow.busy ? "Starting" : "Start")
-                    }
-                }
-                .primaryButton()
-                .fixedSize()
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(!ready || flow.busy)
-                .hoverTip("Start the session (⌘↩)")
+                LaunchFormButtons(flow: flow, ready: ready, startTip: "Start the session",
+                              cancel: { launchTask?.cancel(); dismiss() },
+                              start: { launchTask = Task { await start() } })
             }
         }
     }

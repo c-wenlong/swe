@@ -333,10 +333,10 @@
       <p class="caption muted">USD per 1M tokens. Blank cache fields count as 0. Saves to ~/.swe/config/pricing.json on ${esc(where)}.</p>
       <p class="error" id="qp-error" role="alert" hidden></p>
       <div class="sheet-actions qp-actions">
-        ${r.source === "yours" ? '<button type="button" class="qp-button danger-text" id="qp-remove">Remove your price</button>' : ""}
+        ${r.source === "yours" ? '<button type="button" class="btn danger-text" id="qp-remove">Remove your price</button>' : ""}
         <span class="qp-spacer"></span><span class="caption" id="qp-working"></span>
-        <button type="button" class="qp-button" id="qp-cancel">Cancel</button>
-        <button type="submit" class="qp-button primary" id="qp-save">Save</button>
+        <button type="button" class="btn" id="qp-cancel">Cancel</button>
+        <button type="submit" class="btn primary" id="qp-save">Save</button>
       </div></form>`;
     const $ = (id) => document.getElementById(id);
     const valid = () => !!$("qp-key").value.trim() && rateValue($("qp-in").value, null) != null
