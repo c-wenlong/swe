@@ -460,7 +460,7 @@ private final class Changes: Sendable {
 
     /// A sessions.json the app can't read (locked, corrupt) is the only
     /// copy of sessions Devin no longer lists: a sync never writes over it.
-    @Test func anUnreadableStoreIsNeverOverwritten() async throws {
+    @Test(skippedAsRoot) func anUnreadableStoreIsNeverOverwritten() async throws {
         for locked in [true, false] {
             let dir = try TempDir()
             let file = dir.url.appending(path: "sessions.json")

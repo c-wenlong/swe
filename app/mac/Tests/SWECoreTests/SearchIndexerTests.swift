@@ -153,7 +153,7 @@ import Testing
         #expect(try s.store.status().messageCount == 1)
     }
 
-    @Test func anUnreadableFileAccumulatesFailuresThenHoldsOut() async throws {
+    @Test(skippedAsRoot) func anUnreadableFileAccumulatesFailuresThenHoldsOut() async throws {
         let s = try Setup()
         await s.attach()
         try s.write(userLine("hello"))
