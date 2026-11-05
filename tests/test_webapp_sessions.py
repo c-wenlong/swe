@@ -802,6 +802,10 @@ return div.innerHTML;
     # work comes out near 4 and quadratic near 16, however loaded the
     # machine is, since both sizes run under the same load. The n time
     # is floored at 5 ms so timer noise on a tiny run cannot fake a jump.
+    # T.hl's scanner can retry from every position, so it is quadratic up
+    # to HL_MAX (8,000) characters by design and escapes the rest plain.
+    # Its samples sit above the cap on purpose: what they guard is the
+    # cap: with HL_MAX lifted this test fails (node runs past its timeout).
     GROWTH_JS = r"""
 const pieces = {
   heading: (n) => T.heading("# a" + " ".repeat(n) + "b ##"),
