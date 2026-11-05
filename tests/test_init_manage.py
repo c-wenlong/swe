@@ -214,6 +214,19 @@ class InteractivePickerTest(unittest.TestCase):
                 json.loads((cfg / "harness.json").read_text()), registry
             )
 
+    def test_register_writes_what_save_registry_writes(self):
+        # Without registry_text's trailing newline, init and
+        # save_registry flipped harness.json's last byte in the hub's git.
+        from swe.harness.registry import registry_text
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            root = home / ".foo" / "skills"
+            root.mkdir(parents=True)
+            registry = manage.register(home, {}, {"foo": (root, None)}, {})
+            written = (home / ".swe" / "config" / "harness.json").read_text()
+            self.assertEqual(written, registry_text(registry))
+
     def test_eof_defaults_to_agents_md(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = _home(tmp)

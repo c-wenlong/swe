@@ -846,6 +846,25 @@ class CodexPluginNoFlagTest(unittest.TestCase):
             found = _from_codex_toml(home)
         self.assertEqual([p.name for p in found], ["nested"])
 
+    def test_newest_cached_version_wins_not_the_last_by_name(self):
+        # By name, an old 2.0.0 sorted after the 10.0.0 just installed;
+        # plugin drift and the catalog pick the most recently written.
+        import os
+        from swe.find.plugins import _from_codex_toml
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".codex").mkdir()
+            (home / ".codex" / "config.toml").write_text(
+                '[plugins."tool@mk"]\nenabled = true\n')
+            cache = home / ".codex" / "plugins" / "cache" / "mk" / "tool"
+            (cache / "2.0.0").mkdir(parents=True)
+            (cache / "10.0.0").mkdir()
+            (cache / ".in_use").mkdir()
+            os.utime(cache / "2.0.0", (1_000_000, 1_000_000))
+            found = _from_codex_toml(home)
+        self.assertEqual([p.version for p in found], ["10.0.0"])
+
     def test_block_without_enabled_is_skipped(self):
         from swe.find.plugins import _from_codex_toml
 

@@ -374,7 +374,7 @@ struct StripSwitcher: NSViewRepresentable {
 
         /// The picks the sidebar's machine switcher offers: This Mac,
         /// every listed hub, then the shown hub's Reload and Open in
-        /// Browser and the list's Add a Hub. The app-level actions come
+        /// browser and the list's Add a hub. The app-level actions come
         /// in as closures so the menu can be built without an AppModel.
         @MainActor
         static func menu(machines: MachineSwitcher, shown: HubOrigin,
@@ -415,11 +415,11 @@ struct StripSwitcher: NSViewRepresentable {
             }
             menu.addItem(.separator())
             menu.addItem(row("Reload \(shown.name)", symbol: "arrow.clockwise") { reload() })
-            menu.addItem(row("Open in Browser", symbol: "safari") {
+            menu.addItem(row("Open in browser", symbol: "safari") {
                 NSWorkspace.shared.open(shown.url)
             })
             menu.addItem(.separator())
-            menu.addItem(row("Add a Hub…", symbol: "plus") { addHub() })
+            menu.addItem(row("Add a hub…", symbol: "plus") { addHub() })
             return menu
         }
 

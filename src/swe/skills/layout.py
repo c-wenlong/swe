@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from swe.configuration import CorruptConfigurationError
-from swe.paths import CONFIG_DIR, SKILL_LINKS_FILE, expand_user
+from swe.paths import CONFIG_DIR, SKILL_LINKS_FILE, atomic_write_text, expand_user
 from swe.skills.catalogs import load_skill_catalogs, count_skill_md
 
 
@@ -110,10 +110,10 @@ def check_link_records_writable() -> None:
 def save_link_records(links: list[dict]) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     check_link_records_writable()
-    tmp = SKILL_LINKS_FILE.with_suffix(".tmp")
     payload = {"links": links, "updated": datetime.now().isoformat()}
-    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    tmp.rename(SKILL_LINKS_FILE)
+    # A unique temp name (two writers shared skill_links.tmp) that writes
+    # through a symlinked skill_links.json instead of replacing the link.
+    atomic_write_text(SKILL_LINKS_FILE, json.dumps(payload, indent=2) + "\n")
 
 
 def record_symlink(label: str, path: Path, target: Path) -> None:

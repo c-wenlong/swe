@@ -184,6 +184,30 @@ def _from_installed_json(harness: str, path: Path, enabled_map: dict,
     return found
 
 
+def _newest_dir(parent: Path) -> Path | None:
+    """The most recently written version dir under ``parent``, name breaking
+    a tie; dot dirs and LITTER are not versions."""
+    from swe.find.plugin_drift import LITTER
+
+    best = None
+    try:
+        children = list(parent.iterdir())
+    except OSError:
+        return None
+    for p in children:
+        if p.name.startswith(".") or p.name in LITTER:
+            continue
+        try:
+            if not p.is_dir():
+                continue
+            key = (p.stat().st_mtime, p.name)
+        except OSError:
+            continue
+        if best is None or key > best[0]:
+            best = (key, p)
+    return best[1] if best else None
+
+
 def _from_codex_toml(home: Path) -> list[Plugin]:
     """codex declares each plugin with an explicit enabled flag."""
     try:
@@ -205,8 +229,9 @@ def _from_codex_toml(home: Path) -> list[Plugin]:
         cache = home / ".codex" / "plugins" / "cache" / market / name
         root = None
         if cache.is_dir():
-            versions = sorted(p for p in cache.iterdir() if p.is_dir())
-            root = versions[-1] if versions else None
+            # The newest copy, as plugin_drift and the catalog pick it: by
+            # name, an old 2.0.0 sorted after the 10.0.0 just installed.
+            root = _newest_dir(cache)
         found.append(Plugin(
             harness="codex", name=name, marketplace=market,
             version=root.name if root else "",

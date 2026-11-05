@@ -552,7 +552,6 @@ function controlErrorText(status, data, fallback) {
  * land after the list was left: only the visible list is repainted —
  * anything else would overwrite the open view (a chat draft included).
  * #session-search exists only in the list's own markup. */
-const sessionsListVisible = () => !!document.getElementById("session-search");
 
 /* A finished write leaves the row's ownership stale until the next list:
  * refetch rather than patch it, so badges and actions always agree. */
@@ -560,23 +559,23 @@ async function runControl(r, op, mode, doneNote) {
   const s = sessionsPage;
   if (s.acting.has(r.key)) return;
   s.acting.add(r.key);
-  if (sessionsListVisible()) paintSessions();
+  if (onSessionsList()) paintSessions();
   const { status, data } = await sessionControl(r.key, op, mode);
   s.acting.delete(r.key);
   if (status === 401) {
-    if (sessionsListVisible()) {
+    if (onSessionsList()) {
       return renderGate();
     }
     return;
   }
   if (status === 200 || status === 202) {
     s.actionNote = doneNote || "";
-    if (sessionsListVisible()) renderSessions("sessions");
+    if (onSessionsList()) renderSessions("sessions");
     return;
   }
   s.actionNote = controlErrorText(status, data,
     `Couldn't ${op === "attach" ? "attach it" : "detach it"}. Check the connection, then try again.`);
-  if (sessionsListVisible()) paintSessions();
+  if (onSessionsList()) paintSessions();
 }
 
 function attachRow(r) {
@@ -864,7 +863,7 @@ function patchMeta(key, meta) {
 }
 
 function repaintList() {
-  if (sessionsListVisible()) paintSessions();
+  if (onSessionsList()) paintSessions();
 }
 
 /* Unread dots (#1439). The hub flags each row `unread` for this browser
@@ -991,7 +990,7 @@ async function setPinned(row, pinned) {
   if (!base) return;
   patchMeta(key, { title: r.title, harness_title: r.harness_title, ...base });
   if (status === 401) {
-    if (sessionsListVisible()) renderGate();
+    if (onSessionsList()) renderGate();
     return;
   }
   sessionsPage.actionNote = `${pinned ? "Couldn't pin it" : "Couldn't unpin it"}. ${
@@ -1134,7 +1133,7 @@ function openRenameSheet(r) {
     if (mine !== actionSheet.seq) return;
     if (status === 401) {
       sheet.close();
-      if (sessionsListVisible()) renderGate();
+      if (onSessionsList()) renderGate();
       return;
     }
     for (const b of [input, reset, cancel]) if (b) b.disabled = false;

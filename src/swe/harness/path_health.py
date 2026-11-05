@@ -107,7 +107,8 @@ def probe_node_env() -> NodeEnv:
 
 
 def preferred_npm_bin() -> str | None:
-    """Prefer a PATH-visible npm that is NOT under nvm, else any npm on PATH."""
+    """Prefer a Homebrew or /usr/local npm when its bin dir (or any npm) is
+    on PATH, else whatever npm is first on PATH, nvm or not."""
     which_npm = shutil.which("npm")
     homebrew = Path("/opt/homebrew/bin/npm")
     usr_local = Path("/usr/local/bin/npm")
@@ -118,11 +119,7 @@ def preferred_npm_bin() -> str | None:
             if is_dir_on_path(candidate.parent) or which_npm:
                 return str(candidate)
 
-    if which_npm and "nvm" not in which_npm:
-        return which_npm
-    if which_npm:
-        return which_npm
-    return None
+    return which_npm
 
 
 def nvm_bin_dirs(home: Path | None = None) -> list[Path]:

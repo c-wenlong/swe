@@ -423,13 +423,9 @@ def check_cert(exe: str, name: str, home: Path | None = None, run: Runner = subp
     now = time.time() if now is None else now
     cache = _cert_cache(home)
     if not fresh:
-        try:
-            got = json.loads(cache.read_text(encoding="utf-8"))
-            ttl = CERT_OK_TTL_S if got.get("ok") else CERT_FAIL_TTL_S
-            if got.get("name") == name and now - float(got.get("at", 0)) < ttl:
-                return bool(got.get("ok")), str(got.get("error") or "")
-        except (OSError, ValueError, TypeError):
-            pass
+        hit = _cached_cert(home, name, now)
+        if hit is not None:
+            return hit
     with tempfile.TemporaryDirectory() as tmp:
         try:
             res = run([exe, "cert", f"--cert-file={tmp}/c.crt", f"--key-file={tmp}/c.key", name],
@@ -493,15 +489,19 @@ def gather(home: Path | None = None, port: int | None = None, run: Runner = subp
     return f
 
 
-def _cached_cert(home: Path | None, name: str) -> tuple[bool, str] | None:
+def _cached_cert(home: Path | None, name: str,
+                 now: float | None = None) -> tuple[bool, str] | None:
+    """The cached ``check_cert`` answer for ``name`` while it is fresh,
+    else None (also for a missing or malformed cache)."""
+    now = time.time() if now is None else now
     try:
         got = json.loads(_cert_cache(home).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if got.get("name") != name:
-        return None
-    ttl = CERT_OK_TTL_S if got.get("ok") else CERT_FAIL_TTL_S
-    if time.time() - float(got.get("at", 0)) >= ttl:
+        if not isinstance(got, dict) or got.get("name") != name:
+            return None
+        ttl = CERT_OK_TTL_S if got.get("ok") else CERT_FAIL_TTL_S
+        if now - float(got.get("at", 0)) >= ttl:
+            return None
+    except (OSError, ValueError, TypeError):
         return None
     return bool(got.get("ok")), str(got.get("error") or "")
 
