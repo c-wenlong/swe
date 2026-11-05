@@ -20,13 +20,15 @@ import Testing
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         let selection = WidgetSelection()
 
+        let saved = WidgetSnapshotStore(file: WidgetSnapshotStore.defaultFile(home: home.url))
         monitor.writeWidgets(overview: nil, selection: selection, compute: section(1), now: start)
         #expect(reloads == 1, "the first write pushes")
         monitor.writeWidgets(overview: nil, selection: selection, compute: section(1), now: start.addingTimeInterval(1))
         #expect(reloads == 1, "nothing changed: no write, no push")
+        #expect(saved.read()?.generatedAt == start, "the unchanged snapshot was not rewritten")
         monitor.writeWidgets(overview: nil, selection: selection, compute: section(2), now: start.addingTimeInterval(60))
         #expect(reloads == 1, "a change inside the floor writes the file only")
-        #expect(FileManager.default.fileExists(atPath: WidgetSnapshotStore.defaultFile(home: home.url).path))
+        #expect(saved.read()?.compute?.harnesses.first?.cpuPercent == 2, "the change was saved")
         monitor.writeWidgets(overview: nil, selection: selection, compute: section(3), force: true,
                              now: start.addingTimeInterval(120))
         #expect(reloads == 2, "a forced write pushes at once")
