@@ -47,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the browser refuses to parse. Such a time now reads as unknown, as it
   does in the Mac app.
 
+- **A late approval tap can no longer answer the next terminal prompt.**
+  Once a prompt was answered at the terminal, its request id stopped
+  being checked, so a phone's delayed tap on it could answer the next
+  prompt the agent showed before the hub had named it. A replaced or
+  cleared id is now refused. An approval's key walk also shares the
+  pane's write lock, so a message steered in at the same moment can't
+  land between its arrow keys.
+
 - **Qwen Code sessions get `@` file references for attachments again.**
   The hub's attachment fallback table keyed Qwen Code as `qwen`, its
   command, but sessions carry the registry id `qwen-code`, so a file

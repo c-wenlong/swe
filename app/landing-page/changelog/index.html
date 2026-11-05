@@ -151,6 +151,14 @@ and <code>1e400</code>, and the incident time went back out as bare <code>NaN</c
 the browser refuses to parse. Such a time now reads as unknown, as it
 does in the Mac app.</p>
 </li>
+<li><p><strong>A late approval tap can no longer answer the next terminal prompt.</strong>
+Once a prompt was answered at the terminal, its request id stopped
+being checked, so a phone's delayed tap on it could answer the next
+prompt the agent showed before the hub had named it. A replaced or
+cleared id is now refused. An approval's key walk also shares the
+pane's write lock, so a message steered in at the same moment can't
+land between its arrow keys.</p>
+</li>
 <li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
 The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its
 command, but sessions carry the registry id <code>qwen-code</code>, so a file

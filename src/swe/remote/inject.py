@@ -142,10 +142,6 @@ class TmuxInjector:
     # injector is built per request; bounded so a long-lived hub does
     # not grow it forever.
     _answered: dict[str, "collections.deque[str]"] = {}
-    # One lock per pane serializes a whole approval: the hub serves
-    # each client on its own thread, and two answers racing the same
-    # menu would otherwise interleave their arrow keys mid-walk.
-    _pane_locks: dict[str, threading.Lock] = {}
 
     def __init__(self, home: Path | None, session_key: str) -> None:
         self.home = home
@@ -182,8 +178,9 @@ class TmuxInjector:
         # Checks, pane capture, the key walk and the answered mark are
         # one critical section per pane — a concurrent reply must see
         # either the request still open or the menu already consumed.
-        lock = self._pane_locks.setdefault(self.key, threading.Lock())
-        with lock:
+        # It is send_text's own pane lock, so a message steered in
+        # meanwhile can't land between the walk's arrow keys either.
+        with supervise._pane_lock(self.name):
             return self._approval(session, request_id, decision)
 
     def _approval(self, session: Session, request_id: str, decision: str) -> InjectResult:
@@ -200,10 +197,20 @@ class TmuxInjector:
         # When the tailer issued a request_id for the prompt currently
         # on screen, only that id may answer it — a stale or superseded
         # id cannot consume the new menu.
-        outstanding = supervise.pending_approval(self.key)
-        if outstanding and request_id != outstanding:
+        # The id and its fingerprint are read once, together: the
+        # watcher may clear or replace them while the pane is captured.
+        snap = supervise.pending_entry(self.key)
+        outstanding, fp = snap if snap else (None, None)
+        if (outstanding and request_id != outstanding) \
+                or supervise.approval_retired(self.key, request_id):
             return InjectResult(False, "stale approval request id")
         pane = supervise.capture_pane(self.name)
+        if supervise.pending_entry(self.key) != snap:
+            # Answered at the terminal, or a new prompt named, while
+            # capturing: the screen may already be the next prompt.
+            return InjectResult(
+                False, "approval prompt changed since the request"
+            )
         if not supervise.pane_shows_approval(pane):
             return InjectResult(
                 False, "no approval prompt is on screen"
@@ -211,7 +218,6 @@ class TmuxInjector:
         # The id was minted for the prompt that was on screen then —
         # re-fingerprint now so a menu swapped in between polls can't
         # be answered by the old id.
-        fp = supervise.pending_approval_fp(self.key)
         if fp and fp != supervise.approval_fingerprint(pane):
             return InjectResult(
                 False, "approval prompt changed since the request"
