@@ -47,8 +47,8 @@ _SESSION_QUEUED_OPS = frozenset({"message", "attachment"})
 OUTBOX_KEY = "_outbox"             # journal key for unsent uplink events
 # Same as the hub's: a ``queue``-mode send polls a fresh status on this
 # cadence and fails honestly once a turn outlives the cap.
-QUEUE_POLL_S = 2.0
-QUEUE_WAIT_MAX_S = 1800
+QUEUE_POLL_S = protocol.IDLE_POLL_S
+QUEUE_WAIT_MAX_S = protocol.IDLE_WAIT_MAX_S
 # How long a queue-mode send that reached idle waits for an attachment
 # pull it names to finish downloading.
 PULL_WAIT_MAX_S = 300
@@ -304,7 +304,6 @@ class RemoteAgent:
         self._cmd_epoch = 0
         # The ``?last=`` the current command stream sent.
         self._stream_cursor = self._done_cmd_seq
-        from swe.sessions.status import session_statuses
         # Same status re-probe as the hub: the satellite's tailer emits
         # session.status itself, and its catalog push carries the
         # fresher of the two.
@@ -788,7 +787,8 @@ class RemoteAgent:
             if waited == "busy":
                 self._report_message(
                     key, data, False,
-                    "session stayed busy for 30 min; message not sent")
+                    f"session stayed busy for "
+                    f"{round(QUEUE_WAIT_MAX_S / 60)} min; message not sent")
                 self._mark_done(seq, epoch)
                 return
             self._dispatch_then_done(seq, ev, epoch)
