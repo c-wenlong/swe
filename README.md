@@ -71,7 +71,7 @@ If you juggle more than one AI coding agent you end up with a mess:
 | --- | --- |
 | **Registry** | List every AI coding CLI with tags, aliases, versions, and install status |
 | **Launch** | Start any tool by name or alias; extra args pass straight through (`execvp`) |
-| **Sessions** | Unified, time-sorted view of recent sessions across 21 agents + one-command resume |
+| **Sessions** | Unified, time-sorted view of recent sessions across 16 agents + one-command resume |
 | **Models** | Aggregate model usage parsed read-only from each tool's session logs |
 | **Skills** | Discover, list, catalog, symlink, and move skills across harness roots |
 | **MCP sync** | Inspect, compare, validate, and copy MCP servers between tools |
@@ -110,8 +110,8 @@ Both come from the [c-wenlong/homebrew-swe](https://github.com/c-wenlong/homebre
 tap, which each release updates. The app updates itself through Sparkle, so
 `brew upgrade` leaves it alone unless you pass `--greedy`.
 
-Installed it as `swe` before the rename? The `swe` cask stays frozen at
-the last Quiver build. `app/mac/script/install-app.sh` moves an existing
+Installed it as `quiver` before the rename? The `quiver` cask stays frozen
+at the last Quiver build. `app/mac/script/install-app.sh` moves an existing
 install to SWE.app itself; by brew, `brew uninstall --cask
 c-wenlong/quiver/quiver` first, then the `swe` cask.
 
@@ -494,7 +494,7 @@ flowchart LR
 - **Reports** — normalizes those logs into semantic messages, filters startup noise, batches useful sessions by project, and invokes configured Claude/Codex models only after a local cost preview is approved.
 - **Skills** — walks known skill roots under `$HOME` (and `./.cursor/skills`), de-duplicates symlinked paths, reads each `SKILL.md` front matter. Catalogs from `skill_catalogs.json` extend the scan; `swe skills link` / `unlink` / `move` manage harness symlinks without touching skill content.
 - **MCP sync** — reads each tool's native MCP config, normalizes to a canonical shape, re-emits in the target format. Nothing is written unless you run a real (non-`--dry-run`) `sync` or `edit`.
-- **Rate limits** — `swe list` shows the percentage of quota remaining and fetches usage data only for starred harnesses that expose a rate limit API; Freebuff instead shows remaining/total referral-unlocked GLM 5.2 sessions. Starring is the explicit opt-in for provider traffic. Unstarred harnesses still show registry details and local 100-day session counts without running usage scripts. Codex, Copilot, Claude, Droid, Freebuff, Cursor, and Devin use their authenticated provider endpoints; Cursor shows the more exhausted of its included Auto-mode and named-model (API) usage for the current billing cycle. Antigravity is read through the running app or CLI's loopback-only quota RPC, so swe never reads its Google OAuth credential directly; the last successful value remains available from the outage cache when Antigravity is closed. Results are cached in `rate_limits_cache.json` (5-minute TTL); `swe list --refresh`, `swe list -r`, and `swe list -n` bypass the fresh cache for starred harnesses only. The architecture is pluggable — additional fetchers can be registered in `harness/rate_limits.py`. On macOS python.org builds that lack CA certificates, remote fetchers retry with the operating system's own CA bundle (or `certifi` if installed), still fully verified; with no bundle at all they send nothing and print how to fix it.
+- **Rate limits** — `swe list` shows the percentage of quota remaining and fetches usage data only for starred harnesses that expose a rate limit API; Freebuff instead shows remaining/total referral-unlocked GLM 5.2 sessions. Starring is the explicit opt-in for provider traffic. Unstarred harnesses still show registry details and local 100-day session counts without running usage scripts. Codex, Copilot, Claude, Droid, Freebuff, Cursor, and Devin use their authenticated provider endpoints; Cursor shows the more exhausted of its included Auto-mode and named-model (API) usage for the current billing cycle. Results are cached in `rate_limits_cache.json` (5-minute TTL); `swe list --refresh`, `swe list -r`, and `swe list -n` bypass the fresh cache for starred harnesses only. The architecture is pluggable — additional fetchers can be registered in `harness/rate_limits.py`. On macOS python.org builds that lack CA certificates, remote fetchers retry with the operating system's own CA bundle (or `certifi` if installed), still fully verified; with no bundle at all they send nothing and print how to fix it.
 
 ## Configuration
 
@@ -530,14 +530,15 @@ The MCP subsystem also reads/writes each tool's native config (e.g. `~/.claude.j
 
 ## Supported tools
 
-`swe discover` recognises **21 AI coding CLIs** on sight: Claude Code, Codex, Gemini
-CLI, GitHub Copilot CLI, Cursor CLI, opencode, Qwen Code, Mistral Vibe,
-Crush, Cline, Goose, Aider, Continue, pi, Forge, Factory Droid, Augment, Kiro,
-Blackbox, Freebuff, and Ollama. That is a recognition table, not a seed — nothing is
+`swe discover` recognises **28 AI coding CLIs** on sight: Claude Code, Codex, Gemini
+CLI, GitHub Copilot CLI, Cursor CLI, Qwen Code, Mistral Vibe, Kimi, Grok,
+opencode, Crush, Cline, Kilo, Goose, Aider, Continue, pi, Forge, Devin, Factory
+Droid, Augment, Kiro, Blackbox, Freebuff, Antigravity, Command Code, and Qoder
+(two editions). That is a recognition table, not a seed — nothing is
 written to your registry until discovery finds the binary on PATH. Register anything
 else by hand with `swe add`.
 
-Session parsers currently cover **15 tools**: opencode, Claude Code, Gemini, Codex, Cursor, pi, Freebuff, Droid, Copilot, Continue, Crush, Grok, Cline, Forge, and Devin. Parsers are built on three reusable family engines (SQLite, JSONL, JSON) with declarative per-tool configs. Model analytics cover opencode, Claude Code, Codex, and Freebuff.
+Session parsers currently cover **16 tools**: opencode, Claude Code, Gemini, Codex, Cursor, pi, Freebuff, Droid, Copilot, Devin, Continue, Crush, Grok, Cline, Forge, and Kilo. Parsers are built on three reusable family engines (SQLite, JSONL, JSON) with declarative per-tool configs. Model analytics cover opencode, Claude Code, Codex, and Freebuff.
 
 ## Development
 

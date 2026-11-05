@@ -11,7 +11,6 @@ files are still seen, and that N lookups cost one walk.
 import glob
 import json
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -20,6 +19,8 @@ from swe.reports import transcripts
 from swe.reports.transcripts import _find_session_file
 from swe.sessions import status
 from swe.sessions.models import Session
+
+from tests._tempdir import temp_dir
 
 NOW = 1_700_000_000.0
 
@@ -52,7 +53,7 @@ def _touch(path: Path, text: str = "{}\n") -> Path:
 
 class FindSessionFileTest(unittest.TestCase):
     def setUp(self):
-        self.root = Path(tempfile.mkdtemp()) / "root"
+        self.root = temp_dir(self) / "root"
         self.root.mkdir()
 
     def test_matches_the_per_lookup_glob(self):
@@ -159,7 +160,7 @@ def _session(tool, sid):
 
 class StatusProbeIndexTest(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         patcher = patch.dict(os.environ, {"HOME": str(self.home)})
         patcher.start()
         self.addCleanup(patcher.stop)

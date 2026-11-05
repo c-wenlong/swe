@@ -42,7 +42,7 @@ below track the SwiftUI app.
 ## Pages
 
 Each page lists what it shows, then the hub work it needs. "Hub:" items
-are server changes in `src/quiver/remote/`.
+are server changes in `src/swe/remote/`.
 
 ### P1. Welcome
 - [x] App icon, name and a one-line description, shown before any hub is paired
@@ -155,7 +155,7 @@ are server changes in `src/quiver/remote/`.
 - [x] Repo section keeps its `status`/`error` when its fetch fails while the others still list
 - [x] Pull to refresh (`?refresh=1` bypasses the hub's `gh` cache); `env_blocked` shows the `gh` fix on an empty list
 - [x] Detail page: the row plus rendered body (the chat's Markdown) and its comments — author, relative age, rendered markdown
-- [x] Swipe Resolve and a context menu (Resolve with agent / Copy link / Open on GitHub / Share) on the row — Resolve opens the same sheet, never a blind launch; Copy link writes the `quiver://issue/<o>/<r>/<n>` deep link
+- [x] Swipe Resolve and a context menu (Resolve with agent / Copy link / Open on GitHub / Share) on the row — Resolve opens the same sheet, never a blind launch; Copy link writes the `swe://issue/<o>/<r>/<n>` deep link
 - [x] "Resolve with agent" sheet: "Starts in" card naming `repo · quiver/issue-<n>`, the harness icon grid, prompt field prefilled with `suggested_prompt` — a row's Resolve has no detail yet, so the sheet fetches it for the prefill and a blank field still lets the hub build the brief
 - [x] Hub: `GET /v1/issues` (list + `mine`, `?state=` picks the `gh` list state for the Closed chip), `GET /v1/issues/<o>/<r>/<n>` (detail), `POST /v1/issues/resolve {repo, number, harness, prompt?}` → `launch_id`, followed on `GET /v1/launches/<id>`; the adopted session pushes its chat onto the issues stack
 - [x] Comments on the detail page
@@ -187,7 +187,7 @@ and per-source env blocks so a missing token explains an empty page.
   `PullDetailView`/`IssueDetailView`, "New agent session" and "Open on
   GitHub"
 - [x] Row actions (`SessionAction.newSession`, amber like Resolve):
-  Copy link writes the `quiver://issue` deep link for GitHub issues,
+  Copy link writes the `swe://issue` deep link for GitHub issues,
   Open on GitHub, New session
 - [x] "Link a session" sheet on the detail posts `POST
   /v1/sessions/<key>/task`; a non-GitHub task's launch sheet links the
@@ -233,7 +233,7 @@ and per-source env blocks so a missing token explains an empty page.
 - [ ] Face ID gate on launch
 - [x] Share sheet target: send text, a link, images or files to a session as a prompt (#1441)
 - [ ] Siri and Shortcuts: "Approve the pending request", "What needs me"
-- [x] Deep links: `quiver://pair`, `quiver://issue/<o>/<r>/<n>` and `quiver://session/<key>?hub=<hub>`
+- [x] Deep links: `swe://pair`, `swe://issue/<o>/<r>/<n>` and `swe://session/<key>?hub=<hub>` (links written as `quiver://` before the rename still open)
 - [ ] Dictation in the composer
 - [x] Search sessions from Sessions: transcripts through the hub's FTS index when present, titles and folders as text always (`GET /v1/search`)
 - [ ] Search satellite transcripts (the index covers the hub machine only)

@@ -311,10 +311,6 @@ class HarnessRouterTest(unittest.TestCase):
         self.assertIn("swe hs", out)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 def _drive_statepicker(key_names, count=3):
     """Run the tri-state picker on ``count`` active rows, feeding it
     ``key_names``. Returns (result, everything drawn, what was drawn by
@@ -954,3 +950,7 @@ class StatePickerMouseTest(unittest.TestCase):
         # A shell left reporting the wheel spews escape sequences at the
         # prompt, so the off switch has to precede the termios restore.
         self.assertIn(keys.MOUSE_OFF, seen[0])
+
+
+if __name__ == "__main__":
+    unittest.main()

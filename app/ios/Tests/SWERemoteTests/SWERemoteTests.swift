@@ -937,6 +937,21 @@ final class HarnessIconTests: XCTestCase {
         XCTAssertNotNil(HarnessIcon.assetName("codex"))
         XCTAssertNil(HarnessIcon.assetName("no-such-harness"))
     }
+
+    /// The same picks the Mac's `HarnessColor.stableIndex` and the web's
+    /// `Fmt.harnessColor` make (their tests pin these ids too), so an
+    /// unlisted harness is one colour on every client.
+    func testAnUnlistedHarnessTakesThePalettePickEveryClientMakes() {
+        XCTAssertEqual(Theme.harnessHex("claude"), "#d97757")
+        XCTAssertEqual(Theme.harnessHex("made-up-harness"), "#f0755f")
+        XCTAssertEqual(Theme.harnessHex("aider"), "#d9b44a")
+        XCTAssertEqual(Theme.harnessHex("amp"), "#8ac74f")
+        XCTAssertEqual(Theme.harnessHex("zed"), "#4ec9b0")
+        XCTAssertEqual(Theme.harnessHex(""), "#f0755f")
+        // A huge or non-ASCII id still lands in the palette (the old
+        // signed hash could trap in `abs`).
+        XCTAssertTrue(Theme.harnessPalette.contains(Theme.harnessHex(String(repeating: "é漢🙂", count: 5000))))
+    }
 }
 
 final class ReviewFixTests: XCTestCase {
@@ -1083,6 +1098,70 @@ final class SessionSearchTests: XCTestCase {
         let runs = SessionSearch.snippetRuns("the \u{E000}ledger\u{E001} cursor")
         XCTAssertEqual(runs.map(\.text), ["the ", "ledger", " cursor"])
         XCTAssertEqual(runs.map(\.hit), [false, true, false])
+    }
+
+    /// Holds a stubbed search until the test lets it go.
+    private final class Latch {
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        private var open = false
+        func wait() async {
+            if open { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+        func release() {
+            open = true
+            waiters.forEach { $0.resume() }
+            waiters = []
+        }
+    }
+
+    private func app(with rows: [SessionRow]) -> AppModel {
+        let app = AppModel(hub: PairedHub(baseURL: URL(string: "http://mac:8477")!,
+                                          credential: Credential(deviceId: "d", credential: "c", name: nil)))
+        app.applyLists(sessions: rows, machines: nil, inbox: [], attachedAtStart: [])
+        return app
+    }
+
+    /// A hub older than `/v1/search` answers 404: the list loaded on the
+    /// phone is searched instead.
+    func testAnOlderHubsSearchFallsBackToTheLoadedList() async {
+        let search = SessionSearch()
+        search.pause = { _ in }
+        search.lookup = { _, _ in throw HubError(status: 404, code: "not_found", message: "") }
+        search.query = "ledger"
+        await search.run(app: app(with: [row("a", "Fix ledger cursor", ago: 1)]))
+        XCTAssertEqual(search.results.map(\.key), ["a"])
+        XCTAssertEqual(search.answered, "ledger")
+        XCTAssertFalse(search.indexed)
+    }
+
+    /// A keystroke cancels the search under way; its late 404 must not
+    /// replace the newer query's answer with the old query's matches.
+    func testACancelledSearchsLate404KeepsTheNewerAnswer() async {
+        let search = SessionSearch()
+        search.pause = { _ in }
+        let started = Latch(), late = Latch()
+        search.lookup = { _, q in
+            if q == "old" {
+                started.release()
+                await late.wait()
+                throw HubError(status: 404, code: "not_found", message: "")
+            }
+            return SearchResponse(results: [], indexed: true)
+        }
+        let app = app(with: [row("a", "old ledger", ago: 1)])
+        search.query = "old"
+        let first = Task { await search.run(app: app) }
+        await started.wait()
+        first.cancel()
+        search.query = "new"
+        await search.run(app: app)
+        XCTAssertEqual(search.answered, "new")
+        late.release()
+        await first.value
+        XCTAssertEqual(search.answered, "new")
+        XCTAssertEqual(search.results.map(\.key), [])
+        XCTAssertTrue(search.indexed)
     }
 
     func testDecodesHubSearchResult() throws {
@@ -1571,6 +1650,17 @@ final class LaunchFlowTests: XCTestCase {
         XCTAssertEqual(key, "claude:new")
         XCTAssertEqual(asked, ["l1", "l1"])
         XCTAssertEqual(flow.phase, .started("claude:new"))
+    }
+
+    /// Every launch sheet words its Start button through the one button;
+    /// the fork sheet only names its own idle and waiting steps.
+    func testStartButtonWordsEachPhase() {
+        let phases: [LaunchFlow.Phase] = [.idle, .starting, .waiting, .started("k"), .failed("no"), .unconfirmed("slow")]
+        XCTAssertEqual(phases.map { LaunchStartButton.title($0) },
+                       ["Start session", "Starting", "Waiting for the session", "Opening the chat",
+                        "Start session", "Start session"])
+        XCTAssertEqual(phases.map { LaunchStartButton.title($0, idle: "Start", waiting: "Waiting for the fork") },
+                       ["Start", "Starting", "Waiting for the fork", "Opening the chat", "Start", "Start"])
     }
 
     func testTheLastPollIsStillRead() async {

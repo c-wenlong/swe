@@ -32,6 +32,8 @@ from swe.sessions.status import (
     session_statuses,
 )
 
+from tests._tempdir import temp_dir
+
 NOW = 1_700_000_000.0  # seconds
 NOW_MS = NOW * 1000
 
@@ -98,7 +100,7 @@ def _codex_msg(role, text):
 
 class StatusTestBase(unittest.TestCase):
     def setUp(self):
-        self.home = tempfile.mkdtemp()
+        self.home = str(temp_dir(self))
         self._patch = patch.dict(os.environ, {"HOME": self.home})
         self._patch.start()
         self.addCleanup(self._patch.stop)
@@ -1176,6 +1178,7 @@ class TailRecordsTest(unittest.TestCase):
         with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as fh:
             fh.write(json.dumps({"a": 1}) + "\n" + json.dumps({"b": 2}) + "\n")
             path = fh.name
+        self.addCleanup(os.unlink, path)
         records, complete = _tail_records(path, 65536)
         self.assertTrue(complete)
         self.assertEqual([{"a": 1}, {"b": 2}], list(records))
@@ -1187,6 +1190,7 @@ class TailRecordsTest(unittest.TestCase):
             fh.write(json.dumps({"head": "x" * 500}) + "\n")
             fh.write(json.dumps({"tail": 1}) + "\n")
             path = fh.name
+        self.addCleanup(os.unlink, path)
         records, complete = _tail_records(path, 64)
         self.assertFalse(complete)
         self.assertEqual([{"tail": 1}], list(records))
@@ -1250,7 +1254,7 @@ class StatusLegendTest(unittest.TestCase):
             (["done", ""], True),
             (["", ""], False),
         ):
-            with patch(
+            with patch.dict(os.environ, {"HOME": str(temp_dir(self))}), patch(
                 "swe.sessions.commands.get_all_sessions",
                 return_value=sessions,
             ), patch(

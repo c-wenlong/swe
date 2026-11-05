@@ -184,7 +184,7 @@ AI Coding Tools
 </tr>
 <tr>
   <td><strong>Sessions</strong></td>
-  <td>Unified, time-sorted view of recent sessions across 21 agents + one-command resume</td>
+  <td>Unified, time-sorted view of recent sessions across 16 agents + one-command resume</td>
 </tr>
 <tr>
   <td><strong>Models</strong></td>
@@ -241,8 +241,8 @@ brew install c-wenlong/swe/swe          # the swe CLI on its own
 <p>Both come from the <a href="https://github.com/c-wenlong/homebrew-swe">c-wenlong/homebrew-swe</a>
 tap, which each release updates. The app updates itself through Sparkle, so
 <code>brew upgrade</code> leaves it alone unless you pass <code>--greedy</code>.</p>
-<p>Installed it as <code>swe</code> before the rename? The <code>swe</code> cask stays frozen at
-the last Quiver build. <code>app/mac/script/install-app.sh</code> moves an existing
+<p>Installed it as <code>quiver</code> before the rename? The <code>quiver</code> cask stays frozen
+at the last Quiver build. <code>app/mac/script/install-app.sh</code> moves an existing
 install to SWE.app itself; by brew, <code>brew uninstall --cask c-wenlong/quiver/quiver</code> first, then the <code>swe</code> cask.</p>
 <h3 id="linux"><a class="anchor" href="#linux"></a>Linux</h3>
 <pre><code class="language-bash">curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh
@@ -803,7 +803,7 @@ swe find skills -r               # every root with symlink kind + counts
 <li><strong>Reports</strong> — normalizes those logs into semantic messages, filters startup noise, batches useful sessions by project, and invokes configured Claude/Codex models only after a local cost preview is approved.</li>
 <li><strong>Skills</strong> — walks known skill roots under <code>$HOME</code> (and <code>./.cursor/skills</code>), de-duplicates symlinked paths, reads each <code>SKILL.md</code> front matter. Catalogs from <code>skill_catalogs.json</code> extend the scan; <code>swe skills link</code> / <code>unlink</code> / <code>move</code> manage harness symlinks without touching skill content.</li>
 <li><strong>MCP sync</strong> — reads each tool's native MCP config, normalizes to a canonical shape, re-emits in the target format. Nothing is written unless you run a real (non-<code>--dry-run</code>) <code>sync</code> or <code>edit</code>.</li>
-<li><strong>Rate limits</strong> — <code>swe list</code> shows the percentage of quota remaining and fetches usage data only for starred harnesses that expose a rate limit API; Freebuff instead shows remaining/total referral-unlocked GLM 5.2 sessions. Starring is the explicit opt-in for provider traffic. Unstarred harnesses still show registry details and local 100-day session counts without running usage scripts. Codex, Copilot, Claude, Droid, Freebuff, Cursor, and Devin use their authenticated provider endpoints; Cursor shows the more exhausted of its included Auto-mode and named-model (API) usage for the current billing cycle. Antigravity is read through the running app or CLI's loopback-only quota RPC, so swe never reads its Google OAuth credential directly; the last successful value remains available from the outage cache when Antigravity is closed. Results are cached in <code>rate_limits_cache.json</code> (5-minute TTL); <code>swe list --refresh</code>, <code>swe list -r</code>, and <code>swe list -n</code> bypass the fresh cache for starred harnesses only. The architecture is pluggable — additional fetchers can be registered in <code>harness/rate_limits.py</code>. On macOS python.org builds that lack CA certificates, remote fetchers retry with the operating system's own CA bundle (or <code>certifi</code> if installed), still fully verified; with no bundle at all they send nothing and print how to fix it.</li>
+<li><strong>Rate limits</strong> — <code>swe list</code> shows the percentage of quota remaining and fetches usage data only for starred harnesses that expose a rate limit API; Freebuff instead shows remaining/total referral-unlocked GLM 5.2 sessions. Starring is the explicit opt-in for provider traffic. Unstarred harnesses still show registry details and local 100-day session counts without running usage scripts. Codex, Copilot, Claude, Droid, Freebuff, Cursor, and Devin use their authenticated provider endpoints; Cursor shows the more exhausted of its included Auto-mode and named-model (API) usage for the current billing cycle. Results are cached in <code>rate_limits_cache.json</code> (5-minute TTL); <code>swe list --refresh</code>, <code>swe list -r</code>, and <code>swe list -n</code> bypass the fresh cache for starred harnesses only. The architecture is pluggable — additional fetchers can be registered in <code>harness/rate_limits.py</code>. On macOS python.org builds that lack CA certificates, remote fetchers retry with the operating system's own CA bundle (or <code>certifi</code> if installed), still fully verified; with no bundle at all they send nothing and print how to fix it.</li>
 </ul>
 <h2 id="configuration"><a class="anchor" href="#configuration"></a>Configuration</h2>
 <p>Everything swe persists lives under one root, <code>~/.swe/</code>. It is split by
@@ -897,13 +897,14 @@ manages coding harnesses, and most harness config directories are <code>$HOME/.&
 into this layout and removes the old root.</p>
 <p>The MCP subsystem also reads/writes each tool's native config (e.g. <code>~/.claude.json</code>, <code>~/.cursor/mcp.json</code>, <code>~/.config/opencode/opencode.json</code>).</p>
 <h2 id="supported-tools"><a class="anchor" href="#supported-tools"></a>Supported tools</h2>
-<p><code>swe discover</code> recognises <strong>21 AI coding CLIs</strong> on sight: Claude Code, Codex, Gemini
-CLI, GitHub Copilot CLI, Cursor CLI, opencode, Qwen Code, Mistral Vibe,
-Crush, Cline, Goose, Aider, Continue, pi, Forge, Factory Droid, Augment, Kiro,
-Blackbox, Freebuff, and Ollama. That is a recognition table, not a seed — nothing is
+<p><code>swe discover</code> recognises <strong>28 AI coding CLIs</strong> on sight: Claude Code, Codex, Gemini
+CLI, GitHub Copilot CLI, Cursor CLI, Qwen Code, Mistral Vibe, Kimi, Grok,
+opencode, Crush, Cline, Kilo, Goose, Aider, Continue, pi, Forge, Devin, Factory
+Droid, Augment, Kiro, Blackbox, Freebuff, Antigravity, Command Code, and Qoder
+(two editions). That is a recognition table, not a seed — nothing is
 written to your registry until discovery finds the binary on PATH. Register anything
 else by hand with <code>swe add</code>.</p>
-<p>Session parsers currently cover <strong>15 tools</strong>: opencode, Claude Code, Gemini, Codex, Cursor, pi, Freebuff, Droid, Copilot, Continue, Crush, Grok, Cline, Forge, and Devin. Parsers are built on three reusable family engines (SQLite, JSONL, JSON) with declarative per-tool configs. Model analytics cover opencode, Claude Code, Codex, and Freebuff.</p>
+<p>Session parsers currently cover <strong>16 tools</strong>: opencode, Claude Code, Gemini, Codex, Cursor, pi, Freebuff, Droid, Copilot, Devin, Continue, Crush, Grok, Cline, Forge, and Kilo. Parsers are built on three reusable family engines (SQLite, JSONL, JSON) with declarative per-tool configs. Model analytics cover opencode, Claude Code, Codex, and Freebuff.</p>
 <h2 id="development"><a class="anchor" href="#development"></a>Development</h2>
 <pre><code class="language-bash">python3 -m venv .venv &amp;&amp; source .venv/bin/activate
 pip install -e &quot;.[test]&quot;

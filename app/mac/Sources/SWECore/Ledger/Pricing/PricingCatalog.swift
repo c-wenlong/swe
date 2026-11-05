@@ -245,6 +245,11 @@ public struct PricingCatalog: Sendable {
     /// `gpt-4.1`, but only one lands in `overrideIndex`), so every `.yours`
     /// entry's own forms are compared, not just the index's single hit.
     public func userKeys(matching model: String) -> [String] {
+        Self.keys(entries.keys.filter { sources[$0] == .yours }, matching: model)
+    }
+
+    /// The keys among `candidates` that price `model`, by the rules above.
+    public static func keys(_ candidates: some Sequence<String>, matching model: String) -> [String] {
         let lowered = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         var forms = Self.forms(of: lowered, stripDates: true, stripEffort: true)
         forms.append(lowered)
@@ -254,8 +259,7 @@ public struct PricingCatalog: Sendable {
             forms += Self.forms(of: split.model, stripDates: true, stripEffort: true)
         }
         let lookup = Set(forms)
-        return entries.keys
-            .filter { sources[$0] == .yours }
+        return candidates
             .filter { key in
                 // A saved key keeps its effort suffix, as in `overrideIndex`:
                 // `swe-2-medium` and `swe-2-high` never price each other.

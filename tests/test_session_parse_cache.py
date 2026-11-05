@@ -12,7 +12,6 @@ the status column is stable between runs.
 
 import json
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -22,6 +21,8 @@ from swe.sessions import aggregator, failures, parse_cache
 from swe.sessions.engines import jsonl_engine
 from swe.sessions.parsers import parse_claude
 from tests.test_json_output import decode, run_swe
+
+from tests._tempdir import temp_dir
 
 OLD = 1_780_000_000
 
@@ -137,7 +138,7 @@ class CliColdWarmTest(unittest.TestCase):
     """`swe session --json` reads the same cold, warm and after changes."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.cache = session_parse_cache_file_for(self.home)
 
     def listing(self) -> str:
@@ -297,7 +298,7 @@ class InProcessCacheTest(unittest.TestCase):
     """Counts reads and checks scoping, with HOME pinned in-process."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         patcher = patch.dict(os.environ, {"HOME": str(self.home)})
         patcher.start()
         self.addCleanup(patcher.stop)

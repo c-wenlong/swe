@@ -129,18 +129,32 @@ struct StartsInCard: View {
 }
 
 /// Start session, worded by where the launch is, then the launch's
-/// failure or unconfirmed note and the sheet's footnote.
+/// failure or unconfirmed note and the sheet's footnote. Every launch
+/// sheet draws it; the fork sheet names its own idle and waiting steps.
 struct LaunchStartButton: View {
     let flow: LaunchFlow
     let ready: Bool
     let footnote: String
+    var idleTitle = "Start session"
+    var waitingTitle = "Waiting for the session"
     let start: () -> Void
+
+    /// The button's words for `phase`.
+    static func title(_ phase: LaunchFlow.Phase, idle: String = "Start session",
+                      waiting: String = "Waiting for the session") -> String {
+        switch phase {
+        case .starting: "Starting"
+        case .waiting: waiting
+        case .started: "Opening the chat"
+        case .idle, .failed, .unconfirmed: idle
+        }
+    }
 
     var body: some View {
         Button(action: start) {
             HStack(spacing: 8) {
                 if flow.busy { ProgressView().controlSize(.small).tint(Theme.primaryForeground) }
-                Text(flow.phase == .waiting ? "Waiting for the session" : flow.opening ? "Opening the chat" : flow.busy ? "Starting" : "Start session")
+                Text(Self.title(flow.phase, idle: idleTitle, waiting: waitingTitle))
             }
         }
         .primaryButton()

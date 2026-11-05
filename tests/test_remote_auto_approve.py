@@ -8,7 +8,6 @@ untagged node of that same login. Every other case stays pending.
 import io
 import json
 import os
-import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -17,6 +16,8 @@ from unittest.mock import patch
 from swe.remote import commands, pairing
 
 from tests.test_remote_hub import _Server
+
+from tests._tempdir import temp_dir
 
 _OWNER = "dev@github"
 # The hub machine's own tailnet node.
@@ -89,7 +90,7 @@ class TestRefusal(unittest.TestCase):
 
 class TestSetting(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def test_off_by_default(self):
         self.assertFalse(pairing.auto_approve_owner(self.home))
@@ -114,7 +115,7 @@ class TestSetting(unittest.TestCase):
 
 class TestAutoApproveRequest(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def test_approves_the_matching_row_like_a_code_would(self):
         r = pairing.request_pair(self.home, dict(_PHONE), name="phone")
@@ -311,7 +312,7 @@ def _run(args):
 
 class TestCli(unittest.TestCase):
     def setUp(self):
-        home = tempfile.mkdtemp()
+        home = str(temp_dir(self))
         env = patch.dict(os.environ, {"HOME": home})
         env.start()
         self.addCleanup(env.stop)

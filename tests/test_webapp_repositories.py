@@ -22,6 +22,7 @@ from swe.webapp.pages import repositories as R
 
 from tests.test_remote_hub import HubBase
 from tests.test_webapp import app_js_function
+from tests._tempdir import temp_dir
 
 OK_ENV = gh.GhEnv(installed=True, authenticated=True, login="octo")
 
@@ -213,7 +214,7 @@ class _Clock:
 class _Base(unittest.TestCase):
     def setUp(self):
         super().setUp()
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.clock = _Clock()
         cache = G.TtlCache(clock=self.clock)
         p = patch.object(G, "CACHE", cache)
@@ -633,6 +634,17 @@ class TestPin(_Base):
         with self.assertRaises(PageError) as caught:
             R.get(self.ctx, {"search": "x" * 201})
         self.assertEqual(caught.exception.code, "bad_search")
+
+    def test_a_search_never_reaches_gh_as_a_flag(self):
+        fake = FakeGh(self)
+        for text in ("--web", "  -L 1", "--jq=.[0]"):
+            with self.assertRaises(PageError) as caught:
+                R.get(self.ctx, {"search": text})
+            self.assertEqual(caught.exception.code, "bad_search")
+        self.assertFalse(any(c[:2] == ["search", "repos"] for c in fake.calls()))
+        # A "-" after the first word is GitHub's own "not" and stays.
+        R.get(self.ctx, {"search": "swe -fork"})
+        self.assertIn(["search", "repos", "swe -fork"], [c[:3] for c in fake.calls()])
 
     def test_add_pins_githubs_spelling_and_answers_the_pins(self):
         _pin(self.home, "o/a")

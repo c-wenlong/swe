@@ -8,7 +8,6 @@ is redirected to a per-test temp dir and ``now`` is passed explicitly.
 
 import json
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -25,6 +24,8 @@ from swe.sessions.status import (
     UNKNOWN,
     session_statuses,
 )
+
+from tests._tempdir import temp_dir
 
 NOW = 1_700_000_000.0
 
@@ -62,7 +63,7 @@ def _tool_use():
 
 class TailCacheTest(unittest.TestCase):
     def setUp(self):
-        self.home = tempfile.mkdtemp()
+        self.home = str(temp_dir(self))
         patcher = patch.dict(os.environ, {"HOME": self.home})
         patcher.start()
         self.addCleanup(patcher.stop)

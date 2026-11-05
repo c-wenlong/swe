@@ -18,6 +18,8 @@ from swe.sessions.commands import (
 from swe.console import strip_ansi
 from swe.sessions.models import Session
 
+from tests._tempdir import temp_dir
+
 
 class SessionCommandsTest(unittest.TestCase):
     def test_launch_tool_defaults_to_tool_name(self):
@@ -237,7 +239,7 @@ class SessionCommandsTest(unittest.TestCase):
 
 class SessionInteractiveTest(unittest.TestCase):
     def setUp(self):
-        self._tmpdirs = [tempfile.mkdtemp() for _ in range(3)]
+        self._tmpdirs = [str(temp_dir(self)) for _ in range(3)]
         self.sessions = [
             Session(
                 timestamp=1000.0 * (i + 1),
@@ -311,10 +313,6 @@ class SessionInteractiveTest(unittest.TestCase):
         header_arg = mock_pick.call_args.kwargs.get("header")
         for line in rows_arg + header_arg:
             self.assertLessEqual(visible_len(line), 98)
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class SessionPreviewTest(unittest.TestCase):
@@ -447,3 +445,7 @@ class SessionPreviewTest(unittest.TestCase):
         with patch("swe.sessions.commands._session_preview") as again:
             preview(0)
             again.assert_not_called()          # memoised per picker run
+
+
+if __name__ == "__main__":
+    unittest.main()

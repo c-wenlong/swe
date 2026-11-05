@@ -5,7 +5,7 @@ Audit date: 2026-10-31 (main at `8431e96f`)
 ## Baseline
 
 The full `unittest` suite was measured with branch and subprocess tracking
-enabled against the `quiver` package, using an empty temporary `$HOME`. All
+enabled against the `swe` package, using an empty temporary `$HOME`. All
 6,767 tests passed (5 skipped).
 
 | Metric | Covered | Total | Coverage |

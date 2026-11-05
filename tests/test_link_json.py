@@ -14,9 +14,10 @@ import copy
 import os
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
+
+from tests._tempdir import temp_dir
 
 try:
     from test_json_output import REGISTRY, SRC, decode, run_swe, write_registry
@@ -93,7 +94,7 @@ class InitCheckJsonTest(unittest.TestCase):
     def setUp(self):
         # resolve(): on macOS the temp dir is a symlink, and `swe find`
         # compares the cwd (resolved) against HOME to decide a root's scope.
-        self.home = Path(tempfile.mkdtemp()).resolve()
+        self.home = temp_dir(self).resolve()
         build_machine(self.home)
 
     def init_check(self, *extra):
@@ -196,7 +197,7 @@ class FindSkillsJsonTest(unittest.TestCase):
     def setUp(self):
         # resolve(): on macOS the temp dir is a symlink, and `swe find`
         # compares the cwd (resolved) against HOME to decide a root's scope.
-        self.home = Path(tempfile.mkdtemp()).resolve()
+        self.home = temp_dir(self).resolve()
         self.shared = build_machine(self.home)
 
     def find_skills(self, *extra):
@@ -282,7 +283,7 @@ class FindSkillsJsonTest(unittest.TestCase):
         self.assertNotIn("team", skills)
 
     def test_no_shared_tree_is_an_empty_list_not_an_error(self):
-        empty = Path(tempfile.mkdtemp())
+        empty = temp_dir(self)
         result = run_swe(empty, "find", "skills", "--json", "-r")
         self.assertEqual(result.returncode, 0, result.stderr)
         data = decode(result)["data"]

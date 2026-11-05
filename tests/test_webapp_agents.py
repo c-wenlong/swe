@@ -3,7 +3,6 @@ folder's AGENTS.md and CLAUDE.md, never outside the hub's home."""
 
 import json
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,11 +15,13 @@ from swe.webapp.pages import agents as page
 from tests.test_remote_hub import HubBase
 from tests.test_webapp_doctor import _TempHome
 
+from tests._tempdir import temp_dir
+
 
 class TestCheckDocument(unittest.TestCase):
     def test_matches_init_check_json_and_writes_nothing(self):
         from swe.init.commands import check_document
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         doc = check_document(home)
         self.assertEqual(doc["agents_file"], str(home / ".swe" / "AGENTS.md"))
         self.assertFalse(doc["agents_file_exists"])
@@ -30,7 +31,7 @@ class TestCheckDocument(unittest.TestCase):
 
 class TestProject(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         self.app = self.home / "dev" / "app"
         self.app.mkdir(parents=True)
 
@@ -49,7 +50,7 @@ class TestProject(unittest.TestCase):
 
     def test_refuses_folders_outside_home(self):
         cases = {"relative/dir": 400, "/": 403, str(self.home / "nope"): 404}
-        outside = tempfile.mkdtemp()
+        outside = str(temp_dir(self))
         os.symlink(outside, self.home / "link")
         cases[str(self.home / "link")] = 403
         for folder, status in cases.items():
@@ -58,7 +59,7 @@ class TestProject(unittest.TestCase):
             self.assertEqual(refused.exception.status, status, folder)
 
     def test_a_file_linking_out_of_home_is_not_read(self):
-        secret = Path(tempfile.mkdtemp()) / "AGENTS.md"
+        secret = temp_dir(self) / "AGENTS.md"
         secret.write_text("private")
         os.symlink(secret, self.app / "AGENTS.md")
         agents = page.project(str(self.app), self.home)["files"][0]
@@ -68,7 +69,7 @@ class TestProject(unittest.TestCase):
 
 class TestSuggestions(unittest.TestCase):
     def test_recent_local_folders_under_home(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         a, b = home / "a", home / "b"
         a.mkdir()
         b.mkdir()

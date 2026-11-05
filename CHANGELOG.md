@@ -7,7 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **A resolve prompt no longer carries strangers' comments.** Anyone can
+  comment on a public issue, and every comment went word for word into
+  the first prompt of the agent resolving it. The prompt now quotes the
+  issue's title, body and comments line by line behind a note that they
+  are untrusted data the agent must not take instructions from, keeps
+  only comments whose `authorAssociation` is `OWNER`, `MEMBER` or
+  `COLLABORATOR`, and replaces the rest with "N comments from others,
+  not included". Every client prefills the hub's `suggested_prompt`, so
+  the Mac, iPhone and web resolve sheets all get the new prompt; issue
+  comments in `--json` gain `association`.
+
 ### Fixed
+
+- **Qwen Code sessions get `@` file references for attachments again.**
+  The hub's attachment fallback table keyed Qwen Code as `qwen`, its
+  command, but sessions carry the registry id `qwen-code`, so a file
+  sent from a phone arrived as an `[Attached file: …]` line instead of
+  an `@` reference.
+
+- **A wildcard hub bind no longer turns off the Host check, and a
+  second `swe remote serve` on a taken port no longer disturbs the
+  running hub.** `--host=0.0.0.0 --unsafe-bind-any` left the hub's
+  allowed Host names empty, which lets any Host through, so a page that
+  rebound its name to the hub could pass as the owner's own tailnet
+  device; `::` was not even read as a wildcard. Both now answer this
+  node's loopback, hostname and tailnet names, plus any IP address on
+  the hub's port (a LAN pairing link), since a rebound page always
+  arrives under its own domain name. `serve` also binds before
+  it starts the hub's loops, so a copy that can't get the port exits
+  before it registers the machine, settles kept sessions or retires
+  ntfy credentials under the running hub.
 
 - **Codex sessions were undercounted when codex ran subagents.**
   `parse_codex` dropped every thread whose store `preview` was empty,
@@ -266,6 +298,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   iPhone's Usage tab a row of machine chips under the periods. A
   satellite's days are its own local days, and its view has no top
   models, since daily rows carry none. Closes
+  [#525](https://github.com/c-wenlong/swe/issues/525).
 - **Mac and web: Hub sync card.** Settings › Files shows `swe sync
   status` for `~/.swe` (branch mode, uncommitted changes by primitive,
   commits to push and pull, new commits on `origin/main`, files kept
@@ -737,6 +770,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Notion-Version: 2022-06-28`, paginates with a cap, waits out a 429's
   `Retry-After`, and renders a page body to markdown for a resolve
   prompt. Read-only. Part of
+  [#847](https://github.com/c-wenlong/swe/issues/847).
 
 - **Tasks on the Mac, the web and the iPhone show Notion like Linear.**
   The three clients read the hub's new `notion` env block beside
@@ -5047,7 +5081,9 @@ service / model layering, tests with an 84% coverage floor).
   status colors, dim version text, `version unknown` fallback, three
   heal-side-effect cases (live overrides stored, live matches stored,
   dirty stored value cleared), off-PATH footer conditional rendering
-  (with/without orphans), alphabetical row order, and bold header line.- `swe list` now shows a **RATE** column with usage percentage and reset countdown for tools that expose rate limit APIs. Currently supports:
+  (with/without orphans), alphabetical row order, and bold header line.
+
+- `swe list` now shows a **RATE** column with usage percentage and reset countdown for tools that expose rate limit APIs. Currently supports:
   - **Codex** via ChatGPT `backend-api/wham/usage` endpoint using OAuth
     tokens from `~/.codex/auth.json`
   - **GitHub Copilot** via `api.github.com/copilot_internal/user` using
@@ -5420,9 +5456,15 @@ service / model layering, tests with an 84% coverage floor).
 - Stdlib-only core; optional FastMCP server extra for session history MCP tool
 - Test suite (15 unit tests) with isolated `$HOME` fixtures
 
+[Unreleased]: https://github.com/c-wenlong/swe/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/c-wenlong/swe/releases/tag/v1.2.2
 [1.2.1]: https://github.com/c-wenlong/swe/releases/tag/v1.2.1
 [1.2.0]: https://github.com/c-wenlong/swe/releases/tag/v1.2.0
 [1.1.1]: https://github.com/c-wenlong/swe/releases/tag/v1.1.1
-[1.1.0]: https://github.com/c-wenlong/swe/releases/tag/v1.1.0
 [1.0.0]: https://github.com/c-wenlong/swe/releases/tag/v1.0.0
+[0.2.9]: https://github.com/c-wenlong/swe/releases/tag/v0.2.9
+[0.2.8]: https://github.com/c-wenlong/swe/releases/tag/v0.2.8
+[0.2.7]: https://github.com/c-wenlong/swe/releases/tag/v0.2.7
+[0.2.5]: https://github.com/c-wenlong/swe/releases/tag/v0.2.5
+[0.2.2]: https://github.com/c-wenlong/swe/releases/tag/v0.2.2
 [0.1.0]: https://github.com/c-wenlong/swe/releases/tag/v0.1.0

@@ -21,6 +21,8 @@ from swe.webapp.api import WebApp
 from tests.test_remote_hub import HubBase, _AttachedServer
 from tests.test_remote_owner_device import _OWNER_IP, OwnerBase
 
+from tests._tempdir import temp_dir
+
 STATIC = Path(__file__).resolve().parent.parent / "src" / "swe" / "webapp" / "static"
 
 CATALOG = PricingCatalog({"m": rates_from_entry(
@@ -34,7 +36,7 @@ def _ev(session, ts, inp, out=0, model="m", cwd="/w", harness="claude"):
 
 class TestBySession(unittest.TestCase):
     def setUp(self):
-        self.store = LedgerStore(Path(tempfile.mkdtemp()) / "l.sqlite")
+        self.store = LedgerStore(temp_dir(self) / "l.sqlite")
         self.addCleanup(self.store.close)
 
     def add(self, key, ev):
@@ -57,7 +59,7 @@ class TestBySession(unittest.TestCase):
 
 class TestProjects(unittest.TestCase):
     def setUp(self):
-        self.root = Path(tempfile.mkdtemp())
+        self.root = temp_dir(self)
 
     def test_repository_and_its_subfolders(self):
         repo = self.root / "quiver"
@@ -169,7 +171,7 @@ class TestBuild(unittest.TestCase):
 
 class TestCodexResume(unittest.TestCase):
     def test_a_resumed_thread_carries_every_rollout(self):
-        store = LedgerStore(Path(tempfile.mkdtemp()) / "l.sqlite")
+        store = LedgerStore(temp_dir(self) / "l.sqlite")
         self.addCleanup(store.close)
         thread = "01a03a60-389b-73d0-a8a3-8cde9d36da15"
         first = f"rollout-2026-10-01T10-00-00-{thread}"
@@ -200,7 +202,7 @@ class TestLedgerCoverage(unittest.TestCase):
         return built
 
     def test_cline_taskhistory_row_stays_visible(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         state = home / ".cline" / "data" / "state"
         state.mkdir(parents=True)
         (state / "taskHistory.json").write_text(json.dumps([
@@ -208,14 +210,14 @@ class TestLedgerCoverage(unittest.TestCase):
         self.assertFalse(self._build(home, "cline", "legacy-1")["trivial"])
 
     def test_a_cline_manifest_row_is_judged(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         d = home / ".cline" / "data" / "sessions" / "s2"
         d.mkdir(parents=True)
         (d / "s2.json").write_text("{}")
         self.assertTrue(self._build(home, "cline", "s2")["trivial"])
 
     def test_a_cline_row_under_an_account_home_uses_that_home(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         profile = home / ".swe" / "accounts" / "cline" / "p1" / "home"
         d = profile / "data" / "sessions" / "s3"
         d.mkdir(parents=True)
@@ -224,7 +226,7 @@ class TestLedgerCoverage(unittest.TestCase):
             self._build(home, "cline", "s3", account_home=str(profile))["trivial"])
 
     def test_a_droid_row_needs_its_settings_file(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         proj = home / ".factory" / "sessions" / "proj"
         proj.mkdir(parents=True)
         (proj / "abc.jsonl").write_text("{}\n")
@@ -234,7 +236,7 @@ class TestLedgerCoverage(unittest.TestCase):
 
     def test_droid_folders_are_listed_once_per_build(self):
         # A glob per Droid row walked every project folder each time.
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         proj = home / ".factory" / "sessions" / "proj"
         proj.mkdir(parents=True)
         for sid in ("a", "b", "c"):
@@ -251,13 +253,13 @@ class TestLedgerCoverage(unittest.TestCase):
                          {"a": True, "b": True, "c": True, "gone": False})
 
     def test_pi_rows_are_covered_by_definition(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         self.assertTrue(self._build(home, "pi", "anything")["trivial"])
 
 
 class TestCarefulJudgement(unittest.TestCase):
     def test_satellite_projects_ignore_this_disk(self):
-        repo = Path(tempfile.mkdtemp()) / "hubrepo"
+        repo = temp_dir(self) / "hubrepo"
         (repo / ".git").mkdir(parents=True)
         (repo / "wt").mkdir()
         self.assertEqual(sessions.project_of(str(repo / "wt")), "hubrepo")
@@ -913,6 +915,20 @@ return div.innerHTML;
         self.assertIsNone(out["bash"])
         self.assertIsNone(out["junk"])
         self.assertEqual(out["lines"], {"ctxTop": ["a"], "del": ["b"], "add": ["B"], "ctxBot": ["c"]})
+
+    def test_an_empty_side_has_no_lines(self):
+        """The Swift ToolDiff.diff's rule: a Write (no old text) is all
+        added lines, never a removed blank one, and its trailing newline
+        is an added blank line on every client, not a context row."""
+        out = self.run_js("""
+          return [T.diffLines("", "a"), T.diffLines("", "a\\nb\\n"), T.diffLines("x", ""),
+                  T.diffLines("", "")];""")
+        self.assertEqual(out, [
+            {"ctxTop": [], "del": [], "add": ["a"], "ctxBot": []},
+            {"ctxTop": [], "del": [], "add": ["a", "b", ""], "ctxBot": []},
+            {"ctxTop": [], "del": ["x"], "add": [], "ctxBot": []},
+            {"ctxTop": [], "del": [], "add": [], "ctxBot": []},
+        ])
 
     def test_tool_args_that_are_not_strings_render_no_diff(self):
         """args_full is the transcript's tool input as the agent sent it,

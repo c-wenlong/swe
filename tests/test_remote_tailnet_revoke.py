@@ -18,6 +18,8 @@ from swe.remote import devices as devices_mod
 from tests.test_remote_commands import _run
 from tests.test_remote_hub import _Server, _session
 
+from tests._tempdir import temp_dir
+
 _PHONE_IP, _LAPTOP_IP = "100.64.0.9", "100.64.0.10"
 _PEERS = {
     _PHONE_IP: {"node_id": "n-phone", "login": "dev@github",
@@ -226,7 +228,7 @@ class TestNoteSignin(unittest.TestCase):
         import tempfile
         from pathlib import Path
 
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
 
     def test_seen_at_most_every_touch_interval(self):
         pairing.note_signin(self.home, "n1", "one", now=1000.0)

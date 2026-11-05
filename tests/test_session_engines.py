@@ -938,6 +938,29 @@ class EngineCommonHelpersTest(unittest.TestCase):
                 lazy.execute("SELECT 1 FROM sqlite_master").fetchall()
             lazy.close()
 
+    def test_open_sqlite_ro_path_with_hash_opens_that_file(self):
+        # An unquoted '#' cut the URI there: /x/C#proj/d.db opened /x/C
+        # read-write, creating an empty file, and read no tables.
+        from swe.sessions.engines.common import open_sqlite_ro
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "C#proj?x"
+            folder.mkdir()
+            db = folder / "d.db"
+            conn = sqlite3.connect(db)
+            conn.execute("CREATE TABLE t (a)")
+            conn.commit()
+            conn.close()
+            ro = open_sqlite_ro(str(db))
+            try:
+                names = [r[0] for r in ro.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'")]
+                with self.assertRaises(sqlite3.OperationalError):
+                    ro.execute("INSERT INTO t VALUES (1)")
+            finally:
+                ro.close()
+            self.assertEqual(names, ["t"])
+            self.assertFalse((Path(tmp) / "C").exists())
+
     def test_path_from_encoded_dir(self):
         from swe.sessions.engines.common import path_from_encoded_dir
         self.assertEqual(path_from_encoded_dir("-Users-a-b"), "/Users/a/b")

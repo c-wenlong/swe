@@ -14,9 +14,10 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
+
+from tests._tempdir import temp_dir
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 
@@ -73,7 +74,7 @@ REGISTRY = {
 
 class ListJsonTest(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         write_registry(self.home, REGISTRY)
 
     def test_list_json_is_an_enveloped_list_of_harnesses(self):
@@ -147,7 +148,7 @@ class ListNotesJsonTest(unittest.TestCase):
     """The app's edit sheet prefills from `swe list --json`, notes included."""
 
     def test_notes_is_null_when_unset_and_the_text_when_set(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         write_registry(home, dict(
             REGISTRY, codex=dict(REGISTRY["codex"], notes="  daily driver ")))
         rows = {row["name"]: row for row in
@@ -157,7 +158,7 @@ class ListNotesJsonTest(unittest.TestCase):
         self.assertEqual(rows["codex"]["notes"], "  daily driver ")
 
     def test_an_empty_notes_string_reads_as_null(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         write_registry(home, {"claude": dict(REGISTRY["claude"], notes="")})
         row = decode(run_swe(home, "list", "--json"))["data"]["harnesses"][0]
         self.assertIsNone(row["notes"])
@@ -167,7 +168,7 @@ class ListDisplayNameJsonTest(unittest.TestCase):
     """`swe list --json` rows carry `display_name`, next to `name`."""
 
     def rows(self, registry):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         write_registry(home, registry)
         return {row["name"]: row for row in
                 decode(run_swe(home, "list", "--scope=all", "--json")
@@ -202,7 +203,7 @@ class ListPrimaryColorJsonTest(unittest.TestCase):
     """
 
     def rows(self, registry):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         write_registry(home, registry)
         return {row["name"]: row for row in
                 decode(run_swe(home, "list", "--json"))["data"]["harnesses"]}
@@ -222,7 +223,7 @@ class ListPrimaryColorJsonTest(unittest.TestCase):
         self.assertIsNone(rows["mytool"]["primary_color"])
 
     def test_edit_sets_normalises_and_clears_the_colour(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         write_registry(home, {"claude": {"command": "claude", "tags": []}})
 
         result = run_swe(home, "edit", "claude", "--primary-color=d97757")
@@ -245,7 +246,7 @@ class ListPrimaryColorJsonTest(unittest.TestCase):
         self.assertEqual(rows["claude"]["primary_color"], "#D97757")
 
     def test_edit_rejects_a_bad_colour(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         write_registry(home, {"claude": {"command": "claude"}})
         result = run_swe(home, "edit", "claude", "--primary-color=notacolour")
         self.assertEqual(result.returncode, 1)
@@ -255,7 +256,7 @@ class ListPrimaryColorJsonTest(unittest.TestCase):
         self.assertNotIn("primary_color", saved["claude"])
 
     def test_info_shows_the_effective_colour(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         write_registry(home, {"claude": {"command": "claude"}})
         result = run_swe(home, "info", "claude")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -263,7 +264,7 @@ class ListPrimaryColorJsonTest(unittest.TestCase):
         self.assertIn("#D97757", result.stdout)
 
     def test_re_adding_a_harness_keeps_the_chosen_colour(self):
-        home = Path(tempfile.mkdtemp())
+        home = temp_dir(self)
         write_registry(home, {"claude": {"command": "claude", "tags": []}})
 
         result = run_swe(home, "edit", "claude", "--primary-color=#102030")
@@ -283,7 +284,7 @@ class EditJsonTest(unittest.TestCase):
     """`swe edit <name> --field=value --json`: the app's edit sheet."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         write_registry(self.home, {
             "claude": {
                 "command": "claude", "description": "Anthropic CLI",
@@ -545,7 +546,7 @@ class ListUsageJsonTest(unittest.TestCase):
     def setUp(self):
         import time
 
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         write_registry(self.home, REGISTRY)
         self.taken_at = time.time() - 60
 

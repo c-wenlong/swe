@@ -1,12 +1,13 @@
 """ledger/parsers.py and models.py: the Swift ledger's line rules."""
 
 import json
-import tempfile
 import unittest
 from pathlib import Path
 
 from swe.ledger import parsers
 from swe.ledger.models import MAX_TOKENS, parse_timestamp
+
+from tests._tempdir import temp_dir
 
 
 def _claude(**over):
@@ -32,6 +33,14 @@ class TestTimestamp(unittest.TestCase):
         self.assertIsNone(parse_timestamp("yesterday"))
         self.assertIsNone(parse_timestamp(None))
         self.assertIsNone(parse_timestamp("2026-10-03T10:00:03"))  # no zone
+
+    def test_impossible_dates_are_unreadable(self):
+        self.assertIsNone(parse_timestamp("2026-02-30T10:00:00Z"))
+        self.assertIsNone(parse_timestamp("2026-04-31T10:00:00Z"))
+        self.assertIsNone(parse_timestamp("2026-02-29T10:00:00Z"))  # not a leap year
+        self.assertIsNotNone(parse_timestamp("2028-02-29T10:00:00Z"))
+        self.assertIsNotNone(parse_timestamp("2000-02-29T10:00:00Z"))
+        self.assertIsNone(parse_timestamp("2100-02-29T10:00:00Z"))
 
 
 class TestClaude(unittest.TestCase):
@@ -177,7 +186,7 @@ class TestCodex(unittest.TestCase):
         self.assertIsNone(parsers.normalized_tier("Default"))
 
     def test_file_reader_skips_partial_last_line(self):
-        d = Path(tempfile.mkdtemp())
+        d = temp_dir(self)
         f = d / "rollout-z.jsonl"
         lines = [_codex("turn_context", {"model": "gpt-5.5"}),
                  _tc({"input_tokens": 3, "output_tokens": 1})]

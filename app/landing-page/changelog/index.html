@@ -110,10 +110,42 @@ footer a:hover { color: var(--text); }
 <p>All notable changes to this project will be documented in this file.</p>
 <p>The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>,
 and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
-<h2 id="unreleased"><a class="anchor" href="#unreleased"></a>[Unreleased]</h2>
+<h2 id="unreleased"><a class="anchor" href="#unreleased"></a><a href="https://github.com/c-wenlong/swe/compare/v1.2.2...HEAD">Unreleased</a></h2>
+<h3 id="security"><a class="anchor" href="#security"></a>Security</h3>
+<ul>
+<li><strong>A resolve prompt no longer carries strangers' comments.</strong> Anyone can
+comment on a public issue, and every comment went word for word into
+the first prompt of the agent resolving it. The prompt now quotes the
+issue's title, body and comments line by line behind a note that they
+are untrusted data the agent must not take instructions from, keeps
+only comments whose <code>authorAssociation</code> is <code>OWNER</code>, <code>MEMBER</code> or
+<code>COLLABORATOR</code>, and replaces the rest with &quot;N comments from others,
+not included&quot;. Every client prefills the hub's <code>suggested_prompt</code>, so
+the Mac, iPhone and web resolve sheets all get the new prompt; issue
+comments in <code>--json</code> gain <code>association</code>.</li>
+</ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
-<li><strong>Codex sessions were undercounted when codex ran subagents.</strong>
+<li><p><strong>Qwen Code sessions get <code>@</code> file references for attachments again.</strong>
+The hub's attachment fallback table keyed Qwen Code as <code>qwen</code>, its
+command, but sessions carry the registry id <code>qwen-code</code>, so a file
+sent from a phone arrived as an <code>[Attached file: …]</code> line instead of
+an <code>@</code> reference.</p>
+</li>
+<li><p><strong>A wildcard hub bind no longer turns off the Host check, and a
+second <code>swe remote serve</code> on a taken port no longer disturbs the
+running hub.</strong> <code>--host=0.0.0.0 --unsafe-bind-any</code> left the hub's
+allowed Host names empty, which lets any Host through, so a page that
+rebound its name to the hub could pass as the owner's own tailnet
+device; <code>::</code> was not even read as a wildcard. Both now answer this
+node's loopback, hostname and tailnet names, plus any IP address on
+the hub's port (a LAN pairing link), since a rebound page always
+arrives under its own domain name. <code>serve</code> also binds before
+it starts the hub's loops, so a copy that can't get the port exits
+before it registers the machine, settles kept sessions or retires
+ntfy credentials under the running hub.</p>
+</li>
+<li><p><strong>Codex sessions were undercounted when codex ran subagents.</strong>
 <code>parse_codex</code> dropped every thread whose store <code>preview</code> was empty,
 treating it as opened and never typed into — but codex also leaves
 <code>preview</code> blank on spawned threads (subagents, automations) no matter
@@ -124,7 +156,8 @@ that it never ran — and kept spawned threads are titled from
 <code>agent_path</code>'s leaf or <code>agent_nickname</code> rather than their transcript's
 injected-context first line. <code>swe session</code> and the session counts on
 <code>swe list</code> also pick up <code>~/.codex/archived_sessions/</code> now: archiving a
-thread moves its rollout there, and an archived session still ran.</li>
+thread moves its rollout there, and an archived session still ran.</p>
+</li>
 </ul>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
@@ -201,7 +234,7 @@ view, shows a chip per harness per chapter for one-click per-harness
 receipt. View AGENTS.md opens the filtered output's own file.</p>
 </li>
 </ul>
-<h2 id="122---2026-11-04"><a class="anchor" href="#122---2026-11-04"></a>[1.2.2] - 2026-11-04</h2>
+<h2 id="122---2026-11-04"><a class="anchor" href="#122---2026-11-04"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v1.2.2">1.2.2</a> - 2026-11-04</h2>
 <h3 id="added-1"><a class="anchor" href="#added-1"></a>Added</h3>
 <ul>
 <li><p><strong>A one-line installer for Linux.</strong> <code>curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh</code>
@@ -372,7 +405,8 @@ shows one. The web Overview gets a Machines card with each machine's
 tokens and spend for the period (pick one to filter the page), and the
 iPhone's Usage tab a row of machine chips under the periods. A
 satellite's days are its own local days, and its view has no top
-models, since daily rows carry none. Closes</p>
+models, since daily rows carry none. Closes
+<a href="https://github.com/c-wenlong/swe/issues/525">#525</a>.</p>
 </li>
 <li><p><strong>Mac and web: Hub sync card.</strong> Settings › Files shows <code>swe sync status</code> for <code>~/.swe</code> (branch mode, uncommitted changes by primitive,
 commits to push and pull, new commits on <code>origin/main</code>, files kept
@@ -854,7 +888,8 @@ doesn't fit the database answers <code>bad-config</code> naming the property,
 while other databases and sources keep listing. The adapter pins
 <code>Notion-Version: 2022-06-28</code>, paginates with a cap, waits out a 429's
 <code>Retry-After</code>, and renders a page body to markdown for a resolve
-prompt. Read-only. Part of</p>
+prompt. Read-only. Part of
+<a href="https://github.com/c-wenlong/swe/issues/847">#847</a>.</p>
 </li>
 <li><p><strong>Tasks on the Mac, the web and the iPhone show Notion like Linear.</strong>
 The three clients read the hub's new <code>notion</code> env block beside
@@ -2481,7 +2516,7 @@ in the Nix build sandbox. It now resolves <code>env</code> through <code>PATH</c
 falling back to <code>/usr/bin/env</code>.</p>
 </li>
 </ul>
-<h3 id="security"><a class="anchor" href="#security"></a>Security</h3>
+<h3 id="security-1"><a class="anchor" href="#security-1"></a>Security</h3>
 <ul>
 <li><p><strong>Remote: ntfy approval buttons can no longer switch off later
 approvals.</strong> A notification's action token accepted any menu row
@@ -2767,7 +2802,7 @@ the bundled logos the Mac and iPhone apps draw at
 PWA's list shows the logo in place of the harness's name.</p>
 </li>
 </ul>
-<h2 id="110---2026-10-26"><a class="anchor" href="#110---2026-10-26"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v1.1.0">1.1.0</a> - 2026-10-26</h2>
+<h2 id="110---2026-10-26"><a class="anchor" href="#110---2026-10-26"></a>[1.1.0] - 2026-10-26</h2>
 <h3 id="added-3"><a class="anchor" href="#added-3"></a>Added</h3>
 <ul>
 <li><p><strong>Shared hooks across harnesses, plus hook CRUD.</strong> The <code>hooks</code> domain
@@ -4197,7 +4232,7 @@ the old hour steps persist, and clamped to a minute through a year.
 The legacy hours setting still loads.</p>
 </li>
 </ul>
-<h3 id="security-1"><a class="anchor" href="#security-1"></a>Security</h3>
+<h3 id="security-2"><a class="anchor" href="#security-2"></a>Security</h3>
 <ul>
 <li><strong>The <code>server</code> extra now requires <code>mcp&gt;=1.30.0,&lt;2</code></strong> (was <code>&gt;=1.0.0</code>),
 the first 1.x release patched for
@@ -4883,7 +4918,7 @@ already documents <code>swe harness star</code>.</li>
 <li>Dead <code>demo</code> symlink, stale coverage artifacts, and <code>.jules/</code> session
 notes (parked under <code>.archive/</code>, gitignored) cleaned out of the repo.</li>
 </ul>
-<h2 id="029---2026-08-20"><a class="anchor" href="#029---2026-08-20"></a>[0.2.9] - 2026-08-20</h2>
+<h2 id="029---2026-08-20"><a class="anchor" href="#029---2026-08-20"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v0.2.9">0.2.9</a> - 2026-08-20</h2>
 <h3 id="fixed-9"><a class="anchor" href="#fixed-9"></a>Fixed</h3>
 <ul>
 <li><strong>v0.2.8 could not start on Python 3.10 or 3.11.</strong> <code>swe find</code>'s summary line
@@ -4902,7 +4937,7 @@ the release. Two earlier attempts at this guard silently passed:
 reaches the parser. It uses the builtin <code>compile()</code> now, and is verified
 against the actual v0.2.8 defect.</li>
 </ul>
-<h2 id="028---2026-08-20"><a class="anchor" href="#028---2026-08-20"></a>[0.2.8] - 2026-08-20</h2>
+<h2 id="028---2026-08-20"><a class="anchor" href="#028---2026-08-20"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v0.2.8">0.2.8</a> - 2026-08-20</h2>
 <h3 id="added-11"><a class="anchor" href="#added-11"></a>Added</h3>
 <ul>
 <li><strong><code>swe find</code>.</strong> The read-only counterpart to <code>swe init</code>: where the shared
@@ -4961,7 +4996,7 @@ file. <code>mcp/servers/</code> is gitignored, since it is 21 nested git repos a
 <code>mcp.json</code> records how to rebuild it.</p>
 </li>
 </ul>
-<h2 id="027---2026-08-20"><a class="anchor" href="#027---2026-08-20"></a>[0.2.7] - 2026-08-20</h2>
+<h2 id="027---2026-08-20"><a class="anchor" href="#027---2026-08-20"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v0.2.7">0.2.7</a> - 2026-08-20</h2>
 <h3 id="added-12"><a class="anchor" href="#added-12"></a>Added</h3>
 <ul>
 <li><p><strong><code>swe init --migrate</code>.</strong> Moves a pre-0.2.7 <code>~/.config/swe</code> into <code>~/.quiver</code>,
@@ -5272,8 +5307,10 @@ column order, separator/header/body visible-width parity, green/red
 status colors, dim version text, <code>version unknown</code> fallback, three
 heal-side-effect cases (live overrides stored, live matches stored,
 dirty stored value cleared), off-PATH footer conditional rendering
-(with/without orphans), alphabetical row order, and bold header line.- <code>swe list</code> now shows a <strong>RATE</strong> column with usage percentage and reset countdown for tools that expose rate limit APIs. Currently supports:</li>
+(with/without orphans), alphabetical row order, and bold header line.</li>
 </ul>
+</li>
+<li><p><code>swe list</code> now shows a <strong>RATE</strong> column with usage percentage and reset countdown for tools that expose rate limit APIs. Currently supports:</p>
 <ul>
 <li><strong>Codex</strong> via ChatGPT <code>backend-api/wham/usage</code> endpoint using OAuth
 tokens from <code>~/.codex/auth.json</code></li>
@@ -5599,7 +5636,7 @@ per-subtest <code>reset_at</code> mutation into <code>_SAMPLE_RESPONSE</code>, w
 <li><code>commands.py</code> and <code>usage.py</code> import from central <code>identity.py</code> instead of local mappings</li>
 <li>README updated with autocomplete, favourites, providers, doctor, install, edit, and --search/--refresh docs</li>
 </ul>
-<h2 id="025---2026-07-06"><a class="anchor" href="#025---2026-07-06"></a>[0.2.5] - 2026-07-06</h2>
+<h2 id="025---2026-07-06"><a class="anchor" href="#025---2026-07-06"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v0.2.5">0.2.5</a> - 2026-07-06</h2>
 <h3 id="added-14"><a class="anchor" href="#added-14"></a>Added</h3>
 <ul>
 <li><code>swe skills help &lt;topic&gt;</code> — per-topic help (catalog, discover, tree, link, unlink, move, scope)</li>
@@ -5625,7 +5662,7 @@ per-subtest <code>reset_at</code> mutation into <code>_SAMPLE_RESPONSE</code>, w
 <li><code>swe skills discover</code> — scan <code>~/Desktop</code> and <code>~/Documents</code> for <code>*/skills/</code> catalogs</li>
 <li><code>swe skills catalog add|list|remove</code> — register extra skill directories in <code>skill_catalogs.json</code></li>
 </ul>
-<h2 id="022---2026-07-06"><a class="anchor" href="#022---2026-07-06"></a>[0.2.2] - 2026-07-06</h2>
+<h2 id="022---2026-07-06"><a class="anchor" href="#022---2026-07-06"></a><a href="https://github.com/c-wenlong/swe/releases/tag/v0.2.2">0.2.2</a> - 2026-07-06</h2>
 <h3 id="added-17"><a class="anchor" href="#added-17"></a>Added</h3>
 <ul>
 <li><code>swe mcp discover</code> — find MCP servers across tool configs vs <code>~/.config/swe/mcp.json</code></li>

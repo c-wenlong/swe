@@ -10,12 +10,13 @@ import json
 import os
 import ssl
 import stat
-import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from swe.paths import atomic_write_text, backup_tree
+
+from tests._tempdir import temp_dir
 
 
 class SslVerificationTest(unittest.TestCase):
@@ -71,7 +72,7 @@ class AtomicWritePermissionTest(unittest.TestCase):
     came back 0644. Harness MCP configs hold resolved API tokens."""
 
     def setUp(self):
-        self.d = Path(tempfile.mkdtemp())
+        self.d = temp_dir(self)
 
     def _mode(self, p):
         return stat.S_IMODE(p.stat().st_mode)
@@ -141,7 +142,15 @@ class ForcedLinkBacksUpTest(unittest.TestCase):
     copy anywhere, while the same decision in `swe init` backed up first."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
+        # link_skill_root records the link in skill_links.json, a path
+        # fixed at import from the runner's HOME: keep it in this home.
+        records = self.home / ".swe" / "config" / "skill_links.json"
+        for target, value in (("swe.skills.layout.SKILL_LINKS_FILE", records),
+                              ("swe.skills.layout.CONFIG_DIR", records.parent)):
+            patcher = mock.patch(target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         (self.home / ".swe" / "skills").mkdir(parents=True)
         self.root = self.home / ".codex" / "skills"
         self.root.mkdir(parents=True)
@@ -177,7 +186,7 @@ class BackupTreeHardeningTest(unittest.TestCase):
     """Three ways the old _backup aborted a run partway through."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         (self.home / ".swe" / "backups").mkdir(parents=True)
         self.tree = self.home / ".h" / "skills"
         self.tree.mkdir(parents=True)
@@ -195,7 +204,7 @@ class BackupTreeHardeningTest(unittest.TestCase):
         self.assertTrue((dest / "link").is_symlink())
 
     def test_a_path_outside_home_does_not_raise(self):
-        outside = Path(tempfile.mkdtemp()) / "skills"
+        outside = temp_dir(self) / "skills"
         outside.mkdir(parents=True)
         (outside / "s").mkdir()
         self.assertTrue(backup_tree(outside, self.home).exists())
@@ -205,10 +214,6 @@ class BackupTreeHardeningTest(unittest.TestCase):
         b = backup_tree(self.tree, self.home)
         self.assertNotEqual(a, b)
         self.assertTrue(a.exists() and b.exists())
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class ParserFailuresAreReportedTest(unittest.TestCase):
@@ -232,7 +237,7 @@ class ParserFailuresAreReportedTest(unittest.TestCase):
         from swe.sessions.engines import json_engine
         from swe.sessions.engines.json_engine import JsonParserConfig
 
-        d = Path(tempfile.mkdtemp())
+        d = temp_dir(self)
         idx = d / "index.json"
         idx.write_text(_json.dumps([{"id": "1"}]))
 
@@ -288,9 +293,9 @@ class UnknownRootRefTest(unittest.TestCase):
         from swe.skills.layout import SkillLayoutError
 
         self.error = SkillLayoutError
-        self.home = Path(tempfile.mkdtemp())
+        self.home = temp_dir(self)
         (self.home / ".swe" / "skills").mkdir(parents=True)
-        self.work = Path(tempfile.mkdtemp())
+        self.work = temp_dir(self)
         (self.work / "codx").mkdir()
         self._old = os.getcwd()
         os.chdir(self.work)
@@ -329,3 +334,7 @@ class UnknownRootRefTest(unittest.TestCase):
         with self.assertRaises(self.error):
             link_skill_root("codx", home=self.home, cwd=self.home, force=True)
         self.assertTrue((self.work / "codx").is_dir(), "cwd folder was touched")
+
+
+if __name__ == "__main__":
+    unittest.main()
