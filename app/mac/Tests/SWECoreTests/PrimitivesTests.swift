@@ -213,9 +213,11 @@ final class PrimitiveHome {
         var edited = try JSONTextEdit.set("https://example.com/a/b", at: ["homepage"], in: text)
         edited = try JSONTextEdit.set(["url": "https://github.com/o/r"], at: ["repository"], in: edited)
         #expect(edited.contains(#""homepage": "https://example.com/a/b""#))
-        // A new object goes through JSONSerialization's pretty printer,
-        // which spaces both sides of the colon; a scalar is written by hand.
-        #expect(edited.contains(#""url" : "https://github.com/o/r""#))
+        // A new object goes through JSONSerialization, whose spacing is
+        // its own business: read the value back rather than pin the text.
+        let json = try #require(try JSONSerialization.jsonObject(with: Data(edited.utf8)) as? [String: Any])
+        let repository = try #require(json["repository"] as? [String: Any])
+        #expect(repository["url"] as? String == "https://github.com/o/r")
         #expect(!edited.contains(#"\/"#))
     }
 
