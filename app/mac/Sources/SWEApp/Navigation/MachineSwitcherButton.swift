@@ -29,12 +29,12 @@ struct MachineSwitcherButton: View {
                 Button("Reload \(hub.name)", systemImage: "arrow.clockwise") {
                     app.hubWebViews.reload(hub)
                 }
-                Button("Open in Browser", systemImage: "safari") {
+                Button("Open in browser", systemImage: "safari") {
                     NSWorkspace.shared.open(hub.url)
                 }
                 Divider()
             }
-            Button("Add a Hub…", systemImage: "plus") {
+            Button("Add a hub…", systemImage: "plus") {
                 // Settings › Integrations holds the Remote card's hub list.
                 UserDefaults.standard.set(SettingsSection.integrations.rawValue, forKey: "settingsSection")
                 app.select(.settings)
