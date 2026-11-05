@@ -981,8 +981,8 @@ struct PluginDetailView: View {
         manifestWrite = Task {
             await previous?.value
             do {
-                app.primitiveNames = try await app.primitiveNames.savingOffMain(
-                    { $0.set(trimmed.isEmpty ? nil : trimmed, forPlugin: ref) }, to: file)
+                try await app.saveDisplayNames({ $0.set(trimmed.isEmpty ? nil : trimmed, forPlugin: ref) },
+                                               to: file)
                 nameError = nil
             } catch {
                 // The write left the overlay untouched: show that name

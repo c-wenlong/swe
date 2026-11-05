@@ -498,6 +498,8 @@ final class AppModel {
     /// SWE's display names for marketplaces and plugins, from
     /// ~/.swe/config/plugin-display-names.json.
     var primitiveNames: PluginDisplayNames
+    /// The last display-name save, which the next one waits for.
+    @ObservationIgnored var displayNamesSave: Task<Void, Never>?
     private let userHome = FileManager.default.homeDirectoryForCurrentUser
     /// This Mac's hub, which the Sessions page's chat talks to.
     private(set) var hub: LocalHub

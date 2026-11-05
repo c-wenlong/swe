@@ -115,8 +115,7 @@ struct PluginExplorer: View {
                     let file = PluginDisplayNames.file(home: home)
                     Task {
                         do {
-                            app.primitiveNames = try await app.primitiveNames.savingOffMain(
-                                { $0.set(text, forMarketplace: id) }, to: file)
+                            try await app.saveDisplayNames({ $0.set(text, forMarketplace: id) }, to: file)
                             renameError = nil
                         } catch {
                             renameError = "Couldn't save the name: \(error.localizedDescription)"
@@ -541,6 +540,28 @@ private struct StatusDot: View {
         case .disabled, .cached: Circle().fill(Theme.borderStrong).frame(width: Theme.statusDot, height: Theme.statusDot)
         case .available, .absent: Circle().strokeBorder(Theme.textMuted, lineWidth: 1.2).frame(width: Theme.statusDot, height: Theme.statusDot)
         }
+    }
+}
+
+extension AppModel {
+    /// Renames, one after another: each waits for the last to land and
+    /// starts from the names as they are then, so two quick renames (a
+    /// marketplace's and a plugin's) can't each write a copy that drops
+    /// the other. The write runs off the main actor.
+    func saveDisplayNames(_ change: @escaping @MainActor (inout PluginDisplayNames) -> Void,
+                          to file: URL) async throws {
+        let previous = displayNamesSave
+        let mine = Task<String?, Never> { @MainActor in
+            await previous?.value
+            do {
+                primitiveNames = try await primitiveNames.savingOffMain(change, to: file)
+                return nil
+            } catch {
+                return error.localizedDescription
+            }
+        }
+        displayNamesSave = Task { _ = await mine.value }
+        if let failure = await mine.value { throw PluginDisplayNames.SaveFailure(message: failure) }
     }
 }
 

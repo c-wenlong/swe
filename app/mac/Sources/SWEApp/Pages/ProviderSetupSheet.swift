@@ -17,8 +17,9 @@ struct ProviderSetupSheet: View {
     @State private var model: InstallCatalogModel?
 
     /// The swe a copied install line names. Resolving a Settings path
-    /// stats the file, so it is worked out once, off the main actor.
-    @State private var sweExecutable = SweLocation.bundled ?? "swe"
+    /// stats the file, so it is worked out once, off the main actor; nil
+    /// until then, which keeps Run off rather than naming the wrong swe.
+    @State private var sweExecutable: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -41,6 +42,7 @@ struct ProviderSetupSheet: View {
         .background(Theme.panel)
         .task(id: app.swePath) {
             let path = app.swePath
+            sweExecutable = nil
             sweExecutable = await offMain { SweLocation.executable(override: path) }
         }
         .task {
@@ -77,7 +79,7 @@ struct ProviderSetupSheet: View {
                     note("The \(provider.name) app is already on this Mac at \(appPath); these commands install its command line tool.")
                 }
                 methodList(entry.methods) { method in
-                    InstallCatalogModel.installLine(entry.name, via: method.via, swe: sweExecutable)
+                    sweExecutable.flatMap { InstallCatalogModel.installLine(entry.name, via: method.via, swe: $0) }
                 }
                 websiteLink(entry.website)
             } else if let site = entry?.website, let url = URL(string: site), url.isWebURL {
