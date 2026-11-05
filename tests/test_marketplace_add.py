@@ -146,11 +146,17 @@ class MarketplaceCliTest(unittest.TestCase):
         self.assertEqual(doc["data"]["results"][0]["harness"], "claude")
 
     def test_refused_source_never_runs(self):
-        code, _, err = self.run_cli("add", "--bogus", "--harness=claude")
+        from unittest import mock
+        run = mock.Mock(side_effect=AssertionError("subprocess.run called"))
+        code, out, _ = self.run_cli(
+            "add", "--bogus", "--harness=claude", patch_run=run)
         self.assertEqual(code, 1)
-        code, out, err = self.run_cli("add", "owner/repo", "--json")
+        self.assertIn("Unknown flag: --bogus", out)
+        code, out, err = self.run_cli("add", "owner/repo", "--json",
+                                      patch_run=run)
         self.assertEqual(code, 1)
         self.assertIn("--harness", err)
+        run.assert_not_called()
 
     def test_partial_failure_exits_one(self):
         seq = iter([(0, "ok\n", ""), (1, "", "bad\n")])
