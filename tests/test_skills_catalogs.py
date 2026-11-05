@@ -125,6 +125,17 @@ class SkillsCatalogTest(unittest.TestCase):
                 self.assertEqual(load_skill_catalogs(), [])
 
 
+    def test_a_non_object_catalogs_file_reads_as_none(self):
+        # `[]` crashed `swe skills catalog list` with AttributeError.
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp) / ".config" / "swe"
+            config_dir.mkdir(parents=True)
+            catalogs_file = config_dir / "skill_catalogs.json"
+            catalogs_file.write_text("[]")
+            p1, p2, p3, p4 = _catalog_patches(config_dir, catalogs_file)
+            with p1, p2, p3, p4:
+                self.assertEqual(load_skill_catalogs(), [])
+
     def test_remove_matches_a_label_or_a_whole_path_never_a_substring(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)

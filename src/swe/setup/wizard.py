@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -23,7 +21,7 @@ from swe.console import c, sanitize
 from swe.harness.discover import apply_findings, discover_harnesses
 from swe.init import hub as hub_repo
 from swe.mcp.discover import apply_mcp_findings, discover_mcp_servers
-from swe.paths import HARNESS_FILE, MCP_SOURCE_FILE
+from swe.paths import HARNESS_FILE, MCP_SOURCE_FILE, backup_tree
 from swe.prompt import read_line
 from swe.providers.discover import discover_provider_keys
 from swe.providers.keys import default_keys_dir
@@ -99,15 +97,17 @@ def _display_path(path: Path, home: Path) -> str:
     return "~" if str(relative) == "." else f"~/{relative}"
 
 
-def backup_file(path: Path, *, now: datetime | None = None) -> Path | None:
-    """Create a timestamped sibling backup without changing the source."""
+def backup_file(path: Path, *, home: Path | None = None) -> Path | None:
+    """Copy ``path`` into ~/.swe/backups before the wizard rewrites it.
+
+    Not a sibling: harness.json, mcp.json and config.json sit in the
+    versioned half of the hub, where a ``*.bak.<time>`` copy would be
+    picked up by git. backups/ is gitignored.
+    """
 
     if not path.exists():
         return None
-    timestamp = (now or datetime.now()).strftime("%Y%m%d_%H%M%S_%f")
-    backup = path.with_name(f"{path.name}.bak.{timestamp}")
-    shutil.copy2(path, backup)
-    return backup
+    return backup_tree(path, home)
 
 
 def _stage_header(number: int, total: int, label: str) -> None:
