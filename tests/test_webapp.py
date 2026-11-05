@@ -22,6 +22,37 @@ class TestAssetNames(unittest.TestCase):
             self.assertFalse(static.is_asset_name(bad), bad)
 
 
+class TestStyles(unittest.TestCase):
+    """styles.css keeps one definition per component and one dark palette."""
+
+    STATIC = Path(static.__file__).parent / "static"
+
+    @staticmethod
+    def _tokens(block):
+        return dict(re.findall(r"(--[\w-]+):\s*([^;]+);", block))
+
+    def test_both_dark_blocks_define_the_same_tokens(self):
+        css = (self.STATIC / "styles.css").read_text()
+        auto = css.split("@media (prefers-color-scheme: dark) {")[1].split("\n}\n")[0]
+        explicit = css.split(':root[data-theme="dark"] {')[1].split("\n}\n")[0]
+        auto_tokens, explicit_tokens = self._tokens(auto), self._tokens(explicit)
+        self.assertGreater(len(explicit_tokens), 30)
+        self.assertEqual(auto_tokens, explicit_tokens)
+
+    def test_pages_borrow_spinner_switch_and_button_instead_of_copying_them(self):
+        for sheet in sorted((self.STATIC / "pages").glob("*.css")):
+            css = re.sub(r"/\*.*?\*/", "", sheet.read_text(), flags=re.S)
+            self.assertNotIn("@keyframes spin", css, sheet.name)
+            for rule in css.split("}"):
+                with self.subTest(sheet=sheet.name, rule=rule.strip()[:60]):
+                    # A ring that turns is .spinner; an inked button is .btn.primary.
+                    self.assertFalse("border-radius: 50%" in rule and "animation: spin" in rule
+                                     and "border-top-color" in rule)
+                    self.assertFalse("background: var(--text-primary)" in rule
+                                     and "color: var(--card)" in rule and "border-color: var(--text-primary)" in rule)
+                    self.assertNotIn("translateX(16px)", rule)
+
+
 class TestWebAppRoutes(HubBase):
     def setUp(self):
         super().setUp()

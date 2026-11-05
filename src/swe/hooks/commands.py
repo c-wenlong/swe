@@ -910,6 +910,10 @@ def _sync(rest: list[str], json_view: bool, fail) -> int:
     except LinkIgnoreError as exc:
         return fail(c("red", f"{exc} — fix or remove "
                              "~/.swe/.linkignore, then sync again."))
+    from swe.init.migrate import move_renamed_hook_dirs
+
+    # Same one-shot rename swe init runs, ahead of the deploy and plan.
+    moved = move_renamed_hook_dirs(home, registry=registry, patterns=patterns)
     written, pruned = _shared.apply_deploy(home, registry)
     statuses = plan_hooks(home, patterns=patterns, registry=registry)
     results: Counter = Counter()
@@ -921,6 +925,8 @@ def _sync(rest: list[str], json_view: bool, fail) -> int:
             "pruned": [str(p) for p in pruned],
             "links": dict(results),
         })
+    for note in moved:
+        print(f"  {c('cyan', '~')} {note}")
     if written:
         for path in written:
             print(f"  {c('cyan', '+')} wrote {_short(path, home)}")

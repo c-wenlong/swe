@@ -409,8 +409,7 @@ private struct LogoLaunchButton: View {
         .buttonStyle(.plain)
         .disabled(!target.canLaunch)
         .onHover { hovering = $0 }
-        .help(help)
-        .accessibilityLabel(help)
+        .hoverTip(help, pinsOnClick: false)
     }
 
     /// One phrasing for the tooltip and the VoiceOver label.
@@ -440,7 +439,7 @@ private struct PanelIconButton: View {
             .contentShape(.rect)
             .plainButton(cornerRadius: Theme.smallRadius)
             .onHover { hovering = $0 }
-            .help(title)
+            .hoverTip(title, replacesLabel: false, pinsOnClick: false)
     }
 }
 
@@ -721,7 +720,8 @@ private struct PanelOtherRow: View {
                     .font(Theme.caption).foregroundStyle(Theme.textSecondary)
             }
         }
-        .help(row.limit.fetchedAt.map { "Fetched \(UsageFormat.ago($0, now: .now))" } ?? "Fetch time unknown")
+        .hoverTip(row.limit.fetchedAt.map { "Fetched \(UsageFormat.ago($0, now: .now))" } ?? "Fetch time unknown",
+                  replacesLabel: false, pinsOnClick: false)
     }
 }
 

@@ -28,7 +28,8 @@ struct BrandLogo: View {
                 Color.clear.frame(width: size, height: size)
             }
         }
-        .help(name)
-        .accessibilityLabel(name)
+        // A tip that never pins, so a logo inside a row's Button label
+        // leaves the click to the row (`.help` never shows there).
+        .hoverTip(name, pinsOnClick: false)
     }
 }

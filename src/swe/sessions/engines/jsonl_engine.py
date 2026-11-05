@@ -302,6 +302,10 @@ def _session_from_index_entry(
             path = ""
     else:
         path = entry.get("cwd") or entry.get("path") or entry.get("directory") or ""
+        if not isinstance(path, str):
+            # Missing, so the fallbacks and ``require_path`` apply; Session
+            # would blank it only after the require_path check.
+            path = ""
 
     title = ""
     title_source = ""
@@ -412,7 +416,10 @@ def _title_from_tail(fp: str, config: JsonlParserConfig) -> tuple[str, str]:
         size = os.path.getsize(fp)
         with open(fp, "rb") as f:
             start = max(0, size - config.tail_bytes)
-            f.seek(start)
+            # Read from one byte before the window: when that byte is the
+            # newline ending the previous record, the "partial" first line
+            # dropped below is empty and the window's first record is kept.
+            f.seek(start - 1 if start > 0 else 0)
             chunk = f.read().decode("utf-8", errors="ignore")
     except OSError:
         parse_cache.note_read_error()

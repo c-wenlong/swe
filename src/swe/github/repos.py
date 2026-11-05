@@ -16,7 +16,10 @@ from pathlib import Path
 
 from swe import paths
 
-_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+# A GitHub owner never starts with "-", so neither may ours: owner/name
+# goes into gh argv as a bare word (``gh repo view <repo>``, ``--repo
+# <repo>``), where "-x/y" would read as a flag.
+_NAME_RE = re.compile(r"^[A-Za-z0-9_.][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$")
 _SSH_RE = re.compile(r"^git@([^:]+):(.+?)(?:\.git)?$")
 _HTTPS_RE = re.compile(r"^https?://([^/]+)/(.+?)(?:\.git)?/?$")
 

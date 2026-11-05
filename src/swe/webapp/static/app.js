@@ -212,13 +212,13 @@ function renderGate(message = CREDENTIAL_REFUSED, always = false) {
     <div id="pair-start">
       <input class="field gate-field" id="pair-name" type="text" autocomplete="off"
         placeholder="Name for this device" aria-label="Name for this device">
-      <button class="set-button primary" id="pair-ts">Pair with Tailscale</button>
+      <button class="btn medium set-button primary" id="pair-ts">Pair with Tailscale</button>
       <p class="gate-error" id="pair-error"></p>
       <details class="gate-token">
         <summary>Have a pair token?</summary>
         <input class="field gate-field" id="pair-token" type="text" inputmode="text"
           autocomplete="off" placeholder="pair token" spellcheck="false">
-        <button class="set-button" id="pair-go">Pair with token</button>
+        <button class="btn medium set-button" id="pair-go">Pair with token</button>
       </details>
     </div>
     <div id="pair-code-card" hidden>
@@ -228,7 +228,7 @@ function renderGate(message = CREDENTIAL_REFUSED, always = false) {
         <code>swe remote devices --approve=<span id="pair-code-flat"></span></code>,
         or in Settings &rsaquo; Integrations &rsaquo; Remote on a signed-in browser.</p>
       <p class="caption" id="pair-code-status"></p>
-      <button class="set-button" id="pair-retry" hidden>Try again</button>
+      <button class="btn medium set-button" id="pair-retry" hidden>Try again</button>
     </div>
   </div></div>`;
   const el = (id) => document.getElementById(id);
@@ -391,8 +391,9 @@ function pairRequestPoll(requestId, secret, gen, rgen) {
     asking = true;
     let status = 0, data = null;
     try {
-      const resp = await fetch(
-        `/v1/pair/request/${encodeURIComponent(requestId)}?secret=${encodeURIComponent(secret)}`);
+      // The secret goes in a header, never the URL, which logs keep.
+      const resp = await fetch(`/v1/pair/request/${encodeURIComponent(requestId)}`,
+        { headers: { "X-Pair-Secret": secret } });
       status = resp.status;
       try { data = await resp.json(); } catch { /* empty body */ }
     } catch { /* transient — poll again */ }

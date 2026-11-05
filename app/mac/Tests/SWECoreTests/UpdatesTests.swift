@@ -422,7 +422,9 @@ struct UpdatesModelTests {
             preferences: prefs,
             releaseCheck: ReleaseCheck(
                 transport: DeadTransport(),
-                cacheURL: tempDir().appending(path: "latest-release.json")))
+                cacheURL: tempDir().appending(path: "latest-release.json")),
+            rebuildRunner: RecordingRunner(gitOk("")),
+            rebuildDir: tempDir())
         #expect(model.channel == .prod)
         #expect(!model.showsDevControls)
         // setChannel can still be called; on a prod build it stays prod.
@@ -437,7 +439,9 @@ struct UpdatesModelTests {
             preferences: UpdatePreferences(defaults: defaults),
             releaseCheck: ReleaseCheck(
                 transport: DeadTransport(),
-                cacheURL: tempDir().appending(path: "latest-release.json")))
+                cacheURL: tempDir().appending(path: "latest-release.json")),
+            rebuildRunner: RecordingRunner(gitOk("")),
+            rebuildDir: tempDir())
         #expect(model.channel == .dev)
         #expect(model.showsDevControls)
     }

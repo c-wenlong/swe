@@ -48,6 +48,11 @@ class TestNormalize(unittest.TestCase):
         self.assertEqual(repos.normalize_repo_input("o/r"), "o/r")
         self.assertEqual(repos.normalize_repo_input("a-b_c.d/e"), "a-b_c.d/e")
 
+    def test_an_owner_that_reads_as_a_flag_is_no_repo(self):
+        # owner/name reaches gh argv as a bare word.
+        for text in ("-w/x", "--web/x", "https://github.com/-w/x"):
+            self.assertIsNone(repos.normalize_repo_input(text), text)
+
     def test_urls(self):
         self.assertEqual(
             repos.normalize_repo_input("https://github.com/cli/cli"),
