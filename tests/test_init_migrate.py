@@ -9,6 +9,7 @@ in the versioned half, or a second run undoing the first.
 
 import io
 import json
+import re
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -670,8 +671,11 @@ class CmdInitMigrationTest(unittest.TestCase):
             target = home / "foreign" / "AGENTS.md"
             paths.agents_file_for(home).parent.mkdir(parents=True)
             paths.agents_file_for(home).symlink_to(target)
-            code, _out = self._run(home, [])
-            self.assertIn(code, (0, 1))
+            code, out = self._run(home, [])
+            # The run still succeeds; it names the link it left alone.
+            self.assertEqual(code, 0, out)
+            self.assertIn("AGENTS.md is a dangling symlink",
+                          re.sub(r"\x1b\[[0-9;]*m", "", out))
             self.assertFalse(target.exists(), "seed wrote through a symlink")
             self.assertTrue(paths.agents_file_for(home).is_symlink())
 

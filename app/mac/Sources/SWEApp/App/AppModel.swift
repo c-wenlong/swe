@@ -479,7 +479,7 @@ final class AppModel {
         didSet { githubNotify.windowVisible = mainWindowOnScreen }
     }
     /// Banners provider incidents from the Service status poll, which it
-    /// also drives. Assigned in init, where `~/.quiver` is known.
+    /// also drives. Assigned in init, where `~/.swe` is known.
     let serviceNotify: ServiceStatusNotifier
     /// The MCP servers page's "Server folders" section.
     let mcpRepo = McpServerRepoModel()
@@ -515,8 +515,11 @@ final class AppModel {
     /// and leave a `~/.quiver` → `.swe` symlink so harness links and older
     /// copies of the CLI keep resolving. A `~/.quiver` that is itself a
     /// link is mirrored as `~/.swe`, never moved out from under whatever
-    /// put it there. On any failure the old root keeps serving.
-    private static func migrateDataRoot(home: URL) {
+    /// put it there, unless it points at `~/.swe` itself (the link an
+    /// earlier move left, after `~/.swe` was deleted): mirroring that would
+    /// make `~/.swe` a link to itself, and every path under it would fail.
+    /// On any failure the old root keeps serving.
+    static func migrateDataRoot(home: URL) {
         let fm = FileManager.default
         let new = home.appending(path: ".swe")
         let old = home.appending(path: ".quiver")
@@ -525,6 +528,9 @@ final class AppModel {
               let type = attrs[.type] as? FileAttributeType else { return }
         if type == .typeSymbolicLink {
             if let target = try? fm.destinationOfSymbolicLink(atPath: old.path) {
+                let resolved = URL(fileURLWithPath: target, relativeTo: home)
+                    .standardizedFileURL.path
+                guard resolved != new.standardizedFileURL.path else { return }
                 try? fm.createSymbolicLink(atPath: new.path, withDestinationPath: target)
             }
             return

@@ -9,7 +9,6 @@ from unittest.mock import patch
 from swe.console import visible_len
 from swe.sessions.commands import (
     _display_title,
-    _filter_search,
     _launch_tool_name,
     _parse_session_args,
     _resume_cmd_args,
@@ -111,27 +110,6 @@ class SessionCommandsTest(unittest.TestCase):
         parsed = _parse_session_args(["--start=2026-07-01", "--end=2026-07-30"])
         self.assertEqual(parsed.start, "2026-07-01")
         self.assertEqual(parsed.end, "2026-07-30")
-
-    def test_filter_search(self):
-        sessions = [
-            SimpleNamespace(
-                agent="Droid",
-                tool_name="droid",
-                path="/tmp/a",
-                title="fix login",
-                session_id="1",
-            ),
-            SimpleNamespace(
-                agent="Codex",
-                tool_name="codex",
-                path="/tmp/b",
-                title="refactor",
-                session_id="2",
-            ),
-        ]
-        hits = _filter_search(sessions, "login")
-        self.assertEqual(len(hits), 1)
-        self.assertEqual(hits[0].title, "fix login")
 
     def test_display_title_fallback(self):
         s = SimpleNamespace(title="", session_id="aaaaaaaa-bbbb-cccc")

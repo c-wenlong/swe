@@ -518,7 +518,9 @@ async function doctorAgentLaunch(finding, idx) {
   const p = doctorPage, id = doctorId(finding), agent = p.agent;
   const r = (finding.remedies || [])[idx];
   if (!agent || agent.id !== id || p.agentBusy || !r || !r.prompt || !agent.harness) return;
-  const live = () => p.agent === agent;
+  // Leaving the page drops the wait as closing the picker does: no
+  // launch polls keep running behind another page.
+  const live = () => p.agent === agent && onDoctorPage();
   agent.phase = "Starting…";
   agent.error = null;
   p.agentBusy = true;
@@ -533,7 +535,13 @@ async function doctorAgentLaunch(finding, idx) {
     if (onDoctorPage()) renderGate();
     return;
   }
-  if (!live()) { p.agentBusy = false; return; }
+  if (!live()) {
+    // Left the page (or closed the picker) before the hub answered: no
+    // picker stays behind stuck on "Starting…".
+    p.agentBusy = false;
+    if (p.agent === agent) p.agent = null;
+    return;
+  }
   if (!((status === 200 || status === 202) && data && data.launch_id)) {
     agent.phase = null;
     agent.error = controlErrorText(status, data,
@@ -546,7 +554,11 @@ async function doctorAgentLaunch(finding, idx) {
   if (onDoctorPage()) paintDoctor();
   const launch = await followLaunch(data, live);
   p.agentBusy = false;
-  if (!launch) return;
+  if (!launch) {
+    // Left the page mid-wait: the session keeps running under Sessions.
+    if (p.agent === agent) p.agent = null;
+    return;
+  }
   if (launch.state === "started") {
     p.agent = null;
     p.agentNote[id] = "The agent is on it: the session runs under Sessions, on the hub. Run the checks again when it finishes.";
