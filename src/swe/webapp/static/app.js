@@ -391,8 +391,9 @@ function pairRequestPoll(requestId, secret, gen, rgen) {
     asking = true;
     let status = 0, data = null;
     try {
-      const resp = await fetch(
-        `/v1/pair/request/${encodeURIComponent(requestId)}?secret=${encodeURIComponent(secret)}`);
+      // The secret goes in a header, never the URL, which logs keep.
+      const resp = await fetch(`/v1/pair/request/${encodeURIComponent(requestId)}`,
+        { headers: { "X-Pair-Secret": secret } });
       status = resp.status;
       try { data = await resp.json(); } catch { /* empty body */ }
     } catch { /* transient — poll again */ }

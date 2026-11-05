@@ -34,7 +34,7 @@ import Testing
         #expect(issue.comments[1].createdAt?.date != nil)
         #expect(issue.comments[1].url?.hasSuffix("issuecomment-2") == true)
         #expect(issue.branch == "quiver/issue-816")
-        #expect(issue.worktree == "/Users/k/.swe/worktrees/c-wenlong__quiver-issue816")
+        #expect(issue.worktree == "/Users/k/.swe/worktrees/c-wenlong__swe-issue816")
         #expect(issue.suggestedPrompt?.contains("Closes #816") == true)
     }
 

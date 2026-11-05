@@ -387,7 +387,10 @@ let inventoryJSON = #"""
 
     @Test func leavingThePageMidLoadKeepsItLoadingForTheNextVisit() async {
         let runner = StuckRunner()
-        let model = SkillsModel(swe: SweClient(runner: runner), timeout: .milliseconds(200))
+        // The timeout is what ends the stuck load, and with it the join
+        // below; long enough that a starved machine still reaches the
+        // second visit before it fires and a second load starts.
+        let model = SkillsModel(swe: SweClient(runner: runner), timeout: .seconds(2))
         let load = Task { await model.loadIfStale(for: "/bin/swe") }
         #expect(await runner.arrived())
         load.cancel()

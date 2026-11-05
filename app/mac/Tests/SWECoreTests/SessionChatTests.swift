@@ -784,6 +784,73 @@ extension HubStubbed {
         #expect(await watch.opened.count == 2)
     }
 
+    /// The approval cards in the transcript, by id.
+    private func approvals(_ chat: SessionChatModel) -> [HubChatItem] {
+        chat.items.filter { $0.id.hasPrefix("approval-") }
+    }
+
+    /// A live ask (past the history the chat opened with) for the
+    /// approval the chat opened waiting on fills in that card where it
+    /// stands; it never adds a second card for the same request.
+    @Test func aLiveAskFillsInTheWaitingCardInPlace() async throws {
+        let chat = try await opened(sessions: #"{"sessions": [{"key": "claude:s1", "status": "approval"}]}"#,
+                                    inbox: #"{"items": [{"key": "claude:s1", "status": "approval", "request_id": "r1"}]}"#)
+        let before = try #require(chat.items.firstIndex { $0.id == "approval-r1" })
+        chat.apply(event("approval.requested", seq: 9,
+                         #"{"request_id": "r1", "prompt": "Edit main.swift?", "options": [{"n": "1", "label": "Yes"}]}"#))
+        #expect(approvals(chat).count == 1)
+        #expect(chat.items.firstIndex { $0.id == "approval-r1" } == before)
+        #expect(chat.items[before].kind == .approval(requestId: "r1", prompt: "Edit main.swift?",
+                                                   options: [HubApprovalOption(n: "1", label: "Yes")],
+                                                   picked: nil, state: .open))
+        // A second live ask for another request is a card of its own.
+        chat.apply(event("approval.requested", seq: 10, #"{"request_id": "r2"}"#))
+        #expect(approvals(chat).map(\.id) == ["approval-r1", "approval-r2"])
+        #expect(chat.items.last?.kind == .approval(requestId: "r2", prompt: "Approval requested",
+                                                 options: [], picked: nil, state: .open))
+        // An ask with no request id has nothing to answer and draws nothing.
+        chat.apply(event("approval.requested", seq: 11, #"{"prompt": "orphan"}"#))
+        #expect(approvals(chat).count == 2)
+    }
+
+    /// A replayed answer (inside the history already shown) settles its
+    /// own card with the decision it carries, and only that card.
+    @Test func aReplayedAnswerSettlesOnlyItsOwnCard() async throws {
+        let chat = try await opened(sessions: #"{"sessions": [{"key": "claude:s1", "status": "approval"}]}"#,
+                                    inbox: #"{"items": [{"key": "claude:s1", "status": "approval", "request_id": "r1"}]}"#)
+        chat.apply(event("approval.requested", seq: 9, #"{"request_id": "r2", "prompt": "Push?"}"#))
+        chat.apply(event("approval.resolved", seq: 2, #"{"request_id": "r1", "decision": "allow"}"#))
+        let r1 = try #require(chat.items.first { $0.id == "approval-r1" })
+        guard case .approval(_, _, _, _, let state) = r1.kind else {
+            Issue.record("approval-r1 is \(r1.kind)")
+            return
+        }
+        #expect(state == .resolved("allow"))
+        #expect(chat.items.last?.kind == .approval(requestId: "r2", prompt: "Push?",
+                                                 options: [], picked: nil, state: .open))
+        // A replayed answer for a card the chat never drew changes nothing.
+        let shown = chat.items
+        chat.apply(event("approval.resolved", seq: 2, #"{"request_id": "gone", "decision": "deny"}"#))
+        #expect(chat.items == shown)
+    }
+
+    /// A failed or degraded command other than a send gets a line of its
+    /// own naming the command; a plain success, and a send's result with
+    /// no bubble here, draw nothing.
+    @Test func aCommandsFailureGetsALineNamingIt() async throws {
+        let chat = try await opened(sessions: #"{"sessions": [{"key": "claude:s1"}]}"#)
+        let shown = chat.items.count
+        chat.apply(event("command.result", seq: 20, #"{"op": "interrupt", "ok": true}"#))
+        chat.apply(event("command.result", seq: 21, #"{"op": "message", "ok": false, "note": "x"}"#))
+        #expect(chat.items.count == shown)
+        chat.apply(event("command.result", seq: 22, #"{"op": "interrupt", "ok": false, "note": "no pane"}"#))
+        chat.apply(event("command.result", seq: 23, #"{"ok": false}"#))
+        chat.apply(event("command.result", seq: 24, #"{"op": "attach", "degraded": true, "note": "Queued for the satellite"}"#))
+        let lines = chat.items.dropFirst(shown).map(\.kind)
+        #expect(lines == [.system("Interrupt failed: no pane"), .system("Command failed: unknown error"),
+                          .system("Queued for the satellite")])
+    }
+
     /// The placeholder a waiting approval opens with learns the pane's
     /// menu when the ask replays: options ride `approval.requested`.
     @Test func aWaitingApprovalLearnsItsMenu() async throws {

@@ -3,8 +3,13 @@ import os
 import Testing
 @testable import SWECore
 
+/// When the events happened: noon today, so a run that crosses midnight
+/// can't move them out of Today. The models read `modelNow`, an hour later.
+private let testNow = Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: Date())!
+private let modelNow = testNow.addingTimeInterval(3600)
+
 private func event(_ model: String, tokens: Int = 100, loggedCost: Double? = nil,
-                   harness: String = "claude", at: Date = Date()) -> UsageEvent {
+                   harness: String = "claude", at: Date = testNow) -> UsageEvent {
     UsageEvent(harness: harness, accountHome: "", sessionId: "s", model: model,
                timestamp: at, inputTokens: tokens,
                costUSD: loggedCost)
@@ -131,8 +136,13 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
             try blocked.set("swe-2", prices: .init(input: 1, output: 1))
         }
         #expect(blocked.models.isEmpty)
+    }
 
-        // The same for remove: a read-only directory fails the write, the
+    /// Root ignores the folder's mode, so only a user run can make it read-only.
+    @Test(skippedAsRoot) func `a failed remove leaves the price saved until it can write`() throws {
+        let temp = try TempDir()
+        defer { withExtendedLifetime(temp) {} }
+        // A read-only directory fails the write, the
         // price stays saved, and a retry once writable lands.
         let url = temp.path("config/pricing.json")
         var overrides = PricingOverrides(url: url)
@@ -298,7 +308,7 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
             ledger: ledger,
             overrides: overrides ?? PricingOverrides(
                 url: temp.url.appending(path: "config/pricing.json")),
-            makeCatalog: { catalog }, apply: { _ in })
+            makeCatalog: { catalog }, apply: { _ in }, now: { modelNow })
         return (ledger, model, temp)
     }
 
@@ -439,7 +449,7 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
             makeCatalog: { try PricingCatalog(
                 liteLLM: Data("{}".utf8),
                 overrides: PricingOverrides(url: file).entries) },
-            apply: { catalog in await ledger.setPricing(catalog) })
+            apply: { catalog in await ledger.setPricing(catalog) }, now: { modelNow })
         try await model.save(key: "grok-4.7-high (Auto)", prices: .init(input: 3, output: 15))
         let row = try #require(model.groups.flatMap(\.models).first)
         #expect(row.harnessBilled && row.source == .yours && row.rates?.input == 3 / 1_000_000)
@@ -467,7 +477,7 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
                     liteLLM: Data("{}".utf8), supplement: supplement,
                     overrides: overrides.entries)
             },
-            apply: { catalog in await ledger.setPricing(catalog) })
+            apply: { catalog in await ledger.setPricing(catalog) }, now: { modelNow })
         var totals = await ledger.totals(in: allTime)
         #expect(totals.unpricedTokens == 1_000_000)
         #expect(totals.costUSD == 0)
@@ -509,7 +519,7 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
             apply: { catalog in
                 await ledger.setPricing(catalog)
                 release.signal()
-            })
+            }, now: { modelNow })
         async let first: Void = model.save(key: "swe-2", prices: .init(input: 1, output: 1))
         #expect(await firstRead.reach(1))
         try await model.save(key: "swe-2", prices: .init(input: 5, output: 5))
@@ -528,7 +538,7 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
             makeCatalog: { try PricingCatalog(
                 liteLLM: Data("{}".utf8),
                 overrides: PricingOverrides(url: file).entries) },
-            apply: { catalog in await ledger.setPricing(catalog) })
+            apply: { catalog in await ledger.setPricing(catalog) }, now: { modelNow })
         // Edit swe-2's saved price to live under swe-2-medium instead:
         // the old key leaves in the same write.
         try await model.save(key: "swe-2", prices: .init(input: 1, output: 1))
@@ -565,7 +575,7 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
                     "output_cost_per_token": 0.00001}}
                     """.utf8),
                 overrides: PricingOverrides(url: file).entries) },
-            apply: { catalog in await ledger.setPricing(catalog) })
+            apply: { catalog in await ledger.setPricing(catalog) }, now: { modelNow })
         return (ledger, model, temp)
     }
 
@@ -641,7 +651,7 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
             makeCatalog: { try PricingCatalog(
                 liteLLM: liteLLM,
                 overrides: PricingOverrides(url: file).entries) },
-            apply: { catalog in await ledger.setPricing(catalog) })
+            apply: { catalog in await ledger.setPricing(catalog) }, now: { modelNow })
         // Two different saved keys both price gpt-4.1; removing just the
         // row's own key would leave the other one charging.
         try await model.save(key: "gpt-4.1", prices: .init(input: 1, output: 1))
@@ -713,7 +723,7 @@ private func catalog(supplement prices: [String: [String: Any]] = [:],
         // rides on the dim's serviceTier.
         let (ledger, model, temp) = try makeModel([
             UsageEvent(harness: "claude", accountHome: "", sessionId: "s",
-                       model: "claude-opus-5-5", timestamp: Date(),
+                       model: "claude-opus-5-5", timestamp: testNow,
                        inputTokens: 100, serviceTier: "fast"),
         ], catalog: catalog)
         await ledger.setPricing(catalog)
@@ -783,7 +793,7 @@ extension PricingModelTests {
         let (_, model, temp) = try makeModel([
             event("claude-sonnet-4-6", tokens: 50, harness: "claude"),
             event("gpt-5", tokens: 300, harness: "codex",
-                  at: Date().addingTimeInterval(-60 * 86_400)),
+                  at: testNow.addingTimeInterval(-60 * 86_400)),
         ], catalog: priced)
         model.period = .allTime
         await model.load()
@@ -800,7 +810,7 @@ extension PricingModelTests {
         let (_, model, temp) = try makeModel([
             event("claude-sonnet-4-6", tokens: 50, harness: "claude"),
             event("gpt-5", tokens: 300, harness: "codex",
-                  at: Date().addingTimeInterval(-60 * 86_400)),
+                  at: testNow.addingTimeInterval(-60 * 86_400)),
         ], catalog: priced)
         model.period = .allTime
         await model.load()
@@ -838,7 +848,7 @@ extension PricingModelTests {
         for (i, e) in [
             event("claude-sonnet-4-6", tokens: 50, harness: "claude"),
             event("gpt-5", tokens: 300, harness: "codex",
-                  at: Date().addingTimeInterval(-60 * 86_400)),
+                  at: testNow.addingTimeInterval(-60 * 86_400)),
         ].enumerated() {
             try store.upsert(LedgerRecord(key: "t:\(i)", event: e))
         }
@@ -848,7 +858,7 @@ extension PricingModelTests {
         let model = PricingModel(
             ledger: ledger,
             overrides: PricingOverrides(url: temp.url.appending(path: "config/pricing.json")),
-            makeCatalog: { catalog }, apply: { _ in },
+            makeCatalog: { catalog }, apply: { _ in }, now: { modelNow },
             slices: { range in
                 if gate.takeArmed() {
                     try? await gate.hold.pass()
