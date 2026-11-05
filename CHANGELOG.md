@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The web app's model search and price edits no longer wait on the
+  daily price download.** The LiteLLM price list was fetched while
+  holding the lock every catalog read and price save takes, so a slow
+  network stalled the Models search and the Pricing page. The fetch now
+  runs outside it, and a download cut short counts as tried for the day.
+
 - **Archiving Qwen Code stops its shared hooks, and its hook settings
   count.** The hook contract table keyed Qwen Code as `qwen`, its
   command, while harness.json calls it `qwen-code`. Archiving qwen-code

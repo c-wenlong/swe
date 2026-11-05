@@ -42,8 +42,8 @@ async function renderHarnesses() {
 function harnessesHeader(actions = false) {
   const where = harnessesPage.data && harnessesPage.data.machine ? ` on ${harnessesPage.data.machine}` : "";
   return pageHeader("Harnesses", `The AI coding CLIs swe knows about${where}. Star the ones you use; archive the ones you've ruled out.`,
-    `${actions ? `<button class="harness-button" data-sheet="detect">Detect</button>
-     <button class="harness-button primary harness-add" data-sheet="add">${harnessIcon("plus")}Add harness</button>` : ""}
+    `${actions ? `<button class="btn lg on-panel harness-button" data-sheet="detect">Detect</button>
+     <button class="btn lg on-panel harness-button primary harness-add" data-sheet="add">${harnessIcon("plus")}Add harness</button>` : ""}
      <button class="icon-button" id="page-refresh" aria-label="Refresh" title="Refresh">${icon("rescan")}</button>`);
 }
 
@@ -77,7 +77,7 @@ function paintHarnesses() {
   let body;
   if (!all.length) {
     body = `<div class="harness-none"><p class="empty">No harnesses registered yet.</p>
-      <button class="harness-button" data-sheet="detect" title="Scan the hub for harnesses to register">Detect</button></div>`;
+      <button class="btn lg on-panel harness-button" data-sheet="detect" title="Scan the hub for harnesses to register">Detect</button></div>`;
   }
   else if (!list.length) {
     body = `<p class="empty">${q ? "No harnesses match." : p.scope === "archived" ? "Nothing archived." : "Every harness is archived."}</p>`;
@@ -205,7 +205,7 @@ function harnessActions(h, busy) {
   const name = esc(harnessTitle(h));
   if (h.state === "archived") {
     return `<div class="harness-actions">
-      <button class="harness-button" data-act="restore"${off}>Restore</button></div>`;
+      <button class="btn lg on-panel harness-button" data-act="restore"${off}>Restore</button></div>`;
   }
   const starred = h.state === "starred";
   const open = harnessesPage.archiving === h.name;
@@ -229,8 +229,8 @@ function archiveForm(h, busy) {
       placeholder="Why? Like: too slow, or no MCP support" aria-label="Why are you archiving it?"
       value="${esc(p.reason)}"${busy ? " disabled" : ""}>
     <div class="harness-form-buttons">
-      <button type="button" class="harness-button" data-act="archive-cancel"${busy ? " disabled" : ""}>Cancel</button>
-      <button type="submit" class="harness-button primary" id="harness-archive-go"${empty || busy ? " disabled" : ""}>${busy ? "Archiving…" : "Archive"}</button>
+      <button type="button" class="btn lg on-panel harness-button" data-act="archive-cancel"${busy ? " disabled" : ""}>Cancel</button>
+      <button type="submit" class="btn lg on-panel harness-button primary" id="harness-archive-go"${empty || busy ? " disabled" : ""}>${busy ? "Archiving…" : "Archive"}</button>
     </div>
   </form>`;
 }
@@ -516,8 +516,8 @@ function editSheet(s) {
     ${sheetField("he-notes", "Notes", sheetInput("he-notes", d.notes, "Anything worth remembering about it", { ...off, multiline: true, rows: 3 }))}
     ${s.error ? `<p class="error harness-sheet-error" role="alert">${esc(s.error)}</p>` : ""}
     <div class="sheet-actions">
-      <button type="button" class="harness-button" data-sheet-act="cancel"${s.working ? " disabled" : ""}>Cancel</button>
-      <button type="submit" class="harness-button primary" id="harness-sheet-go"${s.working || unchanged || problem ? " disabled" : ""}>${s.working ? "Saving…" : "Save"}</button>
+      <button type="button" class="btn lg on-panel harness-button" data-sheet-act="cancel"${s.working ? " disabled" : ""}>Cancel</button>
+      <button type="submit" class="btn lg on-panel harness-button primary" id="harness-sheet-go"${s.working || unchanged || problem ? " disabled" : ""}>${s.working ? "Saving…" : "Save"}</button>
     </div>
   </form>`;
 }
@@ -550,8 +550,8 @@ function detectSheet(s) {
     ${s.error ? `<p class="error harness-sheet-error" role="alert">${esc(s.error)}</p>` : ""}
     ${body}
     <div class="sheet-actions">
-      <button type="button" class="harness-button" data-sheet-act="cancel"${s.working ? " disabled" : ""}>${s.registered ? "Done" : "Cancel"}</button>
-      ${offer ? `<button type="submit" class="harness-button primary" id="harness-sheet-go"${s.working || !s.checked.size ? " disabled" : ""}>Register (${s.checked.size})</button>` : ""}
+      <button type="button" class="btn lg on-panel harness-button" data-sheet-act="cancel"${s.working ? " disabled" : ""}>${s.registered ? "Done" : "Cancel"}</button>
+      ${offer ? `<button type="submit" class="btn lg on-panel harness-button primary" id="harness-sheet-go"${s.working || !s.checked.size ? " disabled" : ""}>Register (${s.checked.size})</button>` : ""}
     </div>
   </form>`;
 }
@@ -575,8 +575,8 @@ function addSheet(s) {
     ${sheetField("ha-tags", "Tags", sheetInput("ha-tags", d.tags, "agentic, coding", { ...off, mono: true }))}
     ${s.error ? `<p class="error harness-sheet-error" role="alert">${esc(s.error)}</p>` : ""}
     <div class="sheet-actions">
-      <button type="button" class="harness-button" data-sheet-act="cancel"${s.working ? " disabled" : ""}>Cancel</button>
-      <button type="submit" class="harness-button primary" id="harness-sheet-go"${s.working || problem || !d.command ? " disabled" : ""}>${s.working ? "Adding…" : "Add"}</button>
+      <button type="button" class="btn lg on-panel harness-button" data-sheet-act="cancel"${s.working ? " disabled" : ""}>Cancel</button>
+      <button type="submit" class="btn lg on-panel harness-button primary" id="harness-sheet-go"${s.working || problem || !d.command ? " disabled" : ""}>${s.working ? "Adding…" : "Add"}</button>
     </div>
   </form>`;
 }
