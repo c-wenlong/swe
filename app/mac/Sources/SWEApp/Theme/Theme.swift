@@ -433,8 +433,8 @@ struct PageHeader<Actions: View>: View {
                     }
                     .plainButton(cornerRadius: Theme.smallRadius)
                     .keyboardShortcut("[", modifiers: .command)
-                    .help("\(back.help) (⌘[)")
                     .accessibilityLabel(back.help)
+                    .hoverTip("\(back.help) (⌘[)", replacesLabel: false, pinsOnClick: false)
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     Text(title).font(Theme.pageTitle).tracking(-0.6).foregroundStyle(Theme.textPrimary)

@@ -89,7 +89,7 @@ const NeedsYou = (() => {
     // GitHubModel.unreadCount > 0 shows the mark-all button, as in the app.
     const busyAll = inbox.busy.has("*");
     const markAll = !inbox.data || inbox.data.transport || !unreadCount() ? "" : `<button type="button"
-        class="gh-button" id="gh-read-all"
+        class="btn lg hairline gh-button" id="gh-read-all"
         title="Mark every notification read"${busyAll || inbox.confirmAll ? " disabled" : ""}>${
         GhUI.ico(busyAll ? "running" : "envelopeOpen", busyAll ? "gh-spin" : "")}<span>Mark all read</span></button>`;
     // The app's Unread / All Tabs: both sides of the filter are labelled.
@@ -315,7 +315,7 @@ const NeedsYou = (() => {
     </div>`;
   }
 
-  const retry = '<button type="button" class="gh-button" id="gh-inbox-retry">Refresh</button>';
+  const retry = '<button type="button" class="btn lg hairline gh-button" id="gh-inbox-retry">Refresh</button>';
   const failCard = (msg) => `<div class="card"><div class="gh-error-row"><span class="error">${esc(msg)}</span>${retry}</div></div>`;
 
   /* Mark all read reaches past the rows on screen (every notification
@@ -327,8 +327,8 @@ const NeedsYou = (() => {
     return `<div class="card gh-confirm" role="group" aria-label="Confirm mark all read">
       <div class="gh-confirm-text">Mark every GitHub notification read, including the ${n} unread here? This can't be undone from here.</div>
       <div class="gh-confirm-buttons">
-        <button type="button" class="gh-button" id="gh-read-all-cancel"${busy ? " disabled" : ""}>Cancel</button>
-        <button type="button" class="gh-button gh-primary" id="gh-read-all-go"${busy ? " disabled" : ""}>${busy ? "Marking…" : "Mark all read"}</button>
+        <button type="button" class="btn lg hairline gh-button" id="gh-read-all-cancel"${busy ? " disabled" : ""}>Cancel</button>
+        <button type="button" class="btn lg hairline gh-button gh-primary" id="gh-read-all-go"${busy ? " disabled" : ""}>${busy ? "Marking…" : "Mark all read"}</button>
       </div></div>`;
   }
 

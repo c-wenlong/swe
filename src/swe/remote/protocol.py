@@ -90,6 +90,12 @@ def _launch_bool(body: dict, field: str) -> bool:
     return value
 
 # Cap on a first prompt; the phone's composer never gets near it.
+# A wait for a session to go idle (a queue-mode send on the hub or a
+# satellite, a when_idle detach) polls a fresh status this often and
+# gives up after the cap, failing honestly.
+IDLE_POLL_S = 2.0
+IDLE_WAIT_MAX_S = 1800
+
 MAX_LAUNCH_PROMPT = 32_000
 
 # RemoteMessage.kind values. ``tool`` payloads pair over ``call_id``;

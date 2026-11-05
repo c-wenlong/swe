@@ -12,6 +12,7 @@ today's rates.
 
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import threading
@@ -313,6 +314,9 @@ class PricingCatalog:
 # ---------------------------------------------------------------- loading
 
 _LOCK = threading.Lock()
+# Held only by the thread fetching LiteLLM's list. Never _LOCK: a page
+# load or a price save must not wait on the network.
+_DOWNLOAD_LOCK = threading.Lock()
 
 
 def _litellm_cache(home: Path | None) -> Path:
@@ -320,6 +324,17 @@ def _litellm_cache(home: Path | None) -> Path:
 
 
 def _refresh_download(home: Path | None, now: float) -> None:
+    """Fetch LiteLLM's list once a day. A second caller while one fetch
+    runs returns at once and reads the copy already on disk."""
+    if not _DOWNLOAD_LOCK.acquire(blocking=False):
+        return
+    try:
+        _download(home, now)
+    finally:
+        _DOWNLOAD_LOCK.release()
+
+
+def _download(home: Path | None, now: float) -> None:
     path = _litellm_cache(home)
     try:
         if now - path.stat().st_mtime < REFRESH_S:
@@ -339,8 +354,9 @@ def _refresh_download(home: Path | None, now: float) -> None:
         data = json.loads(body)
         if not isinstance(data, dict) or len(data) < 100:
             return
-    except (OSError, ValueError):
-        # Offline or refused: keep the last download, or the snapshot,
+    except (OSError, ValueError, http.client.HTTPException):
+        # Offline, refused or cut short (IncompleteRead is no OSError):
+        # keep the last download, or the snapshot,
         # and mark the attempt so the next one waits a day too. An empty
         # file reads as no download, which falls back to the snapshot.
         try:
@@ -436,9 +452,11 @@ def remove_overrides(home: Path | None, keys: list[str]) -> None:
 
 
 def load_catalog(home: Path | None = None, download: bool = True) -> PricingCatalog:
+    if download:
+        # Outside _LOCK: the download is written atomically, so a reader
+        # sees the old file or the new one, never half of either.
+        _refresh_download(home, time.time())
     with _LOCK:
-        if download:
-            _refresh_download(home, time.time())
         listed = read_json_dict(_litellm_cache(home)) or read_json_dict(BUNDLED)
     supplement = read_json_dict(SUPPLEMENT)
     raw = dict(listed)

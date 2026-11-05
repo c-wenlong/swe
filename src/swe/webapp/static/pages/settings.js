@@ -287,8 +287,8 @@ function setGroup(title, detail, content) {
 }
 
 function setSwitch(id, on, opts = {}) {
-  return `<button class="set-switch" role="switch" aria-checked="${on}" data-switch="${esc(id)}"
-    aria-label="${esc(opts.label || id)}"${opts.disabled ? " disabled" : ""}${opts.title ? ` title="${esc(opts.title)}"` : ""}><span></span></button>`;
+  return `<button class="switch" role="switch" aria-checked="${on}" data-switch="${esc(id)}"
+    aria-label="${esc(opts.label || id)}"${opts.disabled ? " disabled" : ""}${opts.title ? ` title="${esc(opts.title)}"` : ""}></button>`;
 }
 
 function settingsBody(section) {
@@ -319,7 +319,7 @@ function generalSection() {
       macRow("Terminal", "Used by Terminal, Sign in and Resume."),
       macRow("Show in Dock", "Off keeps SWE out of the Dock and the app switcher. Open it from the menu bar."),
       setRow("First-run setup", "Pick the agents you use, link AGENTS.md and skills into each one, and choose the look and notifications.",
-        `<a class="set-button" href="#/setup">Set up this machine</a>`),
+        `<a class="btn medium set-button" href="#/setup">Set up this machine</a>`),
     ])}
     ${setGroup("Display", "", setCard([
       setRow("Appearance", "System follows this browser's setting. Saved in this browser.", appearance),
@@ -332,7 +332,7 @@ function generalSection() {
     ]))}
     ${setGroup("Doctor", "", setCard([
       setRow("Doctor", "Checks on PATH, Node and drift between swe and your harnesses, on the hub.",
-        `<a class="set-button" href="#/doctor">Open Doctor</a>`),
+        `<a class="btn medium set-button" href="#/doctor">Open Doctor</a>`),
     ]))}
   </div>`;
 }
@@ -388,7 +388,7 @@ function providersSection() {
     ? setCard([
       macRow("Provider visibility", "Which harnesses show up across the Mac app, in your own order."),
       setRow("Harnesses on the hub", "Star the ones you use and archive the ones you've ruled out.",
-        `<a class="set-button" href="#/harnesses">Open Harnesses</a>`),
+        `<a class="btn medium set-button" href="#/harnesses">Open Harnesses</a>`),
     ])
     : inferenceTab();
   return `<div class="set-stack">${tabs}${body}</div>`;
@@ -420,9 +420,9 @@ function inferenceTab() {
     <div class="set-keys-top">
       <div class="set-keys-head"><div class="set-group-title">Keys and plans</div><div class="caption">${esc(subtitle)}</div></div>
       <div class="set-keys-actions">
-        <button class="set-button" id="set-keys-reload"${p.keysBusy ? " disabled" : ""} title="Read the file again">${settingsIcon("rescan")}<span>Reload</span></button>
-        <button class="set-button" id="set-key-catalog"${prov.stamp == null ? " disabled" : ""}><span>Catalogue</span></button>
-        <button class="set-button" id="set-key-add"${prov.stamp == null ? " disabled" : ""}>${settingsIcon("plus")}<span>Add key</span></button>
+        <button class="btn medium set-button" id="set-keys-reload"${p.keysBusy ? " disabled" : ""} title="Read the file again">${settingsIcon("rescan")}<span>Reload</span></button>
+        <button class="btn medium set-button" id="set-key-catalog"${prov.stamp == null ? " disabled" : ""}><span>Catalogue</span></button>
+        <button class="btn medium set-button" id="set-key-add"${prov.stamp == null ? " disabled" : ""}>${settingsIcon("plus")}<span>Add key</span></button>
       </div>
     </div>
     ${prov.error ? `<p class="error" role="alert">${esc(prov.error)}</p>` : ""}
@@ -474,7 +474,7 @@ function settingsCatalogSheet() {
       <input class="field search" id="set-cat-search" type="search" placeholder="Search providers" value="${esc(p.catalogQuery)}" aria-label="Search providers">
       <div class="set-cat-grid">${rows.length ? rows.map(cell).join("") : '<p class="empty">Nothing matches.</p>'}</div>
       <div class="set-key-foot"><span class="caption count num">${rows.length} of ${(prov.catalog || []).length}</span><span class="set-key-spacer"></span>
-        <button class="set-button" data-cat-act="close">Close</button></div>
+        <button class="btn medium set-button" data-cat-act="close">Close</button></div>
     </div>
   </dialog>`;
 }
@@ -539,17 +539,17 @@ function settingsKeySheet() {
   const canSave = !e.working && name && e.value.trim() && (!e.isNew || picked);
   const left = e.isNew ? "" : e.confirmingDelete
     ? `<span class="caption">Delete ${esc(e.name)}?</span>
-       <button class="set-button danger" data-key-act="delete-confirm"${e.working ? " disabled" : ""}>Delete</button>
-       <button class="set-button" data-key-act="keep">Keep</button>`
-    : `<button class="set-button set-danger" data-key-act="delete" title="Delete ${esc(e.name)} from the keys file"${e.working ? " disabled" : ""}>Delete</button>`;
+       <button class="btn medium set-button danger" data-key-act="delete-confirm"${e.working ? " disabled" : ""}>Delete</button>
+       <button class="btn medium set-button" data-key-act="keep">Keep</button>`
+    : `<button class="btn medium set-button set-danger" data-key-act="delete" title="Delete ${esc(e.name)} from the keys file"${e.working ? " disabled" : ""}>Delete</button>`;
   return `<dialog class="sheet set-key-sheet" id="set-key-sheet" aria-labelledby="set-key-title">
     <div class="sheet-body set-key-form">
       <div class="sheet-title" id="set-key-title">${e.isNew ? "Add a key" : `Edit ${esc(e.name)}`}</div>
       ${fields}
       ${e.error ? `<p class="error" role="alert">${esc(e.error)}</p>` : ""}
       <div class="set-key-foot">${left}<span class="set-key-spacer"></span>
-        <button class="set-button" data-key-act="cancel">Cancel</button>
-        <button class="set-button primary" data-key-act="save"${canSave ? "" : " disabled"}>${e.working === "save" ? "Saving…" : e.isNew ? "Add key" : "Save"}</button></div>
+        <button class="btn medium set-button" data-key-act="cancel">Cancel</button>
+        <button class="btn medium set-button primary" data-key-act="save"${canSave ? "" : " disabled"}>${e.working === "save" ? "Saving…" : e.isNew ? "Add key" : "Save"}</button></div>
     </div>
   </dialog>`;
 }
@@ -596,7 +596,7 @@ function githubCard() {
   // The app's Sync now: off while one runs or while gh can't run.
   const blocked = !g || !g.env || g.env.status !== "ok";
   const p = settingsPage;
-  const sync = `<button class="set-button primary" id="set-gh-sync"${p.syncing || blocked ? " disabled" : ""}
+  const sync = `<button class="btn medium set-button primary" id="set-gh-sync"${p.syncing || blocked ? " disabled" : ""}
       title="${blocked ? "Sign gh in on the hub first" : "List every repo your account and its orgs can see"}">${p.syncing ? "Syncing…" : "Sync now"}</button>`;
   return setCard([
     setRow("GitHub CLI", detail, refresh, { warning }),
@@ -635,7 +635,7 @@ function remoteCards() {
   const live = r.devices.filter((x) => !x.revoked);
   const p = settingsPage;
   const pair = `<div class="set-pair-row">
-      <button class="set-button primary" id="set-pair"${p.minting ? " disabled" : ""}>${settingsIcon("qr")}${p.minting ? "Pairing…" : "Pair a device"}</button>
+      <button class="btn medium set-button primary" id="set-pair"${p.minting ? " disabled" : ""}>${settingsIcon("qr")}${p.minting ? "Pairing…" : "Pair a device"}</button>
       ${p.pairError ? `<span class="caption set-danger">${esc(p.pairError)}</span>` : ""}
     </div>`;
   // The hub owner's own tailnet device gets in without pairing, so it
@@ -646,7 +646,7 @@ function remoteCards() {
   // The Mac folds the list after two rows; the Pair row sits under it.
   const shown = p.showsAllDevices ? live : live.slice(0, 2);
   const fold = live.length > 2
-    ? `<button class="set-button set-fold" id="set-devices-fold" title="${p.showsAllDevices ? "Show only the first 2" : "Show every paired device"}">${p.showsAllDevices ? "Show less" : `Show ${live.length - 2} more`}</button><div class="set-divider"></div>`
+    ? `<button class="btn medium set-button set-fold" id="set-devices-fold" title="${p.showsAllDevices ? "Show only the first 2" : "Show every paired device"}">${p.showsAllDevices ? "Show less" : `Show ${live.length - 2} more`}</button><div class="set-divider"></div>`
     : "";
   const devices = live.length
     ? `<div class="set-card"><div class="set-card-title">Paired devices</div>${viaTailnet}${shown.map(deviceRow).join('<div class="set-divider"></div>')}<div class="set-divider"></div>${fold}${pair}</div>`
@@ -680,7 +680,7 @@ function setupCard() {
   const s = p.setup;
   if (!s) return p.setupBusy ? setCardSkeleton(3) : "";
   if (s.error) {
-    return setCard([setRow("Couldn't check setup", s.error, '<button class="set-button" id="set-setup-recheck">Check again</button>', { warning: s.error, danger: true })], "Set up remote control");
+    return setCard([setRow("Couldn't check setup", s.error, '<button class="btn medium set-button" id="set-setup-recheck">Check again</button>', { warning: s.error, danger: true })], "Set up remote control");
   }
   if (s.ready) return "";
   const rows = s.steps.map(setupRow);
@@ -690,9 +690,9 @@ function setupCard() {
     || (x.state === "failed" && x.action && x.action.kind === "apply"));
   const foot = swePending
     ? setRow("Steps SWE does itself", "Open Settings › Remote › Set up remote control in the SWE Mac app, or run swe remote setup --apply on the hub machine.",
-        '<button class="set-button" id="set-setup-recheck">Check again</button>')
+        '<button class="btn medium set-button" id="set-setup-recheck">Check again</button>')
     : setRow("Done one of these?", "Steps you finish in a browser show here when you check again.",
-        '<button class="set-button" id="set-setup-recheck">Check again</button>');
+        '<button class="btn medium set-button" id="set-setup-recheck">Check again</button>');
   return setCard([...rows, foot], "Set up remote control");
 }
 
@@ -701,12 +701,12 @@ function setupRow(step) {
   let control = SETUP_BADGE[step.state] || "";
   const live = step.state === "needs_you" || step.state === "failed";
   if (live && a.kind === "open" && safeHref(a.url)) {
-    control += ` <a class="set-button" href="${safeHref(a.url)}" target="_blank" rel="noopener">${esc(a.label || "Open")}</a>`;
+    control += ` <a class="btn medium set-button" href="${safeHref(a.url)}" target="_blank" rel="noopener">${esc(a.label || "Open")}</a>`;
   } else if (live && a.kind === "command" && a.command) {
     const label = a.label || "Copy command";
     control += ` <button class="icon-button" data-setup-copy="${esc(step.id)}" aria-label="${esc(label)}" title="${esc(label)}">${Fmt.copyIcon()}</button>`;
   } else if (live && a.kind === "pair") {
-    control += ` <button class="set-button primary" data-setup-pair>${esc(a.label || "Pair a phone")}</button>`;
+    control += ` <button class="btn medium set-button primary" data-setup-pair>${esc(a.label || "Pair a phone")}</button>`;
   }
   let detail = step.detail || "";
   if (live && a.kind === "command" && a.command) detail = detail ? `${detail} (${a.command})` : a.command;
@@ -745,8 +745,8 @@ function requestRow(q) {
     <input class="field set-code" id="set-code-${esc(q.request_id)}" inputmode="numeric" maxlength="7"
       placeholder="000 000" aria-label="Code the device shows" data-code
       value="${esc(p.codeDrafts[q.request_id] || "")}"${busy ? " disabled" : ""}>
-    <button class="set-button primary" data-act="approve"${busy ? " disabled" : ""}>Approve</button>
-    <button class="set-button" data-act="deny"${busy ? " disabled" : ""}>Deny</button></span>`;
+    <button class="btn medium set-button primary" data-act="approve"${busy ? " disabled" : ""}>Approve</button>
+    <button class="btn medium set-button" data-act="deny"${busy ? " disabled" : ""}>Deny</button></span>`;
   return setRow(q.name || "device", detail, control,
     { warning: p.decideErrors[q.request_id] || null });
 }
@@ -773,12 +773,12 @@ function deviceRow(dev) {
     return `<div class="set-row set-confirm"${attrs}>
       <div class="set-text"><div class="set-title">${title}</div><div class="set-detail">${esc(what)}</div></div>
       <div class="set-control">
-        <button class="set-button" data-act="cancel"${busy ? " disabled" : ""}>Cancel</button>
-        <button class="set-button danger" data-act="revoke-confirm"${busy ? " disabled" : ""}>${busy ? "Revoking…" : dev.this_device ? "Revoke this browser" : "Revoke"}</button>
+        <button class="btn medium set-button" data-act="cancel"${busy ? " disabled" : ""}>Cancel</button>
+        <button class="btn medium set-button danger" data-act="revoke-confirm"${busy ? " disabled" : ""}>${busy ? "Revoking…" : dev.this_device ? "Revoke this browser" : "Revoke"}</button>
       </div></div>`;
   }
   return setRow(name, bits.join(" · "),
-    `<button class="set-button" data-act="revoke" title="Sign this device out of the hub"${busy ? " disabled" : ""}>Revoke</button>`,
+    `<button class="btn medium set-button" data-act="revoke" title="Sign this device out of the hub"${busy ? " disabled" : ""}>Revoke</button>`,
     { titleHtml: title, warning: p.revokeErrors[dev.id] || null, danger: true, attrs });
 }
 
@@ -798,12 +798,12 @@ function signinRow(s) {
     return `<div class="set-row set-confirm"${attrs}>
       <div class="set-text"><div class="set-title">${title}</div><div class="set-detail">${esc(what)}</div></div>
       <div class="set-control">
-        <button class="set-button" data-act="cancel"${busy ? " disabled" : ""}>Cancel</button>
-        <button class="set-button danger" data-act="revoke-confirm"${busy ? " disabled" : ""}>${busy ? "Revoking…" : s.this_device ? "Revoke this browser" : "Revoke"}</button>
+        <button class="btn medium set-button" data-act="cancel"${busy ? " disabled" : ""}>Cancel</button>
+        <button class="btn medium set-button danger" data-act="revoke-confirm"${busy ? " disabled" : ""}>${busy ? "Revoking…" : s.this_device ? "Revoke this browser" : "Revoke"}</button>
       </div></div>`;
   }
   return setRow(name, bits.join(" · "),
-    `<button class="set-button" data-act="revoke" title="Stop this device getting in through Tailscale"${busy ? " disabled" : ""}>Revoke</button>`,
+    `<button class="btn medium set-button" data-act="revoke" title="Stop this device getting in through Tailscale"${busy ? " disabled" : ""}>Revoke</button>`,
     { titleHtml: title, warning: p.revokeErrors[s.id] || null, danger: true, attrs });
 }
 
@@ -818,7 +818,7 @@ function pairSheet() {
   return `<dialog class="sheet set-pair-sheet" id="set-pair-sheet" aria-labelledby="set-pair-title">
     <div class="sheet-body">
       <div class="set-sheet-head"><div class="sheet-title" id="set-pair-title">Pair a device</div>
-        <button class="set-button" data-act="done">Done</button></div>
+        <button class="btn medium set-button" data-act="done">Done</button></div>
       <div class="set-pair">
         <div class="set-qr">${target === "web" ? t.qr.web : t.qr.app}</div>
         <div class="set-pair-side">
@@ -827,7 +827,7 @@ function pairSheet() {
           <p class="caption">${esc(instructions)}</p>
           <code class="set-payload" id="set-payload">${esc(payload)}</code>
           <div class="set-pair-actions">
-            <button class="set-button" data-act="copy">${settingsIcon("copy")}<span>Copy link</span></button>
+            <button class="btn medium set-button" data-act="copy">${settingsIcon("copy")}<span>Copy link</span></button>
             <span id="set-countdown">${settingsCountdown()}</span>
           </div>
         </div>
@@ -843,7 +843,7 @@ function settingsCountdown() {
   if (left > 0) {
     return `<span class="caption set-clock">${settingsIcon("clock")}Expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}</span>`;
   }
-  return `<button class="set-button" data-act="remint">Expired — mint a new code</button>`;
+  return `<button class="btn medium set-button" data-act="remint">Expired — mint a new code</button>`;
 }
 
 function settingsStopClock() {
@@ -944,7 +944,7 @@ function hubSyncCard() {
     { warning: repoWarning, danger: true });
   if (!s.ready) return setCard([repo]);
   const outcome = p.hubSyncResult ? hubSyncOutcome(p.hubSyncResult) : null;
-  const button = `<button class="set-button primary" id="set-hub-sync"${p.hubSyncing ? " disabled" : ""}
+  const button = `<button class="btn medium set-button primary" id="set-hub-sync"${p.hubSyncing ? " disabled" : ""}
     title="Commit, merge the remote in and push">${p.hubSyncing ? "Syncing…" : "Sync"}</button>`;
   const failure = p.hubSyncError || (outcome && outcome.danger ? outcome.text : null);
   return setCard([
@@ -1042,7 +1042,7 @@ function experimentalSection() {
   // status line while the index is on, and stop answering mid-pass.
   const actions = ss.enabled ? `<div class="set-search-actions">
       <button class="icon-button set-key-icon" id="set-search-resync" title="Read every transcript again now" aria-label="Re-index every transcript"${ss.running || p.searchBusy ? " disabled" : ""}>${settingsIcon("rescan")}</button>
-      <button class="set-button" id="set-search-clear"${ss.running || p.searchBusy ? " disabled" : ""}>Clear search data</button>
+      <button class="btn medium set-button" id="set-search-clear"${ss.running || p.searchBusy ? " disabled" : ""}>Clear search data</button>
     </div>` : "";
   return setGroup("Session index", "How SWE finds what a session said, not only its titles and paths.",
     setCard([
