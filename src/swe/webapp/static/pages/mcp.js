@@ -521,7 +521,7 @@ async function mcpPreview(s, thenConfirm) {
   const { status, data } = await mcpPost("preview", request);
   if (mcpPage.sheet !== st) return;
   st.running = false;
-  if (status === 401) { renderGate(); return; }
+  if (status === 401) { if (mcpOnPage()) renderGate(); return; }
   if (status !== 200 || !data) {
     st.error = failText(status, data);
     st.preview = null;
@@ -547,7 +547,7 @@ async function mcpSync(s) {
   const { status, data } = await mcpPost("sync", request);
   st.running = false;
   st.confirming = false;
-  if (status === 401) { renderGate(); return; }
+  if (status === 401) { if (mcpOnPage()) renderGate(); return; }
   if (status !== 200 || !data) {
     st.error = failText(status, data);
     st.preview = null;
@@ -606,6 +606,7 @@ function mcpSecretsHtml(s, st) {
 async function mcpSecretValue(name, st) {
   const { status, data } = await mcpPost("secret_value", { name });
   if (status === 200 && data && typeof data.value === "string") return data.value;
+  if (status === 401) { if (mcpOnPage()) renderGate(); return null; }
   st.secretError = failText(status, data);
   return null;
 }

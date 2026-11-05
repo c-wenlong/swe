@@ -177,8 +177,25 @@ class McpFormatEdgeCasesTest(unittest.TestCase):
             source_format="standard", target_format="opencode",
         )
         self.assertEqual(issues, [])
-        non_dict = get_conversion_issues("junk", "standard", "opencode")
-        self.assertIn("not a JSON object", non_dict[0])
+        # opencode's remote entries carry no transport, so an SSE server's
+        # ``type`` does not survive the round trip.
+        self.assertEqual(
+            get_conversion_issues({"url": "https://x", "type": "sse"},
+                                  source_format="standard", target_format="opencode"),
+            ["lost field 'type'"],
+        )
+        # droid keeps it.
+        self.assertEqual(
+            get_conversion_issues({"url": "https://x", "type": "sse"},
+                                  source_format="standard", target_format="droid"),
+            [],
+        )
+        self.assertEqual(
+            get_conversion_issues({"nonsense": 1}, "standard", "opencode"),
+            ["source config could not be parsed into canonical format"],
+        )
+        self.assertEqual(get_conversion_issues("junk", "standard", "opencode"),
+                         ["source config is not a JSON object"])
 
 
 if __name__ == "__main__":

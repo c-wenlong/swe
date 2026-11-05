@@ -53,6 +53,9 @@ def load_skill_catalogs() -> list[dict]:
         data = json.loads(SKILL_CATALOGS_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError, RecursionError):
         return []
+    if not isinstance(data, dict):
+        # A hand-edited `[]` crashed `swe skills catalog list`.
+        return []
     catalogs = data.get("catalogs", [])
     if not isinstance(catalogs, list):
         return []

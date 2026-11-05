@@ -581,14 +581,39 @@ def combine(harness: str, user: dict, project: dict) -> list[dict]:
     spec = _HARNESSES.get(harness)
     if spec is None:
         return []
-    scopes = {"user": user or {}, "project": project or {}}
+    # A satellite's pushed layers arrive as JSON from another machine:
+    # anything but a dict of lists of rows with string name and source
+    # is skipped rather than failing the menu route.
+    scopes = {"user": user if isinstance(user, dict) else {},
+              "project": project if isinstance(project, dict) else {}}
     out: dict[str, dict] = {}
     for scope, layer in spec.order:
         rows = scopes[scope].get(layer) or []
         for row in rows if isinstance(rows, list) else []:
-            if isinstance(row, dict) and row.get("name"):
-                out.setdefault(str(row["name"]), dict(row))
+            clean = _custom_row(row)
+            if clean is not None:
+                out.setdefault(clean["name"], clean)
     return list(out.values())
+
+
+# A custom row's fields and their JSON types: the clients decode every
+# row of the menu, so one wrong type would fail the whole answer.
+_ROW_STRINGS = ("name", "description", "source", "argument_hint", "insert")
+_ROW_BOOLS = ("argument_required",)
+
+
+def _custom_row(row) -> dict | None:
+    """``row`` with only its known, rightly typed fields; None without a
+    name and source."""
+    if not isinstance(row, dict):
+        return None
+    clean = {k: row[k] for k in _ROW_STRINGS if isinstance(row.get(k), str)}
+    clean.update({k: row[k] for k in _ROW_BOOLS
+                  if isinstance(row.get(k), bool)})
+    if not clean.get("name") or "source" not in clean:
+        return None
+    clean.setdefault("description", "")
+    return clean
 
 
 def custom_entries(harness: str, cwd: str, home: Path | None = None,
@@ -889,9 +914,10 @@ def for_remote_row(home: Path | None, key: str, row: dict) -> dict:
     mode = modes.get(local_key) if isinstance(modes, dict) else None
     if isinstance(slot, dict):
         channel = str(mode or slot.get("auto") or "tmux")
-        folders = slot.get("folders") or {}
-        custom = combine(harness, slot.get("user") or {},
-                         folders.get(cwd) or {})
+        folders = slot.get("folders")
+        custom = combine(harness, slot.get("user"),
+                         folders.get(cwd) if isinstance(folders, dict)
+                         else None)
         rows, custom_ok = for_channel(harness, channel, custom)
         return _answer(key, harness, channel, attached, rows,
                        custom_available=custom_ok, note="")

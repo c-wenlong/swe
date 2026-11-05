@@ -295,12 +295,23 @@ public struct HeatmapView: View {
         self.now = now
     }
 
+    static let gap: CGFloat = 2
+    static let caption: CGFloat = 22
+
+    /// The cell side and how many weeks fit. The cell is at least a point:
+    /// a widget too short for the caption would make it negative, and at
+    /// exactly -gap the weeks division is by zero and `Int` traps.
+    static func grid(for size: CGSize) -> (cell: CGFloat, weeks: Int) {
+        let cell = max(1, min((size.height - caption - 6 * gap) / 7, 10))
+        let fit = ((size.width + gap) / (cell + gap)).rounded(.down)
+        let weeks = fit.isFinite ? Int(max(0, min(fit, CGFloat(WidgetSnapshot.heatmapWeeks)))) : 0
+        return (cell, weeks)
+    }
+
     public var body: some View {
         GeometryReader { geo in
-            let gap: CGFloat = 2
-            let caption: CGFloat = 22
-            let cell = min((geo.size.height - caption - 6 * gap) / 7, 10)
-            let weeks = min(WidgetSnapshot.heatmapWeeks, Int((geo.size.width + gap) / (cell + gap)))
+            let gap = Self.gap
+            let (cell, weeks) = Self.grid(for: geo.size)
             let map = snapshot.heatmap(weeks: max(weeks, 1), now: now, calendar: .current)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top, spacing: gap) {

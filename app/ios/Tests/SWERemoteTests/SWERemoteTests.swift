@@ -349,10 +349,6 @@ final class GroupingTests: XCTestCase {
 
 @MainActor
 final class ChatModelTests: XCTestCase {
-    private func env(_ json: String) -> Envelope {
-        try! Hub.decoder.decode(Envelope.self, from: Data(json.utf8))
-    }
-
     func testToolResultMergesIntoCallAndDuplicatesAreDropped() {
         let chat = ChatModel(key: "claude:1", app: AppModel(hub: nil))
         let use = env(#"{"type":"message.appended","seq":1,"data":{"kind":"tool_use","text":"","tool":{"name":"Bash","call_id":"t1","args_summary":"Bash · ls"}}}"#)
@@ -449,16 +445,21 @@ final class ChatModelTests: XCTestCase {
 
     func testABurstIsRevealedOneAtATime() async throws {
         let chat = ChatModel(key: "claude:1", app: AppModel(hub: nil))
+        let gate = Gate()
+        chat.pause = gate.pause
         for seq in 1...3 { chat.enqueue(say(seq)) }
         XCTAssertTrue(chat.items.isEmpty)
         XCTAssertTrue(chat.working)
-        var counts: [Int] = []
-        for _ in 0..<200 where chat.items.count < 3 {
-            if counts.last != chat.items.count { counts.append(chat.items.count) }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        // One entry, then a pause before each of the rest.
+        await settle { chat.items.count == 1 && gate.waits.count == 1 }
+        XCTAssertEqual(chat.items.map(\.id), ["m1"])
+        gate.release()
+        await settle { chat.items.count == 2 && gate.waits.count == 2 }
+        XCTAssertEqual(chat.items.map(\.id), ["m1", "m2"])
+        gate.release()
+        await settle { chat.items.count == 3 }
         XCTAssertEqual(chat.items.map(\.id), ["m1", "m2", "m3"])
-        XCTAssertTrue(counts.contains(1) && counts.contains(2), "saw \(counts)")
+        XCTAssertEqual(gate.waits.count, 2, "no pause after the last one")
         XCTAssertFalse(chat.working)
     }
 

@@ -476,6 +476,50 @@ import Testing
         #expect(try s.fts("reply").count == 1)
     }
 
+    /// The shared index is parsed once per scan; each session still gets
+    /// its own work dir from it.
+    @Test func kimiSessionsSharingAnIndexEachGetTheirWorkDir() async throws {
+        let s = try Setup()
+        await s.attach()
+        let kimiHome = s.temp.path("kimi-code")
+        for id in ["session_a", "session_b"] {
+            try s.write(#"{"title":"\#(id)"}"#,
+                        to: kimiHome.appendingPathComponent("sessions/wd_ws/\(id)/state.json"))
+        }
+        try s.write("""
+            {"sessionId":"session_a","workDir":"/repo/a"}
+            {"sessionId":"session_b","workDir":"/repo/b"}
+            """ + "\n", to: kimiHome.appendingPathComponent("session_index.jsonl"))
+
+        let report = try await s.ledger.scan(
+            roots: LedgerRoots(transcriptRoots: [.kimi: [kimiHome.appendingPathComponent("sessions")]]))
+
+        #expect(report.filesIndexed == 2)
+        #expect(try s.session(agent: "kimi", sessionID: "session_a")?.fields.cwd == "/repo/a")
+        #expect(try s.session(agent: "kimi", sessionID: "session_b")?.fields.cwd == "/repo/b")
+    }
+
+    @Test func kimiWorkDirCacheParsesOncePerStampAndAgainAfterARewrite() throws {
+        let temp = try TempDir()
+        let home = temp.path("kimi-code")
+        let index = home.appendingPathComponent("session_index.jsonl")
+        let stateA = home.appendingPathComponent("sessions/wd/session_a/state.json").path
+        let stateB = home.appendingPathComponent("sessions/wd/session_b/state.json").path
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try Data(#"{"sessionId":"session_a","workDir":"/old"}"#.utf8).write(to: index)
+
+        var cache = KimiWorkDirCache()
+        #expect(cache.map(forStateFile: stateA, indexInfo: FileInfo(path: index.path))["session_a"] == "/old")
+        _ = cache.map(forStateFile: stateB, indexInfo: FileInfo(path: index.path))
+        #expect(cache.parses == 1)
+
+        // Rewritten mid-scan: the new stamp reads the new map.
+        try Data((#"{"sessionId":"session_a","workDir":"/new"}"# + "\n"
+                  + #"{"sessionId":"session_b","workDir":"/b"}"#).utf8).write(to: index)
+        #expect(cache.map(forStateFile: stateB, indexInfo: FileInfo(path: index.path))["session_b"] == "/b")
+        #expect(cache.parses == 2)
+    }
+
     @Test func kimiPrefersTheMainAgentWithoutAParent() async throws {
         let s = try Setup()
         await s.attach()

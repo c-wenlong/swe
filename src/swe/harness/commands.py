@@ -1553,7 +1553,9 @@ def cmd_use(args, env: dict | None = None):
     if not name:
         print(c("red", f"  Tool '{args[0]}' not found. Try 'swe list'."))
         return 1
-    command = tools[name]["command"]
+    # A state-only registry row (no command recorded) runs under its name,
+    # as everywhere else that reads the registry.
+    command = tools[name].get("command") or name
     if not is_installed(command):
         print(c("red", f"  Command '{command}' not found in PATH."))
         return 1
@@ -1812,7 +1814,7 @@ def _doctor_probe(home: Path) -> SimpleNamespace:
     probe.preferred = preferred_npm_bin()
     probe.which_npm = shutil.which("npm")
     probe.orphans = find_off_path_tools(probe.tools)
-    probe.drift = run_drift_checks()
+    probe.drift = run_drift_checks(home=home)
     probe.setup = setup_findings(home)
     probe.issues = issue_findings(home)
     # Plugin drift needs the hub: before it exists, setup says so first.

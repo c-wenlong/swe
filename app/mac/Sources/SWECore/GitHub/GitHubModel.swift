@@ -170,7 +170,7 @@ public final class GitHubModel {
     /// SQLite writes ride a serial queue so a fetch reply never blocks
     /// the main actor on a busy or slow disk; order is preserved, so a
     /// `removeRepo` still wins over the remembers queued before it.
-    let historyWriteQueue = DispatchQueue(label: "quiver.gh-history")
+    let historyWriteQueue = DispatchQueue(label: "com.cwenlong.swe.gh-history")
     /// Set once the store has provably taken the snapshot's boards —
     /// `saveNow` drops the file's `boards` field only then, so an
     /// unopened database or a failed import never erases the last copy.
@@ -244,7 +244,8 @@ public final class GitHubModel {
     /// `probed` alone would leave Repositories stuck on the empty card.
     private var pinsFetchedAt: Date?
     private var generation = 0
-    private let now: () -> Date
+    /// The clock every freshness check reads, injectable for tests.
+    let now: () -> Date
     private let staleAfter: TimeInterval
     /// Where the warm-start snapshot lives; nil (tests) disables disk.
     private let snapshot: SnapshotFile<GitHubSnapshot>?
