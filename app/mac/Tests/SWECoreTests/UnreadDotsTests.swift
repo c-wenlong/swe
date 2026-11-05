@@ -248,8 +248,10 @@ extension HubStubbed {
         #expect(chat.readOnOpen == nil, "the opening read can't outlive the chat")
         await chat.readFlush?.value
         #expect(Self.reads().count == 2, "the close covers history shown after the opening read")
-        // A second stop sends nothing more.
+        // A second stop sends nothing more: any flush it started has
+        // landed before the count is read.
         chat.stop()
+        await chat.readFlush?.value
         #expect(Self.reads().count == 2)
         gate.open()
     }

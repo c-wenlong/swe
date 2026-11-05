@@ -4,15 +4,27 @@ import Testing
 @testable import SWECore
 
 /// A transport stub that records every request and answers from a handler.
-private final class StubHTTP: HTTPTransport, @unchecked Sendable {
-    /// URL path → (body, status, headers); unmatched paths throw.
-    var handler: (URLRequest) throws -> (Data, Int, [String: String]) = { _ in
-        ("{}".data(using: .utf8)!, 200, [:])
+/// Requests arrive off the test's actor, so the handler and the record sit
+/// behind a lock.
+private final class StubHTTP: HTTPTransport, Sendable {
+    typealias Handler = @Sendable (URLRequest) throws -> (Data, Int, [String: String])
+    private struct State {
+        /// URL path → (body, status, headers); unmatched paths throw.
+        var handler: Handler = { _ in ("{}".data(using: .utf8)!, 200, [:]) }
+        var requests: [URLRequest] = []
     }
-    private(set) var requests: [URLRequest] = []
+    private let state = Mutex(State())
+    var handler: Handler {
+        get { state.withLock { $0.handler } }
+        set { state.withLock { $0.handler = newValue } }
+    }
+    var requests: [URLRequest] { state.withLock { $0.requests } }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        requests.append(request)
+        let handler = state.withLock { s in
+            s.requests.append(request)
+            return s.handler
+        }
         let (data, status, headers) = try handler(request)
         return (data, HTTPURLResponse(url: request.url!, statusCode: status,
                                       httpVersion: nil, headerFields: headers)!)
@@ -781,26 +793,25 @@ private final class StubHTTP: HTTPTransport, @unchecked Sendable {
             entry("a", "A", "a", creator: "openai", intelligence: 80),
             entry("b", "B", "b", creator: "anthropic", intelligence: 70),
         ])
-        let (started, reading) = AsyncStream<Void>.makeStream()
-        let (release, releasing) = AsyncStream<Void>.makeStream()
+        // Holds the usage read until the test has looked at the rows.
+        let reading = HoldGate()
         let used = [slice("b", "claude", tokens: 50)]
         let model = ModelsModel(store: ArtificialAnalysisStore(directory: dir.path("aa")),
                                 keyReader: { "key" }, transport: StubHTTP(),
                                 linksURL: dir.path("config/model-links.json"),
                                 slices: { _ in
-                                    reading.yield()
-                                    for await _ in release { break }
+                                    try? await reading.pass()
                                     return used
                                 },
                                 now: { Date(timeIntervalSince1970: 1_800_000_000) },
                                 calendar: Calendar(identifier: .gregorian))
         let load = Task { await model.load() }
-        for await _ in started { break }
+        #expect(await reading.arrived())
         // Benchmarks are drawn before the ledger answers, tokens pending.
         #expect(model.usagePending)
         #expect(model.rows.map(\.logged) == ["A", "B"])
         #expect(model.rows.allSatisfy { $0.tokens == 0 })
-        releasing.yield()
+        reading.open()
         await load.value
         #expect(!model.usagePending)
         #expect(model.rows.first { $0.aa?.id == "b" }?.tokens == 50)
@@ -1030,53 +1041,22 @@ private final class StubHTTP: HTTPTransport, @unchecked Sendable {
         #expect(used.first?.tokens == 9)
     }
 
-    /// A key read that waits while closed, so a test can land a usage
-    /// reload in the middle of a load.
-    private final class KeyGate: @unchecked Sendable {
-        private struct State {
-            var open = true
-            var value: String?
-            var waiting: [CheckedContinuation<String?, Never>] = []
-        }
-        private let state = Mutex(State())
-        /// Bumped once a call is waiting on the closed gate.
-        let parked = CountGate()
-        func call() async -> String? {
-            let parked = self.parked
-            return await withCheckedContinuation { continuation in
-                let ready: String?? = state.withLock { state in
-                    if state.open { return .some(state.value) }
-                    state.waiting.append(continuation)
-                    return .none
-                }
-                if case .some(let value) = ready {
-                    continuation.resume(returning: value)
-                } else {
-                    Task { await parked.bump() }
-                }
-            }
-        }
-        func close() { state.withLock { $0.open = false } }
-        func open(with value: String?) {
-            let waiting = state.withLock { state in
-                state.open = true
-                state.value = value
-                defer { state.waiting = [] }
-                return state.waiting
-            }
-            for continuation in waiting { continuation.resume(returning: value) }
-        }
-    }
-
     @Test func aUsageReloadMidLoadDoesNotCancelTheLoad() async throws {
         // The page's two tasks: a revisit's load is waiting on the key
         // when a ledger re-scan reloads the usage. The load must still
         // pick up the key the user just saved.
         let dir = try TempDir()
         try writeLLMs(dir, [entry("a", "A", "a", creator: "openai", intelligence: 80)])
-        let gate = KeyGate()
+        // The key read answers at once until `held` names a gate; then it
+        // waits there, so a usage reload can land in the middle of a load.
+        let key = Box<String?>(nil)
+        let held = Box<HoldGate?>(nil)
         let model = ModelsModel(store: ArtificialAnalysisStore(directory: dir.path("aa")),
-                                keyReader: { await gate.call() }, transport: StubHTTP(),
+                                keyReader: {
+                                    if let gate = held.value { try? await gate.pass() }
+                                    return key.value
+                                },
+                                transport: StubHTTP(),
                                 linksURL: dir.path("config/model-links.json"),
                                 slices: { _ in [] },
                                 now: { Date(timeIntervalSince1970: 1_800_000_000) },
@@ -1084,11 +1064,15 @@ private final class StubHTTP: HTTPTransport, @unchecked Sendable {
         await model.load()
         #expect(!model.hasKey)
 
-        gate.close()
+        let gate = HoldGate()
+        held.value = gate
         let loading = Task { await model.load(allowRefresh: false) }
-        #expect(await gate.parked.reach(1))
+        #expect(await gate.arrived())
         await model.loadIfNeeded(usageStamp: 1)
-        gate.open(with: "key")
+        // A load the reload cancelled has already left the gate with no
+        // key, so it can't pick this one up.
+        key.value = "key"
+        gate.open()
         await loading.value
         #expect(model.hasKey)
         #expect(!model.isLoading)

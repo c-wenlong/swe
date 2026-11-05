@@ -187,53 +187,65 @@ import Testing
 
     /// A second save waits for the first and writes on top of it with no
     /// false conflict; text typed while the first ran stays unsaved.
-    @Test(.timeLimit(.minutes(1))) func overlappingSavesQueueAndKeepNewerTyping() async throws {
+    /// A save's outcome, or nil once `gateTimeout` passes; a stuck save
+    /// is cancelled rather than left behind.
+    private func finishes(_ save: Task<InstructionDocument.SaveOutcome, Never>) async -> InstructionDocument.SaveOutcome? {
+        let outcome = Box<InstructionDocument.SaveOutcome?>(nil)
+        let done = await withinTimeout {
+            outcome.value = await save.value
+            return true
+        }
+        if !done { save.cancel() }
+        return outcome.value
+    }
+
+    @Test func overlappingSavesQueueAndKeepNewerTyping() async throws {
         let folder = try TempDir()
         let file = try folder.write("AGENTS.md", "v0\n")
         let doc = InstructionDocument(url: file)
         await doc.load()
-        let gate = AsyncStream<Void>.makeStream()
-        let held = AsyncStream<Void>.makeStream()
-        var first = true
-        doc.beforeWrite = {
-            guard first else { return }
-            first = false
-            held.continuation.yield()
-            for await _ in gate.stream { break }
-        }
+        // Holds a's write; once open, b's write (queued behind a) passes
+        // straight through.
+        let gate = HoldGate()
+        doc.beforeWrite = { try? await gate.pass() }
         doc.text = "one\n"
         let a = Task { await doc.save() }
-        for await _ in held.stream { break }
+        #expect(await gate.arrived(1))
         doc.text = "two\n"
         // b runs on the main actor, so once it says it started, the test
         // cannot resume until b's save has suspended: queued behind a.
+        // The signal is a synchronous yield for that reason.
         let started = AsyncStream<Void>.makeStream()
         let b = Task {
             started.continuation.yield()
             return await doc.save()
         }
-        for await _ in started.stream { break }
-        gate.continuation.yield()
-        #expect(await a.value == .saved)
-        #expect(await b.value == .saved)
+        #expect(await withinTimeout {
+            for await _ in started.stream { return true }
+            return false
+        })
+        // b is queued, not writing: only a has reached the write.
+        #expect(await gate.arrivalCount == 1)
+        gate.open()
+        // Bounded: a save queue that stalls once the gate opens fails here.
+        #expect(await finishes(a) == .saved)
+        #expect(await finishes(b) == .saved)
+        // The arrival count bumps in a task of its own: wait for it.
+        #expect(await gate.arrived(2))
+        #expect(await gate.arrivalCount == 2)
         #expect(try String(contentsOf: file, encoding: .utf8) == "two\n")
         #expect(!doc.isDirty)
         #expect(!doc.changedOnDisk)
 
         // Typing during a save that nothing follows stays dirty.
-        first = true
-        let gate2 = AsyncStream<Void>.makeStream()
-        let held2 = AsyncStream<Void>.makeStream()
-        doc.beforeWrite = {
-            held2.continuation.yield()
-            for await _ in gate2.stream { break }
-        }
+        let gate2 = HoldGate()
+        doc.beforeWrite = { try? await gate2.pass() }
         doc.text = "three\n"
         let c = Task { await doc.save() }
-        for await _ in held2.stream { break }
+        #expect(await gate2.arrived(1))
         doc.text = "four\n"
-        gate2.continuation.yield()
-        #expect(await c.value == .saved)
+        gate2.open()
+        #expect(await finishes(c) == .saved)
         #expect(try String(contentsOf: file, encoding: .utf8) == "three\n")
         #expect(doc.isDirty)
         #expect(doc.text == "four\n")
