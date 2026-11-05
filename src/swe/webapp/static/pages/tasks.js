@@ -336,7 +336,7 @@
 
   function listContent() {
     const d = page.data;
-    if (!d) return loadingCard("Reading the task list…");
+    if (!d) return loadingCard();
     const cards = sourceCards(d);
     const blocked = GhUI.envSetup(d.github) || githubFailed(d)
       || KEYED_SOURCES.some((src) => sourceFailing(d[src]));
@@ -620,7 +620,7 @@
     const t = id && task(id);
     let body;
     if (!page.data) {
-      body = `${pageHeader("Tasks", "The issues and pull requests your agents are on.")}${loadingCard("Reading the task list…")}`;
+      body = `${pageHeader("Tasks", "The issues and pull requests your agents are on.")}${loadingCard()}`;
     } else if (!t) {
       body = `${pageHeader("Task", "The issues and pull requests your agents are on.",
         `<a class="gh-button" href="#/tasks" title="Back to the task list">${ico("chevronLeft")}<span>Tasks</span></a>`)}

@@ -186,7 +186,7 @@ struct PrDetailSheet: View {
                         Text("+\(additions)/−\(pr.deletions ?? 0) in \(pr.changedFiles ?? 0) files")
                             .font(Theme.caption)
                     }
-                    if let mergeable = pr.mergeable {
+                    if let mergeable = pr.mergeable, mergeable != .unknown {
                         Text(mergeable.rawValue).font(Theme.caption)
                     }
                     if pr.mergeState != "unknown" {
