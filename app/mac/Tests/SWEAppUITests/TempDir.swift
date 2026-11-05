@@ -8,7 +8,7 @@ final class TempDir: @unchecked Sendable {
 
     init() throws {
         url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("quiver-app-test-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("swe-app-test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }
 

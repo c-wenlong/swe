@@ -4,7 +4,7 @@ import Testing
 @testable import SWECore
 
 /// `ServiceStatusNotifier`: the switch, the state file under
-/// `~/.quiver/cache/`, and the issue's acceptance run. `post` captures the
+/// `~/.swe/cache/`, and the issue's acceptance run. `post` captures the
 /// alerts instead of reaching `UNUserNotificationCenter`.
 @Suite(.serialized)
 @MainActor

@@ -521,6 +521,19 @@ final class AppModel {
     /// earlier move left, after `~/.swe` was deleted): mirroring that would
     /// make `~/.swe` a link to itself, and every path under it would fail.
     /// On any failure the old root keeps serving.
+    /// `path` with every link in its folder followed, for a last part
+    /// that need not exist. realpath(3) on the folder, since Foundation's
+    /// resolving standardizes first and folds "link/.." away before the
+    /// link is followed. Python's `os.path.realpath` twin.
+    private static func realPath(_ path: String) -> String {
+        let ns = path as NSString
+        guard let folder = realpath(ns.deletingLastPathComponent, nil) else {
+            return ns.standardizingPath
+        }
+        defer { free(folder) }
+        return String(cString: folder) + "/" + ns.lastPathComponent
+    }
+
     static func migrateDataRoot(home: URL) {
         let fm = FileManager.default
         let new = home.appending(path: ".swe")
@@ -530,9 +543,10 @@ final class AppModel {
               let type = attrs[.type] as? FileAttributeType else { return }
         if type == .typeSymbolicLink {
             if let target = try? fm.destinationOfSymbolicLink(atPath: old.path) {
-                let resolved = URL(fileURLWithPath: target, relativeTo: home)
-                    .standardizedFileURL.path
-                guard resolved != new.standardizedFileURL.path else { return }
+                // Links followed, not just "..": "link/../.swe" through a
+                // linked folder is somewhere else entirely.
+                let full = target.hasPrefix("/") ? target : home.path + "/" + target
+                guard Self.realPath(full) != Self.realPath(new.path) else { return }
                 try? fm.createSymbolicLink(atPath: new.path, withDestinationPath: target)
             }
             return
