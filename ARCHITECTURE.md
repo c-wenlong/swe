@@ -441,7 +441,7 @@ Each harness session starts its own copy of every stdio server it is
 configured with. With 17 servers that was 26 processes and about 1.3 GB
 per Claude Code session. A hub entry marked `"shared": true` (`swe mcp
 gateway share`) runs once instead, in `swe mcp gateway serve`, a
-LaunchAgent (`com.cwenlong.quiver.mcp-gateway`) that serves it as MCP
+LaunchAgent (`com.cwenlong.swe.mcp-gateway`) that serves it as MCP
 streamable HTTP at `http://127.0.0.1:8478/mcp/<name>`. While mcp.json's
 `gateway.enabled` is set (by `install`), `swe mcp sync swe ...` writes
 that URL for a shared server instead of its command; Claude Desktop takes
