@@ -77,7 +77,7 @@ const NeedsYou = (() => {
 (() => {
   const inbox = {
     data: null, status: 0, unreadOnly: true, loading: false,
-    busy: new Set(), confirmAll: false, actionError: null, writes: 0,
+    busy: new Set(), confirmAll: false, actionError: null, writes: 0, seq: 0,
   };
   /* Needs you: the hub's rows (null until the first answer), the last
    * read's or clear's error, and the dismissals still in flight. */
@@ -107,11 +107,14 @@ const NeedsYou = (() => {
   async function render(_id, refresh = false) {
     const gen = routeGen;
     const writes = inbox.writes;
+    // A Refresh pressed while the minute poll's read is out: only the
+    // newest read's reply paints, so an older one can't land last.
+    const seq = ++inbox.seq;
     inbox.loading = true;
     paint();
     loadNeeds();
     const { status, data } = await api(`/v1/app/inbox${refresh ? "?refresh=1" : ""}`);
-    if (gen !== routeGen) return;
+    if (gen !== routeGen || seq !== inbox.seq) return;
     inbox.loading = false;
     if (status === 401) return GhUI.gate("inbox");
     // A mark-read landed while this read was in flight: its rows may be
