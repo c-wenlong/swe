@@ -109,6 +109,9 @@ def _save_cached_sessions(sessions: list[Session]) -> None:
         # data parse_cache keeps private; atomic so a second swe reading
         # mid-write never sees half a file.
         atomic_write_text(SESSION_CACHE_FILE, json.dumps(payload), private=True)
+        # atomic_write_text keeps an existing file's mode, so a cache an
+        # older swe left at 0644 is tightened here.
+        os.chmod(SESSION_CACHE_FILE, 0o600)
     except Exception:
         pass
 

@@ -113,6 +113,8 @@ class SessionsAggregatorTest(unittest.TestCase):
                         session_id="s1", tool_name="claude")]
         with tempfile.TemporaryDirectory() as tmp:
             cache_file = Path(tmp) / "session_cache.json"
+            cache_file.write_text("{}")
+            os.chmod(cache_file, 0o644)  # left by an older swe
             with patch("swe.sessions.aggregator.SESSION_CACHE_FILE", cache_file):
                 _save_cached_sessions(fake)
             self.assertEqual(stat.S_IMODE(os.stat(cache_file).st_mode), 0o600)
