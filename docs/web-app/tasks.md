@@ -2,7 +2,7 @@
 
 The Tasks page (sidebar id `tasks`, hash route `#/tasks`, a task's
 detail at `#/tasks?task=<id>`): the work items the hub's agents are on —
-the task store (`~/.swe/tasks.json`) overlaid on the sources' open
+the task store (`~/.swe/data/remote/tasks.json`) overlaid on the sources' open
 items. It is the web half of the work-items surface the iOS app mirrors;
 GitHub is the first source; Linear and Notion ride along when
 configured.
@@ -116,7 +116,9 @@ nothing here is pinned.
 
 **Detail.** `#/tasks?task=<id>` — the state ladder as a stepper (Open →
 In progress → PR open → Merged/Closed; the PR rung exists only where a
-PR can close the gap, a GitHub issue), then a Sessions card, then the
+PR can close the gap, a GitHub issue; a closed task lights only Open
+and Closed, muted, and a state the ladder doesn't know sits on Open, as
+`TaskStepper` on the Mac and the iPhone), then a Sessions card, then the
 PR card when the task has one. A session row deep-links into the chat
 (`#/sessions?chat=<key>`) and carries an unlink button
 (`DELETE /v1/sessions/{key}/task` with the task's ref); a `gone` row is
