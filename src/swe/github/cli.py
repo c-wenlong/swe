@@ -1422,9 +1422,9 @@ _run_git = manage.run_git
 
 def _pr_number(ref: str) -> str | None:
     """The numeric part of a PR ref: bare digits or a /pull/N URL."""
-    if ref.isdigit():
+    if gh.digits(ref):
         return ref
-    match = re.search(r"/pull/(\d+)", ref)
+    match = re.search(r"/pull/([0-9]+)", ref)
     return match.group(1) if match else None
 
 
@@ -1710,7 +1710,7 @@ def rerun_run(repo: str, run_id: str, failed_only: bool) -> gh.GhResult:
 
 def _cmd_run_rerun(run_id: str, opts: dict, json_view: bool) -> int:
     err = error_stream(json_view)
-    if not run_id.isdigit():
+    if not gh.digits(run_id):
         print(c("red", "Want the numeric run id from `swe gh run`"),
               file=err)
         return 1
@@ -1780,7 +1780,7 @@ def _cmd_inbox_read(ids: list[str], opts: dict, json_view: bool) -> int:
     if ids and opts["all"]:
         print(c("red", "Pick ids or --all, not both"), file=err)
         return 1
-    bad = [i for i in ids if not i.isdigit()]
+    bad = [i for i in ids if not gh.digits(i)]
     if bad:
         print(c("red", f"Not a notification id: {' '.join(bad)}"), file=err)
         return 1
@@ -1936,8 +1936,8 @@ def _print_overview(json_view: bool) -> int:
         print(f"  {c('green', '●')} gh"
               f"{c('dim', f' as {env.login}') if env.login else ''}")
     else:
-        print(f"  {c('red', '●')} "
-              f"{'gh not installed: brew install gh' if not env.installed else 'not authenticated: gh auth login'}")
+        # env_error words all three states, a timed-out probe included.
+        print(f"  {c('red', '●')} {_env_error(env)}")
     print()
     if not pinned:
         print(c("dim", "  No repos pinned. "

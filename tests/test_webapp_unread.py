@@ -13,9 +13,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.test_webapp_live_reply import ChatScript
+
 STATIC = Path(__file__).resolve().parent.parent / "src" / "swe" / "webapp" / "static"
 SESSIONS_JS = STATIC / "sessions.js"
-CHAT_JS = STATIC / "pages" / "chat.js"
 
 PRELUDE = (
     "const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;')"
@@ -211,17 +212,63 @@ class TestSessionUnread(unittest.TestCase):
         self.assertEqual(out, [True, False])
 
 
-class TestChatCallsTheReadHooks(unittest.TestCase):
-    """chat.js reaches SessionUnread on open, live messages, a shown tab
-    and close; a cheap guard, since the chat's flow tests live elsewhere."""
+# chat.js under the live-reply tests' DOM stub, with SessionUnread replaced
+# by a recorder, then: a live message on a shown tab, an old one, a live one
+# while hidden, the tab shown again, the chat closed, and another opened
+# (whose row read reports its own last_active_at).
+HOOKS_FLOW = r"""
+const calls = [];
+globalThis.SessionUnread = new Proxy({}, { get: (_, name) => (...args) => { calls.push([name, ...args]); } });
+document.body = document.createElement('body');
+ids.panel = document.createElement('div');
+document.visibilityState = 'visible';
+appended(1, { kind: 'assistant', text: 'live', ts: 1234 });
+T.appendEvent({ type: 'message.appended', seq: 2, data: { kind: 'assistant', text: 'old', ts: 9 } }, false);
+document.hidden = true; document.visibilityState = 'hidden';
+appended(3, { kind: 'assistant', text: 'unseen', ts: 99 });
+const whileHidden = calls.length;
+T.chat.opened = true; T.chat.stream = {};
+document.hidden = false; document.visibilityState = 'visible';
+docListeners.visibilitychange();
+drain();
+SessionChat.close();
+// What open() needs from the page around it: any element by id, the
+// app.js helpers it paints with, and a hub that answers the two reads.
+const quiet = (e) => { for (const m of ['addEventListener', 'setAttribute', 'removeAttribute']) e[m] ||= () => {}; return e; };
+const stubEl = (id) => { const e = quiet(document.createElement('div')); e.id = id; return e; };
+document.getElementById = (id) => ids[id] || (ids[id] = stubEl(id));
+for (const id in ids) quiet(ids[id]);
+const logQsa = log.querySelectorAll;
+log.querySelectorAll = (sel) => sel.startsWith('details.') ? [] : logQsa(sel);
+globalThis.Fmt = new Proxy({}, { get: () => () => '' });
+globalThis.Sk = new Proxy({}, { get: () => () => '' });
+globalThis.icon = () => '';
+globalThis.authHeaders = () => ({});
+globalThis.fetch = () => new Promise(() => {});
+globalThis.api = async (path) => path.startsWith('/v1/sessions?key=')
+  ? { status: 200, data: { sessions: [{ key: 'claude:s2', last_active_at: 77 }], machines: [] } }
+  : path.includes('/messages') ? { status: 200, data: { messages: [] } } : { status: 404, data: null };
+await SessionChat.open('claude:s2', { row: { key: 'claude:s2', last_active_at: 55 } });
+return { whileHidden, calls };
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestChatCallsTheReadHooks(ChatScript):
+    """chat.js reaches SessionUnread on open, the row read, live messages
+    on a shown tab, the tab shown again and close."""
 
     def test_hooks_are_wired(self):
-        src = CHAT_JS.read_text(encoding="utf-8")
-        for call in ('unreadHook("opened", key', 'unreadHook("closed", chat.key)',
-                     'unreadHook("seen", chat.key, row.last_active_at)',
-                     'unreadHook("activity", chat.key)'):
-            self.assertIn(call, src)
-        self.assertEqual(src.count('unreadHook("activity"'), 2)
+        out = self.run_js(HOOKS_FLOW)
+        self.assertEqual(out["whileHidden"], 1, "a hidden tab's message waits for the tab to show")
+        self.assertEqual(out["calls"], [
+            ["activity", "claude:s1", 1234],    # live, on a shown tab
+            ["activity", "claude:s1", 99],      # the hidden one, revealed on show
+            ["activity", "claude:s1"],          # the tab shown again
+            ["closed", "claude:s1"],
+            ["opened", "claude:s2", 55],        # the list's row, at once
+            ["seen", "claude:s2", 77],          # the catalog row, once read
+        ])
 
 
 if __name__ == "__main__":

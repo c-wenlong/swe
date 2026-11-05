@@ -83,7 +83,7 @@ struct AccountsPage: View {
                           actionTitle: "Open Harnesses") { app.selection = .harnesses }
             }
         }
-        .quiverSheet(isPresented: $adding) {
+        .cardSheet(isPresented: $adding) {
             AddAccountSheet { vendor, name, color in
                 Task {
                     do {
@@ -178,7 +178,7 @@ private struct AccountCard: View {
     var installSheet: some View {
         // Drawn behind the card, not inside its stack, so it adds no row
         // spacing; the sheet itself is drawn over the window.
-        Color.clear.quiverSheet(item: $installing, onDismiss: {
+        Color.clear.cardSheet(item: $installing, onDismiss: {
             // A CLI installed from the sheet turns Install back into Sign in.
             Task {
                 await app.others.load(force: true)
@@ -544,7 +544,7 @@ private struct HarnessAccountCard: View {
     var installSheet: some View {
         // Drawn behind the card, not inside its stack, so it adds no row
         // spacing; the sheet itself is drawn over the window.
-        Color.clear.quiverSheet(item: $installing, onDismiss: {
+        Color.clear.cardSheet(item: $installing, onDismiss: {
             // A CLI installed from the sheet turns Install back into Sign in.
             Task {
                 await app.others.load(force: true)
@@ -671,7 +671,7 @@ private struct HarnessAccountCard: View {
         .background {
             if let issue = row.issue {
                 // Drawn like installSheet: over the window, no row space.
-                Color.clear.quiverSheet(isPresented: $fixing) {
+                Color.clear.cardSheet(isPresented: $fixing) {
                     IssueFixSheet(title: name, issue: issue, perform: perform)
                 }
             }

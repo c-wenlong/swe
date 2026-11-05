@@ -528,7 +528,7 @@ final class ChatAttachmentTests: XCTestCase {
     func testARestoredQueuedSendKeepsItsFilesWhenItFails() {
         let chat = ChatModel(key: "claude:1", app: AppModel(hub: nil))
         chat.mergeQueue([WaitingSend(clientId: "c1", text: "look", attachments: [.string("1730000000-a1b2c3-a.png")])])
-        chat.apply(try! Hub.decoder.decode(Envelope.self, from: Data(#"{"type":"command.result","seq":50,"data":{"op":"message","ok":false,"note":"x","client_id":"c1"}}"#.utf8)))
+        chat.apply(env(#"{"type":"command.result","seq":50,"data":{"op":"message","ok":false,"note":"x","client_id":"c1"}}"#))
         XCTAssertEqual(chat.fileNames(for: "send-c1"), ["a.png"])
     }
 

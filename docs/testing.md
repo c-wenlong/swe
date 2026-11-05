@@ -58,7 +58,8 @@ Conventions that keep the suite working:
   pins terminal size under unittest.
 - A test module's `if __name__ == "__main__": unittest.main()` goes at the
   very end of the file. Anything below it is skipped when the file is run
-  directly, even though discovery still finds it.
+  directly, even though discovery still finds it. `tests/test_agent_rules.py`
+  enforces it.
 
 ### Interpreter matrix
 
