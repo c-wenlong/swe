@@ -1256,6 +1256,7 @@ struct QueuedTray: View {
     /// Rows shown before the card scrolls.
     var visibleRows = 3
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var size
     @State private var confirmRemoveAll = false
 
     static let rowHeight: CGFloat = 44
@@ -1275,12 +1276,15 @@ struct QueuedTray: View {
                 Text(note).font(Theme.small).foregroundStyle(Theme.textMuted)
                     .padding(.horizontal, 14).padding(.bottom, 4)
             }
-            if sends.count > visibleRows {
+            // At most its default height over the keyboard: grown rows
+            // scroll, as many sends do.
+            if sends.count > visibleRows || size.isAccessibilitySize {
                 ScrollView(.vertical) { rows }
                     // The chat anchors its scroll views at the bottom; the
                     // tray starts at its oldest send.
                     .defaultScrollAnchor(.top)
-                    .frame(height: CGFloat(visibleRows) * Self.rowHeight)
+                    .scaledHeight(CGFloat(min(sends.count, visibleRows)) * Self.rowHeight,
+                                  cap: CGFloat(visibleRows) * Self.rowHeight)
             } else {
                 rows
             }
@@ -1309,7 +1313,7 @@ struct QueuedTray: View {
     }
 }
 
-private struct QueuedRow: View {
+struct QueuedRow: View {
     let send: QueuedSend
     let editing: Bool
     let onEdit: () -> Void
@@ -1362,7 +1366,8 @@ private struct QueuedRow: View {
         }
         .padding(.leading, 14)
         .padding(.trailing, 2)
-        .frame(height: QueuedTray.rowHeight)
+        // Taller with the text: a fixed 44 pt clipped the message.
+        .scaledMinHeight(QueuedTray.rowHeight)
     }
 }
 

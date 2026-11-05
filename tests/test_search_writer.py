@@ -461,9 +461,19 @@ class ReviewFixTests(_Home):
         lock_path = search_index.index_path(self.home).parent / writer.LOCK_FILE
         lock_path.parent.mkdir(parents=True)
         holder = open(lock_path, "a+")
+        self.addCleanup(holder.close)
         fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
-        threading.Timer(0.05, holder.close).start()
-        self.assertEqual(self.run_pass().files, 0)
+        # The probe lets go during the pass's first retry pause: no timer
+        # racing the retry loop, and the pause is the writer's own.
+        pauses = []
+
+        def pause(seconds):
+            pauses.append(seconds)
+            holder.close()
+
+        with mock.patch.object(writer.time, "sleep", side_effect=pause):
+            self.assertEqual(self.run_pass().files, 0)
+        self.assertEqual(pauses, [writer._Lock.RETRY_S])
 
     def test_the_outcome_is_saved_before_the_lock_is_released(self):
         seen = []
@@ -524,7 +534,7 @@ class ReviewFixTests(_Home):
     def test_bad_text_and_deep_nesting_never_stop_a_pass(self):
         self.write(self.projects / "a.jsonl",
                    '{"type":"user","sessionId":"s","message":{"content":"bad \\ud800 surrogate"}}\n'
-                   + '{"type":"user",' + '"x":' * 0 + '"a":' + "[" * 100000 + "]" * 100000 + "}\n")
+                   + '{"type":"user","a":' + "[" * 100000 + "]" * 100000 + "}\n")
         self.write(self.projects / "b.jsonl", claude_line("user", "fine", session="s2"))
         result = self.run_pass()
         self.assertEqual((result.indexed, result.failed), (2, 0))
