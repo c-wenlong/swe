@@ -144,10 +144,10 @@ def read_shell_export_keys(
                     and value[0] in ('"', "'")
                 ):
                     value = value[1:-1]
-                if value:
-                    found[env_var] = value  # keeps its first-seen place
+                # Empty too: `export A=""` after `export A=old` clears it.
+                found[env_var] = value  # keeps its first-seen place
                 break
-    return next(((value, name) for name, value in found.items()), None)
+    return next(((value, name) for name, value in found.items() if value), None)
 
 
 def mask_key(raw: str | None) -> str:
