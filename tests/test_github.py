@@ -438,7 +438,9 @@ class TestCommands(unittest.TestCase):
         # with the command's own message, never a traceback.
         for args in (["run", "rerun", "²", "--repo=o/r", "--json"],
                      ["pr", "worktree", "²", "--repo=o/r", "--json"],
-                     ["inbox", "read", "²"]):
+                     ["inbox", "read", "²"],
+                     ["pr", "worktree", "https://github.com/o/r/pull/٣",
+                      "--repo=o/r", "--json"]):
             rc, _out, _err = self._run_cli(args)
             self.assertEqual(rc, 1, args)
 

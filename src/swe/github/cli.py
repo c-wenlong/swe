@@ -1424,7 +1424,7 @@ def _pr_number(ref: str) -> str | None:
     """The numeric part of a PR ref: bare digits or a /pull/N URL."""
     if gh.digits(ref):
         return ref
-    match = re.search(r"/pull/(\d+)", ref)
+    match = re.search(r"/pull/([0-9]+)", ref)
     return match.group(1) if match else None
 
 
