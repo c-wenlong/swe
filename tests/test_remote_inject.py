@@ -961,9 +961,12 @@ class TestAttachmentCapability(unittest.TestCase):
     """``capabilities.attachments`` over ``ATTACH_FALLBACK``."""
 
     def test_fallback_table(self):
-        for name in ("claude", "gemini", "qwen"):
+        # Keyed by registry id: Qwen Code is "qwen-code" (its command
+        # is "qwen"), and a key off the registry never matches a session.
+        for name in ("claude", "gemini", "qwen-code"):
             self.assertTrue(attachments.at_refs(name, {}), name)
-        for name in ("codex", "opencode", "cursor", "droid", "pi", ""):
+        for name in ("codex", "opencode", "cursor", "droid", "pi", "qwen",
+                     ""):
             self.assertFalse(attachments.at_refs(name, {}), name)
 
     def test_registry_wins(self):
@@ -972,14 +975,19 @@ class TestAttachmentCapability(unittest.TestCase):
             "claude": {"capabilities": {"attachments": {"supported": False}}},
             "gemini": {"capabilities": {"attachments": {"at_refs": False}}},
             # Malformed declarations fall back to the table.
-            "qwen": {"capabilities": {"attachments": "yes"}},
+            "qwen-code": {"capabilities": {"attachments": "yes"}},
             "pi": {"capabilities": "nope"},
         }
         self.assertTrue(attachments.at_refs("codex", reg))
         self.assertFalse(attachments.at_refs("claude", reg))
         self.assertFalse(attachments.at_refs("gemini", reg))
-        self.assertTrue(attachments.at_refs("qwen", reg))
+        self.assertTrue(attachments.at_refs("qwen-code", reg))
         self.assertFalse(attachments.at_refs("pi", reg))
+
+    def test_fallback_keys_are_registry_ids(self):
+        from swe.harness.catalog import HARNESS_CATALOG
+        for name in attachments.ATTACH_FALLBACK:
+            self.assertIn(name, HARNESS_CATALOG, name)
 
     def test_wrong_field_types_are_ignored(self):
         for bad in ({"at_refs": "yes"}, {"at_refs": None}, {"at_refs": 1},
