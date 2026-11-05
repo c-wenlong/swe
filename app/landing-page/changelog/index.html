@@ -142,8 +142,14 @@ drift never reparents. A drop on a folder row still moves the file
 there, a &quot;Top level&quot; strip appears under the outline for the root,
 and dropping between two rows lands the index entry in that gap.
 Every rail move registers on the window's UndoManager, so ⌘Z (and
-⇧⌘Z under Edit) walks file moves and reorders back. The row's path
-tip no longer pins on click, so it never eats the first drag click.</p>
+⇧⌘Z under Edit) walks file moves and reorders back.</p>
+</li>
+<li><p><strong>Hover tips no longer eat clicks.</strong> A tip is a separate window and
+could float over its own control when it flipped below for room, so
+the first click only dismissed the tip — visible buttons like an API
+probe's Test needed two presses. The tip window now ignores mouse
+events everywhere it appears: a click on covered controls goes
+straight through, and a click on the tip itself still dismisses it.</p>
 </li>
 <li><p><strong>Muse shows Meta's logo.</strong> The <code>muse</code> harness id is aliased to the
 bundled <code>meta</code> mark (<code>harness-meta-color.svg</code>) on the Mac, iPhone and

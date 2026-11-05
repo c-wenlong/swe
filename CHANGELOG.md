@@ -38,8 +38,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   there, a "Top level" strip appears under the outline for the root,
   and dropping between two rows lands the index entry in that gap.
   Every rail move registers on the window's UndoManager, so ⌘Z (and
-  ⇧⌘Z under Edit) walks file moves and reorders back. The row's path
-  tip no longer pins on click, so it never eats the first drag click.
+  ⇧⌘Z under Edit) walks file moves and reorders back.
+
+- **Hover tips no longer eat clicks.** A tip is a separate window and
+  could float over its own control when it flipped below for room, so
+  the first click only dismissed the tip — visible buttons like an API
+  probe's Test needed two presses. The tip window now ignores mouse
+  events everywhere it appears: a click on covered controls goes
+  straight through, and a click on the tip itself still dismisses it.
 
 - **Muse shows Meta's logo.** The `muse` harness id is aliased to the
   bundled `meta` mark (`harness-meta-color.svg`) on the Mac, iPhone and
