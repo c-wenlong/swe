@@ -124,14 +124,15 @@ final class HubListTests: XCTestCase {
     @MainActor
     func testARefusedCredentialIsDroppedWithoutTellingTheHub() async {
         let app = AppModel(hub: hub("mac"))
-        // The hub already refused it; there's nothing to sign out. The
-        // revoke runs in a Task, so wait long enough for one to land.
-        let told = expectation(description: "no revoke")
-        told.isInverted = true
-        app.revokeOnHub = { _, _ in told.fulfill() }
+        // The hub already refused it; there's nothing to sign out. A
+        // revoke would run in a Task on this actor, so yielding a while
+        // gives one every chance to land, without a fixed wait.
+        var revoked = false
+        app.revokeOnHub = { _, _ in revoked = true }
         app.unpair(from: HubClient(baseURL: hub("mac").baseURL, credential: "c"))
         XCTAssertNil(app.hub)
-        await fulfillment(of: [told], timeout: 0.5)
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertFalse(revoked)
     }
 
     @MainActor
