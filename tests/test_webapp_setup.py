@@ -13,7 +13,6 @@ import shutil
 import subprocess
 import tempfile
 import threading
-import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -393,14 +392,29 @@ class TestInstall(_Home, unittest.TestCase):
             self.assertEqual(refused.exception.status, status, (pid, via))
 
 
-def _wait_for_clone(home: Path, timeout: float = 30.0) -> dict:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        hub = setup_page.hub_status(home)
-        if hub["job"]["state"] != "cloning":
-            return hub
-        time.sleep(0.02)
-    raise AssertionError("the clone never finished")
+def _track_clones(case: unittest.TestCase) -> threading.Event:
+    """An event the clone thread sets as it ends, after it released the
+    setup lock and its claim, so a test waits for that rather than
+    polling the job's state."""
+    finished = threading.Event()
+    real = setup_page._clone
+
+    def tracked(home, url):
+        try:
+            real(home, url)
+        finally:
+            finished.set()
+
+    patcher = patch.object(setup_page, "_clone", tracked)
+    patcher.start()
+    case.addCleanup(patcher.stop)
+    return finished
+
+
+def _wait_for_clone(home: Path, finished: threading.Event) -> dict:
+    if not finished.wait(30):
+        raise AssertionError("the clone never finished")
+    return setup_page.hub_status(home)
 
 
 class _HubClone(_Home):
@@ -414,6 +428,7 @@ class _HubClone(_Home):
         register = patch("swe.init.hub.register_marketplaces", return_value=[])
         self.register = register.start()
         self.addCleanup(register.stop)
+        self.cloned = _track_clones(self)
 
     def clone(self, url) -> dict:
         return setup_page.post(self.ctx(), "hub", {"url": url})
@@ -437,7 +452,7 @@ class TestHubClone(_HubClone, unittest.TestCase):
     def test_a_clone_runs_on_its_own_thread_and_lands_in_quiver(self):
         reply = self.clone(str(self.src))
         self.assertIn(reply["hub"]["job"]["state"], ("cloning", "done"))
-        hub = _wait_for_clone(self.home)
+        hub = _wait_for_clone(self.home, self.cloned)
         self.assertEqual(hub["job"]["state"], "done", hub)
         self.assertEqual(hub["job"]["url"], str(self.src))
         self.assertEqual(hub["job"]["cloned"]["path"], str(self.home / ".swe"))
@@ -467,7 +482,7 @@ class TestHubClone(_HubClone, unittest.TestCase):
         with patch("swe.init.hub.install_hub_plugins", side_effect=step("plugins")), \
                 patch("swe.init.hub.sync_hub_mcp", side_effect=step("mcp")):
             self.clone(str(self.src))
-            hub = _wait_for_clone(self.home)
+            hub = _wait_for_clone(self.home, self.cloned)
         self.assertEqual(hub["job"]["state"], "done", hub)
         self.assertEqual(held, {"plugins": False, "mcp": True})
         self.assertFalse(pages.CONFIG_LOCK.locked())
@@ -479,7 +494,7 @@ class TestHubClone(_HubClone, unittest.TestCase):
 
         with patch("swe.init.hub._git", fail):
             reply = self.clone("https://me:tok@h/r.git")
-            hub = _wait_for_clone(self.home)
+            hub = _wait_for_clone(self.home, self.cloned)
         self.assertNotIn("tok", json.dumps(reply) + json.dumps(hub))
         self.assertEqual(hub["job"]["state"], "failed")
         self.assertEqual(hub["job"]["url"], "https://h/r.git")
@@ -495,7 +510,7 @@ class TestHubClone(_HubClone, unittest.TestCase):
         real_git = hub_mod._git
         with patch("swe.init.hub._git", lambda args, timeout, run: real_git(args, timeout, slow)):
             self.clone("https://h/r.git")
-            hub = _wait_for_clone(self.home)
+            hub = _wait_for_clone(self.home, self.cloned)
         self.assertEqual(hub["job"]["state"], "failed")
         self.assertIn("took longer than 30s", hub["job"]["error"])
 
@@ -517,32 +532,46 @@ class TestHubClone(_HubClone, unittest.TestCase):
             err = self.refused(url=str(self.src))
         self.assertEqual((err.status, err.code), (409, "busy"))
 
-    def _apply_behind_a_clone(self, claim_after: float) -> tuple[PageError | None, float]:
-        """Apply while a clone holds (or comes to hold) the setup lock."""
-        setup_page._LOCK.acquire()
+    def _apply_behind_a_clone(self, claim_on_wait: int) -> tuple[PageError | None, int]:
+        """Apply while a clone holds the setup lock, the clone claiming it
+        during the apply's ``claim_on_wait``-th wait (0: before it asks).
+        Returns the refusal and how many waits the apply sat through."""
         self.addCleanup(setup_page._release_claim)
-        timer = threading.Timer(claim_after, setup_page._claim_clone)
-        timer.start()
-        started = time.monotonic()
-        try:
-            setup_page.post(self.ctx(), "apply", {"starred": []})
-        except PageError as exc:
-            return exc, time.monotonic() - started
-        finally:
-            timer.cancel()
-            setup_page._LOCK.release()
-        return None, time.monotonic() - started
+        if claim_on_wait == 0:
+            setup_page._claim_clone()
+        waits = []
+
+        class HeldLock:
+            """The setup lock as a clone holds it: every wait times out."""
+
+            def acquire(self, blocking=True, timeout=-1):
+                waits.append(timeout)
+                if len(waits) == claim_on_wait:
+                    setup_page._claim_clone()
+                if len(waits) > 5:
+                    raise AssertionError("apply kept waiting behind a claimed clone")
+                return False
+
+            def release(self):
+                raise AssertionError("released a lock it never took")
+
+        with patch.object(setup_page, "_LOCK", HeldLock()):
+            try:
+                setup_page.post(self.ctx(), "apply", {"starred": []})
+            except PageError as exc:
+                return exc, len(waits)
+        return None, len(waits)
 
     def test_apply_is_a_409_not_a_wait_while_a_clone_holds_the_lock(self):
-        err, waited = self._apply_behind_a_clone(claim_after=0)
+        err, waits = self._apply_behind_a_clone(claim_on_wait=0)
         self.assertEqual((err.status, err.code), (409, "busy"))
-        self.assertLess(waited, 2)
+        self.assertEqual(waits, 1)
 
     def test_apply_already_waiting_gives_up_when_a_clone_claims_the_lock(self):
         # The race: apply found no clone, then a clone took the lock first.
-        err, waited = self._apply_behind_a_clone(claim_after=0.3)
+        err, waits = self._apply_behind_a_clone(claim_on_wait=2)
         self.assertEqual((err.status, err.code), (409, "busy"))
-        self.assertLess(waited, 2)
+        self.assertEqual(waits, 2, "the apply gives up on the first wait after the claim")
 
     def test_a_clone_cant_start_while_another_has_claimed(self):
         self.assertTrue(setup_page._claim_clone())
@@ -601,11 +630,12 @@ class TestRoute(_Home, HubBase):
         self.assertEqual(status, 401)
         # Pairing writes ~/.swe/data/remote: local state the clone lands beside.
         auth = self.auth()
+        cloned = _track_clones(self)
         with patch("swe.init.hub.register_marketplaces", return_value=[]):
             status, data = self.srv.request("POST", "/v1/app/setup/hub", body={"url": str(src)},
                                             headers={**auth, "Origin": self.origin()})
             self.assertEqual(status, 200, data)
-            hub = _wait_for_clone(self.srv.home)
+            hub = _wait_for_clone(self.srv.home, cloned)
         self.assertEqual(hub["job"]["state"], "done", hub)
         status, data = self.srv.request("GET", "/v1/app/setup?hub=1", headers=auth)
         self.assertEqual(status, 200)

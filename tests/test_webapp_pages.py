@@ -1,5 +1,6 @@
 """Web app page plugins: dispatch of /v1/app/<page> and the page bundles."""
 
+import http.client
 import json
 import shutil
 import subprocess
@@ -103,15 +104,31 @@ class TestLoad(unittest.TestCase):
             gate.wait(5)
             return real(suffix)
 
+        # The bundle lock, counting the requests that reach it: the build
+        # is held until all three are at the lock, so none can come late.
+        arrived = threading.Semaphore(0)
+
+        class CountingLock:
+            def __init__(self):
+                self.lock = threading.Lock()
+
+            def __enter__(self):
+                arrived.release()
+                self.lock.acquire()
+
+            def __exit__(self, *exc):
+                self.lock.release()
+
         with patch.object(pages, "STATIC", folder), \
                 patch.dict(pages._BUNDLES, clear=True), \
+                patch.object(pages, "_BUNDLES_LOCK", CountingLock()), \
                 patch.object(pages, "bundle", side_effect=slow):
             threads = [threading.Thread(target=pages.bundled, args=(".js",))
                        for _ in range(3)]
             for t in threads:
                 t.start()
-            import time
-            time.sleep(0.3)  # every request is in before the build ends
+            for _ in threads:
+                self.assertTrue(arrived.acquire(timeout=5), "a request never reached the lock")
             gate.set()
             for t in threads:
                 t.join(5)
@@ -239,7 +256,6 @@ process.stdout.write(JSON.stringify({ errors, pages: Object.keys(PAGES).sort() }
 
 class TestBundleRoute(HubBase):
     def test_an_unchanged_bundle_answers_304(self):
-        import http.client
         for name in ("pages.js", "pages.css"):
             conn = http.client.HTTPConnection("127.0.0.1", self.srv.port, timeout=5)
             try:
@@ -349,9 +365,14 @@ class TestDispatch(HubBase):
         self.assertEqual(status, 404)
 
     def test_bundles_are_served(self):
-        for path, ctype in (("/pages.js", "javascript"), ("/pages.css", "css")):
-            status, _ = self.srv.request("GET", path)
-            self.assertEqual(status, 200, path)
+        for path, ctype in (("/pages.js", "javascript"), ("/pages.css", "text/css")):
+            conn = http.client.HTTPConnection("127.0.0.1", self.srv.port, timeout=5)
+            self.addCleanup(conn.close)
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            resp.read()
+            self.assertEqual(resp.status, 200, path)
+            self.assertIn(ctype, resp.getheader("Content-Type", ""), path)
         status, body = self.srv.request("GET", "/")
         self.assertIn(b"/pages.js", body)
 
