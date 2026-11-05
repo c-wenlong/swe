@@ -25,19 +25,30 @@ enum Feedback {
             accounts: accountNames(app: app))
     }
 
+    private static func accountNames(app: AppModel) -> [String] {
+        accountNames(profiles: app.accounts.cards.map(\.profile), issues: app.issues.open)
+    }
+
     /// Every name an account goes by in a check id or message: the profile's
     /// label, id and slug, and the label and key of each extra account an
-    /// open issue is about. The harness half of a key stays.
-    private static func accountNames(app: AppModel) -> [String] {
+    /// open issue is about. The harness half of a key stays. A default
+    /// profile's built-in "Default" label and "default" slug stay too:
+    /// masking them would hide the ordinary word "default" in every
+    /// message, and they name no one. A default profile the user renamed
+    /// still has its new label masked.
+    nonisolated static func accountNames(profiles: [Profile], issues: [Issue]) -> [String] {
         var names: [String] = []
-        for card in app.accounts.cards {
-            let profile = card.profile
-            names += [profile.name, profile.id]
-            if let slug = profile.id.split(separator: "-", maxSplits: 1).dropFirst().first {
+        for profile in profiles {
+            names.append(profile.id)
+            if !(profile.isDefault && profile.name.caseInsensitiveCompare("default") == .orderedSame) {
+                names.append(profile.name)
+            }
+            if !profile.isDefault,
+               let slug = profile.id.split(separator: "-", maxSplits: 1).dropFirst().first {
                 names.append(String(slug))
             }
         }
-        for issue in app.issues.open {
+        for issue in issues {
             if let account = issue.account { names.append(account) }
             if let key = issue.accountKey {
                 names += key.split(separator: "/").map(String.init).filter { $0 != issue.harness }

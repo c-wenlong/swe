@@ -191,26 +191,66 @@ class TestIssueWorktree(unittest.TestCase):
             Path(manage.issue_worktree_path("o/r", 9, self.home)).exists())
 
     def test_two_first_resolves_share_one_clone(self):
-        # Two issues of a new repo at once: one clone, both checkouts.
+        # Two issues of a new repo at once: one clone, both checkouts. The
+        # second resolve is started from inside the first one's clone and
+        # the clone waits until it is queued on the mirror lock, so the
+        # race window is held open by events rather than a sleep.
         import threading
-        import time
 
-        real = gh.run_gh
-
-        def slow_clone(*args, **kwargs):
-            time.sleep(0.3)
-            return real(*args, **kwargs)
-
+        real_clone = gh.run_gh
+        real_lock = manage._mirror_lock
+        cloning = threading.Event()
+        second_waiting = threading.Event()
+        contended = []
         results = {}
-        with patch("swe.github.gh.run_gh", side_effect=slow_clone):
-            threads = [threading.Thread(
-                target=lambda n=n: results.update(
-                    {n: manage.issue_worktree("o/r", n, self.home)}))
-                for n in (7, 8)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join(30)
+
+        class SpyLock:
+            def __init__(self, lock):
+                self.lock = lock
+
+            def __enter__(self):
+                if cloning.is_set() and not second_waiting.is_set() \
+                        and threading.current_thread() is second:
+                    # Signal only once the lock is proven held by the
+                    # first resolve. A lock that lets the second in at
+                    # once never signals, so the clone waits out its cap
+                    # and the test fails rather than racing.
+                    if self.lock.acquire(blocking=False):
+                        contended.append(False)
+                        return self
+                    contended.append(True)
+                    second_waiting.set()
+                self.lock.acquire()
+                return self
+
+            def __exit__(self, *exc):
+                self.lock.release()
+                return False
+
+        def resolve(n):
+            results[n] = manage.issue_worktree("o/r", n, self.home)
+
+        second = threading.Thread(target=resolve, args=(8,))
+        saw_second = []
+
+        def gated_clone(*args, **kwargs):
+            if not cloning.is_set():
+                cloning.set()
+                second.start()
+                saw_second.append(second_waiting.wait(10))
+            return real_clone(*args, **kwargs)
+
+        with patch("swe.github.gh.run_gh", side_effect=gated_clone), \
+                patch.object(manage, "_mirror_lock",
+                             lambda mirror: SpyLock(real_lock(mirror))):
+            first = threading.Thread(target=resolve, args=(7,))
+            first.start()
+            first.join(30)
+            second.join(30)
+        self.assertEqual(contended, [True],
+                         "the second resolve was not held at the lock")
+        self.assertEqual(saw_second, [True],
+                         "the second resolve never reached the lock")
         self.assertEqual(self.clones, 1)
         for n in (7, 8):
             self.assertEqual(results[n].status, "ok", results[n].error)
@@ -357,6 +397,8 @@ class TestBuildPrompt(unittest.TestCase):
 
     def test_issue_number(self):
         for ref, want in (("5", 5), ("#5", 5), ("0", None), ("abc", None),
+                          ("²", None), ("#٣", None),
+                          ("https://github.com/o/r/issues/٣", None),
                           ("https://github.com/o/r/issues/12", 12),
                           ("https://github.com/o/r/pull/12", None)):
             self.assertEqual(gh_issues.issue_number(ref), want, ref)

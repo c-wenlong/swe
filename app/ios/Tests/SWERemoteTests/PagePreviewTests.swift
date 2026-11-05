@@ -216,8 +216,13 @@ final class LockedWebViewTests: XCTestCase {
         // The web view holds its delegate weakly: keep the lock alive to
         // the end, or the navigation below would meet no delegate at all.
         defer { withExtendedLifetime(lock) {} }
+        let before = lock.decided
         _ = try? await view.evaluateJavaScript("location.href = '\(server.base)/next'; 1")
-        try await Task.sleep(for: .milliseconds(500))
+        // Wait for the lock to decide the navigation, not a fixed time.
+        for _ in 0..<100 where lock.decided == before {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertGreaterThan(lock.decided, before, "the navigation never reached the lock")
         XCTAssertEqual(view.url?.absoluteString, "about:blank")
         let title = try await view.evaluateJavaScript("document.title") as? String
         XCTAssertEqual(title, "page")
@@ -249,10 +254,17 @@ final class LockedWebViewTests: XCTestCase {
         defer { server.stop() }
         let (view, lock) = try await loaded(page(server.base))
         defer { withExtendedLifetime(lock) {} }
-        try await Task.sleep(for: .seconds(1))
+        // Every subresource settled (the blocked ones fail at once) and
+        // the data image drew: whatever was going to load has tried.
+        var settled = false
+        for _ in 0..<100 where !settled {
+            let state = try await view.evaluateJavaScript(
+                "document.readyState + ' ' + document.getElementById('i').naturalWidth") as? String
+            settled = state == "complete 4"
+            if !settled { try await Task.sleep(for: .milliseconds(20)) }
+        }
+        XCTAssertTrue(settled, "the page never finished loading")
         XCTAssertEqual(server.connections, 0, "a locked preview reached the network")
-        let width = try await view.evaluateJavaScript("document.getElementById('i').naturalWidth") as? Int
-        XCTAssertEqual(width, 4)
     }
 }
 

@@ -308,10 +308,6 @@ class McpAddRemoveTest(unittest.TestCase):
         self.assertEqual(rows["shared"]["in_hub"], True)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class HttpTransportRoundTripTest(unittest.TestCase):
     """An explicit and an implicit http read the same; sse stays distinct."""
 
@@ -330,3 +326,7 @@ class HttpTransportRoundTripTest(unittest.TestCase):
         self.assertEqual(get_conversion_issues(sse, "standard", "droid"), [])
         canonical = get_format_handler("standard").parse(sse)
         self.assertEqual(get_format_handler("droid").emit(canonical)["type"], "sse")
+
+
+if __name__ == "__main__":
+    unittest.main()

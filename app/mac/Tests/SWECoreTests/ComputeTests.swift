@@ -302,7 +302,23 @@ import Testing
         let item = CleanupItem.process(swe, harness: "claude")
         let order = ComputeSummary.killOrder(for: item, in: [launchd, swe, helper],
                                              selfPID: 99, ancestors: [1])
-        #expect(order == [10])
+        // The helper runs under SWE, so it is SWE's own too.
+        #expect(order.isEmpty)
+    }
+
+    /// A `claude` SWE started for its own reads is attributed to Claude;
+    /// "Quit all" must leave it (and what it spawned) alone while the
+    /// user's own claude still goes.
+    @Test func killOrderSkipsWhatRunsUnderSWE() {
+        let swe = Self.proc(99, 1, path: "/Applications/SWE.app/Contents/MacOS/SWE")
+        let probe = Self.proc(20, 99, path: "/opt/homebrew/bin/claude")
+        let probeChild = Self.proc(21, 20, path: "/x/node")
+        let users = Self.proc(30, 1, path: "/opt/homebrew/bin/claude")
+        let samples = [swe, probe, probeChild, users]
+        #expect(ComputeSummary.killOrder(for: .process(probe, harness: "claude"), in: samples,
+                                         selfPID: 99, ancestors: [1]).isEmpty)
+        #expect(ComputeSummary.killOrder(for: .process(users, harness: "claude"), in: samples,
+                                         selfPID: 99, ancestors: [1]) == [30])
     }
 
     @Test func aHarnessRootQuitsAlone() {

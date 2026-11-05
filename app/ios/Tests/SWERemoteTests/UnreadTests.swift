@@ -207,10 +207,6 @@ final class UnreadTests: XCTestCase {
 
     @MainActor
     func testAReadStaysWithTheHubItWasMadeOn() async {
-        func hub(_ host: String) -> PairedHub {
-            PairedHub(baseURL: URL(string: "http://\(host):8477")!,
-                      credential: Credential(deviceId: "d-\(host)", credential: "c", name: nil))
-        }
         var list = HubList()
         list.adopt(hub("mac"))
         list.adopt(hub("server"))
