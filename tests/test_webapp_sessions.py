@@ -916,6 +916,20 @@ return div.innerHTML;
         self.assertIsNone(out["junk"])
         self.assertEqual(out["lines"], {"ctxTop": ["a"], "del": ["b"], "add": ["B"], "ctxBot": ["c"]})
 
+    def test_an_empty_side_has_no_lines(self):
+        """The Swift ToolDiff.diff's rule: a Write (no old text) is all
+        added lines, never a removed blank one, and its trailing newline
+        is an added blank line on every client, not a context row."""
+        out = self.run_js("""
+          return [T.diffLines("", "a"), T.diffLines("", "a\\nb\\n"), T.diffLines("x", ""),
+                  T.diffLines("", "")];""")
+        self.assertEqual(out, [
+            {"ctxTop": [], "del": [], "add": ["a"], "ctxBot": []},
+            {"ctxTop": [], "del": [], "add": ["a", "b", ""], "ctxBot": []},
+            {"ctxTop": [], "del": ["x"], "add": [], "ctxBot": []},
+            {"ctxTop": [], "del": [], "add": [], "ctxBot": []},
+        ])
+
     def test_tool_args_that_are_not_strings_render_no_diff(self):
         """args_full is the transcript's tool input as the agent sent it,
         so a field can be an array or an object: no diff, no throw."""
