@@ -14,7 +14,7 @@ at `/` is the client for browsers and other devices.
 | `Sources/SWERemote/Hub/` | Wire types, `HubClient` (one method per route), the SSE reader, `AppModel` (pairing, sessions, inbox), `ChatModel` (one open chat), `Attachments` (the composer's picked files), `TasksModel`, `IssuesModel` and `PullsModel` (the Tasks and GitHub tabs' data), `NewSession` (what the launch sheets offer, and the launch poll), `UsageModel` and `UsageFormat` (the Usage tab's data and number formatting), `PromptCompletion` (the prompt box's `@` and `/` menus), and the diff, markdown and page-preview helpers |
 | `Sources/SWERemote/Hub/SSH*.swift`, `ConsoleModel.swift` | The console: this phone's SSH key (`SSHIdentity`), the hub's `/v1/ssh` answer and the saved targets (`SSHTarget`), the SwiftNIO SSH shell with pinned host keys (`SSHShell`), and the console's state (`ConsoleModel`) |
 | `Sources/SWERemote/Share/`, `Sources/SWEShare/` | The share extension: what a share carries and how it sends (`ShareItems`, `ShareModel`, compiled into the app too so the tests reach them), and the extension's own view controller and sheet |
-| `Sources/SWERemote/Widget/`, `Sources/SWEWidget/` | The home screen widget: the snapshot it draws, its store in the App Group, the summary and fetch rules and the `quiver://session` link (shared with the app, which rewrites the snapshot after each refresh), and the WidgetKit extension itself |
+| `Sources/SWERemote/Widget/`, `Sources/SWEWidget/` | The home screen widget: the snapshot it draws, its store in the App Group, the summary and fetch rules and the `swe://session` link (shared with the app, which rewrites the snapshot after each refresh), and the WidgetKit extension itself |
 | `Sources/SWERemote/Theme/` | The Mac app's theme ported to iOS: the same hex values and roles, cards, list rows, badges, buttons |
 | `Sources/SWERemote/Views/` | Welcome and pairing, Sessions (with rename, fork and the new-session sheet), Chat, Inbox, Tasks, GitHub (issues and pull requests, their detail pages and launch sheets), Usage (limits and spend), Pair requests and devices, Console, the QR scanner |
 | `Tests/SWERemoteTests/` | Unit tests for parsing, pairing links, diffs, grouping, chat event handling, the GitHub and Tasks rules, usage formatting and the console |
@@ -40,7 +40,7 @@ copies the Mac app's `harness-*.svg` into `Assets.xcassets/Harnesses`.
 - **QR:** on the hub machine, open SWE › Settings › Remote › Pair a
   device (the Mac app, or the hub's web app), choose SWE app, and
   scan its code, either in the app or with the Camera app (the
-  `quiver://pair` link opens the app, which names the hub and asks
+  `swe://pair` link opens the app, which names the hub and asks
   before pairing with it). A server with neither runs
   `swe remote setup` and then `swe remote pair --app`.
 - **Token:** paste the token `swe remote pair` prints.
@@ -80,7 +80,7 @@ screen for the hub on screen in the app: how many sessions wait on you
 (the Inbox's "Waiting on you" rows, plus sessions marked approval or
 follow-up), how many are still working, and today's spend. The medium
 size lists up to three of those sessions; tapping one opens its chat
-through `quiver://session/<key>?hub=<hub>`, and tapping anywhere else
+through `swe://session/<key>?hub=<hub>`, and tapping anywhere else
 opens the app.
 
 - **Refresh:** the widget asks the hub (`/v1/sessions`, `/v1/inbox`,
@@ -153,11 +153,12 @@ The console's SSH tests need a server and skip without one.
 `script/console-sshd.sh` starts a throwaway sshd on 127.0.0.1:2222 (its
 own host key, config and authorized_keys in a temp folder; nothing in
 `~/.ssh` or `/etc/ssh` changes) that trusts a key made fresh for that
-run, and prints the `TEST_RUNNER_QUIVER_SSH_*` variables, the key
+run, and prints the `TEST_RUNNER_SWE_SSH_*` variables, the key
 included, to run the tests with.
 
 `project.yml` carries the pieces that matter: bundle id
-`com.swe.remote`, the `quiver` URL scheme so pair QRs open the app,
+`com.swe.remote`, the `swe` URL scheme so pair QRs open the app (and
+`quiver`, so links written before the rename still do),
 the scoped ATS exceptions for a plain-HTTP hub on the tailnet
 (`NSAllowsLocalNetworking` for IP literals and local names — which is
 what covers Tailscale CGNAT addresses — plus an `NSExceptionDomains`
