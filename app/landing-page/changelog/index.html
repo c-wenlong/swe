@@ -139,6 +139,26 @@ holding the lock every catalog read and price save takes, so a slow
 network stalled the Models search and the Pricing page. The fetch now
 runs outside it, and a download cut short counts as tried for the day.</p>
 </li>
+<li><p><strong>A model or effort switch is no longer typed into a TUI that can't
+take it.</strong> On a tmux session the hub typed <code>/model &lt;v&gt;</code> or <code>/effort &lt;v&gt;</code> into any harness's pane, so opencode or codex (for effort) got the
+line as a prompt to the model. It now refuses with <code>unsupported_control</code>
+unless the harness's TUI is known to run the command, the rule the
+session's <code>model_modes</code> and a launch already follow.</p>
+</li>
+<li><p><strong>A status feed with a <code>NaN</code> or out-of-range time no longer blanks
+the web Status page.</strong> Python's JSON reader takes <code>NaN</code>, <code>Infinity</code>
+and <code>1e400</code>, and the incident time went back out as bare <code>NaN</code>, which
+the browser refuses to parse. Such a time now reads as unknown, as it
+does in the Mac app.</p>
+</li>
+<li><p><strong>A late approval tap can no longer answer the next terminal prompt.</strong>
+Once a prompt was answered at the terminal, its request id stopped
+being checked, so a phone's delayed tap on it could answer the next
+prompt the agent showed before the hub had named it. A replaced or
+cleared id is now refused. An approval's key walk also shares the
+pane's write lock, so a message steered in at the same moment can't
+land between its arrow keys.</p>
+</li>
 <li><p><strong>Archiving Qwen Code stops its shared hooks, and its hook settings
 count.</strong> The hook contract table keyed Qwen Code as <code>qwen</code>, its
 command, while harness.json calls it <code>qwen-code</code>. Archiving qwen-code

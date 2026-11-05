@@ -34,6 +34,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   network stalled the Models search and the Pricing page. The fetch now
   runs outside it, and a download cut short counts as tried for the day.
 
+- **A model or effort switch is no longer typed into a TUI that can't
+  take it.** On a tmux session the hub typed `/model <v>` or `/effort
+  <v>` into any harness's pane, so opencode or codex (for effort) got the
+  line as a prompt to the model. It now refuses with `unsupported_control`
+  unless the harness's TUI is known to run the command, the rule the
+  session's `model_modes` and a launch already follow.
+
+- **A status feed with a `NaN` or out-of-range time no longer blanks
+  the web Status page.** Python's JSON reader takes `NaN`, `Infinity`
+  and `1e400`, and the incident time went back out as bare `NaN`, which
+  the browser refuses to parse. Such a time now reads as unknown, as it
+  does in the Mac app.
+
+- **A late approval tap can no longer answer the next terminal prompt.**
+  Once a prompt was answered at the terminal, its request id stopped
+  being checked, so a phone's delayed tap on it could answer the next
+  prompt the agent showed before the hub had named it. A replaced or
+  cleared id is now refused. An approval's key walk also shares the
+  pane's write lock, so a message steered in at the same moment can't
+  land between its arrow keys.
+
 - **Archiving Qwen Code stops its shared hooks, and its hook settings
   count.** The hook contract table keyed Qwen Code as `qwen`, its
   command, while harness.json calls it `qwen-code`. Archiving qwen-code

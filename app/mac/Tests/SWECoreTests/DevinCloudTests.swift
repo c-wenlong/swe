@@ -639,7 +639,7 @@ private final class Changes: Sendable {
         let local = SessionInfo(id: "a", harness: "gemini", agent: "Gemini", cwd: "/c/quiver", title: "Local",
                                 titleSource: nil, lastActiveAt: now.addingTimeInterval(-60), status: nil, resume: nil)
         let model = SessionsModel(source: FakeSessionSource(list: SessionList(sessions: [local], failures: [])),
-                                  ledger: FakeSessionLedger(), now: { now })
+                                  ledger: FakeSessionLedger(), now: { now }, searchIndexingEnabled: false)
         model.hideTrivial = true
         model.ledgerScanned = true
         await model.load()
