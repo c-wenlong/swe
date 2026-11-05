@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **The hub's session journals are private to your account.** Every
+  prompt, reply and tool call a remote session sees is journaled under
+  `~/.swe/data/remote/journal/`, which was created 0755 with 0644 files,
+  so any other local account could read them. The folder is now 0700
+  (an existing one is tightened) and its files 0600.
+
 - **A resolve prompt no longer carries strangers' comments.** Anyone can
   comment on a public issue, and every comment went word for word into
   the first prompt of the agent resolving it. The prompt now quotes the
@@ -27,6 +33,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command, but sessions carry the registry id `qwen-code`, so a file
   sent from a phone arrived as an `[Attached file: …]` line instead of
   an `@` reference.
+
+- **A satellite's malformed push no longer breaks the hub's routes.**
+  `/v1/agent/register` answered 500 when `machine` was not an object; an
+  uploaded event whose `data` was not an object failed its whole batch,
+  which the agent then resent forever, journaling the good events again;
+  a "/" menu push with the wrong shapes turned that satellite's menu
+  route into a 500; and `NaN`/`Infinity` (or `1e400`) in any request
+  body was stored and served back, which no client's JSON parser
+  accepts. Each is now a 422, a skipped event, a skipped row or a 400.
+
+- **An approval resolved without a request id now kills its ntfy
+  buttons.** The hub clears every pending approval on such a resolve,
+  but the notification tokens were retired only by exact request id, so
+  the buttons of the cleared prompts stayed spendable until they expired
+  and could answer the next prompt on the session.
+
+- **An opencode approval's request id can no longer reach another serve
+  route.** The hub put the client's request id into the opencode serve
+  URL as typed, so an id like `../../<session>/abort` posted to a
+  different route; ids and session ids are now one quoted path segment.
 
 - **A wildcard hub bind no longer turns off the Host check, and a
   second `swe remote serve` on a taken port no longer disturbs the

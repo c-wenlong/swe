@@ -32,17 +32,40 @@ class SetupWizardTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_backup_file_preserves_source_and_uses_timestamped_sibling(self):
+    def test_backup_file_copies_into_the_ignored_backups_dir(self):
+        # A sibling *.bak.<time> landed in the versioned hub, where git
+        # picked it up; backups/ is in the hub's .gitignore.
+        from swe.paths import GITIGNORE_BODY, backups_dir_for
+
         with tempfile.TemporaryDirectory() as tmp:
-            source = Path(tmp) / "config.json"
+            home = Path(tmp)
+            source = home / ".swe" / "config" / "config.json"
+            source.parent.mkdir(parents=True)
             source.write_text('{"before": true}\n')
 
-            backup = backup_file(source, now=datetime(2026, 7, 30, 12, 34, 56))
+            backup = backup_file(source, home=home)
 
             self.assertEqual(source.read_text(), '{"before": true}\n')
             self.assertIsNotNone(backup)
             self.assertEqual(backup.read_text(), source.read_text())
-            self.assertIn("config.json.bak.20260730_123456", backup.name)
+            self.assertEqual(backup.parent, backups_dir_for(home))
+            self.assertEqual(list(source.parent.iterdir()), [source])
+            self.assertIn("backups/", GITIGNORE_BODY.splitlines())
+            self.assertIsNone(backup_file(home / "missing.json", home=home))
+
+    def test_backup_of_a_symlinked_file_keeps_the_old_contents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            real = home / "dotfiles" / "harness.json"
+            real.parent.mkdir()
+            real.write_text("old")
+            link = home / ".swe" / "config" / "harness.json"
+            link.parent.mkdir(parents=True)
+            link.symlink_to(real)
+            backup = backup_file(link, home=home)
+            link.write_text("new")  # the wizard writes through the link
+            self.assertFalse(backup.is_symlink())
+            self.assertEqual(backup.read_text(), "old")
 
     def test_yes_no_reprompts_then_accepts_default(self):
         answers = iter(["maybe", ""])

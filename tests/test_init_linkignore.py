@@ -69,6 +69,32 @@ class LoadTest(unittest.TestCase):
             self.assertIn(".linkignore", str(ctx.exception))
 
 
+    def test_non_utf8_file_raises_link_ignore_error(self):
+        # UnicodeDecodeError escaped as a traceback from `swe init --check`.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            linkignore_file(home).write_bytes(b"\xff\xfe.agents\n")
+            with self.assertRaises(LinkIgnoreError) as ctx:
+                load_linkignore(home)
+            self.assertIn("UTF-8", str(ctx.exception))
+
+
+class ChainLandsOnTest(unittest.TestCase):
+    def test_a_symlink_loop_lands_nowhere(self):
+        # Path.resolve raises RuntimeError on a loop before Python 3.13,
+        # which crashed `swe init --check` on a self-linked CLAUDE.md.
+        from swe.init.layout import _chain_lands_on
+
+        with tempfile.TemporaryDirectory() as tmp:
+            loop = Path(tmp) / "CLAUDE.md"
+            loop.symlink_to("CLAUDE.md")
+            shared = Path(tmp) / "AGENTS.md"
+            shared.write_text("x")
+            self.assertFalse(_chain_lands_on(loop, shared))
+            with mock.patch.object(Path, "resolve", side_effect=RuntimeError("loop")):
+                self.assertFalse(_chain_lands_on(loop, shared))
+
+
 class MatchTest(unittest.TestCase):
     def test_exact_wildcard_and_parent_matches(self):
         home = Path("/h")

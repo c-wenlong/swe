@@ -8,12 +8,14 @@ drawing a bubble, and an idle session or a reconnect drops what no final
 claimed."""
 
 import json
+import re
 import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
+from tests._node_timers import FAKE_TIMERS
 from tests.test_webapp_chat_queue import CHAT_JS, PRELUDE
 
 # The few DOM parts the bubbles need that the tray's stub leaves out.
@@ -62,7 +64,7 @@ const docListeners = {};
 document.addEventListener = (t, f) => { docListeners[t] = f; };
 """
 
-HELPERS = r"""
+HELPERS = FAKE_TIMERS + r"""
 const T = SessionChat._test;
 T.chat.key = 'claude:s1'; T.chat.gen = 1; T.chat.rowKnown = true;
 T.chat.row = { status: 'active', ownership: 'attached' };
@@ -80,7 +82,6 @@ const drain = () => {
 const shape = () => log.children.map((c) => c === T.chat.streamBox
   ? ['streams', c.children.map((b) => [b.dataset.streamId, b.streamText])]
   : [c.className, c.dataset.seq || '']);
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 """
 
 
@@ -137,9 +138,12 @@ class TestLiveReply(ChatScript):
 
     def test_deltas_repaint_throttled_and_the_final_takes_the_bubbles_place(self):
         out = self.run_js("""
+            const advance = fakeTimers();
             delta('x', 'Hel', 1); delta('x', 'lo **wor', 2);
             const throttled = [T.chat.streamPaint !== null, shape()];
-            await wait(T.STREAM_MS.paint + 20);
+            advance(T.STREAM_MS.paint - 1);
+            const early = shape();
+            advance(1);
             const painted = shape();
             const html = T.chat.streamBox.children[0].innerHTML;
             // A tool card and the final arrive together: the card is shown
@@ -152,9 +156,10 @@ class TestLiveReply(ChatScript):
             const late = shape();
             drain();
             const final = log.children[log.children.length - 1];
-            return { throttled, painted, html, held, late, after: shape(), arrive: final.classList.contains('arrive'),
+            return { throttled, early, painted, html, held, late, after: shape(), arrive: final.classList.contains('arrive'),
                      queueEmpty: T.chat.pending.length === 0 };""")
         self.assertEqual(out["throttled"], [True, []])
+        self.assertEqual(out["early"], [], "nothing is drawn before the throttle's pause ends")
         self.assertEqual(out["painted"], [["streams", [["x", "Hello **wor"]]]])
         self.assertIn('class="text"', out["html"])
         self.assertEqual(out["held"], [["tool arrive", "5"], ["streams", [["x", "Hello **wor"]]]])
@@ -180,11 +185,13 @@ class TestLiveReply(ChatScript):
 
     def test_idle_sweeps_an_orphan_and_clear_drops_everything(self):
         out = self.run_js("""
-            T.STREAM_MS.idleGrace = 0;
+            const advance = fakeTimers();
             delta('x', 'cut off', 1); T.paintStreams();
             frame({ type: 'session.status', seq: 3, data: { status: 'idle' } }); drain();
             const kept = shape();
-            await wait(10);
+            advance(T.STREAM_MS.idleGrace - 1);
+            const graced = shape();
+            advance(1);
             const swept = shape();
             delta('y', 'mid', 1); T.paintStreams();
             T.clearStreams();
@@ -193,13 +200,15 @@ class TestLiveReply(ChatScript):
             delta('z', 'during resync', 1); T.paintStreams();
             const held = [shape(), T.chat.held.length];
             T.chat.held = null;
-            return { kept, swept, cleared: held };""")
+            return { kept, graced, swept, cleared: held };""")
         self.assertEqual(out["kept"], [["streams", [["x", "cut off"]]]], "the grace runs first")
+        self.assertEqual(out["graced"], out["kept"], "the bubble stays for the whole grace")
         self.assertEqual(out["swept"], [])
         self.assertEqual(out["cleared"], [[], 0])
 
     def test_the_sweep_takes_only_bubbles_open_when_the_status_arrived(self):
         out = self.run_js("""
+            const advance = fakeTimers();
             T.STREAM_MS.idleGrace = 0;
             delta('old', 'cut off', 1);
             // The reveal holds the idle status behind a tool card while the
@@ -208,7 +217,7 @@ class TestLiveReply(ChatScript):
             appended(1, { kind: 'tool_use', tool: { name: 'Bash', call_id: 'c' } });
             frame({ type: 'session.status', seq: 2, data: { status: 'idle' } });
             delta('new', 'next turn', 1);
-            await wait(10);
+            advance(0);
             T.paintStreams();
             const live = shape().filter((e) => e[0] === 'streams');
             drain();
@@ -230,12 +239,13 @@ class TestLiveReply(ChatScript):
         state but nothing is drawn and the cursor stays; showing the tab
         draws the bubbles and reveals every held event, in order."""
         out = self.run_js("""
+            const advance = fakeTimers();
             T.chat.opened = true; T.chat.stream = {};
             document.hidden = true; document.visibilityState = 'hidden';
             delta('x', 'Hel', 1); delta('x', 'lo', 2);
             appended(5, { kind: 'system', text: 'one' });
             appended(6, { kind: 'system', text: 'two' });
-            await wait(T.STREAM_MS.paint + 20);
+            advance(T.STREAM_MS.paint * 10);
             const hidden = { shape: shape(), pending: T.chat.pending.length, seq: T.chat.seq,
                              bubble: T.chat.replies.shown().map((b) => b.text) };
             document.hidden = false; document.visibilityState = 'visible';
@@ -404,10 +414,20 @@ class TestStreamingMarkdown(ChatScript):
         self.assertTrue(out["idle"], "a paint with no new text touches nothing")
 
     def test_the_log_is_no_live_region_and_a_final_is_announced(self):
+        # The shell's markup is a template in paintShell, which the page
+        # does not export, so its two tags are read from the source: each
+        # whole opening tag, whatever its attribute order or line breaks.
         source = CHAT_JS.read_text(encoding="utf-8")
-        log_tag = next(line for line in source.splitlines() if 'id="chat-log"' in line)
-        self.assertNotIn("aria-live", log_tag)
-        self.assertIn('id="chat-announce" role="status" aria-live="polite"', source)
+
+        def tag(element_id):
+            tags = re.findall(r'<[a-z]+\b[^>]*\bid="%s"[^>]*>' % element_id, source)
+            self.assertEqual(len(tags), 1, element_id)
+            return tags[0]
+
+        self.assertNotIn("aria-live", tag("chat-log"))
+        announce = tag("chat-announce")
+        self.assertIn('role="status"', announce)
+        self.assertIn('aria-live="polite"', announce)
         out = self.run_js("""
             const say = ids['chat-announce'] = el('div');
             const settle = () => new Promise((r) => setImmediate(r));

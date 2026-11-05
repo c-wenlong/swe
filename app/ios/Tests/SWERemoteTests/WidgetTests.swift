@@ -11,15 +11,14 @@ private func inbox(_ key: String, status: String, at: Double, github: Bool = fal
               status: status, lastActiveAt: at, requestId: nil, kind: github ? "github" : nil)
 }
 
-private func hub(_ host: String = "mac.tail.ts.net") -> PairedHub {
-    PairedHub(baseURL: URL(string: "http://\(host):8477")!,
-              credential: Credential(deviceId: "d", credential: "c", name: nil))
-}
-
-private func tempStore() -> WidgetSnapshotStore {
-    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("widget-\(UUID().uuidString)")
-    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    return WidgetSnapshotStore(directory: dir)
+private extension XCTestCase {
+    /// A snapshot store in its own temp folder, removed when the test ends.
+    func tempStore() -> WidgetSnapshotStore {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("widget-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return WidgetSnapshotStore(directory: dir)
+    }
 }
 
 private let now = Date(timeIntervalSince1970: 1_800_000_000)

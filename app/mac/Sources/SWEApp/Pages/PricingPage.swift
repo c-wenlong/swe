@@ -67,7 +67,7 @@ private struct PricingContent: View {
         // whole read on first open, one after another.
         .task(id: LoadKey(period: model.period, harness: model.harnessFilter,
                           scans: app.overview?.completedScans)) { await model.load() }
-        .quiverSheet(item: $editing) { row in
+        .cardSheet(item: $editing) { row in
             PriceSheet(model: model, row: row)
         }
     }

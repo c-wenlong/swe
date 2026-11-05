@@ -7,7 +7,6 @@ import struct
 import subprocess
 import tempfile
 import threading
-import time
 import unittest
 import xml.etree.ElementTree as ET
 import zlib
@@ -891,14 +890,29 @@ class TestOwnerTailnetCaller(_Settings):
 
 
 class TestSessionSearch(_Settings):
+    def setUp(self):
+        super().setUp()
+        # Each background pass the page starts signals when it ends, so a
+        # test waits for that pass itself rather than polling the lock
+        # (which also read "idle" before a pass had started).
+        self.passes = threading.Semaphore(0)
+        real = settings_page._first_pass
+
+        def tracked(home):
+            try:
+                real(home)
+            finally:
+                self.passes.release()
+
+        patcher = patch.object(settings_page, "_first_pass", side_effect=tracked)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def wait_idle(self):
         from swe.sessions import search_writer
 
-        for _ in range(500):
-            if not search_writer.is_running(self.home):
-                return
-            time.sleep(0.01)
-        self.fail("the pass never finished")
+        self.assertTrue(self.passes.acquire(timeout=30), "the pass never finished")
+        self.assertFalse(search_writer.is_running(self.home))
 
     def get(self, cred):
         status, data = self.srv.request("GET", "/v1/app/settings",

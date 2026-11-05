@@ -447,7 +447,7 @@ private struct SettingsSectionView: View {
             detail: releaseDetail(updates.release)) {
                 HStack(spacing: 12) {
                     if prod {
-                        Button("Check for Updates…") { AppUpdater.shared.checkForUpdates() }
+                        Button("Check for updates…") { AppUpdater.shared.checkForUpdates() }
                             .secondaryButton()
                             .disabled(!AppUpdater.shared.canCheckForUpdates)
                     } else {

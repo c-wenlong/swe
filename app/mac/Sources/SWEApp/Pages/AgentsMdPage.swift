@@ -905,7 +905,7 @@ private struct ChaptersEditor: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxHeight: .infinity)
-        .quiverSheet(item: $creating) { initial in
+        .cardSheet(item: $creating) { initial in
             NewChapterSheet(initial: initial)
         }
     }
@@ -1697,7 +1697,7 @@ private struct ViewCompiledButton: View {
         }
         .secondaryButton()
         .hoverTip(stateText, replacesLabel: false)
-        .quiverSheet(isPresented: $showing) {
+        .cardSheet(isPresented: $showing) {
             CompiledOutputSheet(path: outputPath, onOpenChapter: onOpenChapter)
         }
     }
@@ -1823,7 +1823,9 @@ private struct CompiledOutputSheet: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        ForEach(sections(of: document.text), id: \.name) { section in
+                        // By position: the preamble has no name, and a chapter
+                        // index.txt lists twice compiles in twice.
+                        ForEach(Array(sections(of: document.text).enumerated()), id: \.offset) { _, section in
                             VStack(alignment: .leading, spacing: 6) {
                                 if let name = section.name {
                                     Button {

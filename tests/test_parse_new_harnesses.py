@@ -3,6 +3,7 @@
 import json
 import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -50,7 +51,8 @@ class ParseCopilotTest(unittest.TestCase):
             self.assertEqual(len(sessions), 1)
             self.assertEqual(sessions[0].tool_name, "copilot")
             self.assertEqual(sessions[0].path, "/tmp/proj")
-            self.assertIn("login", sessions[0].title)
+            self.assertEqual(sessions[0].title, "fix the login bug")
+            self.assertEqual(sessions[0].title_source, "")
             self.assertEqual(sessions[0].session_id, "s1")
 
 
@@ -292,6 +294,28 @@ class ParseCrushTest(unittest.TestCase):
             self.assertEqual(sessions[0].tool_name, "crush")
             self.assertEqual(sessions[0].path, "/Users/test/Downloads")
             self.assertEqual(sessions[0].session_id, "sess1")
+
+
+class ParseCrushFailureTest(unittest.TestCase):
+    def test_a_crash_is_recorded_not_swallowed(self):
+        # Swallowed, it read as "no Crush history" and the aggregator
+        # pruned Crush's cached sessions.
+        from swe.sessions import failures
+        from swe.sessions.parsers import parse_crush
+
+        with tempfile.TemporaryDirectory() as tmp:
+            projects = Path(tmp) / "projects.json"
+            projects.write_text("{not json")
+            failures.clear()
+            try:
+                with mock.patch(
+                    "swe.sessions.parsers.os.path.expanduser",
+                    side_effect=lambda p: str(projects) if p.endswith("projects.json") else p,
+                ):
+                    self.assertEqual(parse_crush(), [])
+                self.assertIn("crush", failures.snapshot())
+            finally:
+                failures.clear()
 
 
 class ParseGrokTest(unittest.TestCase):
@@ -684,13 +708,31 @@ class TrackedCountsTest(unittest.TestCase):
     def test_session_counts_includes_zero_for_tracked(self):
         from swe.sessions.usage import session_counts_100d, tracked_tool_names
 
+        from swe.sessions.models import Session
+
         tracked = tracked_tool_names()
         self.assertIn("copilot", tracked)
         self.assertIn("grok", tracked)
         self.assertIn("cline", tracked)
-        counts = session_counts_100d()
-        for name in tracked:
-            self.assertIn(name, counts)
+        now_ms = time.time() * 1000
+        old_ms = (time.time() - 200 * 86400) * 1000
+        # Stub the scan and the cache: unpatched, this walks every
+        # transcript under the real HOME and rewrites the counts cache.
+        sessions = [
+            Session(timestamp=now_ms, agent="Copilot", path="/p", tool_name="copilot"),
+            Session(timestamp=now_ms, agent="Copilot", path="/p", tool_name="copilot"),
+            Session(timestamp=old_ms, agent="Grok", path="/p", tool_name="grok"),
+        ]
+        with mock.patch("swe.sessions.usage.get_all_sessions", return_value=sessions), \
+                mock.patch("swe.sessions.usage._load_cached_counts", return_value=None), \
+                mock.patch("swe.sessions.usage._save_cached_counts") as save, \
+                mock.patch("swe.sessions.aggregator._load_cached_sessions", return_value=None):
+            counts = session_counts_100d()
+        self.assertEqual(set(counts), tracked)
+        self.assertEqual(counts["copilot"], 2)
+        self.assertEqual(counts["grok"], 0)  # outside the 100-day window
+        self.assertEqual(counts["cline"], 0)
+        save.assert_called_once()
 
 
 class ParseCrushEdgeTest(unittest.TestCase):

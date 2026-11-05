@@ -11,8 +11,8 @@ file sitting in a harness root, so:
   all      every manifest on disk, cached-but-uninstalled included
 """
 
+import contextlib
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -277,31 +277,40 @@ class MalformedRecordTest(_NoRegistry, unittest.TestCase):
         path.write_text(json.dumps(data))
 
     def test_wrong_shapes_do_not_raise(self):
+        # (file, contents, the rows that still come back). A record whose
+        # key still names a plugin keeps that row; anything else drops.
+        claude_a = [("claude", "a", "dv")]
+        cursor_p = [("cursor", "p", "mk")]
         cases = [
-            (".claude/plugins/installed_plugins.json", []),
-            (".claude/plugins/installed_plugins.json", {"plugins": ["a@dv"]}),
-            (".claude/plugins/installed_plugins.json", {"plugins": {"a@dv": ["x"]}}),
-            (".claude/plugins/installed_plugins.json", {"plugins": {"a@dv": "x"}}),
-            (".claude/settings.json", ["enabledPlugins"]),
-            (".claude/settings.json", {"enabledPlugins": ["a@dv"]}),
-            (".claude/plugins/known_marketplaces.json", ["dv"]),
-            (".claude/plugins/known_marketplaces.json", {"dv": "github"}),
-            (".claude/plugins/known_marketplaces.json", {"dv": {"source": "x"}}),
-            (".factory/plugins/installed_plugins.json", "plugins"),
-            (".cursor/plugins/cache/mk/.claude-plugin/marketplace.json", ["mk"]),
-            (".cursor/plugins/cache/mk/p/.claude-plugin/plugin.json", ["p"]),
-            (".cursor/plugins/cache/mk/p/.claude-plugin/plugin.json", {"name": 3}),
-            (".local/share/devin/cli/plugins/lock.json", []),
-            (".local/share/devin/cli/plugins/lock.json", {"resolved": "x"}),
-            (".local/share/devin/cli/plugins/lock.json", {"resolved": ["x"]}),
+            (".claude/plugins/installed_plugins.json", [], []),
+            (".claude/plugins/installed_plugins.json", {"plugins": ["a@dv"]}, []),
+            (".claude/plugins/installed_plugins.json",
+             {"plugins": {"a@dv": ["x"]}}, claude_a),
+            (".claude/plugins/installed_plugins.json",
+             {"plugins": {"a@dv": "x"}}, claude_a),
+            (".claude/settings.json", ["enabledPlugins"], []),
+            (".claude/settings.json", {"enabledPlugins": ["a@dv"]}, []),
+            (".claude/plugins/known_marketplaces.json", ["dv"], []),
+            (".claude/plugins/known_marketplaces.json", {"dv": "github"}, []),
+            (".claude/plugins/known_marketplaces.json", {"dv": {"source": "x"}}, []),
+            (".factory/plugins/installed_plugins.json", "plugins", []),
+            (".cursor/plugins/cache/mk/.claude-plugin/marketplace.json", ["mk"], []),
+            # The folder still names the plugin when its manifest is junk.
+            (".cursor/plugins/cache/mk/p/.claude-plugin/plugin.json", ["p"], cursor_p),
+            (".cursor/plugins/cache/mk/p/.claude-plugin/plugin.json",
+             {"name": 3}, cursor_p),
+            (".local/share/devin/cli/plugins/lock.json", [], []),
+            (".local/share/devin/cli/plugins/lock.json", {"resolved": "x"}, []),
+            (".local/share/devin/cli/plugins/lock.json", {"resolved": ["x"]}, []),
         ]
-        for rel, data in cases:
+        for rel, data, want in cases:
             with self.subTest(rel=rel, data=data), tempfile.TemporaryDirectory() as tmp:
                 home = Path(tmp)
                 (home / ".claude" / "plugins").mkdir(parents=True)
                 self._write(home, rel, data)
-                for p in discover_plugins(home):
-                    self.assertIsInstance(p.name, str)
+                got = [(p.harness, p.name, p.marketplace)
+                       for p in discover_plugins(home)]
+                self.assertEqual(got, want)
 
     def test_a_single_object_record_and_user_scope_are_read(self):
         """plugin_drift accepts one record object as well as a list, and
@@ -352,13 +361,9 @@ class MalformedRecordTest(_NoRegistry, unittest.TestCase):
             (home / "github").mkdir()
             # A real chdir: relative paths resolve against the process's
             # working directory, which patching os.getcwd does not move.
-            cwd = os.getcwd()
-            os.chdir(home)
-            try:
+            with contextlib.chdir(home):
                 self.assertEqual(_marketplace_sources(home, "claude"),
                                  {"here": home / "mk"})
-            finally:
-                os.chdir(cwd)
 
 
 class ScopeTest(unittest.TestCase):
