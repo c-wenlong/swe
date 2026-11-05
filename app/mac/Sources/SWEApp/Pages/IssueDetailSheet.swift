@@ -112,7 +112,9 @@ struct IssueDetailSheet: View {
                 Text(issue.title).font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
                     .lineLimit(2)
                 Text(["#\(issue.number)", selection.repo, "by \(issue.author)",
-                      (issue.createdAt?.date ?? issue.updatedAt?.date).map { "opened \(UsageFormat.ago($0, now: .now))" }]
+                      // No created time: say updated, never "opened" at the last edit.
+                      issue.createdAt?.date.map { "opened \(UsageFormat.ago($0, now: .now))" }
+                          ?? issue.updatedAt?.date.map { "updated \(UsageFormat.ago($0, now: .now))" }]
                         .compactMap { $0 }.joined(separator: " · "))
                     .font(Theme.caption).foregroundStyle(Theme.textSecondary)
                     .lineLimit(1).truncationMode(.middle)
@@ -259,13 +261,9 @@ struct IssueDetailSheet: View {
     /// A line break in place of the selection, or at the end when the
     /// field reports none.
     private func newline() {
-        guard case .selection(let range) = draftSelection?.indices, range.upperBound <= draft.endIndex else {
-            draft += "\n"
-            return
-        }
-        let at = draft.distance(from: draft.startIndex, to: range.lowerBound)
-        draft.replaceSubrange(range, with: "\n")
-        draftSelection = TextSelection(insertionPoint: draft.index(draft.startIndex, offsetBy: at + 1))
+        let next = Caret.newline(in: draft, replacing: draftSelection)
+        draft = next.text
+        draftSelection = TextSelection(insertionPoint: Caret.index(next.cursor, in: draft))
     }
 
     private func post() {
@@ -278,6 +276,7 @@ struct IssueDetailSheet: View {
                 commentError = error
             } else if draft == text {
                 draft = ""
+                draftSelection = nil
             }
         }
     }

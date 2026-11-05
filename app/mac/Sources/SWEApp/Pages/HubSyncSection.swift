@@ -9,6 +9,9 @@ struct HubSyncSection: View {
     @State private var status: HubSyncStatus?
     @State private var loadError: String?
     @State private var loading = false
+    /// Bumped by each read, so a slower earlier one (the watcher's, the
+    /// Refresh button's) can't land over a newer one or end its spinner.
+    @State private var reads = 0
     @State private var syncing = false
     @State private var result: HubSyncResult?
     @State private var syncError: String?
@@ -83,13 +86,18 @@ struct HubSyncSection: View {
     }
 
     private func load(fetch: Bool) async {
+        reads += 1
+        let mine = reads
         loading = true
-        defer { loading = false }
+        defer { if mine == reads { loading = false } }
         do {
-            status = try await app.swe.hubSyncStatus(fetch: fetch)
+            let next = try await app.swe.hubSyncStatus(fetch: fetch)
+            guard mine == reads else { return }
+            status = next
             loadError = nil
         } catch is CancellationError {
         } catch {
+            guard mine == reads else { return }
             loadError = error.localizedDescription
         }
     }
