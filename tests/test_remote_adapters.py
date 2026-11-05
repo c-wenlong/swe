@@ -1068,6 +1068,37 @@ class TestCodexAppServerEdges(unittest.TestCase):
         self.assertIn("42", server.approvals)  # tracked even without emit
         self.assertTrue(server.dead)           # EOF → marked dead
 
+    def test_read_loop_survives_a_malformed_message(self):
+        # List params on an approval and an unhashable id used to raise
+        # out of the loop, ending the reader while codex kept running.
+        proc = _FakeAppProc()
+        server = inject._AppServer(proc, "thr")
+        import queue as qmod
+        reply_q = qmod.Queue()
+        server.replies[9] = reply_q
+        proc.stdout = io.BytesIO(
+            json.dumps({"id": 1, "method": "x/requestApproval",
+                        "params": [1]}).encode() + b"\n"
+            + json.dumps({"id": [1], "result": {}}).encode() + b"\n"
+            + json.dumps({"id": 9, "result": {"ok": 1}}).encode() + b"\n")
+        inject._appserver_read_loop(server, "k", None, "m1")
+        self.assertIn("1", server.approvals)
+        self.assertEqual(reply_q.get_nowait()["id"], 9)
+
+    def test_server_for_replaces_a_server_whose_reader_died(self):
+        stale = _FakeAppProc()
+        old = inject._AppServer(stale, "old-thread")
+        old.dead = True
+        inject.CodexAppServerInjector._servers["codex:k"] = old
+        proc = _FakeAppProc({
+            "initialize": {"result": {}},
+            "thread/resume": {"result": {"thread": {"id": "t-new"}}},
+        })
+        with self._spawn_patch(proc):
+            server = self._injector()._server_for(self.session)
+        self.assertIs(server.proc, proc)
+        self.assertTrue(stale.killed)
+
     def test_read_loop_stdout_error_marks_dead(self):
         class BadOut:
             def __iter__(self):

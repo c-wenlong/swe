@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **One odd message from codex no longer stalls a Codex session.** An
+  app-server message the hub couldn't read (an approval with list
+  `params`, an unhashable id) ended the reader while codex kept running,
+  so every later send waited its full 60 s and failed until a detach.
+  The reader now skips such a message, and a server whose reader did
+  die is replaced on the next send.
+
 - **Qwen Code sessions get `@` file references for attachments again.**
   The hub's attachment fallback table keyed Qwen Code as `qwen`, its
   command, but sessions carry the registry id `qwen-code`, so a file

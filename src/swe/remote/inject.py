@@ -1089,8 +1089,6 @@ def _appserver_read_loop(server: _AppServer, key: str, emit, machine: str,
     """Demux stdout: responses go to waiting calls; server-initiated
     approval requests become protocol events; message text streams
     into ``deltas``."""
-    from swe.remote import protocol
-
     proc = server.proc
     try:
         assert proc.stdout is not None
@@ -1101,48 +1099,62 @@ def _appserver_read_loop(server: _AppServer, key: str, emit, machine: str,
                 continue
             if not isinstance(msg, dict):
                 continue
-            method = str(msg.get("method") or "")
-            if method:
-                # Server -> client request or notification.
-                params = msg.get("params")
-                if isinstance(params, dict):
-                    _appserver_live(method, params, key, machine, deltas)
-                if "requestApproval" in method or "Approval" in method:
-                    req_id = msg.get("id")
-                    if req_id is not None:
-                        request_id = str(req_id)
-                        server.approvals[request_id] = req_id
-                        params = msg.get("params") or {}
-                        prompt = str(
-                            params.get("reason")
-                            or params.get("command")
-                            or params.get("itemId")
-                            or method
-                        )
-                        if emit is not None:
-                            emit(key, protocol.event(
-                                "approval.requested", key, machine,
-                                {"request_id": request_id,
-                                 "prompt": _tr._redact_secrets(prompt)},
-                            ))
-                elif method in ("turn/started", "codex/turnStarted"):
-                    params = msg.get("params") or {}
-                    turn = params.get("turn") or {}
-                    if isinstance(turn, dict) and turn.get("id"):
-                        server.turn_id = str(turn["id"])
-                elif method in ("turn/completed", "turn/failed",
-                                "codex/turnCompleted"):
-                    server.turn_id = ""
+            try:
+                _appserver_message(server, msg, key, emit, machine, deltas)
+            except Exception:
+                # One odd message (list params, an unhashable id) is
+                # skipped; ending the reader would strand every later
+                # reply until the session detaches.
                 continue
-            if "id" in msg:
-                q = server.replies.pop(msg["id"], None)
-                if q is not None:
-                    q.put(msg)
     except Exception:
         pass
     server.dead = True
     if deltas is not None:
         deltas.finish_all(key)
+
+
+def _appserver_message(server: _AppServer, msg: dict, key: str, emit,
+                       machine: str, deltas) -> None:
+    """Route one app-server message (see ``_appserver_read_loop``)."""
+    from swe.remote import protocol
+
+    method = str(msg.get("method") or "")
+    if method:
+        # Server -> client request or notification.
+        params = msg.get("params")
+        if not isinstance(params, dict):
+            params = {}
+        else:
+            _appserver_live(method, params, key, machine, deltas)
+        if "requestApproval" in method or "Approval" in method:
+            req_id = msg.get("id")
+            if req_id is not None:
+                request_id = str(req_id)
+                server.approvals[request_id] = req_id
+                prompt = str(
+                    params.get("reason")
+                    or params.get("command")
+                    or params.get("itemId")
+                    or method
+                )
+                if emit is not None:
+                    emit(key, protocol.event(
+                        "approval.requested", key, machine,
+                        {"request_id": request_id,
+                         "prompt": _tr._redact_secrets(prompt)},
+                    ))
+        elif method in ("turn/started", "codex/turnStarted"):
+            turn = params.get("turn") or {}
+            if isinstance(turn, dict) and turn.get("id"):
+                server.turn_id = str(turn["id"])
+        elif method in ("turn/completed", "turn/failed",
+                        "codex/turnCompleted"):
+            server.turn_id = ""
+        return
+    if "id" in msg:
+        q = server.replies.pop(msg["id"], None)
+        if q is not None:
+            q.put(msg)
 
 
 class CodexAppServerInjector:
@@ -1181,11 +1193,19 @@ class CodexAppServerInjector:
         spawned = False
         with self._servers_lock:
             server = self._servers.get(self.key)
-            if server is not None and server.proc.poll() is None:
+            if server is not None and server.proc.poll() is None \
+                    and not server.dead:
                 spawned = False
             else:
                 if server is not None:
                     self._servers.pop(self.key, None)
+                    if server.proc.poll() is None:
+                        # Its reader is gone: no reply would ever be
+                        # read and its stdout would back up unread.
+                        try:
+                            server.proc.kill()
+                        except OSError:
+                            pass
                 thread_id = self._thread_id(session)
                 if not thread_id:
                     return None
