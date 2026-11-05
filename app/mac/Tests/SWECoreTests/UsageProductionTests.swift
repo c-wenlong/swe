@@ -249,7 +249,7 @@ struct HangingRunner: CommandRunning {
 
 @Suite struct LocalFilesTests {
     @Test func readsAFileOrNilWhenMissing() throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("quiver-localfiles-\(UUID().uuidString).json")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("swe-localfiles-\(UUID().uuidString).json")
         try Data("{}".utf8).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
         #expect(LocalFiles().read(url.path) == Data("{}".utf8))

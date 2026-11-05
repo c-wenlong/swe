@@ -17,7 +17,7 @@ import Testing
 final class TestDefaults: UserDefaults, @unchecked Sendable {
     let suite: String
 
-    init(_ prefix: String = "quiver-test") {
+    init(_ prefix: String = "swe-test") {
         suite = Self.folder.appending(path: "\(prefix)-\(UUID().uuidString)").path
         super.init(suiteName: suite)!
     }
@@ -28,7 +28,7 @@ final class TestDefaults: UserDefaults, @unchecked Sendable {
     /// cfprefsd writes later lands in the temp folder, never in Preferences.
     static let folder: URL = {
         let folder = FileManager.default.temporaryDirectory
-            .appending(path: "quiver-test-defaults-\(getpid())", directoryHint: .isDirectory)
+            .appending(path: "swe-test-defaults-\(getpid())", directoryHint: .isDirectory)
         // Made now rather than by cfprefsd's first write, so a test can
         // watch it for the plist arriving.
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
