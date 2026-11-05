@@ -336,8 +336,13 @@ const GhUI = (() => {
         continue;
       }
       if (!line.trim()) { flush(); continue; }
-      if ((m = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line))) {
-        flush(); out.push({ t: "h", level: m[1].length, text: m[2] }); continue;
+      if ((m = /^ {0,3}(#{1,6})\s+(.*)$/.exec(line))) {
+        // The closing run and the spaces round it go, walked by hand: a
+        // lazy (.*?)\s*#*\s*$ retries at every space, quadratic on a body.
+        let text = m[2].trimEnd(), j = text.length;
+        while (j > 0 && text[j - 1] === "#") j -= 1;
+        text = text.slice(0, j).trimEnd();
+        flush(); out.push({ t: "h", level: m[1].length, text }); continue;
       }
       if (para.length && /^ {0,3}(=+|-+)\s*$/.test(line)) {
         const level = line.trim()[0] === "=" ? 1 : 2;
@@ -379,8 +384,8 @@ const GhUI = (() => {
   /* [![alt](badge)](href) and [[alt](badge)](href) keep the outer link;
    * a bare image becomes a link to its source. */
   function flatLinks(s) {
-    return s.replace(new RegExp(`\\[!?\\[([^\\]]*)\\]\\([^)]*\\)\\]\\(${URL_PART}\\)`, "g"), "[$1]($2)")
-      .replace(new RegExp(`!\\[([^\\]]*)\\]\\(${URL_PART}[^)]*\\)`, "g"), (_m, alt, src) => `[${alt || "image"}](${src})`);
+    return s.replace(new RegExp(`\\[!?\\[([^\\][]*)\\]\\([^)]*\\)\\]\\(${URL_PART}\\)`, "g"), "[$1]($2)")
+      .replace(new RegExp(`!\\[([^\\][]*)\\]\\(${URL_PART}[^)]*\\)`, "g"), (_m, alt, src) => `[${alt || "image"}](${src})`);
   }
 
   const safeUrl = (url) => safeHref(url) !== "";
@@ -393,7 +398,9 @@ const GhUI = (() => {
       return `\u0001${codes.length - 1}\u0001`;
     }));
     s = esc(s);
-    s = s.replace(new RegExp(`\\[([^\\]]*)\\]\\(${URL_PART}(?:\\s+&quot;.*?&quot;)?\\)`, "g"), (m, label, url) => {
+    // A label holds no "[" (nor an alt in flatLinks): a run of them
+    // would each scan to the end of the body's line.
+    s = s.replace(new RegExp(`\\[([^\\][]*)\\]\\(${URL_PART}(?:\\s+&quot;.*?&quot;)?\\)`, "g"), (m, label, url) => {
       // Code spans bind tighter than links (CommonMark): a target holding
       // one is no link, just text with code in it.
       if (url.includes("\u0001")) return m;

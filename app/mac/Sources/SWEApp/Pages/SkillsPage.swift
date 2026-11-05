@@ -540,9 +540,9 @@ private struct SkillLinksBlock: View {
         case .shared:
             "In the shared library. Every harness whose folder is linked loads it."
         case .plugin:
-            "Shipped by a plugin, so only \(skill.harnesses.first ?? "its harness") loads it."
+            "Shipped by a plugin, so only \(skill.harnesses.first.map { HarnessMark($0).name } ?? "its harness") loads it."
         case .builtin:
-            "Built into \(skill.harnesses.first ?? "its harness")."
+            "Built into \(skill.harnesses.first.map { HarnessMark($0).name } ?? "its harness")."
         case .harness:
             skill.harnesses.isEmpty
                 ? "In \(skill.root)'s own folder, which no linked harness reads."

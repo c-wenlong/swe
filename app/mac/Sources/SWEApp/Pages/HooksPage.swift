@@ -790,7 +790,7 @@ private struct NewHookSheet: View {
     /// `-`, letter or digit first. Looser than a skill name on purpose.
     static let nameRule = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
     var nameProblem: String? {
-        if name.isEmpty { return "Letters, digits, '_' and '-': prose-guard" }
+        if name.isEmpty { return "Letters, digits, '_' and '-', like prose-guard" }
         if name.count > 64 { return "At most 64 characters" }
         return name.wholeMatch(of: Self.nameRule) == nil
             ? "Letters, digits, '_' and '-', starting with a letter or digit" : nil
