@@ -369,6 +369,68 @@ class TestDarwinHelpers(unittest.TestCase):
         self.assertEqual(peer._pid_path(2 ** 22 + 7), "")
 
 
+class TestMalformedTables(unittest.TestCase):
+    """Rows the parsers can't read are skipped, never trusted."""
+
+    hub = ("127.0.0.1", 8477)
+
+    def test_proc_rows_that_do_not_parse_are_skipped(self):
+        root = temp_dir(self)
+        good = _proc_line(("127.0.0.1", 50001), self.hub, 0)
+        # A row cut short after its addresses has no uid column at all.
+        short = " ".join(good.split()[:7]) + "\n"
+        (root / "tcp").write_text(
+            _PROC_HEAD
+            + "   0: short line\n"
+            + good.replace(_hex4("127.0.0.1"), "ZZZZZZZZ", 1)
+            + good.replace(" 0        0 4242", " root        0 4242"))
+        # The bad-hex row is skipped; the matching row's uid column is not
+        # a number, so the answer is "can't tell", not uid 0.
+        self.assertIsNone(peer.linux_uid(self.hub, ("127.0.0.1", 50001), root))
+        (root / "tcp").write_text(
+            _PROC_HEAD + "   0: short line\n" + short
+            + good.replace(_hex4("127.0.0.1"), "ZZZZZZZZ", 1) + good)
+        self.assertEqual(peer.linux_uid(self.hub, ("127.0.0.1", 50001), root), 0)
+
+    def test_proc_addr_rejects_bad_fields(self):
+        self.assertIsNone(peer._proc_addr("ZZZZZZZZ:1F90"))
+        self.assertIsNone(peer._proc_addr("0100007F:XYZ"))
+        self.assertIsNone(peer._proc_addr("0100:1F90"))  # neither v4 nor v6
+        self.assertEqual(peer._proc_addr("0100007F:1F90"), ("127.0.0.1", 8080))
+
+    def test_names_that_are_not_addresses_compare_verbatim(self):
+        self.assertEqual(peer._norm("localhost"), "localhost")
+        self.assertEqual(peer._norm("fe80::1%lo0"), "fe80::1")
+        self.assertTrue(peer._same(("localhost", 1), ("localhost", 1)))
+        self.assertFalse(peer._same(("localhost", 1), ("127.0.0.1", 1)))
+
+    def test_netstat_row_without_a_pid_is_not_a_pid(self):
+        line = ("tcp4       0      0  127.0.0.1.53757        127.0.0.1.8477"
+                "         ESTABLISHED  840  493  408000  146988  00182\n")
+        self.assertIsNone(
+            peer.netstat_pid(self.hub, ("127.0.0.1", 53757), line))
+        # A bad address column is skipped like any other row.
+        bad = line.replace("127.0.0.1.53757", "127.0.0.1.port")
+        self.assertIsNone(peer.netstat_pid(self.hub, ("127.0.0.1", 53757), bad))
+
+    def test_app_store_binary_refuses_links_out_and_missing_files(self):
+        base = temp_dir(self)
+        app = base / "Tailscale.app"
+        (app / "Contents").mkdir(parents=True)
+        outside = base / "evil"
+        outside.write_text("")
+        link = app / "Contents" / "link"
+        link.symlink_to(outside)
+        # The path names the bundle, but the file it resolves to is not
+        # inside it: refused even when stat reports everything root-owned.
+        root_owned = SimpleNamespace(st_uid=0, st_mode=0o40755)
+        with patch.object(peer.os, "stat", return_value=root_owned):
+            self.assertFalse(peer.app_store_binary(str(link), str(app)))
+        # Inside the bundle but gone: stat fails, so no.
+        self.assertFalse(
+            peer.app_store_binary(str(app / "Contents" / "gone"), str(app)))
+
+
 class TestElsewhere(unittest.TestCase):
     def test_other_platforms_never_trust(self):
         with patch.object(peer.sys, "platform", "win32"):

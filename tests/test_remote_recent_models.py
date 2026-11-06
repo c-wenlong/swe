@@ -182,6 +182,95 @@ class TestRecentModels(unittest.TestCase):
         self.assertEqual(
             recent_models.recent_models(temp_dir(self)), {})
 
+    def test_an_older_reply_does_not_demote_a_model(self):
+        self._add(_rec("a", "claude", "sonnet", 10))
+        recent_models.recent_models(self.home)
+        # Folded incrementally: a later row carrying an older timestamp
+        # for the same model must not move it behind a newer one.
+        self._add(_rec("b", "claude", "sonnet", 5),
+                  _rec("c", "claude", "opus", 7))
+        self.assertEqual(recent_models.recent_models(self.home),
+                         {"claude": ["sonnet", "opus"]})
+
+    def test_rows_with_no_harness_are_skipped(self):
+        self._add(_rec("a", "claude", "sonnet", 1))
+        self.store.db.execute("UPDATE events SET harness = ''")
+        self.store.db.commit()
+        self.assertEqual(recent_models.recent_models(self.home), {})
+
+    def test_a_file_that_is_not_a_ledger_is_no_history(self):
+        home = temp_dir(self)
+        path = ledger_path_for(home)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        db = sqlite3.connect(path)
+        db.execute("CREATE TABLE other (x)")
+        db.commit()
+        db.close()
+        self.assertEqual(recent_models.recent_models(home), {})
+        self.assertNotIn(str(path), recent_models._state)
+
+    def test_the_state_map_is_bounded(self):
+        self._add(_rec("a", "claude", "sonnet", 1))
+        key = str(ledger_path_for(self.home))
+        with patch.dict(recent_models._state,
+                        {f"/gone/{i}": {} for i in range(64)}, clear=True):
+            recent_models.recent_models(self.home)
+            self.assertEqual(list(recent_models._state), [key])
+
+    def test_inode_of_a_missing_file_is_none(self):
+        self.assertIsNone(recent_models._inode(self.home / "nope.db"))
+
+
+class TestOpencodeProviders(unittest.TestCase):
+    def setUp(self):
+        self.home = temp_dir(self)
+        self.db_path = self.home / "opencode.db"
+
+    def _db(self, rows=None, table=True):
+        db = sqlite3.connect(self.db_path)
+        if table:
+            db.execute("CREATE TABLE session_v2 (id TEXT, model TEXT,"
+                       " time_updated INTEGER)")
+            for i, model in enumerate(rows or []):
+                db.execute("INSERT INTO session_v2 VALUES (?, ?, ?)",
+                           (f"s{i}", json.dumps(model), i))
+        else:
+            db.execute("CREATE TABLE other (x)")
+        db.commit()
+        db.close()
+
+    def test_missing_db_is_empty_and_never_created(self):
+        self.assertEqual(recent_models._opencode_providers(self.db_path), {})
+        self.assertFalse(self.db_path.exists())
+
+    def test_a_db_without_session_v2_is_empty(self):
+        self._db(table=False)
+        self.assertEqual(recent_models._opencode_providers(self.db_path), {})
+
+    def test_malformed_model_json_is_skipped(self):
+        self._db([{"id": 5, "providerID": "x"}, {"id": "m1", "providerID": ""},
+                  {"id": "", "providerID": "p"}, {"providerID": "p"},
+                  {"id": "m2", "providerID": "good"}])
+        self.assertEqual(recent_models._opencode_providers(self.db_path),
+                         {"m2": "good"})
+
+    def test_unchanged_db_is_served_from_memory(self):
+        self._db([{"id": "m2", "providerID": "good"}])
+        first = recent_models._opencode_providers(self.db_path)
+        with patch.object(recent_models, "_open_ro") as opened:
+            self.assertEqual(
+                recent_models._opencode_providers(self.db_path), first)
+        opened.assert_not_called()
+
+    def test_the_provider_map_is_bounded(self):
+        self._db([{"id": "m2", "providerID": "good"}])
+        with patch.dict(recent_models._providers,
+                        {f"/gone/{i}": ((), {}) for i in range(64)},
+                        clear=True):
+            recent_models._opencode_providers(self.db_path)
+            self.assertEqual(list(recent_models._providers),
+                             [str(self.db_path)])
+
 
 if __name__ == "__main__":
     unittest.main()

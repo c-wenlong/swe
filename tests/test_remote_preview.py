@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import quote
 
@@ -156,6 +157,57 @@ class TestRead(_Tmp):
     def test_missing_cwd(self):
         self.assertEqual(self.code("a.html", cwd=self.base / "gone"),
                          (422, "cwd_missing"))
+
+    def test_link_to_the_working_folder_is_not_a_file(self):
+        os.symlink(self.proj, self.proj / "root.html")
+        self.assertEqual(self.code("root.html"), (422, "not_a_file"))
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a 000 file anyway")
+    def test_unreadable_file(self):
+        page = self.proj / "out" / "page.html"
+        os.chmod(page, 0)
+        self.addCleanup(os.chmod, page, 0o644)
+        self.assertEqual(self.code("out/page.html"), (403, "not_readable"))
+
+    def test_fstat_failure_is_not_readable(self):
+        with patch.object(preview.os, "fstat", side_effect=OSError("EIO")):
+            self.assertEqual(self.code("out/page.html"),
+                             (403, "not_readable"))
+
+    def test_read_failure_is_not_readable(self):
+        real_fdopen = os.fdopen
+
+        class Failing:
+            def __init__(self, fh):
+                self.fh = fh
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.fh.close()
+
+            def read(self, _n):
+                raise OSError("EIO")
+
+        with patch.object(preview.os, "fdopen",
+                          side_effect=lambda fd, mode: Failing(
+                              real_fdopen(fd, mode))):
+            self.assertEqual(self.code("out/page.html"),
+                             (403, "not_readable"))
+
+    def test_file_that_grew_after_the_size_check(self):
+        big = self.proj / "big.html"
+        big.write_bytes(b"x" * (preview.MAX_BYTES + 10))
+        real_fstat = os.fstat
+
+        def fstat(fd):
+            st = real_fstat(fd)
+            return SimpleNamespace(st_mode=st.st_mode, st_size=10,
+                                   st_mtime=st.st_mtime)
+
+        with patch.object(preview.os, "fstat", side_effect=fstat):
+            self.assertEqual(self.code("big.html"), (413, "too_large"))
 
 
 class TestRoute(unittest.TestCase):
