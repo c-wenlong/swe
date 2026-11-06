@@ -220,4 +220,21 @@ public enum TrendScale {
         let rounded = (highest / step).rounded(.down) + 1
         return max(rounded * step, minimum)
     }
+
+    /// Gridlines for a scale topping out at `top`, at most `marks` of
+    /// them counting zero: the smallest round step (1, 2, 2.5 or 5 times a
+    /// power of ten) that fits, with the top raised to the next whole
+    /// step. The top always carries a gridline and a label, so a line
+    /// above the last labelled value never rises into blank space (a CPU
+    /// line at 106% under a 125% top used to climb past "100%").
+    public static func axis(top: Double, marks: Int) -> (top: Double, ticks: [Double]) {
+        guard top > 0, marks >= 2 else { return (top, [0, top]) }
+        let rough = top / Double(marks - 1)
+        let power = pow(10, (log10(rough)).rounded(.down))
+        let step = [1, 2, 2.5, 5, 10].map { $0 * power }.first { (top / $0).rounded(.up) <= Double(marks - 1) }
+            ?? 10 * power
+        let count = Int((top / step - 1e-9).rounded(.up))
+        let ticks = (0...count).map { Double($0) * step }
+        return (ticks.last ?? top, ticks)
+    }
 }

@@ -926,6 +926,17 @@ import Testing
         // Exactly on a step still gets the next one, so a line ending at
         // the top keeps its trailing icon inside the plot.
         #expect(TrendScale.top([6], step: 2, floor: 4) == 8)
+    }
+
+    @Test func theAxisAlwaysLabelsItsTop() {
+        // CPU at 106% tops at 125: the old three marks stopped at 100%.
+        let cpu = TrendScale.axis(top: 125, marks: 4)
+        #expect(cpu.ticks == [0, 50, 100, 150] && cpu.top == 150)
+        #expect(TrendScale.axis(top: 6, marks: 4).ticks == [0, 2, 4, 6])
+        #expect(TrendScale.axis(top: 100, marks: 4).ticks == [0, 50, 100])
+        #expect(TrendScale.axis(top: 100, marks: 6).ticks == [0, 25, 50, 75, 100])
+        #expect(TrendScale.axis(top: 3, marks: 6).ticks == [0, 1, 2, 3])
+        #expect(TrendScale.axis(top: 0, marks: 4).ticks == [0, 0])
         // No points yet: the threshold-based floor.
         #expect(TrendScale.top([], step: 2, floor: 4) == 4)
     }
