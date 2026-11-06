@@ -274,6 +274,9 @@ private struct CalendarContent: View {
     /// The range start a landed swipe already put back in place, so the
     /// range change it causes is not animated a second time.
     @State private var settledStart: Date?
+    /// The hours scroll view's visible height, so the opening scroll knows
+    /// how many hours fit (a short window or a large text size shows fewer).
+    @State private var hoursViewport: CGFloat = 0
     /// The columns' horizontal scroll offset. Only `DayHeaderStrip`
     /// reads it, so a scroll tick re-renders the strip alone instead of
     /// invalidating CalendarContent's body (and every `DayColumn`).
@@ -379,6 +382,11 @@ private struct CalendarContent: View {
                         .onScrollPhaseChange { old, phase in
                             cards.scrollPhase("hours", from: old, to: phase)
                         }
+                        .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, height in
+                            hoursViewport = height
+                        }
+                        // The opening scroll waits for the viewport's height.
+                        .onChange(of: hoursViewport > 0) { scrollToFirstBlock(proxy) }
                         .onAppear { scrollToFirstBlock(proxy) }
                         // Month view replaces this grid; coming back must scroll
                         // again, and a swipe cut off mid-way never reports rest.
@@ -646,12 +654,13 @@ private struct CalendarContent: View {
         // Kept blocks from outside the window must not mark it scrolled:
         // only the window's own blocks or a finished load of this exact
         // render range settle it.
-        guard scrolledRange != model.visibleRange,
+        guard hoursViewport > 0, scrolledRange != model.visibleRange,
               !model.visibleWindowBlocks.isEmpty || model.loadedRange == model.renderRange
         else { return }
         let hour = CalendarScroll.openingHour(blockStarts: model.visibleWindowBlocks.map(\.start),
                                               range: model.visibleRange, now: Date(),
-                                              calendar: model.calendar)
+                                              calendar: model.calendar,
+                                              shownHours: Double(hoursViewport / Self.hourHeight))
         proxy.scrollTo("h\(hour)", anchor: .top)
         scrolledRange = model.visibleRange
     }

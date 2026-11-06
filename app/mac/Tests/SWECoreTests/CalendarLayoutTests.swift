@@ -315,6 +315,18 @@ import Testing
         #expect(hour == 19)
     }
 
+    @Test func fewerHoursOnScreenMeansNowWinsSooner() {
+        // A first session at 04:00 and now at 11:10: seven hours and ten
+        // minutes. Eight hours on screen hold both; six do not.
+        #expect(CalendarScroll.openingHour(blockStarts: [at(6, 4)], range: week, now: at(6, 11),
+                                           calendar: calendar, shownHours: 8) == 4)
+        #expect(CalendarScroll.openingHour(blockStarts: [at(6, 4)], range: week, now: at(6, 11),
+                                           calendar: calendar, shownHours: 6) == 10)
+        // Minutes count: 7h10m does not fit in 7.25 hours less the margin.
+        #expect(CalendarScroll.openingHour(blockStarts: [at(6, 4)], range: week, now: at(6, 11),
+                                           calendar: calendar, shownHours: 7.25) == 10)
+    }
+
     @Test func aTodayWithoutSessionsOpensJustBeforeNow() {
         #expect(CalendarScroll.openingHour(blockStarts: [at(11, 10)], range: week,
                                            now: at(6, 6), calendar: calendar) == 5)
