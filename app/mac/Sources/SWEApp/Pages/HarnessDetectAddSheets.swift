@@ -52,8 +52,11 @@ struct DetectSheet: View {
                                     Text(finding.command).font(Theme.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
                                     Badge(finding.confidence)
                                     if let path = finding.path {
+                                        // One line: a wrapped path pushed the
+                                        // row's name off its checkbox.
                                         Text(displayPath(path))
                                             .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                                            .lineLimit(1).truncationMode(.middle)
                                     }
                                 }
                             }
@@ -155,8 +158,11 @@ struct AddHarnessSheet: View {
             Text("Add harness").font(Theme.sectionTitle).tracking(-0.5)
             FormField("Name") {
                 TextField("mycli", text: $name).sweField(monospaced: true)
+                // An empty field states the rule quietly; red is for a
+                // name that breaks it.
                 if let nameProblem {
-                    Text(nameProblem).font(Theme.caption).foregroundStyle(Theme.dangerText)
+                    Text(nameProblem).font(Theme.caption)
+                        .foregroundStyle(name.isEmpty ? Theme.textMuted : Theme.dangerText)
                 }
             }
             FormField("Command") {

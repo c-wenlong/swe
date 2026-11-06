@@ -94,6 +94,17 @@ let harnessesJSON = #"""
         #expect(!model.canCollapse)
     }
 
+    @Test func nothingToFoldWhenNothingIsStarred() async {
+        // A fresh registry with no stars: every row shows, with no fold
+        // row, instead of an empty card reading "Show 3 more".
+        let json = harnessesJSON.replacingOccurrences(of: #""state": "starred""#, with: #""state": "active""#)
+        let (model, _) = model([(["list"], ok(json))])
+        await model.load()
+        #expect(model.shown.map(\.name).sorted() == ["claude", "codex", "opencode"])
+        #expect(model.collapsedCount == 0)
+        #expect(!model.canCollapse)
+    }
+
     @Test func starTogglesThroughSweThenReloads() async throws {
         let (model, runner) = model([
             (["harness", "star"], ok(#"{"name": "codex", "state": "starred"}"#)),
