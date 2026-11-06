@@ -712,7 +712,9 @@ def _sync_locked(home: Path, dry_run: bool, relink) -> dict:
         if push.returncode == 0:
             doc["pushed"] = True
         else:
-            detail = (push.stderr or "").strip().splitlines()
+            # git indents its hint lines (" ! [rejected] ..."): the stripped
+            # whole text is not enough, each line needs it.
+            detail = [line.strip() for line in (push.stderr or "").splitlines() if line.strip()]
             doc["push_error"] = detail[-1] if detail else "git push failed"
     doc["result"] = "synced" if doc["pushed"] else "push-failed"
     return doc

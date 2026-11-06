@@ -212,6 +212,24 @@ class PushTest(SyncTestBase):
         self.assertEqual(self.relinks, [(b, ["x.txt"])])
 
 
+    def test_a_rejected_push_error_has_no_leading_space(self):
+        a = self.machine("a")
+        (a / ".swe" / "x.txt").write_text("x\n")
+        real = repo._git
+        stderr = ("To /remote.git\n"
+                  " ! [rejected]        HEAD -> device/a (fetch first)\n")
+
+        def rejecting(root, *args, **kw):
+            if args[:1] == ("push",):
+                return subprocess.CompletedProcess(("git", *args), 1, "", stderr)
+            return real(root, *args, **kw)
+
+        with mock.patch.object(repo, "_git", rejecting):
+            doc = self.sync(a)
+        self.assertEqual(doc["result"], "push-failed")
+        self.assertEqual(doc["push_error"], "! [rejected]        HEAD -> device/a (fetch first)")
+
+
 class ConflictTest(SyncTestBase):
     def test_conflict_lists_files_and_leaves_the_repo_as_it_was(self):
         a, b = self.machine("a"), self.machine("b")
