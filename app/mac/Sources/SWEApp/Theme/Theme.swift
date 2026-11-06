@@ -340,6 +340,10 @@ struct Page<Content: View, Actions: View>: View {
     /// A link that ends the subtitle, such as "Data from [Artificial
     /// Analysis]" on the Models page. Rendered inline after the text.
     var subtitleLink: (label: String, url: URL)? = nil
+    /// A last word of the subtitle that never breaks across lines, such as
+    /// the chat's model name: "claude-opus-4-5" wrapped at a hyphen reads
+    /// as two things. Kept whole by layout, so a copy gives the name as is.
+    var subtitleTail: String? = nil
     /// A chevron before the title, for a page reached from a list (the
     /// chat, from Sessions). Carries the ⌘[ shortcut.
     var back: (help: String, action: () -> Void)? = nil
@@ -365,7 +369,8 @@ struct Page<Content: View, Actions: View>: View {
 
     private var stack: some View {
         VStack(alignment: .leading, spacing: 24) {
-            PageHeader(title: title, subtitle: subtitle, link: subtitleLink, back: back) { actions }
+            PageHeader(title: title, subtitle: subtitle, link: subtitleLink, tail: subtitleTail,
+                       back: back) { actions }
             if showsContent {
                 content
                     .textSelection(.enabled)
@@ -386,10 +391,12 @@ struct Page<Content: View, Actions: View>: View {
 extension Page where Actions == EmptyView {
     init(title: String, subtitle: String,
          subtitleLink: (label: String, url: URL)? = nil,
+         subtitleTail: String? = nil,
          back: (help: String, action: () -> Void)? = nil,
          maxWidth: CGFloat = 1280, scrolls: Bool = true,
          @ViewBuilder content: () -> Content) {
-        self.init(title: title, subtitle: subtitle, subtitleLink: subtitleLink, back: back,
+        self.init(title: title, subtitle: subtitle, subtitleLink: subtitleLink,
+                  subtitleTail: subtitleTail, back: back,
                   maxWidth: maxWidth, scrolls: scrolls,
                   actions: { EmptyView() }, content: content)
     }
@@ -399,6 +406,8 @@ struct PageHeader<Actions: View>: View {
     var title: String
     var subtitle: String
     var link: (label: String, url: URL)? = nil
+    /// The subtitle's unbreakable last word (`Page.subtitleTail`).
+    var tail: String? = nil
     /// A chevron before the title, for a page reached from a list (the
     /// chat, from Sessions). Carries the ⌘[ shortcut.
     var back: (help: String, action: () -> Void)? = nil
@@ -422,11 +431,26 @@ struct PageHeader<Actions: View>: View {
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     Text(title).font(Theme.pageTitle).tracking(-0.6).foregroundStyle(Theme.textPrimary)
-                    if !subtitle.isEmpty || link != nil {
+                    if let tail {
+                        // The tail never breaks: the whole line when it
+                        // fits, else the subtitle wraps on its own and the
+                        // tail takes the next line whole.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 4) {
+                                subtitleText
+                                tailText(tail)
+                            }
+                            .fixedSize()
+                            VStack(alignment: .leading, spacing: 2) {
+                                subtitleText.fixedSize(horizontal: false, vertical: true)
+                                tailText(tail)
+                            }
+                        }
+                    } else if !subtitle.isEmpty || link != nil {
                         // Inline link: the subtitle ends mid-sentence and the
                         // link's label finishes it.
                         HStack(spacing: 4) {
-                            Text(subtitle).font(Theme.pageSubtitle).foregroundStyle(Theme.textSecondary)
+                            subtitleText
                             if let link {
                                 Link(link.label, destination: link.url)
                                     .font(Theme.pageSubtitle).foregroundStyle(Theme.link)
@@ -439,6 +463,15 @@ struct PageHeader<Actions: View>: View {
             Spacer(minLength: 16)
             HStack(spacing: 8) { actions }
         }
+    }
+
+    private var subtitleText: some View {
+        Text(subtitle).font(Theme.pageSubtitle).foregroundStyle(Theme.textSecondary)
+    }
+
+    private func tailText(_ tail: String) -> some View {
+        Text(tail).font(Theme.pageSubtitle).foregroundStyle(Theme.textSecondary)
+            .lineLimit(1).fixedSize()
     }
 }
 

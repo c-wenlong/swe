@@ -120,9 +120,12 @@ class TestDetail(unittest.TestCase):
         self.assertFalse(d["editable"])
         self.assertEqual(d["skill_md"].splitlines()[-1], "# TDD <b>")
         self.assertEqual(d["frontmatter"][1], {"key": "description", "value": "Test first"})
-        self.assertEqual([s["kind"] for s in d["tree"]], ["other"])
-        names = [e["name"] for e in d["tree"][0]["entries"]]
-        self.assertEqual(names, ["SKILL.md", "escape.md", "logo.png", "references/loop.md"])
+        # SKILL.md is the skill's main file, not one of its other files.
+        self.assertEqual([s["kind"] for s in d["tree"]], ["main", "other"])
+        self.assertEqual(d["tree"][0], {"kind": "main", "title": "Main file", "entries": [
+            {"name": "SKILL.md", "folder": False, "path": "SKILL.md"}]})
+        names = [e["name"] for e in d["tree"][1]["entries"]]
+        self.assertEqual(names, ["escape.md", "logo.png", "references/loop.md"])
 
     def test_sections_for_plugin_shaped_folders(self):
         (self.root / "skills" / "inner").mkdir(parents=True)
@@ -130,7 +133,7 @@ class TestDetail(unittest.TestCase):
         (self.root / "commands").mkdir()
         (self.root / "commands" / "go.md").write_text("x")
         kinds = {s["kind"]: s for s in page.tree(self.root)}
-        self.assertEqual(list(kinds), ["skills", "commands", "other"])
+        self.assertEqual(list(kinds), ["main", "skills", "commands", "other"])
         inner = kinds["skills"]["entries"][0]
         self.assertTrue(inner["folder"])
         self.assertEqual(inner["preview"], "skills/inner/SKILL.md")
