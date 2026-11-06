@@ -934,7 +934,7 @@ import Testing
         #expect(cpu.ticks == [0, 50, 100, 150] && cpu.top == 150)
         #expect(TrendScale.axis(top: 6, marks: 4).ticks == [0, 2, 4, 6])
         #expect(TrendScale.axis(top: 100, marks: 4).ticks == [0, 50, 100])
-        #expect(TrendScale.axis(top: 100, marks: 6).ticks == [0, 25, 50, 75, 100])
+        #expect(TrendScale.axis(top: 100, marks: 6).ticks == [0, 20, 40, 60, 80, 100])
         #expect(TrendScale.axis(top: 3, marks: 6).ticks == [0, 1, 2, 3])
         #expect(TrendScale.axis(top: 0, marks: 4).ticks == [0, 0])
         // No points yet: the threshold-based floor.
