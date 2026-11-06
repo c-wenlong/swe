@@ -1710,9 +1710,16 @@ class _Handler(BaseHTTPRequestHandler):
         """The unauthenticated approval path's CSRF gate: a cross-site
         form can't send a custom header, and the Host must be a name
         this hub actually answers (DNS-rebinding check)."""
-        if (self.headers.get("X-Quiver-Pair") or "") != "1":
+        if not self._pair_header():
             return False
         return self._local_host_ok()
+
+    def _pair_header(self) -> bool:
+        """The web app's own-page mark, ``X-Swe-Pair: 1``. ``X-Quiver-Pair``
+        is its name from before the rename, still read so a browser tab
+        holding an older page keeps working until it reloads."""
+        return any((self.headers.get(name) or "") == "1"
+                   for name in ("X-Swe-Pair", "X-Quiver-Pair"))
 
     def _pair_meta(self, body: dict | None, node_name: str = "") -> dict:
         """kind/model/client/os for the pairing device: the body's own
@@ -1783,7 +1790,7 @@ class _Handler(BaseHTTPRequestHandler):
                 )
                 return False
             return True
-        if (self.headers.get("X-Quiver-Pair") or "") != "1":
+        if not self._pair_header():
             # Without the header the identity path can't pass at all.
             self._send_error(401, "unauthorized", "pair this device first")
             return False

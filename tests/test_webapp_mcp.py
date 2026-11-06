@@ -415,7 +415,7 @@ class TestSync(_SyncHome, unittest.TestCase):
 
     def test_a_secret_with_no_value_refuses_and_writes_nothing(self):
         before = self.snapshot()
-        body = {"server": "notion", "source": "quiver", "targets": ["claude"]}
+        body = {"server": "notion", "source": "swe", "targets": ["claude"]}
         for action in ("preview", "sync"):
             error = self.refused(action, **body, fingerprint="x")
             self.assertEqual((error.status, error.code), (409, "secrets_missing"))
@@ -425,7 +425,7 @@ class TestSync(_SyncHome, unittest.TestCase):
 
     def test_from_the_hub_the_value_is_written_but_never_sent(self):
         self.set_secret("NOTION_TOKEN", HUB_TOKEN)
-        body = {"server": "notion", "source": "quiver", "targets": ["claude", "cursor"]}
+        body = {"server": "notion", "source": "swe", "targets": ["claude", "cursor"]}
         preview = self.post("preview", **body)
         self.assertEqual([h["outcome"] for h in preview["harnesses"]], ["add", "add"])
         reply = self.post("sync", **body, fingerprint=preview["fingerprint"])
@@ -454,6 +454,7 @@ class TestSync(_SyncHome, unittest.TestCase):
         cases = [
             ("preview", {"server": "nope", "source": "claude", "targets": ["codex"]}, 404, "unknown_server"),
             ("preview", {"server": "linear", "source": "gemini", "targets": ["codex"]}, 422, "bad_source"),
+            ("preview", {"server": "linear", "source": "swe", "targets": ["codex"]}, 422, "bad_source"),
             ("preview", {"server": "linear", "source": "quiver", "targets": ["codex"]}, 422, "bad_source"),
             ("preview", {"server": "linear", "source": "claude", "targets": ["evil"]}, 422, "unknown_harness"),
             ("preview", {"server": "linear", "source": "claude", "targets": ["../x"]}, 422, "unknown_harness"),
@@ -557,17 +558,26 @@ class TestSync(_SyncHome, unittest.TestCase):
     def test_sources_and_targets_follow_the_mac_model(self):
         row = {"name": "x", "harnesses": ["claude", "cursor"], "variants": [["claude"], ["cursor"]],
                "conflict": True, "in_hub": True}
-        self.assertEqual(mcp.sources(row), ["claude", "cursor", "quiver"])
+        self.assertEqual(mcp.sources(row), ["claude", "cursor", "swe"])
         self.assertEqual(mcp.sync_targets(row, "claude", ["claude", "cursor", "codex"]), (["codex"], ["cursor"]))
-        self.assertEqual(mcp.sync_targets(row, "quiver", ["claude", "cursor", "codex"]),
+        self.assertEqual(mcp.sync_targets(row, "swe", ["claude", "cursor", "codex"]),
                          (["codex"], ["claude", "cursor"]))
+
+    def test_a_page_from_before_the_rename_still_names_the_hub_quiver(self):
+        self.set_secret("NOTION_TOKEN", HUB_TOKEN)
+        body = {"server": "notion", "source": "quiver", "targets": ["claude"]}
+        preview = self.post("preview", **body)
+        self.assertEqual(preview["source"], "swe")
+        self.assertEqual([h["outcome"] for h in preview["harnesses"]], ["add"])
+        self.post("sync", **body, fingerprint=preview["fingerprint"])
+        self.assertIn("notion", json.loads(self.claude.read_text())["mcpServers"])
 
     def test_rows_say_where_a_definition_is_remote(self):
         hub = json.loads(self.hub.read_text())
         hub["mcpServers"]["remote"] = {"url": "https://mcp.example.com/mcp"}
         self.hub.write_text(json.dumps(hub))
         rows = {r["name"]: r for r in mcp.get(_ctx(), {})["servers"]}
-        self.assertEqual(rows["remote"]["remote_in"], ["quiver", "swe"])
+        self.assertEqual(rows["remote"]["remote_in"], ["swe", "quiver"])
         self.assertEqual(rows["linear"]["remote_in"], [])
 
     def test_a_url_server_is_not_offered_to_claude_desktop(self):
@@ -577,12 +587,14 @@ class TestSync(_SyncHome, unittest.TestCase):
         every = ["claude", "claude-desktop", "codex"]
         desktop = {"path": self.home / "desktop.json", "key": "mcpServers", "local_only": True}
         self.enterContext(patch.dict(mcp_cli.MCP_CONFIG_MAP, {"claude-desktop": desktop}))
-        self.assertEqual(mcp.sync_targets({**remote, "remote_in": ["quiver"]}, "quiver", every), (["codex"], ["claude"]))
-        self.assertEqual(mcp.sync_targets(local, "quiver", every), (["claude-desktop", "codex"], ["claude"]))
+        self.assertEqual(mcp.sync_targets({**remote, "remote_in": ["swe", "quiver"]}, "swe", every), (["codex"], ["claude"]))
+        # A row from before the rename lists the hub as "quiver" only.
+        self.assertEqual(mcp.sync_targets({**remote, "remote_in": ["quiver"]}, "swe", every), (["codex"], ["claude"]))
+        self.assertEqual(mcp.sync_targets(local, "swe", every), (["claude-desktop", "codex"], ["claude"]))
         # Local in claude, remote in the hub: the source's definition decides.
-        mixed = {**local, "remote_in": ["quiver"]}
+        mixed = {**local, "remote_in": ["swe", "quiver"]}
         self.assertEqual(mcp.sync_targets(mixed, "claude", every), (["claude-desktop", "codex"], []))
-        self.assertEqual(mcp.sync_targets(mixed, "quiver", every), (["codex"], ["claude"]))
+        self.assertEqual(mcp.sync_targets(mixed, "swe", every), (["codex"], ["claude"]))
 
 
 class TestSecrets(_SyncHome, unittest.TestCase):
@@ -689,6 +701,25 @@ const st = mcpSheetState(s);
         self.assertEqual(got["names"], [mcp.secret_name("my-server", "api.key"), mcp.secret_name("1x", "Token"),
                                         mcp.secret_name("a", "__b__")])
         self.assertEqual(got["secret"], [True, True, True, False, False])
+
+    def test_the_page_names_the_hub_swe_and_still_reads_quiver(self):
+        got = self.run_js("""
+mcpPage.data = { harnesses: ["claude", "codex"], caps: {}, servers: [] };
+const hubOnly = { name: "h", harnesses: [], variants: [], in_hub: true, transport: "http", remote_in: ["swe", "quiver"] };
+const shared = { name: "s", harnesses: ["claude"], variants: [["claude"]], in_hub: true, transport: "stdio", remote_in: [] };
+const older = { ...hubOnly, remote_in: ["quiver"] };
+return {
+  sources: [mcpSources(hubOnly), mcpSources(shared)],
+  remove: mcpRemovePlaces(shared),
+  remote: [mcpSourceIsRemote(hubOnly, "swe"), mcpSourceIsRemote(older, "swe"), mcpSourceIsRemote(hubOnly, "quiver"),
+           mcpSourceIsRemote(shared, "swe"), mcpSourceIsRemote(shared, "claude")],
+  fromQuiver: mcpSyncTargets(shared, "quiver", ["claude", "codex"]),
+  name: [mcpSourceName("swe"), mcpSourceName("quiver")] };""")
+        self.assertEqual(got["sources"], [["swe"], ["claude", "swe"]])
+        self.assertEqual(got["remove"], ["claude", "swe"])
+        self.assertEqual(got["remote"], [True, True, True, False, False])
+        self.assertEqual(got["fromQuiver"], {"missing": ["codex"], "differing": ["claude"]})
+        self.assertEqual(got["name"], ["SWE hub", "SWE hub"])
 
     def test_a_reveal_answering_after_close_stays_hidden(self):
         got = self.run_js(self.SERVER + """
@@ -930,6 +961,11 @@ class TestRemove(_SyncHome, unittest.TestCase):
         self.assertNotIn("linear", [s["name"] for s in reply["page"]["servers"]])
 
     def test_the_hub_is_swe(self):
+        reply = self.remove(server="notion", **{"from": ["swe"]})
+        self.assertEqual(reply["removed"], ["swe"])
+        self.assertEqual(json.loads(self.hub.read_text())["mcpServers"], {})
+
+    def test_a_page_from_before_the_rename_removes_from_quiver(self):
         reply = self.remove(server="notion", **{"from": ["quiver"]})
         self.assertEqual(reply["removed"], ["swe"])
         self.assertEqual(json.loads(self.hub.read_text())["mcpServers"], {})
@@ -941,6 +977,7 @@ class TestRemove(_SyncHome, unittest.TestCase):
     def test_refusals(self):
         cases = [({"server": "nope", "from": ["claude"]}, (404, "unknown_server")),
                  ({"server": "linear", "from": ["codex"]}, (409, "state_changed")),
+                 ({"server": "linear", "from": ["swe"]}, (409, "state_changed")),
                  ({"server": "linear", "from": ["quiver"]}, (409, "state_changed")),
                  ({"server": "linear", "from": []}, (422, "bad_from")),
                  ({"server": "linear", "from": "claude"}, (422, "bad_from")),
@@ -1026,7 +1063,7 @@ class TestSyncRoute(_SyncHome, HubBase):
 
     def test_refusal_reaches_the_page(self):
         status, data = self.srv.request("POST", "/v1/app/mcp/preview",
-                                        body={"server": "notion", "source": "quiver", "targets": ["claude"]},
+                                        body={"server": "notion", "source": "swe", "targets": ["claude"]},
                                         headers=self.auth())
         self.assertEqual(status, 409)
         self.assertEqual(json.loads(data)["error"]["code"], "secrets_missing")

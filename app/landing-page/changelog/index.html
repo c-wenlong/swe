@@ -164,6 +164,30 @@ tab and newline (an ESC or ^C in a message cancelled turns or picked
 menu rows), and text with line breaks goes in as one bracketed paste
 instead of one Enter per line.</p>
 </li>
+<li><p><strong>SWE.app ships the licences of the Python and Sparkle it carries.</strong>
+The bundle held only SWE's own licence and CPython's and OpenSSL's
+texts. <code>Contents/Resources/Licenses/</code> now has Sparkle's <code>LICENSE</code> and
+the licence of each library the bundled Python links (libffi, Expat,
+SQLite, xz, bzip2, mpdecimal, libuuid, OpenSSL, zlib, libedit,
+ncurses), and the build stops if one is missing.
+<code>app/mac/THIRD_PARTY_NOTICES.md</code> lists them all and now names every
+colour harness logo.</p>
+</li>
+<li><p><strong>The web app installs as an app and respects the notch.</strong> Its
+manifest now says <code>display: &quot;standalone&quot;</code> and carries an <code>id</code>, and its
+background and theme colours follow the light default and the dark
+scheme (<code>color_scheme_dark</code>). The page declares one <code>theme-color</code> per
+scheme, and a Light or Dark picked in Settings overrides both, so the
+status bar matches the page. The sidebar, pages and chat composer pad
+themselves by <code>env(safe-area-inset-*)</code>, since the viewport covers the
+whole screen.</p>
+</li>
+<li><p><strong>Phone SSH keys carry the <code>swe-remote:</code> tag.</strong> The hub still tagged
+the <code>~/.ssh/authorized_keys</code> lines it manages <code>quiver-remote:&lt;device id&gt;</code>. New lines say <code>swe-remote:&lt;device id&gt;</code>; a line under the old
+tag still counts as the hub's (and as installed), and the next
+rewrite swaps it for the new one, so a revoke after the upgrade
+still removes it.</p>
+</li>
 <li><p><strong><code>swe harness discover --json --apply NAME</code> answers in JSON when NAME
 is not a new match.</strong> It printed red text, which the app could not
 decode. It now prints the usual document with <code>applied.refused</code> and the
@@ -317,6 +341,27 @@ Safe Storage item.</p>
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>Pair QR codes stay on <code>quiver://pair</code> for one more release.</strong> The
+iPhone app has opened both <code>swe://</code> and <code>quiver://</code> links since it
+became SWE Remote (2026-11-01), but a phone still running a build from
+before then registers only <code>quiver://</code>, and a <code>swe://</code> code would open
+nothing there. Hubs keep writing <code>quiver://pair</code> until the next
+release, which switches to <code>swe://pair</code>: rebuild the iPhone app from a
+current checkout before then.</p>
+</li>
+<li><p><strong>The MCP pages name the hub <code>swe</code> when they sync or remove.</strong> The
+Mac and web MCP sheets still sent the hub's pre-rename name, <code>quiver</code>,
+as a sync source and remove place. Both now send <code>swe</code>; the hub's web
+API, the Mac model and <code>swe mcp</code> keep accepting <code>quiver</code>, and server
+rows still list the hub under both names in <code>remote_in</code>, so an older
+app build or an open page keeps working.</p>
+</li>
+<li><p><strong>The web app marks its own requests with <code>X-Swe-Pair</code>.</strong> The header
+that lets the hub owner's tailnet identity in without a bearer was
+still called <code>X-Quiver-Pair</code>. The web app now sends <code>X-Swe-Pair: 1</code>;
+the hub accepts either, so a browser tab still holding an older page
+keeps working until it reloads.</p>
+</li>
 <li><p><strong>A stored Linear task's refresh no longer downloads its
 description.</strong> The hub asked Linear for each issue's full body on
 every task read and never used it. The unused Notion page-body

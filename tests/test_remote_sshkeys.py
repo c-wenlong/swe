@@ -249,6 +249,35 @@ class TestSync(unittest.TestCase):
         self.assertNotIn(f"{sshkeys.TAG}{a}", text)
         self.assertIn(f"{sshkeys.TAG}{b}", text)
 
+    def test_a_pre_rename_line_is_rewritten_under_the_new_tag(self):
+        self.assertEqual(sshkeys.TAG, "swe-remote:")
+        a, b = _device(self.home, "a"), _device(self.home, "b")
+        key_a, key_b = _key(body=b"\x0a" * 32), _key(body=b"\x0b" * 32)
+        sshkeys.set_device_key(self.home, a, key_a)
+        sshkeys.set_device_key(self.home, b, key_b)
+        # What a hub from before the rename left: both devices under the
+        # old tag, b since revoked, around a line of the user's own.
+        mine = "ssh-ed25519 AAAAmine laptop"
+        self.ak.parent.mkdir(mode=0o700)
+        self.ak.write_text(
+            f"{sshkeys.OPTIONS} {key_a} quiver-remote:{a}\n{mine}\n"
+            f"{sshkeys.OPTIONS} {key_b} quiver-remote:{b}\n")
+        pairing.update_device(self.home, b, revoked_at=time.time())
+        # Until a rewrite, the old line is what sshd reads: it counts.
+        self.assertTrue(sshkeys.installed_line(self.home, a))
+        result = sshkeys.set_enabled(self.home, True)
+        self.assertTrue(result["changed"])
+        self.assertEqual(
+            self.ak.read_text().splitlines(),
+            [mine, f"{sshkeys.OPTIONS} {key_a} swe-remote:{a}"])
+        self.assertTrue(sshkeys.installed_line(self.home, a))
+        # Turning it off drops managed lines under either tag.
+        self.ak.write_text(
+            self.ak.read_text()
+            + f"{sshkeys.OPTIONS} {key_b} quiver-remote:{b}\n")
+        sshkeys.set_enabled(self.home, False)
+        self.assertEqual(self.ak.read_text().splitlines(), [mine])
+
     def test_clearing_a_key_removes_the_line(self):
         did = _device(self.home)
         sshkeys.set_enabled(self.home, True)

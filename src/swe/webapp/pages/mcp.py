@@ -169,7 +169,17 @@ def probe_all(pairs: list[tuple[dict, object]],
 # harnesses picked, through the same ``_sync`` that ``swe mcp sync`` runs.
 
 ACTIONS = ("preview", "sync", "remove", "secret_set", "secret_value", "add")
-HUB = "quiver"
+# The hub's name as a sync source or remove place. Pages from before the
+# rename send "quiver"; every request names it through hub_place, so the
+# rest of this module only ever sees "swe".
+HUB = "swe"
+HUB_NAMES = ("swe", "quiver")
+
+
+def hub_place(place: str) -> str:
+    """``place`` with the hub's pre-rename name read as the current one."""
+    return HUB if place in HUB_NAMES else place
+
 NAME_MAX = 200
 
 # Every write here reads harness configs, changes one server and writes them
@@ -272,7 +282,8 @@ def _secret(ctx, action: str, body: dict) -> dict:
 
 def _remove(ctx, body: dict) -> dict:
     """Remove: ``{"server", "from": [places]}``, the places the confirm
-    listed ("quiver" for the hub, its wire name). Every one must hold the server now; a
+    listed ("swe" for the hub; "quiver", its name before the rename, reads
+    the same). Every one must hold the server now; a
     place it has since spread to is left alone, since the confirm didn't
     name it. The reply is ``{"removed", "absent", "page"}``."""
     from swe.harness.registry import load_registry_readonly
@@ -286,6 +297,7 @@ def _remove(ctx, body: dict) -> dict:
     if (not isinstance(places, list) or not places or len(places) > 100
             or not all(isinstance(p, str) and 0 < len(p) <= NAME_MAX for p in places)):
         raise PageError(422, "bad_from", "from must list the places to remove the server from")
+    places = [hub_place(p) for p in places]
     with _WRITE_LOCK:
         _, pairs = inventory()
         row = next((r for r, _ in pairs if r["name"] == name), None)
@@ -529,7 +541,7 @@ def _sync_request(body: dict, needs_fingerprint: bool) -> dict:
     fingerprint = body.get("fingerprint")
     if needs_fingerprint and (not isinstance(fingerprint, str) or not fingerprint):
         raise PageError(422, "no_fingerprint", "Sync needs the fingerprint of a preview.")
-    return {"server": name, "source": source, "targets": targets,
+    return {"server": name, "source": hub_place(source), "targets": targets,
             "replace": set(replace), "fingerprint": fingerprint or ""}
 
 
@@ -553,6 +565,9 @@ def source_is_remote(row: dict, source: str) -> bool:
     URL. ``transport`` is only the first definition's; a server can be
     local in one harness and remote in another."""
     if "remote_in" in row:
+        if source == HUB:
+            # A row lists the hub under both names; an older one only "quiver".
+            return any(name in row["remote_in"] for name in HUB_NAMES)
         return source in row["remote_in"]
     return row.get("transport") in ("http", "sse")
 

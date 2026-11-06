@@ -2721,7 +2721,7 @@ class TestPairRoutes(unittest.TestCase):
         self.assertEqual(self.srv.request(
             "GET", f"/v1/pair/request/{rid}")[0], 404)
 
-    _CSRF = {"Content-Type": "application/json", "X-Quiver-Pair": "1"}
+    _CSRF = {"Content-Type": "application/json", "X-Swe-Pair": "1"}
 
     def _approve(self, code, rid=None, node=None, auth=None, headers=None):
         body = {"code": code}
@@ -2730,7 +2730,7 @@ class TestPairRoutes(unittest.TestCase):
         hdrs = dict(self._CSRF)
         hdrs.update(headers or {})
         if auth:
-            hdrs.pop("X-Quiver-Pair", None)
+            hdrs.pop("X-Swe-Pair", None)
             hdrs.update(auth)
         if node is not None:
             self.srv.state.whois = lambda ip: dict(node)
@@ -2874,7 +2874,7 @@ class TestPairRoutes(unittest.TestCase):
         # Owner identity alone (no bearer) lists them too — with the
         # CSRF header a cross-site page can't send.
         status, data = self.srv.request(
-            "GET", "/v1/pair/requests", headers={"X-Quiver-Pair": "1"})
+            "GET", "/v1/pair/requests", headers={"X-Swe-Pair": "1"})
         self.assertEqual(status, 200)
         status, data = self.srv.request(
             "GET", "/v1/pair/requests",
@@ -2886,13 +2886,26 @@ class TestPairRoutes(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(len(json.loads(data)["requests"]), 1)
 
+    def test_requests_list_reads_the_pre_rename_pair_header(self):
+        # A tab still holding a page from before the rename sends
+        # X-Quiver-Pair; it keeps working until the tab reloads.
+        self._req()
+        self.srv.state.owner_login = "dev@github"
+        for name in ("X-Swe-Pair", "X-Quiver-Pair"):
+            status, data = self.srv.request(
+                "GET", "/v1/pair/requests", headers={name: "1"})
+            self.assertEqual(status, 200, name)
+        status, _ = self.srv.request(
+            "GET", "/v1/pair/requests", headers={"X-Swe-Pair": "0"})
+        self.assertEqual(status, 401)
+
     def test_decide_requires_json_content_type(self):
         _, data = self._req()
         r = json.loads(data)
         status, d = self.srv.request(
             "POST", "/v1/pair/requests/approve",
             body={"code": r["code"], "request_id": r["request_id"]},
-            headers={"X-Quiver-Pair": "1",
+            headers={"X-Swe-Pair": "1",
                      "Content-Type": "text/plain"},
         )
         self.assertEqual(status, 403)
@@ -2906,7 +2919,7 @@ class TestPairRoutes(unittest.TestCase):
             body={"code": r["code"], "request_id": r["request_id"]},
             headers={"Content-Type": "application/json"},
         )
-        # No bearer and no X-Quiver-Pair: the identity path can't
+        # No bearer and no X-Swe-Pair: the identity path can't
         # pass, so the hub refuses without looking the peer up.
         self.assertEqual(status, 401)
         self.assertEqual(json.loads(d)["error"]["code"], "unauthorized")
@@ -2916,7 +2929,7 @@ class TestPairRoutes(unittest.TestCase):
         self.srv.state.whois = lambda ip: calls.append(ip) or dict(_MAC)
         for hdrs in (
             {},  # no bearer, no pair header
-            {"X-Quiver-Pair": "1", "Origin": "http://evil.example"},
+            {"X-Swe-Pair": "1", "Origin": "http://evil.example"},
         ):
             status, _ = self.srv.request(
                 "GET", "/v1/pair/requests", headers=hdrs)
@@ -2932,7 +2945,7 @@ class TestPairRoutes(unittest.TestCase):
     def test_owner_identity_lookups_are_cached_and_rate_limited(self):
         calls = []
         self.srv.state.whois = lambda ip: calls.append(ip) or dict(_MAC)
-        hdrs = {"X-Quiver-Pair": "1"}
+        hdrs = {"X-Swe-Pair": "1"}
         for _ in range(5):
             status, _ = self.srv.request(
                 "GET", "/v1/pair/requests", headers=hdrs)
@@ -3175,7 +3188,7 @@ class TestDeviceSelfService(unittest.TestCase):
         self.srv.state._whois_cache.clear()  # the pair cached a miss
         status, data = self.srv.request(
             "GET", "/v1/devices/me",
-            headers={"X-Quiver-Pair": "1", "Host": "127.0.0.1"},
+            headers={"X-Swe-Pair": "1", "Host": "127.0.0.1"},
         )
         self.assertEqual(status, 200, data)
         body = json.loads(data)
@@ -3219,7 +3232,7 @@ class TestDeviceSelfService(unittest.TestCase):
         status, data = self.srv.request(
             "POST", "/v1/devices/rename", {"name": "x"},
             headers={"Content-Type": "application/json",
-                     "X-Quiver-Pair": "1", "Host": "127.0.0.1"},
+                     "X-Swe-Pair": "1", "Host": "127.0.0.1"},
         )
         self.assertEqual(status, 409, data)
         self.assertEqual(
@@ -3367,7 +3380,7 @@ class TestDeviceList(unittest.TestCase):
         self.srv.state.whois = lambda ip: dict(_MAC)
         self.srv.state._whois_cache.clear()  # the pairs cached a miss
         hdrs = {"Content-Type": "application/json",
-                "X-Quiver-Pair": "1", "Host": "127.0.0.1"}
+                "X-Swe-Pair": "1", "Host": "127.0.0.1"}
         status, data = self.srv.request(
             "POST", "/v1/devices/revoke",
             {"device_id": other["device_id"]}, headers=hdrs)

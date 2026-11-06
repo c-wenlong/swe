@@ -1,0 +1,69 @@
+{
+  "claude": {
+    "command": "claude",
+    "description": "Anthropic's flagship, defined the skills, MCP and hooks others copy",
+    "version": null,
+    "tags": ["agentic", "coding", "byok"],
+    "aliases": ["cc"],
+    "display_name": "Claude Code",
+    "primary_color": "#D97757",
+    "state": "starred",
+    "pin": 1,
+    "capabilities": {
+      "skills": { "supported": true, "root": "~/.claude/skills" },
+      "instructions": { "file": "~/.claude/CLAUDE.md" },
+      "plugins": { "supported": true, "root": "~/.claude/plugins" }
+    }
+  },
+  "codex": {
+    "command": "codex",
+    "description": "OpenAI's, OS-level sandbox by default, network off unless approved",
+    "version": null,
+    "tags": ["agentic", "coding", "byok"],
+    "aliases": ["cx"],
+    "primary_color": "#7A9DFF",
+    "state": "starred",
+    "pin": 2,
+    "capabilities": {
+      "skills": { "supported": true, "root": "~/.codex/skills" },
+      "instructions": { "file": "~/.codex/AGENTS.md" },
+      "plugins": { "supported": true, "root": "~/.codex/plugins" }
+    }
+  },
+  "cursor": {
+    "command": "cursor-agent",
+    "description": "The editor's CLI half, shares its rules and index, print mode for CI",
+    "version": null,
+    "tags": ["agentic", "coding", "subscription"],
+    "aliases": ["cs"],
+    "capabilities": {
+      "skills": { "supported": true, "root": "~/.cursor/skills" },
+      "instructions": { "file": "~/.cursor/AGENTS.md" }
+    }
+  },
+  "opencode": {
+    "command": "opencode",
+    "description": "OS, 75+ providers, local model support, fully customisable",
+    "version": null,
+    "tags": ["agentic", "coding", "open-source", "byok"],
+    "aliases": ["oc"],
+    "primary_color": "#8B5CF6",
+    "capabilities": {
+      "skills": { "supported": true, "root": "~/.config/opencode/skills" },
+      "instructions": { "file": "~/.config/opencode/AGENTS.md" }
+    }
+  },
+  "aider": {
+    "command": "aider",
+    "description": "Git-native pair programmer, commits every edit as it goes",
+    "version": null,
+    "tags": ["agentic", "coding", "open-source", "byok"],
+    "aliases": ["ad"],
+    "state": "archived",
+    "archived": {
+      "reason": "not in use",
+      "archived_at": "2026-01-01T00:00:00",
+      "usage": "none"
+    }
+  }
+}

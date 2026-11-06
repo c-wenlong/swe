@@ -54,7 +54,7 @@ class _Owner(unittest.TestCase):
     def get(self, ip=_PHONE_IP, path="/v1/sessions"):
         return self.srv.request("GET", path, headers={
             "X-Forwarded-For": ip, "X-Forwarded-Proto": "https",
-            "X-Quiver-Pair": "1",
+            "X-Swe-Pair": "1",
         })
 
 
@@ -113,7 +113,7 @@ class TestForgedForwardedFor(_Owner):
         self.addCleanup(conn.close)
         for _ in range(3):
             conn.request("GET", "/v1/sessions", headers={
-                "X-Forwarded-For": _PHONE_IP, "X-Quiver-Pair": "1"})
+                "X-Forwarded-For": _PHONE_IP, "X-Swe-Pair": "1"})
             resp = conn.getresponse()
             resp.read()
             self.assertEqual(resp.status, 200)
@@ -156,7 +156,7 @@ class TestOwnNode(_Owner):
     def test_this_machine_cannot_approve_pair_requests(self):
         status, _ = self.srv.request(
             "POST", "/v1/pair/requests/approve", {"code": "123456"},
-            headers={"X-Forwarded-For": _HUB_IP, "X-Quiver-Pair": "1",
+            headers={"X-Forwarded-For": _HUB_IP, "X-Swe-Pair": "1",
                      "Content-Type": "application/json"})
         self.assertEqual(status, 401)
 
