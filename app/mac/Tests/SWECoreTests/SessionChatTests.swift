@@ -563,6 +563,56 @@ extension HubStubbed {
         await chat.settleReads()
     }
 
+    /// Stop refused by the hub leaves a "Stop failed" line saying why;
+    /// a not_attached refusal also drops the chat back to read-only.
+    @Test func aRefusedStopSaysWhyAndANotAttachedOneGoesReadOnly() async throws {
+        let chat = try await opened(sessions: #"{"sessions": [{"key": "claude:s1", "ownership": "attached"}]}"#)
+        #expect(chat.canSend)
+        HubStub.handler = { req in
+            req.url?.path == "/v1/sessions/claude:s1/control"
+                ? (409, Data(#"{"error": {"code": "not_attached"}}"#.utf8)) : (404, Data())
+        }
+        await chat.interrupt()
+        guard case .error(let line) = chat.items.last?.kind else {
+            Issue.record("no failure line: \(String(describing: chat.items.last?.kind))")
+            return
+        }
+        #expect(line == "Stop failed: This session is read-only until you attach it.")
+        #expect(!chat.canSend)
+    }
+
+    /// Attach answered 202 (a satellite has to take it) says so in the
+    /// transcript and leaves the session observed; answered 200, the
+    /// composer opens at once; refused, the reason is shown.
+    @Test func attachSaysWhenItIsQueuedOpensWhenDoneAndSaysWhyWhenRefused() async throws {
+        let sessions = #"{"sessions": [{"key": "claude:s1", "ownership": "observed", "attachable": true}]}"#
+        let chat = try await opened(sessions: sessions)
+        func answer(_ status: Int, _ body: String = "{}") {
+            HubStub.handler = { req in
+                req.url?.path == "/v1/sessions/claude:s1/control" ? (status, Data(body.utf8)) : (404, Data())
+            }
+        }
+        answer(202)
+        await chat.attach()
+        #expect(chat.items.last?.kind == .system("Attach queued: waiting for the satellite"))
+        #expect(!chat.canSend)
+
+        answer(409, #"{"error": {"code": "not_idle"}}"#)
+        await chat.attach()
+        #expect(chat.items.last?.kind == .error("Attach failed: The session is mid-turn. Attach once it's idle."))
+        #expect(!chat.canSend)
+
+        answer(200)
+        let before = chat.items.count
+        await chat.attach()
+        #expect(chat.canSend)
+        #expect(chat.items.count == before, "a done attach adds no line")
+        // Attached already: a second click asks the hub nothing.
+        HubStub.requests = []
+        await chat.attach()
+        #expect(HubStub.requests.isEmpty)
+    }
+
     /// The header's model comes from the row read at open, and no event
     /// carries it: a finished turn reads the row again.
     @Test func theModelIsReadAgainAfterAReply() async throws {
