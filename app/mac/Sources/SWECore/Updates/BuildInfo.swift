@@ -91,17 +91,32 @@ public struct UpdatePreferences {
 
     /// The checkout to compare against: the stored path when one is saved
     /// (tilde-expanded), else the folder the build came from when it still
-    /// exists, else nil.
+    /// exists, else nil. This touches the disk (PathSafety's walk, the
+    /// stamped folder's existence), and a stalled Desktop or synced folder
+    /// can block that for minutes: never call it on the main actor.
     public func checkout(build: BuildInfo,
                          fileManager: FileManager = .default) -> String? {
-        let stored = checkoutOverride.trimmingCharacters(in: .whitespaces)
-        if !stored.isEmpty, PathSafety.rejection(of: stored) == nil {
-            return (stored as NSString).expandingTildeInPath
+        Self.resolve(stored: checkoutOverride, stamped: build.sourcePath,
+                     fileManager: fileManager)
+    }
+
+    /// `checkout(build:)` from plain values, so it can run off the main
+    /// actor. A valid saved path wins without touching the stamped
+    /// folder: that folder may sit on the stalled provider the saved
+    /// path was chosen to get away from.
+    public static func resolve(stored: String, stamped: String?,
+                               fileManager: FileManager = .default) -> String? {
+        let trimmed = stored.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty, PathSafety.rejection(of: trimmed, fileManager: fileManager) == nil {
+            return (trimmed as NSString).expandingTildeInPath
         }
-        if let stamped = build.sourcePath,
-           fileManager.fileExists(atPath: stamped) {
-            return stamped
-        }
-        return nil
+        return existing(stamped, fileManager: fileManager)
+    }
+
+    /// The stamped folder when it still exists: the Source checkout
+    /// row's hint. Disk work too, so off the main actor.
+    public static func existing(_ stamped: String?,
+                                fileManager: FileManager = .default) -> String? {
+        stamped.flatMap { fileManager.fileExists(atPath: $0) ? $0 : nil }
     }
 }
