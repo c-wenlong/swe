@@ -68,10 +68,7 @@ struct SessionChatPage: View {
     /// model is the hub's row for the newest reply, left out while unknown.
     private var subtitle: String {
         let folder = (model?.row?.cwd ?? row.session.cwd).map { displayPath($0) }
-        // A model name keeps its hyphens unbroken: "claude-" and
-        // "opus-4-5" on two lines read as two things.
-        let model = model?.row?.modelLabel?.replacingOccurrences(of: "-", with: "\u{2011}")
-        return [HarnessMark(row.session.harness).name, folder, model]
+        return [HarnessMark(row.session.harness).name, folder, model?.row?.modelLabel]
             .compactMap { $0 }.joined(separator: " · ")
     }
 }
