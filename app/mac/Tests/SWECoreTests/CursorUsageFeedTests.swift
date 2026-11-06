@@ -203,6 +203,36 @@ import Testing
         #expect(events[0].outputTokens == 60)
     }
 
+    /// A store failure partway through a feed ingest rolls the whole
+    /// batch back (the records before it included) and leaves no
+    /// transaction open, so the next poll's ingest lands every record.
+    @Test func aStoreFailureMidIngestRollsTheBatchBack() async throws {
+        let temp = try TempDir()
+        let ledger = try Ledger(directory: temp.path("cache"))
+        func record(_ id: String, output: Int) -> LedgerRecord {
+            CursorUsageFeed.record(
+                for: CursorUsageEvent(
+                    timestamp: 1791700000.5, model: "composer-1",
+                    kind: "USAGE_EVENT_KIND_INCLUDED", conversationId: id, headless: false,
+                    inputTokens: 1_000, outputTokens: output,
+                    cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: nil),
+                accountKey: "uid-1", accountHome: account)
+        }
+        let batch = [record("conv-1", output: 50), record("conv-2", output: 666)]
+        let db = try SQLiteDatabase(url: temp.path("cache").appending(path: LedgerLocation.fileName))
+        try db.execute("""
+            CREATE TRIGGER refuse BEFORE INSERT ON events WHEN NEW.output = 666
+            BEGIN SELECT RAISE(ABORT, 'refused by the test'); END
+            """)
+        await #expect(throws: SQLiteDatabase.Failure.self) { try await ledger.ingest(batch) }
+        // conv-1 was upserted before conv-2 failed; it doesn't stay.
+        #expect(await ledger.events(in: allTime).isEmpty)
+
+        try db.execute("DROP TRIGGER refuse")
+        #expect(try await ledger.ingest(batch) == 2)
+        #expect(await ledger.events(in: allTime).map(\.outputTokens).sorted() == [50, 666])
+    }
+
     /// Rows written under the old key — which embedded the counts — are
     /// removed when the corrected event lands, not left double-counting.
     @Test func aRowKeyedByTheOldCountsSchemeIsCleanedUp() async throws {

@@ -506,6 +506,63 @@ extension HubStubbed {
                     data: try! HubWire.decoder.decode(HubJSON.self, from: Data(data.utf8)))
     }
 
+    /// The stream answering 401 mid-chat (the hub forgot this Mac's
+    /// credential while the chat was open): the chat drops the refused
+    /// credential, pairs again once, reopens with the new one and goes
+    /// live, so the next event reaches the transcript.
+    @Test(.timeLimit(.minutes(1))) func aLive401PairsAgainAndRestartsTheChat() async throws {
+        HubStub.requests = []
+        let store = HubDeviceStore(url: dir.appending(path: "app-device.json"))
+        try store.save(HubCredential(deviceId: "d1", credential: "revoked"), for: "127.0.0.1:8477")
+        HubStub.handler = { req in
+            let auth = req.value(forHTTPHeaderField: "Authorization")
+            switch req.url?.path {
+            case "/v1/pair":
+                return (201, Data(#"{"device_id": "d2", "credential": "fresh"}"#.utf8))
+            case "/v1/sessions": return (200, Data(#"{"sessions": [{"key": "claude:s1"}]}"#.utf8))
+            case "/v1/sessions/claude:s1/messages":
+                return (200, Data(#"""
+                {"messages": [{"type": "message.appended", "seq": 1, "data": {"kind": "user", "text": "go"}}],
+                 "has_more": false}
+                """#.utf8))
+            case "/v1/sessions/claude:s1/events":
+                // The REST reads still pass on the old credential; only
+                // the stream says it is gone.
+                guard auth == "Bearer fresh" else { return (401, Data()) }
+                return (200, Data("""
+                    data: {"type": "message.appended", "seq": 2, "data": {"kind": "assistant", "text": "after re-pair"}}
+
+                    data: {"type": "journal.caught-up", "seq": 2}
+
+
+                    """.utf8))
+            default: return (404, Data())
+            }
+        }
+        let locator = FakeLocator(address: "127.0.0.1:8477")
+        let hub = LocalHub(locator: locator, store: store) {
+            HubClient(baseURL: $0, credential: $1, session: HubStub.session(), streamSession: HubStub.session())
+        }
+        let chat = SessionChatModel(key: "claude:s1", hub: hub)
+        defer { chat.stop() }
+        await chat.start()
+        #expect(await observe(until: { chat.items.map(\.id) == ["m1", "m2"] && chat.connection == .live }))
+        // One pairing, and the new credential is the one kept.
+        #expect(locator.tokens == 1)
+        #expect(HubStub.requests.filter { $0.url?.path == "/v1/pair" }.count == 1)
+        #expect(store.credential(for: "127.0.0.1:8477") == "fresh")
+        // The stream was asked with the refused credential first, then
+        // only with the new one: the chat started over rather than
+        // retrying the old credential.
+        let streams = HubStub.requests.filter { $0.url?.path == "/v1/sessions/claude:s1/events" }
+            .map { $0.value(forHTTPHeaderField: "Authorization") }
+        #expect(streams.first == "Bearer revoked")
+        #expect(streams.dropFirst().allSatisfy { $0 == "Bearer fresh" })
+        #expect(streams.count >= 2)
+        chat.stop()
+        await chat.settleReads()
+    }
+
     /// The header's model comes from the row read at open, and no event
     /// carries it: a finished turn reads the row again.
     @Test func theModelIsReadAgainAfterAReply() async throws {
