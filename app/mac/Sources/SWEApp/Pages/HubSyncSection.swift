@@ -50,7 +50,9 @@ struct HubSyncSection: View {
 
     private func card(_ status: HubSyncStatus) -> some View {
         let lines = status.lines
-        let remote = status.remote.map { " Remote: \($0)." } ?? ""
+        // Its own line: run on after the branch sentence, the URL wrapped
+        // at its first hyphen ("https://github.com/c-" / "wenlong/...").
+        let remote = status.remote.map { "\nRemote: \($0)" } ?? ""
         // A later read that failed shows over the card it couldn't refresh.
         let repoWarning = loadError.map { "Couldn't check again: \($0)" }
             ?? (status.ready ? nil : lines.warning)

@@ -942,7 +942,18 @@ private struct ChaptersEditor: View {
         return Strip {
             HStack(spacing: 6) {
                 Text("Chapters").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
-                Text("\(fileCount(chapters.tree))").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                // The count is the compiled chapters, the same M as the
+                // editor's "Chapter N of M"; files index.txt leaves out
+                // (the folder's README.md, say) are counted apart.
+                let total = fileCount(chapters.tree)
+                let compiledCount = compiledFileCount(chapters.tree)
+                Text("\(compiledCount)").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    .hoverTip("\(compiledCount) chapters compiled into AGENTS.md", replacesLabel: false)
+                if total > compiledCount {
+                    Text("+\(total - compiledCount) not compiled")
+                        .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                        .lineLimit(1)
+                }
                 Spacer(minLength: 4)
                 // One click opens the sheet; a tip on the button used to
                 // eat the first click while it dismissed.
@@ -1110,6 +1121,13 @@ private struct ChaptersEditor: View {
         nodes.reduce(0) { $0 + ($1.isFolder ? fileCount($1.children) : 1) }
     }
 
+    private func compiledFileCount(_ nodes: [ChapterNode]) -> Int {
+        let compiled = check.compiledNames
+        return nodes.reduce(0) {
+            $0 + ($1.isFolder ? compiledFileCount($1.children) : (compiled.contains($1.path) ? 1 : 0))
+        }
+    }
+
     /// One outline row: a disclosure folder or a selectable, draggable file.
     private struct OutlineNode: View {
         var node: ChapterNode
@@ -1220,6 +1238,11 @@ private struct ChaptersEditor: View {
                         .frame(width: Theme.statusDot, height: Theme.statusDot)
                 }
                 Spacer(minLength: 4)
+                // Muted text alone didn't say why the row differs.
+                if !isCompiled {
+                    Text("Not compiled").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                        .lineLimit(1).fixedSize()
+                }
             }
             .padding(.leading, CGFloat(depth) * 14 + 23)
             .padding(.trailing, 8).padding(.vertical, 5)

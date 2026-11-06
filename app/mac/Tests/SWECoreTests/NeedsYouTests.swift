@@ -70,9 +70,11 @@ private func item(_ key: String, _ status: String?, at: Double = 100, kind: Stri
 @Suite struct NeedsYouModelTests {
     @Test func aLoadKeepsSessionRowsAndAFailureShowsNothing() async {
         let model = NeedsYouModel()
+        #expect(!model.hasLoaded)
         await model.load { [item("a", "followup"), item("gh:1", "github", kind: "github")] }
         #expect(model.items.map(\.key) == ["a"])
         #expect(model.reachable)
+        #expect(model.hasLoaded)
 
         await model.load { throw HubError(status: 0, code: "hub_down", message: "down") }
         #expect(model.items.isEmpty)

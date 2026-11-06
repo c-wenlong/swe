@@ -89,8 +89,14 @@ struct McpServersPage: View {
                 HarnessChips(harnesses: inventory.activeHarnesses, hidden: $hidden)
                     .onChange(of: hidden) { UserDefaults.standard.set(hidden.sorted(), forKey: Self.hiddenKey) }
                 let rows = inventory.servers(filter, across: compared)
-                let grouped = McpServerRepo.grouped(servers: rows, folders: app.mcpRepo.servers,
-                                                    usageFrom: inventory.servers)
+                let all = McpServerRepo.grouped(servers: rows, folders: app.mcpRepo.servers,
+                                                usageFrom: inventory.servers)
+                // A folder no hub server uses is in no harness, so it can't
+                // be out of sync or conflict: only All lists it, or the
+                // Conflicts pill's 4 sat over twenty other rows.
+                let grouped = filter == .all ? all
+                    : (local: all.local.filter { if case .folder = $0 { false } else { true } },
+                       remote: all.remote)
                 if grouped.local.isEmpty && grouped.remote.isEmpty {
                     Card { Text("Every server is in every compared harness, defined the same way.").font(Theme.bodySmall).foregroundStyle(Theme.textSecondary) }
                 } else {
@@ -784,8 +790,12 @@ private struct FolderRow: View {
                 // Its buttons end where a server row's do, not 8pt further right.
                 .padding(.trailing, ServerGrid.actionsGap)
                 .frame(minWidth: ServerGrid.nameMinWidth, maxWidth: .infinity, alignment: .leading)
+            // In no harness: a dash per column, like any server a
+            // harness lacks, rather than blank cells.
             ForEach(harnesses, id: \.self) { harness in
-                Spacer().frame(width: ServerGrid.columnWidth(harness))
+                Text("—").foregroundStyle(Theme.borderStrong)
+                    .hoverTip("Not in \(HarnessMark(harness).name)")
+                    .frame(width: ServerGrid.columnWidth(harness))
             }
         }
         .padding(.vertical, 8)
