@@ -1510,7 +1510,8 @@ class AcpInjector:
             try:
                 conn = acp.Connection(
                     argv, session.path or str(meta.get("cwd") or ""),
-                    account_env(session) or None)
+                    account_env(session) or None,
+                    auto_allow=bool(meta.get("yolo")))
             except OSError as exc:
                 return None, f"{argv[0]} failed to launch: {exc}"
             conn.bind(session_key, machine, emit, deltas)

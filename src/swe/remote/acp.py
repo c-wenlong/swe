@@ -202,8 +202,12 @@ class Connection:
     it serves, and the turn and permission requests in flight."""
 
     def __init__(self, argv: list[str], cwd: str, env: dict | None = None,
-                 *, spawn=None) -> None:
+                 *, spawn=None, auto_allow: bool = False) -> None:
         self.argv = list(argv)
+        # Autonomy (a launch's ``yolo``): each permission request is
+        # answered with the agent's allow-once option, never an
+        # "always" one; a request without one gets the usual card.
+        self.auto_allow = auto_allow
         self.cwd = cwd
         popen = spawn or subprocess.Popen
         self.proc = popen(
@@ -652,8 +656,11 @@ class Connection:
             self._respond(rpc_id, {"outcome": {"outcome": "cancelled"}})
             return
         request_id = f"acp-{secrets.token_hex(6)}"
-        with self.lock:
-            self.approvals[request_id] = (rpc_id, options)
+        once = next((o for o in options if o.get("kind") == "allow_once"),
+                    None) if self.auto_allow else None
+        if once is None:
+            with self.lock:
+                self.approvals[request_id] = (rpc_id, options)
         tool = params.get("toolCall")
         tool = tool if isinstance(tool, dict) else {}
         prompt = str(tool.get("title") or "permission requested")
@@ -665,11 +672,24 @@ class Connection:
                 detail = " ".join(str(p) for p in detail)
             if isinstance(detail, str) and detail and detail not in prompt:
                 prompt += f"\n\n`{detail[:500]}`"
-        self._emit("approval.requested", {
+        request = {
             "request_id": request_id,
             "prompt": _tr._redact_secrets(prompt),
             "options": [_menu_row(i, o) for i, o in enumerate(options, 1)],
-        })
+        }
+        if once is None:
+            self._emit("approval.requested", request)
+            return
+        # Answered here, and the pair journaled so the apps show what
+        # was allowed: the request (``auto``: no push, no inbox wait)
+        # and its resolve, naming the row that was picked.
+        if not self._respond(rpc_id, {"outcome": {
+                "outcome": "selected", "optionId": once["optionId"]}}):
+            return
+        self._emit("approval.requested", {**request, "auto": True})
+        self._emit("approval.resolved", {
+            "request_id": request_id, "decision": "allow",
+            "source": "autonomy"})
 
     def _retire_approvals(self, source: str, *, answer: bool) -> None:
         with self.lock:

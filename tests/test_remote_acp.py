@@ -111,7 +111,8 @@ for raw in sys.stdin:
                      "sessionId": sid,
                      "toolCall": {"toolCallId": "t1", "title": "Run ls",
                                   "rawInput": {"command": "ls -la"}},
-                     "options": [
+                     "options": json.loads(os.environ["FAKE_ACP_OPTS"])
+                     if os.environ.get("FAKE_ACP_OPTS") else [
                          {"optionId": "yes", "name": "Allow", "kind": "allow_once"},
                          {"optionId": "yes-all", "name": "Always allow",
                           "kind": "allow_always"},
@@ -853,7 +854,10 @@ class TestLaunch(_LaunchCase):
 
     def test_eligibility_rules(self):
         self.assertTrue(supervise.acp_launch_eligible("devin", "hi"))
-        for kw in ({"model": "m"}, {"effort": "high"}, {"yolo": True},
+        # Autonomy is honoured on the channel itself.
+        self.assertTrue(supervise.acp_launch_eligible(
+            "devin", "hi", yolo=True))
+        for kw in ({"model": "m"}, {"effort": "high"},
                    {"provider": "groq"}, {"tracked": False}):
             self.assertFalse(supervise.acp_launch_eligible(
                 "devin", "hi", **kw), kw)
@@ -893,6 +897,89 @@ class TestLaunchApproval(_LaunchCase):
                            ev["data"]["request_id"], "allow")
         self.assertTrue(res.ok, res.note)
         self.assertTrue(conn.idle.wait(10))
+
+
+class TestLaunchAutonomy(_LaunchCase):
+    mode = "permission"
+
+    def _released(self):
+        conn = inject.AcpInjector._conns[self.new_key]
+        self.assertTrue(conn.idle.wait(10) or conn.approvals)
+        inject.AcpInjector.release_held(
+            {self.new_key: 1}, self.rec.emit, "m1", self.rec)
+        return conn
+
+    def _reply(self):
+        inject.AcpInjector.close(self.new_key)
+        return next(m for m in self._sent() if m.get("id") == "perm-1")
+
+    def test_autonomy_launch_runs_over_acp(self):
+        ok, note, name = self._launch(yolo=True)
+        self.assertTrue(ok, note)
+        self.assertIn("over ACP", note)
+        self.tmux.assert_not_called()
+        [marker] = self._markers()
+        self.assertTrue(marker["yolo"])
+        self.assertEqual(self._adopt(), [self.new_key])
+        self.assertTrue(supervise.meta_for(self.home, self.new_key)["yolo"])
+
+    def test_allow_once_is_picked_by_kind_and_journaled(self):
+        # "always" first, and named like a plain allow: kind decides.
+        opts = [{"optionId": "always", "name": "Allow",
+                 "kind": "allow_always"},
+                {"optionId": "once", "name": "Yes, this time",
+                 "kind": "allow_once"},
+                {"optionId": "no", "name": "No", "kind": "reject_once"}]
+        self.enterContext(patch.dict(os.environ,
+                                     {"FAKE_ACP_OPTS": json.dumps(opts)}))
+        self.assertTrue(self._launch(yolo=True)[0])
+        conn = self._released()
+        self.assertTrue(conn.idle.wait(10))
+        self.assertEqual(conn.approvals, {})
+        [req] = self.rec.of("approval.requested")
+        [res] = self.rec.of("approval.resolved")
+        self.assertTrue(req["data"]["auto"])
+        self.assertIn("Run ls", req["data"]["prompt"])
+        self.assertEqual(res["data"], {"request_id": req["data"]["request_id"],
+                                       "decision": "allow",
+                                       "source": "autonomy"})
+        self.assertEqual(self._reply()["result"]["outcome"],
+                         {"outcome": "selected", "optionId": "once"})
+
+    def test_no_allow_once_falls_back_to_the_card(self):
+        opts = [{"optionId": "always", "name": "Always",
+                 "kind": "allow_always"},
+                {"optionId": "no", "name": "No", "kind": "reject_once"}]
+        self.enterContext(patch.dict(os.environ,
+                                     {"FAKE_ACP_OPTS": json.dumps(opts)}))
+        self.assertTrue(self._launch(yolo=True)[0])
+        conn = self._released()
+        self.rec.wait(lambda: self.rec.of("approval.requested"))
+        [req] = self.rec.of("approval.requested")
+        self.assertNotIn("auto", req["data"])
+        self.assertEqual(self.rec.of("approval.resolved"), [])
+        self.assertEqual(len(conn.approvals), 1)
+
+    def test_autonomy_off_keeps_the_card(self):
+        self.assertTrue(self._launch()[0])
+        conn = self._released()
+        self.rec.wait(lambda: self.rec.of("approval.requested"))
+        self.assertNotIn("auto", self.rec.of("approval.requested")[0]["data"])
+        self.assertEqual(len(conn.approvals), 1)
+        self.assertFalse(conn.auto_allow)
+
+    def test_a_restarted_agent_keeps_autonomy(self):
+        self.assertTrue(self._launch(yolo=True)[0])
+        self._adopt()
+        inject.AcpInjector.close(self.new_key)
+        inj = inject.injector_for(
+            self.home, self.new_key,
+            supervise.meta_for(self.home, self.new_key),
+            emit=self.rec.emit, machine="m1", deltas=self.rec)
+        res = inj.send(_session(self.proj, sid="fresh-1"),
+                       {"text": "again"}, "done")
+        self.assertTrue(res.ok, res.note)
+        self.assertTrue(inject.AcpInjector._conns[self.new_key].auto_allow)
 
 
 class TestLaunchCancel(_LaunchCase):
