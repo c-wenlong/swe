@@ -119,8 +119,11 @@ public enum UsageFormat {
     public static func dollars(_ amount: Double) -> String {
         if amount == 0 { return "$0" }
         if amount < 0.01 { return "<$0.01" }
+        // Cents below $100, whole dollars from there, judged on the amount
+        // as it rounds: 99.996 prints "$100", not "$100.00".
+        let cents = (amount * 100).rounded() / 100
         let style = FloatingPointFormatStyle<Double>.Currency(code: "USD", locale: Locale(identifier: "en_US"))
-            .precision(.fractionLength(amount < 100 ? 2 : 0))
+            .precision(.fractionLength(cents < 100 ? 2 : 0))
         return amount.formatted(style)
     }
 
