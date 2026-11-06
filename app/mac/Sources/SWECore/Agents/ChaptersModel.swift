@@ -657,6 +657,42 @@ public struct ChapterNode: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Each folder's open/closed state in the AGENTS.md outlines, kept in
+/// UserDefaults under its AGENTS_MD path: one key family for the Edit
+/// rail, one for the Compile tab. Unset means open.
+public enum ChapterFolderState {
+    public static let outlinePrefix = "agentsMd.outline."
+    public static let compilePrefix = "agentsMd.compile."
+
+    /// The folder's own key in both families, then every subfolder's.
+    static func keys(under folder: String, in defaults: UserDefaults,
+                     prefix: String) -> [String] {
+        let own = prefix + folder
+        return defaults.dictionaryRepresentation().keys
+            .filter { $0 == own || $0.hasPrefix(own + "/") }
+    }
+
+    /// Moves the stored state of `from` and every folder under it to the
+    /// same place under `to`, in both families. Stale keys already under
+    /// `to` go first, so a subfolder with no state of its own opens by
+    /// default instead of inheriting an old folder's.
+    public static func carry(in defaults: UserDefaults, from: String, to: String) {
+        guard from != to else { return }
+        for prefix in [outlinePrefix, compilePrefix] {
+            let moving = keys(under: from, in: defaults, prefix: prefix)
+                .map { ($0, defaults.object(forKey: $0)) }
+            for stale in keys(under: to, in: defaults, prefix: prefix) {
+                defaults.removeObject(forKey: stale)
+            }
+            for (key, _) in moving { defaults.removeObject(forKey: key) }
+            for (key, value) in moving {
+                let rest = key.dropFirst((prefix + from).count)
+                defaults.set(value, forKey: prefix + to + rest)
+            }
+        }
+    }
+}
+
 /// The outline the rail draws: every folder and `.md` file under
 /// AGENTS_MD, built from relative paths so it stays testable.
 public enum ChapterTree {
@@ -980,6 +1016,10 @@ public final class ChaptersModel {
     /// them back alongside text edits. The page hands over its
     /// `\.undoManager`; the key window's manager is the fallback.
     public weak var undoManager: UndoManager?
+
+    /// Where the rail and Compile outlines keep each folder's open/closed
+    /// state (`ChapterFolderState` keys); a folder move carries it along.
+    @ObservationIgnored public var folderStateDefaults: UserDefaults = .standard
     private var movesUndoManager: UndoManager? {
         if let undoManager { return undoManager }
         // No NSApplication under `swift test`: NSApp is nil there.
@@ -1486,6 +1526,8 @@ public final class ChaptersModel {
             if let selected = self.selected, ChapterIndex.isUnder(selected, folder: path) {
                 self.selected = ChapterIndex.rehome(selected, from: path, to: newPath)
             }
+            // Before the tree refresh, so the moved rows read their state.
+            ChapterFolderState.carry(in: self.folderStateDefaults, from: path, to: newPath)
             await self.refreshTree(under: check.directory,
                                    order: ChapterIndex.entries(index.text))
             if indexChanged { await self.build(swe: swe) }
