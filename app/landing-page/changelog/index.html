@@ -304,6 +304,13 @@ Safe Storage item.</p>
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The MCP pages name the hub <code>swe</code> when they sync or remove.</strong> The
+Mac and web MCP sheets still sent the hub's pre-rename name, <code>quiver</code>,
+as a sync source and remove place. Both now send <code>swe</code>; the hub's web
+API, the Mac model and <code>swe mcp</code> keep accepting <code>quiver</code>, and server
+rows still list the hub under both names in <code>remote_in</code>, so an older
+app build or an open page keeps working.</p>
+</li>
 <li><p><strong>A stored Linear task's refresh no longer downloads its
 description.</strong> The hub asked Linear for each issue's full body on
 every task read and never used it. The unused Notion page-body
