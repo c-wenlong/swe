@@ -486,10 +486,10 @@ class TestChatObserved(HubBase):
 
 class TestChatOwnerDevice(OwnerBase):
     """The hub owner's own tailnet device has no bearer: the chat's
-    requests carry app.js's X-Quiver-Pair header and get in on that."""
+    requests carry app.js's X-Swe-Pair header and get in on that."""
 
     def test_reads_stream_and_writes_without_pairing(self):
-        headers = {"X-Forwarded-For": _OWNER_IP, "X-Forwarded-Proto": "https", "X-Quiver-Pair": "1"}
+        headers = {"X-Forwarded-For": _OWNER_IP, "X-Forwarded-Proto": "https", "X-Swe-Pair": "1"}
         self.assertEqual(self.get("/v1/sessions/claude%3As1/messages?limit=500")[0], 200)
         conn = http.client.HTTPConnection("127.0.0.1", self.srv.port, timeout=5)
         try:
@@ -501,7 +501,7 @@ class TestChatOwnerDevice(OwnerBase):
         status, data = self.srv.request("POST", "/v1/sessions/claude%3As1/message",
                                         {"text": "hi"}, headers=headers)
         self.assertEqual((status, json.loads(data)["error"]["code"]), (409, "not_attached"))
-        headers.pop("X-Quiver-Pair")
+        headers.pop("X-Swe-Pair")
         self.assertEqual(self.srv.request("GET", "/v1/sessions/claude%3As1/messages",
                                           headers=headers)[0], 401)
 
@@ -1350,7 +1350,7 @@ return { growth, head, view: view.map((b) => b.t), tail: html.endsWith("-".repea
             classList: { hidden: cls === "hidden", toggle(c, on) { if (c === "hidden") this.hidden = !!on; } } });
           const els = { "chat-text": mk(), "chat-send": mk(), "chat-files": mk("hidden") };
           document.getElementById = (id) => els[id] || null;
-          globalThis.authHeaders = (extra) => ({ "X-Quiver-Pair": "1", ...extra });
+          globalThis.authHeaders = (extra) => ({ "X-Swe-Pair": "1", ...extra });
           const calls = [];
           let release = [];
           globalThis.fetch = (url, opts) => {
