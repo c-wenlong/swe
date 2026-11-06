@@ -36,7 +36,7 @@ The hub owner's own devices need no pairing: open the hub's URL and the
 app loads. The hub identifies the caller with `tailscale whois` (behind
 `tailscale serve`, on the client serve forwards for) and lets in a node
 whose login is the hub owner's, as long as the request carries
-`X-Quiver-Pair: 1`, names a Host the hub answers to, and has no foreign
+`X-Swe-Pair: 1`, names a Host the hub answers to, and has no foreign
 `Origin`. That is the gate the app's tailnet-identity calls use: a page
 on another site can't send the header, so it can't borrow the owner's
 network identity. The hub machine's own node doesn't count (any local

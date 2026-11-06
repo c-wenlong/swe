@@ -1,7 +1,7 @@
 """The hub owner's own tailnet devices use the hub without pairing.
 
 A request with no bearer is let in when its tailnet login is the hub
-owner's, it carries ``X-Quiver-Pair: 1`` from a Host the hub answers to,
+owner's, it carries ``X-Swe-Pair: 1`` from a Host the hub answers to,
 and its Origin (if any) is the hub's own: the gate the approval page
 already uses, so a page on another site can't borrow the identity.
 """
@@ -48,7 +48,7 @@ class OwnerBase(unittest.TestCase):
 
     def get(self, path, ip=_OWNER_IP, **extra):
         headers = {"X-Forwarded-For": ip, "X-Forwarded-Proto": "https",
-                   "X-Quiver-Pair": "1", **extra}
+                   "X-Swe-Pair": "1", **extra}
         return self.srv.request("GET", path, headers=headers)
 
 
@@ -89,7 +89,7 @@ class TestOwnerDevice(OwnerBase):
 
     def test_owner_writes_are_its_own_device(self):
         headers = {"X-Forwarded-For": _OWNER_IP, "X-Forwarded-Proto": "https",
-                   "X-Quiver-Pair": "1", "Content-Type": "application/json"}
+                   "X-Swe-Pair": "1", "Content-Type": "application/json"}
         status, data = self.srv.request(
             "POST", "/v1/inbox/dismiss",
             {"key": "claude:s1", "last_active_at": 100.0}, headers=headers,
