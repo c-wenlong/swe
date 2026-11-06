@@ -46,6 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **SWE.app ships the licences of the Python and Sparkle it carries.**
+  The bundle held only SWE's own licence and CPython's and OpenSSL's
+  texts. `Contents/Resources/Licenses/` now has Sparkle's `LICENSE` and
+  the licence of each library the bundled Python links (libffi, Expat,
+  SQLite, xz, bzip2, mpdecimal, libuuid, OpenSSL, zlib, libedit,
+  ncurses), and the build stops if one is missing.
+  `app/mac/THIRD_PARTY_NOTICES.md` lists them all and now names every
+  colour harness logo.
+
 - **`swe harness discover --json --apply NAME` answers in JSON when NAME
   is not a new match.** It printed red text, which the app could not
   decode. It now prints the usual document with `applied.refused` and the

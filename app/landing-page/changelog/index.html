@@ -151,6 +151,15 @@ comments in <code>--json</code> gain <code>association</code>.</p>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>SWE.app ships the licences of the Python and Sparkle it carries.</strong>
+The bundle held only SWE's own licence and CPython's and OpenSSL's
+texts. <code>Contents/Resources/Licenses/</code> now has Sparkle's <code>LICENSE</code> and
+the licence of each library the bundled Python links (libffi, Expat,
+SQLite, xz, bzip2, mpdecimal, libuuid, OpenSSL, zlib, libedit,
+ncurses), and the build stops if one is missing.
+<code>app/mac/THIRD_PARTY_NOTICES.md</code> lists them all and now names every
+colour harness logo.</p>
+</li>
 <li><p><strong><code>swe harness discover --json --apply NAME</code> answers in JSON when NAME
 is not a new match.</strong> It printed red text, which the app could not
 decode. It now prints the usual document with <code>applied.refused</code> and the
