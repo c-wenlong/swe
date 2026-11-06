@@ -1110,6 +1110,9 @@ class RemoteAgent:
                 self._push_catalog()
                 rows, as_of = self.catalog.tail_snapshot()
                 self.tail_manager.sync(rows, as_of=as_of)
+                inject.AcpInjector.release_held(
+                    self.tail_manager.tailers, self._capture,
+                    self.machine_id, self.deltas)
                 supervise.reap_kept(self.home, self.catalog.session_for)
             except Exception:
                 pass

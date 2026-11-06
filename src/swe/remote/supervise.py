@@ -1874,7 +1874,7 @@ def launch_new(
     nothing.
     Returns ``(ok, note, tmux_name)``.
     """
-    from swe.remote import launch_model, launch_provider, launch_yolo
+    from swe.remote import launch_provider
 
     blocked = fresh_launch_error(tool_name, model, effort, yolo=yolo)
     if blocked:
@@ -1893,6 +1893,169 @@ def launch_new(
         return False, f"{tool_name} is not installed on this machine", None
     if not cwd or not os.path.isdir(cwd):
         return False, f"no such folder on this machine: {cwd}", None
+    acp_note = ""
+    if acp_launch_eligible(tool_name, prompt, model=model, effort=effort,
+                           yolo=yolo, provider=provider, tracked=exclusive):
+        outcome, note, abandoned = _launch_acp(
+            home, tool_name, cwd, prompt, known_ids=known_ids,
+            launch_id=launch_id)
+        if outcome != "fallback":
+            return outcome == "ok", note, None
+        acp_note = note
+        if abandoned:
+            # The agent may have written a transcript before it died:
+            # the tmux launch must never adopt that one.
+            known_ids = [*(known_ids or []), abandoned]
+    ok, note, name = _launch_new_tmux(
+        home, tool_name, cwd, prompt, known_ids=known_ids,
+        launch_id=launch_id, binary=binary, model=model, effort=effort,
+        yolo=yolo, provider=provider, exclusive=exclusive)
+    if acp_note:
+        note = f"{note} ({acp_note}; {ACP_FALLBACK_NOTE})"
+    return ok, note, name
+
+
+# Ends the note of a launch whose ACP agent did not come up.
+ACP_FALLBACK_NOTE = "fell back to tmux"
+
+
+# How long a launch gives its ACP agent to initialize and open a new
+# session before falling back to tmux. The launch runs after the 202,
+# so this is not bound by the apps' request timeout.
+LAUNCH_ACP_S = 20.0
+
+
+def acp_launch_eligible(
+    tool_name: str, prompt: str, *, model: str | None = None,
+    effort: str | None = None, yolo: bool = False,
+    provider: str | None = None, tracked: bool = True,
+) -> bool:
+    """Whether a fresh launch of ``tool_name`` runs over ACP: the harness
+    has an ACP mode ``auto`` picks (``acp.auto_eligible``), swe can read
+    its sessions (adoption needs the transcript), there is a first
+    prompt to start it, and no model/effort/yolo/provider pick rides the
+    launch (ACP has no verified control for any of them; the tmux
+    launch applies them on the command line or in the pane)."""
+    if not tracked or not prompt.strip() or model or effort or yolo \
+            or provider:
+        return False
+    from swe.remote import acp
+
+    return acp.auto_eligible(tool_name)
+
+
+def _launch_acp(
+    home: Path | None, tool_name: str, cwd: str, prompt: str, *,
+    known_ids: list[str] | None, launch_id: str,
+) -> tuple[str, str, str]:
+    """``launch_new`` over ACP: start the agent, ``session/new`` (no
+    resume mapping needed), send the first prompt. Returns ``(outcome,
+    note, abandoned)``: ``ok``; ``failed`` (refused, nothing to fall
+    back for); or ``fallback`` when the agent could not come up
+    (initialize failed or timed out, or it died on the first prompt),
+    with the reason. ``abandoned`` is the id of a session the agent
+    created before it was given up on, else "".
+
+    The pending marker reserves the folder as a tmux launch's does, then
+    names the new session's id (``expect_id``), so adoption binds exactly
+    that session, as ``mode: acp``, once its transcript shows. The agent
+    is registered under the key that id gives; its events wait until the
+    session has a tailer (``inject.AcpInjector.release_held``).
+    """
+    from swe.remote import acp, inject, protocol
+
+    argv = acp.command_for(tool_name)
+    if argv is None:
+        return "fallback", f"{tool_name} has no ACP mode installed", ""
+    slot = f"acp-{secrets.token_hex(4)}"
+    marker = _pending_dir(home) / f"{slot}.json"
+    pending = {
+        "tmux": slot,
+        "mode": "acp",
+        "tool_name": tool_name,
+        "cwd": cwd,
+        "exclude": list(known_ids or []),
+        "launched_at": time.time(),
+        "launch_id": launch_id,
+    }
+    with _registry_lock(home):
+        busy = fork_blocker(home, tool_name, cwd)
+        if busy:
+            return "failed", launch_busy_note(tool_name, busy), ""
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(marker, json.dumps(pending))
+        except OSError:
+            return "fallback", "could not reserve the folder", ""
+
+    def give_up(conn, outcome: str, note: str,
+                sid: str = "") -> tuple[str, str, str]:
+        if conn is not None:
+            conn.close()
+        marker.unlink(missing_ok=True)
+        return outcome, note, sid
+
+    try:
+        conn = acp.Connection(argv, cwd)
+    except OSError as exc:
+        return give_up(None, "fallback", f"{argv[0]} failed to launch: {exc}")
+    try:
+        conn.handshake("", allow_new=True, budget=LAUNCH_ACP_S)
+    except acp.AcpError as exc:
+        return give_up(conn, "fallback", f"ACP handshake failed: {exc}")
+    key = protocol.session_key(tool_name, conn.session_id)
+    pending["expect_id"] = conn.session_id
+    try:
+        with _registry_lock(home):
+            atomic_write_text(marker, json.dumps(pending))
+    except OSError:
+        return give_up(conn, "fallback", "could not record the new session",
+                       conn.session_id)
+    conn.bind(key, "", None, None)
+    inject.AcpInjector.register(key, conn)
+    try:
+        q = conn.prompt(prompt)
+    except acp.AcpError as exc:
+        inject.AcpInjector.close(key)
+        return give_up(None, "fallback", str(exc), conn.session_id)
+    import queue as queue_mod
+
+    try:
+        reply = q.get(timeout=inject._ACP_EARLY_S)
+    except queue_mod.Empty:
+        reply = conn.stop_waiting(q)
+    if reply is None:
+        inject.AcpInjector.close(key)
+        return give_up(None, "fallback",
+                       f"{conn.label} exited on the first prompt",
+                       conn.session_id)
+    if isinstance(reply, dict) and "error" in reply:
+        inject.AcpInjector.close(key)
+        return give_up(None, "failed", f"{conn.label} refused the prompt: "
+                                       f"{conn.last_error or 'error'}")
+    return "ok", (f"launched over ACP ({conn.label}); the session appears "
+                  "on refresh"), ""
+
+
+def _launch_new_tmux(
+    home: Path | None,
+    tool_name: str,
+    cwd: str,
+    prompt: str,
+    *,
+    known_ids: list[str] | None,
+    launch_id: str,
+    binary: str,
+    model: str | None,
+    effort: str | None,
+    yolo: bool,
+    provider: str | None,
+    exclusive: bool,
+) -> tuple[bool, str, str | None]:
+    """``launch_new``'s tmux launch (the channel every harness has)."""
+    from swe.remote import launch_model, launch_provider, launch_yolo
+
+    keys_file = launch_provider.keys_path(home)
     # The nonce matters: pid+second collide for two same-harness launches
     # inside one second, and the tmux name derives from the key.
     key = f"new:{tool_name}:{int(time.time())}-{os.getpid()}-{secrets.token_hex(3)}"
@@ -2248,13 +2411,21 @@ def adopt_pending(
         if now - float(pending.get("launched_at") or 0) > PENDING_MAX_AGE_S:
             marker.unlink(missing_ok=True)
             continue
+        if pending.get("mode") == "acp" and not pending.get("expect_id"):
+            # Still handshaking: it adopts the id session/new names and
+            # nothing else, never a folder-and-time match meanwhile.
+            continue
         hit = _pending_match(home, pending, rows, claimed)
         if hit is None:
             continue
         key = hit
+        # An ACP launch's agent already runs (``_launch_acp``); the
+        # row only has to name the channel it writes through.
+        mode = "acp" if pending.get("mode") == "acp" else "tmux"
         meta = {
-            "mode": "tmux",
-            "tmux": str(pending.get("tmux") or ""),
+            "mode": mode,
+            "tmux": str(pending.get("tmux") or "") if mode == "tmux"
+            else "",
             "tool_name": str(pending.get("tool_name") or ""),
             "session_id": "",
             "cwd": str(pending.get("cwd") or ""),

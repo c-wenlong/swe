@@ -190,6 +190,9 @@ _CHUNK_KINDS = {
     "agent_thought_chunk": "thinking",
 }
 
+# Events kept for a connection nobody listens to yet.
+_HELD_MAX = 64
+
 # JSON-RPC "method not found".
 _NO_METHOD = -32601
 
@@ -239,6 +242,8 @@ class Connection:
         self.machine = ""
         self.emit = None
         self.deltas = None
+        self._held: list[tuple[str, dict]] = []
+        self._flush_lock = threading.Lock()
         # The stream id currently growing per kind, and tool calls whose
         # title streams until they finish.
         self._streams: dict[str, str] = {}
@@ -255,17 +260,46 @@ class Connection:
     # -- sinks -----------------------------------------------------------
 
     def bind(self, key: str, machine: str, emit, deltas) -> None:
+        """Point the live sinks at ``key``. Events raised while no emit
+        was bound (a launch's first turn, before its session has a
+        tailer) go out now, in order."""
         with self.lock:
             self.key = key
-            self.machine = machine
-            if emit is not None:
-                self.emit = emit
+            if machine:
+                self.machine = machine
             if deltas is not None:
                 self.deltas = deltas
+        if emit is None:
+            return
+        # Flush what was held, oldest first, and only then let the
+        # reader send directly: an event raised during the flush (the
+        # request's own approval.resolved) queues behind the rest. One
+        # flush at a time, so two binds can't interleave their halves.
+        with self._flush_lock:
+            while True:
+                with self.lock:
+                    held, self._held = self._held, []
+                    if not held:
+                        self.emit = emit
+                        return
+                for etype, data in held:
+                    self._send_event(emit, etype, data)
 
     def _emit(self, etype: str, data: dict) -> None:
-        emit = self.emit
-        if emit is None or not self.key:
+        with self.lock:
+            emit = self.emit
+            if emit is None:
+                # Nobody listens yet. A launched session's journal must
+                # stay empty until its tailer starts (a journal with no
+                # cursor makes the tailer skip the first turn), so the
+                # event waits for bind().
+                if len(self._held) < _HELD_MAX:
+                    self._held.append((etype, data))
+                return
+        self._send_event(emit, etype, data)
+
+    def _send_event(self, emit, etype: str, data: dict) -> None:
+        if not self.key:
             return
         from swe.remote import protocol
 

@@ -1556,6 +1556,29 @@ class AcpInjector:
             if conn is not None:
                 conn.close()
 
+    @classmethod
+    def register(cls, session_key: str, conn) -> None:
+        """Hold ``conn`` as ``session_key``'s agent (a launch, which
+        started it before the session had a row)."""
+        with cls._gate(session_key):
+            with cls._conns_lock:
+                old = cls._conns.get(session_key)
+                cls._conns[session_key] = conn
+            if old is not None and old is not conn:
+                old.close()
+
+    @classmethod
+    def release_held(cls, ready, emit, machine: str = "",
+                     deltas=None) -> None:
+        """Bind the sinks of every agent nobody listens to yet whose key
+        is in ``ready`` (keys that have a tailer now), so a launch's
+        held approval requests reach the chat."""
+        with cls._conns_lock:
+            waiting = [(k, c) for k, c in cls._conns.items()
+                       if c.emit is None and k in ready]
+        for key, conn in waiting:
+            conn.bind(key, machine, emit, deltas)
+
     def _conn(self, session: Session, meta: dict):
         return self.open(self.home, self.key, session, meta,
                          emit=self.emit, machine=self.machine,

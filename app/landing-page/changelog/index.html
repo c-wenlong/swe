@@ -366,7 +366,10 @@ options as the answers, and Stop cancels the turn. Attach loads the
 session over ACP; if the agent can't load it or fails to start (not
 signed in, say), attach falls back to tmux and the note says why.
 <code>--mode=acp</code> on an agent that can't load sessions starts a new one
-and says so. Claude can run through the <code>claude-agent-acp</code> adapter with <code>--mode=acp</code> when it is installed;
+and says so. A new session launched from the apps for such a harness
+starts over ACP too (<code>session/new</code>, then the first prompt), unless
+the launch picks a model, effort, autonomy or provider; if the agent
+fails to start, the launch falls back to tmux. Claude can run through the <code>claude-agent-acp</code> adapter with <code>--mode=acp</code> when it is installed;
 harness.json's <code>capabilities.acp</code> overrides or turns off detection
 (<a href="https://github.com/c-wenlong/swe/issues/1637">#1637</a>).</p>
 </li>
