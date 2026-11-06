@@ -91,17 +91,39 @@ public struct UpdatePreferences {
 
     /// The checkout to compare against: the stored path when one is saved
     /// (tilde-expanded), else the folder the build came from when it still
-    /// exists, else nil.
+    /// exists, else nil. This touches the disk (PathSafety's walk, the
+    /// stamped folder's existence), and a stalled Desktop or synced folder
+    /// can block that for minutes: never call it on the main actor.
     public func checkout(build: BuildInfo,
                          fileManager: FileManager = .default) -> String? {
-        let stored = checkoutOverride.trimmingCharacters(in: .whitespaces)
-        if !stored.isEmpty, PathSafety.rejection(of: stored) == nil {
-            return (stored as NSString).expandingTildeInPath
+        Self.resolve(stored: checkoutOverride, stamped: build.sourcePath,
+                     fileManager: fileManager).checkout
+    }
+
+    /// `checkout(build:)` from plain values, so it can run off the main
+    /// actor: the effective checkout, and the stamped folder when it
+    /// still exists (the Source checkout row's hint).
+    public static func resolve(stored: String, stamped: String?,
+                               fileManager: FileManager = .default) -> ResolvedCheckout {
+        let existingStamp = stamped.flatMap { fileManager.fileExists(atPath: $0) ? $0 : nil }
+        let trimmed = stored.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty, PathSafety.rejection(of: trimmed, fileManager: fileManager) == nil {
+            return ResolvedCheckout(checkout: (trimmed as NSString).expandingTildeInPath,
+                                    stamped: existingStamp)
         }
-        if let stamped = build.sourcePath,
-           fileManager.fileExists(atPath: stamped) {
-            return stamped
-        }
-        return nil
+        return ResolvedCheckout(checkout: existingStamp, stamped: existingStamp)
+    }
+}
+
+/// What `UpdatePreferences.resolve` found on disk.
+public struct ResolvedCheckout: Sendable, Equatable {
+    /// The checkout updates compare against, nil when there is none.
+    public var checkout: String?
+    /// The folder the build was stamped with, when it still exists.
+    public var stamped: String?
+
+    public init(checkout: String?, stamped: String?) {
+        self.checkout = checkout
+        self.stamped = stamped
     }
 }
