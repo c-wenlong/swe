@@ -291,5 +291,107 @@ class ModelsAnalyticsTest(unittest.TestCase):
             self.assertEqual(os.path.getsize(db), size)
             self.assertTrue(os.path.exists(db + "-wal"))
 
+    def test_one_unreadable_log_does_not_hide_the_rest(self):
+        # One undecodable or unreadable file used to raise out of the
+        # whole Claude, Codex or Freebuff scan, dropping every count.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            claude = root / "claude"
+            (claude / "-a").mkdir(parents=True)
+            (claude / "-b").mkdir()
+            (claude / "-a" / "bad.jsonl").write_bytes(b"\xff\xfe\xfa\n" + b'{"model":"claude-x"}\n')
+            (claude / "-b" / "good.jsonl").write_text('{"model":"claude-y"}\n')
+            codex = root / "codex-archived"
+            codex.mkdir()
+            (codex / "locked.jsonl").write_text('{"model":"gpt-z"}\n')
+            (codex / "ok.jsonl").write_text('{"model":"gpt-y"}\n')
+            real_open = open
+
+            def guarded(path, *args, **kwargs):
+                if str(path).endswith("locked.jsonl"):
+                    raise PermissionError(path)
+                return real_open(path, *args, **kwargs)
+
+            with mock.patch(
+                "swe.sessions.models_analytics.os.path.expanduser",
+                side_effect=self._expand_for(root, {
+                    "~/.claude/projects/": claude, "~/.codex/archived_sessions/": codex}),
+            ), mock.patch("builtins.open", side_effect=guarded):
+                usage = collect_model_usage()
+
+            self.assertEqual(usage["claude"], {("", "claude-x"): 1, ("", "claude-y"): 1})
+            self.assertEqual(usage["codex"], {("", "gpt-y"): 1})
+
+    def test_claude_scan_skips_other_folders_and_files_and_reads_past_the_first_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            claude = root / "claude"
+            project = claude / "-proj"
+            project.mkdir(parents=True)
+            (claude / "not-a-project").mkdir()
+            (claude / "not-a-project" / "s.jsonl").write_text('{"model":"nope"}\n')
+            (claude / "-stray.jsonl").write_text('{"model":"nope"}\n')
+            (project / "notes.txt").write_text('{"model":"nope"}\n')
+            (project / "sub.jsonl").mkdir()
+            (project / "s.jsonl").write_text('{"type":"summary"}\n{"model":"claude-z"}\n{"model":"later"}\n')
+            (project / "empty.jsonl").write_text("")
+            with mock.patch(
+                "swe.sessions.models_analytics.os.path.expanduser",
+                side_effect=self._expand_for(root, {"~/.claude/projects/": claude}),
+            ):
+                usage = collect_model_usage()
+            self.assertEqual(usage, {"claude": {("", "claude-z"): 1}})
+
+    def test_cline_metadata_that_is_not_a_session_is_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cline = root / "cline"
+            folder = cline / "s1"
+            folder.mkdir(parents=True)
+            for name, text in (("broken.json", "{oops"), ("list.json", "[1]"),
+                               ("other.json", json.dumps({"model": "m"})),
+                               ("blank.json", json.dumps({"session_id": "s", "model": ""}))):
+                (folder / name).write_text(text)
+            with mock.patch(
+                "swe.sessions.models_analytics.os.path.expanduser",
+                side_effect=self._expand_for(root, {"~/.cline/data/sessions/": cline}),
+            ):
+                self.assertEqual(collect_model_usage(), {})
+
+    def test_freebuff_skips_files_and_projects_without_chats(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            freebuff = root / "manicode"
+            (freebuff / "no-chats").mkdir(parents=True)
+            (freebuff / "loose-file").write_text("x")
+            chats = freebuff / "proj" / "chats"
+            (chats / "no-log").mkdir(parents=True)
+            (chats / "stray.txt").write_text("x")
+            with mock.patch(
+                "swe.sessions.models_analytics.os.path.expanduser",
+                side_effect=self._expand_for(root, {"~/.config/manicode/projects/": freebuff}),
+            ):
+                self.assertEqual(collect_model_usage(), {})
+
+    def test_empty_model_ids_are_not_counted_in_either_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "opencode.db"
+            conn = sqlite3.connect(db)
+            conn.executescript("""
+                CREATE TABLE message (id TEXT, data TEXT);
+                CREATE TABLE session_message (id TEXT, session_id TEXT, type TEXT, seq INTEGER, data TEXT);
+            """)
+            conn.executemany("INSERT INTO message VALUES (?, ?)", [
+                ("a", json.dumps({"model": {"providerID": "x", "modelID": ""}})),
+                ("b", json.dumps({"model": {"modelID": "m1"}}))])
+            conn.executemany("INSERT INTO session_message VALUES (?, 's', 'assistant', 1, ?)", [
+                ("c", json.dumps({"model": {"providerID": "x", "id": ""}})),
+                ("d", json.dumps({"model": {"id": "m1"}})),
+                ("e", json.dumps({"model": {"providerID": "p", "id": "m2"}}))])
+            conn.commit()
+            conn.close()
+            self.assertEqual(_drizzle_model_counts(str(db)), {("", "m1"): 2, ("p", "m2"): 1})
+
+
 if __name__ == "__main__":
     unittest.main()

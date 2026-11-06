@@ -52,17 +52,23 @@ def classify_provider(model: str) -> str:
 
 
 def _scan_jsonl_models(path: str, max_lines: int) -> dict[tuple[str, str], int]:
+    """The first ``"model"`` named in a log's opening lines. A file that
+    can't be read counts nothing, rather than raising out of the caller's
+    loop and dropping every other file of that harness with it."""
     seen: dict[tuple[str, str], int] = {}
-    with open(path) as handle:
-        for _ in range(max_lines):
-            line = handle.readline()
-            if not line:
-                break
-            match = re.search(r'"model":"([^"]+)"', line)
-            if match:
-                key = ("", match.group(1))
-                seen[key] = seen.get(key, 0) + 1
-                break
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            for _ in range(max_lines):
+                line = handle.readline()
+                if not line:
+                    break
+                match = re.search(r'"model":"([^"]+)"', line)
+                if match:
+                    key = ("", match.group(1))
+                    seen[key] = seen.get(key, 0) + 1
+                    break
+    except OSError:
+        return {}
     return seen
 
 

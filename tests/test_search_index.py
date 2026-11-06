@@ -576,5 +576,95 @@ class SearchPassesTest(unittest.TestCase):
         self.assertEqual(search_index.fill_snippets(empty, []), [])
 
 
+class SearchEdgeTest(TempHomeTest):
+    """The read path's refusals: bad limits, a store that errors mid-read,
+    duplicate rows for one session, and transcripts that won't scan."""
+
+    def setUp(self):
+        super().setUp()
+        write_index(self.home)
+
+    def db(self):
+        conn = sqlite3.connect(search_index.index_path(self.home))
+        self.addCleanup(conn.close)
+        return conn
+
+    def test_two_session_rows_for_one_id_give_one_hit(self):
+        conn = self.db()
+        conn.execute("INSERT INTO sessions(id, agent, session_id, file_path, title, updated_at)"
+                     " VALUES (4, 'claude', 'sess-alpha', '/x.jsonl', 'copy', '2026-10-09T10:00:00Z')")
+        conn.execute("INSERT INTO messages(id, session_row_id, role, ts) VALUES (7, 4, 'user', 'x')")
+        conn.execute("INSERT INTO messages_fts(rowid, user_text, assistant_text, tool_text, identifiers)"
+                     " VALUES (7, 'ledger ledger ledger', '', '', '')")
+        conn.commit()
+        hits = search_index.search(self.home, "ledger")
+        self.assertEqual([(h.session_id, h.title) for h in hits], [("sess-alpha", "copy")])
+
+    def test_a_bad_limit_falls_back_and_blank_agents_filter_nothing(self):
+        self.assertEqual(search_index._limit("lots"), search_index.DEFAULT_LIMIT)
+        self.assertEqual(search_index._limit(None), search_index.DEFAULT_LIMIT)
+        self.assertEqual(search_index._limit(0), 1)
+        hits = search_index.search(self.home, "offsets", limit="x", agents=["", ""])
+        self.assertEqual({h.session_id for h in hits}, {"sess-alpha", "sess-gamma"})
+
+    def test_a_store_that_errors_mid_read_answers_nothing(self):
+        broken = sqlite3.OperationalError("database disk image is malformed")
+        with patch.object(search_index, "_run_match", side_effect=broken):
+            self.assertEqual(search_index.search(self.home, "ledger"), [])
+            self.assertEqual(search_index.search_passes(self.home, "ledger cursor"), [])
+        with patch.object(search_index, "_hits", side_effect=broken):
+            self.assertEqual(search_index.search(self.home, "ledger"), [])
+        self.assertEqual(search_index.search_passes(self.home, "!!!"), [])
+
+    def test_fill_snippets_keeps_hits_it_cannot_fill(self):
+        hits = search_index.search_passes(self.home, "ledger")[0]
+        done = search_index.SearchHit("s", "a", "", "", "", 1.0, "user", "", "kept", fts="ledger", rowid=1)
+        bare = search_index.SearchHit("t", "a", "", "", "", 1.0, "user", "", "")
+        filled = search_index.fill_snippets(self.home, [done, bare, *hits])
+        self.assertEqual([h.snippet for h in filled[:2]], ["kept", ""])
+        self.assertTrue(all(h.snippet for h in filled[2:]))
+        with patch.object(search_index, "_snippet", side_effect=sqlite3.OperationalError("locked")):
+            self.assertEqual(search_index.fill_snippets(self.home, hits), hits)
+        empty = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.assertEqual(search_index.fill_snippets(empty, hits), hits)
+
+    def test_match_keys_survive_an_id_codex_cannot_read(self):
+        with patch.object(search_index, "codex_thread_id", side_effect=ValueError("bad")):
+            self.assertEqual(search_index.match_keys("dir/rollout-x.jsonl"),
+                             frozenset({"dir/rollout-x.jsonl", "rollout-x"}))
+
+    def test_no_parser_registry_passes_the_filter_through(self):
+        with patch.dict(sys.modules, {"swe.sessions.aggregator": None}):
+            self.assertEqual(search_index.tool_names_for("cc"), ["cc"])
+
+    def test_merge_skips_sessions_without_an_id_and_labels_from_named_ones(self):
+        sessions = [
+            Session(timestamp=1.0, agent="Untracked", path="/w", title="t", session_id="", tool_name="claude"),
+            Session(timestamp=1.0, agent="", path="/w", title="t", session_id="other", tool_name="droid"),
+            Session(timestamp=1.0, agent="Droid", path="/w", title="t", session_id="other2", tool_name="droid"),
+        ]
+        ids, best = search_index.merge_hits(self.home, "chokes", sessions)
+        self.assertEqual(ids, {"sess-gamma"})
+        self.assertEqual(set(best), {"sess-gamma"})
+        self.assertEqual([(s.session_id, s.agent) for s in sessions[3:]], [("sess-gamma", "Droid")])
+
+
+class ScanJsonlHeadEdgeTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def test_blank_and_non_object_lines_are_skipped(self):
+        path = self.dir / "t.jsonl"
+        path.write_text("\n".join(["", "[1, 2]", "{broken", json.dumps({"cwd": "/w"}),
+                                   json.dumps({"type": "user", "message": {"content": "tidy the cache"}})]) + "\n")
+        self.assertEqual(search_index._scan_jsonl_head(str(path)), ("/w", "tidy the cache"))
+
+    def test_only_the_head_is_read_and_a_missing_file_reads_empty(self):
+        path = self.dir / "t.jsonl"
+        path.write_text("{}\n{}\n" + json.dumps({"cwd": "/late"}) + "\n")
+        self.assertEqual(search_index._scan_jsonl_head(str(path), max_lines=2), ("", ""))
+        self.assertEqual(search_index._scan_jsonl_head(str(self.dir / "missing.jsonl")), ("", ""))
+
+
 if __name__ == "__main__":
     unittest.main()
