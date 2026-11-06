@@ -24,9 +24,11 @@ public enum CalendarFormat {
     }
 
     /// "2h 5m", "47m", or "<1m" when the active time is under a minute —
-    /// "0m" would read as nothing happening.
+    /// "0m" would read as nothing happening. Past 48 hours it counts days
+    /// ("7d 1h"): "169h 42m" makes the reader do the division.
     public static func duration(_ seconds: TimeInterval) -> String {
         let minutes = Int(seconds / 60)
+        if minutes >= 48 * 60 { return "\(minutes / 1440)d \(minutes % 1440 / 60)h" }
         if minutes >= 60 { return "\(minutes / 60)h \(minutes % 60)m" }
         if minutes < 1 { return "<1m" }
         return "\(minutes)m"

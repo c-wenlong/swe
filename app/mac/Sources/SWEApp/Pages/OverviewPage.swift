@@ -530,6 +530,17 @@ private struct BreakdownCard: View {
             Text("No usage in this period.").font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
         }
         VStack(spacing: 0) {
+            if !shown.isEmpty {
+                HStack {
+                    Text("Account")
+                    Spacer()
+                    Text("Tokens")
+                    Text("Spend").frame(minWidth: 72, alignment: .trailing)
+                }
+                .font(Theme.tableHeader).foregroundStyle(Theme.tableHeaderText)
+                .padding(.bottom, 8)
+                Rectangle().fill(Theme.rowDivider).frame(height: Theme.hairline)
+            }
             ForEach(shown) { row in
                 HStack {
                     // An account with no logo keeps the square, so the names line up.

@@ -140,6 +140,20 @@ extension GitHubModel {
         }
     }
 
+    /// Whether `repo`'s `tab` came back as full as the dashboard asked
+    /// for, so GitHub may hold more rows than the board does.
+    public func isAtFetchCap(_ repo: String, tab: RepoTab) -> Bool {
+        guard tab != .pages, let fetched = board(for: repo).rowCount(tab) else { return false }
+        return fetched >= Self.dashboardCap(tab)
+    }
+
+    /// The rail's count for `repo` on `tab`: "30+" when the fetch hit its
+    /// cap, since the true number is unknown past it; nil while unknown.
+    public func rowCountLabel(_ repo: String, tab: RepoTab) -> String? {
+        guard let count = rowCount(repo, tab: tab) else { return nil }
+        return isAtFetchCap(repo, tab: tab) ? "\(count)+" : "\(count)"
+    }
+
     private func count<Row>(_ state: Loadable<[Row]>, repo: String,
                             _ parts: (Row) -> [String?]) -> Int? {
         guard case .loaded(let rows) = state else { return nil }

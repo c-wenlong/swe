@@ -114,11 +114,10 @@ public struct HarnessMark: Equatable, Sendable {
         names[harness] ?? harness.prefix(1).uppercased() + harness.dropFirst()
     }
 
-    /// The name of an account or usage provider for a harness: the same as
-    /// the harness name, except that a Claude account is "Claude". It is
-    /// the Anthropic subscription, which covers the app and the CLI alike.
+    /// The name of an account or usage provider for a harness: the harness
+    /// name, so a Claude account reads "Claude Code" like every other page.
     public static func accountName(_ id: String) -> String {
-        id == "claude" ? "Claude" : HarnessMark(id).name
+        HarnessMark(id).name
     }
 }
 

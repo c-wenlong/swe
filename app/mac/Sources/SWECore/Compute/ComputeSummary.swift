@@ -489,8 +489,15 @@ public enum ComputeSummary {
     /// Physical footprint the way Activity Monitor shows it, except that
     /// nothing reads "0 KB": the formatter's own "Zero KB" sat oddly in
     /// a line of figures.
+    /// The formatter keeps megabytes up to 1,023.9 MB; past 1,000 MB this
+    /// switches to gigabytes so a row never reads "1,004.3 MB".
     public static func bytes(_ count: UInt64) -> String {
         if count == 0 { return "0 KB" }
+        let mebibyte: UInt64 = 1 << 20, gibibyte: UInt64 = 1 << 30
+        if count >= 1000 * mebibyte, count < gibibyte {
+            let gigabytes = Double(count) / Double(gibibyte)
+            return gigabytes.formatted(.number.precision(.fractionLength(2))) + " GB"
+        }
         let formatter = ByteCountFormatter()
         formatter.countStyle = .memory
         return formatter.string(fromByteCount: Int64(count))

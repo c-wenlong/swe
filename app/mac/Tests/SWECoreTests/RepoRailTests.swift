@@ -81,6 +81,19 @@ import Testing
                 == ["o/b", "x/c", "o/d", "o/a"])
     }
 
+    @Test func aSurfaceFetchedToItsCapCountsWithAPlus() async {
+        let runs = (1...GitHubModel.dashboardCap(.actions)).map { run($0, branch: "main", conclusion: "success") }
+        let model = await model(a: board("o/a", pulls: [pr(1)], runs: runs),
+                                b: board("o/b", pulls: []))
+        // 30 runs is the fetch cap, not a total: GitHub may hold more.
+        #expect(model.rowCountLabel("o/a", tab: .actions) == "30+")
+        #expect(model.isAtFetchCap("o/a", tab: .actions))
+        // One pull request under a cap of 50 is the whole list.
+        #expect(model.rowCountLabel("o/a", tab: .pulls) == "1")
+        #expect(model.rowCountLabel("o/b", tab: .pulls) == "0")
+        #expect(model.rowCountLabel("x/c", tab: .pulls) == nil)
+    }
+
     @Test func countsFollowSearchStateWordsAndUnloadedReposStayUnknown() async {
         let model = await model(
             a: board("o/a", pulls: [pr(1), pr(2, author: "app/dependabot", checks: "failing"),
