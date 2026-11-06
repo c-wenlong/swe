@@ -586,6 +586,50 @@ class SkillsLayoutEdgeTest(unittest.TestCase):
         with patch.object(Path, "resolve", resolve):
             self.assertEqual(shared_scopes_for_skill(skill, home=home), [])
 
+    def test_loop_checks_read_both_ways_python_reports_a_loop(self):
+        # resolve() says RuntimeError before 3.13 and OSError(ELOOP) from
+        # 3.13 on; whichever this interpreter does, both are pinned here.
+        import errno
+
+        from swe.skills import link_ops
+
+        home = self._home()
+        missing = home / "nowhere"
+        self.assertFalse(link_ops._loops(missing))  # missing is not a loop
+        for exc, loops in ((RuntimeError("Symlink loop"), True),
+                           (OSError(errno.ELOOP, "Too many levels"), True),
+                           (PermissionError(errno.EACCES, "denied"), False)):
+            with patch.object(Path, "resolve", side_effect=exc):
+                self.assertIs(link_ops._loops(missing), loops, exc)
+                self.assertFalse(link_ops._same_tree(missing, home))
+
+    def test_lookups_survive_a_root_whose_resolve_raises(self):
+        # The loop tests above with the pre-3.13 RuntimeError forced, so
+        # every guard runs on every interpreter (3.13 resolves a loop
+        # without raising).
+        from swe.skills.layout import resolve_root_ref
+
+        home = self._home()
+        codex = home / ".codex" / "skills"
+        codex.mkdir(parents=True)
+        other = home / "elsewhere" / "skills"
+        other.mkdir(parents=True)
+        real = Path.resolve
+
+        def resolve(path, *args, **kwargs):
+            if path == codex:
+                raise RuntimeError(f"Symlink loop from {path!r}")
+            return real(path, *args, **kwargs)
+
+        with patch.object(Path, "resolve", resolve):
+            self.assertEqual(resolve_root_ref(str(other), home=home, cwd=home)[1], other)
+            with self.assertRaises(SkillLayoutError) as ctx:
+                find_skill_directory("x", "codex", home=home, cwd=home)
+            self.assertIn("No skill matching", str(ctx.exception))
+            with self.assertRaises(SkillLayoutError) as ctx:
+                move_skill("x", "shared", "codex", home=home, cwd=home)
+            self.assertIn("Symlink loop", str(ctx.exception))
+
     def test_link_refuses_a_target_that_is_a_symlink_loop(self):
         home = self._home()
         claude = home / ".claude" / "skills"
