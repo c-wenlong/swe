@@ -599,5 +599,69 @@ class SetupHubEndToEndTest(unittest.TestCase):
         self.assertTrue((self.home / ".claude" / "CLAUDE.md").is_symlink())
 
 
+
+class HubInstallEdgeTest(unittest.TestCase):
+    def setUp(self):
+        self.home = temp_dir(self)
+
+    def test_an_unreadable_hub_manifest_is_one_row_about_the_hub(self):
+        with patch("swe.find.plugin_drift.registered_hub_plugins",
+                   side_effect=ValueError("bad marketplace.json")):
+            rows = hub_repo.install_hub_plugins(self.home)
+        self.assertEqual(rows, [{"harness": "", "name": "", "marketplace": "", "skipped": None,
+                                 "error": "couldn't read the hub's plugins: bad marketplace.json",
+                                 "retry": None}])
+
+    def test_an_install_that_changed_nothing_for_another_reason_is_an_error(self):
+        with patch("swe.find.plugin_drift.registered_hub_plugins",
+                   return_value=[("claude", "starter", "lint")]), \
+                patch("swe.plugins.actions.plugin_action",
+                      return_value={"changed": False, "detail": "marketplace not found"}):
+            rows = hub_repo.install_hub_plugins(self.home)
+        self.assertEqual([(r["error"], r["skipped"], r["retry"]) for r in rows],
+                         [("marketplace not found", None,
+                           "swe plugins install lint@starter --harness=claude")])
+
+    def test_a_broken_registry_reads_as_nothing_archived(self):
+        config = self.home / ".swe" / "config"
+        config.mkdir(parents=True)
+        (config / "harness.json").write_text("{broken")
+        (self.home / ".claude").mkdir()
+        with patch("swe.init.layout.shutil.which", return_value=None):
+            self.assertIn("claude", hub_repo.mcp_targets(self.home))
+
+
+class SyncHubMcpEdgeTest(_McpHome):
+    def setUp(self):
+        super().setUp()
+        _write_hub_mcp(self.home)
+
+    def _rows(self, report):
+        with patch.object(mcp_cli, "sync_hub_to", return_value=report):
+            return [(r["harness"], r["name"], r["skipped"], r["error"])
+                    for r in hub_repo.sync_hub_mcp(self.home)]
+
+    def test_a_sync_that_stops_reports_its_last_line_for_every_server(self):
+        rows = self._rows({"code": 1, "said": "Reading...\nmcp.json is locked",
+                           "targets": [], "missing": {}})
+        self.assertEqual(rows, [
+            ("claude", "context7", None, "mcp.json is locked"),
+            ("claude", "github", None, "mcp.json is locked"),
+            ("codex", "context7", None, "mcp.json is locked"),
+            ("codex", "github", None, "mcp.json is locked"),
+        ])
+
+    def test_a_silent_stop_names_the_status(self):
+        rows = self._rows({"code": 3, "said": "", "targets": [], "missing": {}})
+        self.assertEqual({r[3] for r in rows}, {"swe mcp sync stopped with status 3"})
+
+    def test_a_remote_server_a_harness_cannot_run_is_skipped(self):
+        rows = self._rows({"code": 0, "said": "", "missing": {},
+                           "targets": [{"added": ["context7"], "unsupported": ["github"]}]})
+        skipped = {(h, n): why for h, n, why, _ in rows if why}
+        self.assertEqual(set(skipped), {("claude", "github"), ("codex", "github")})
+        self.assertTrue(all(why.startswith("a remote server; ") for why in skipped.values()))
+
+
 if __name__ == "__main__":
     unittest.main()

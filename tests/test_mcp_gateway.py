@@ -590,6 +590,174 @@ class GatewayCommandsInProcessTest(unittest.TestCase):
         self.assertIn("cannot bind", err)
 
 
+
+class GatewayCommandEdgeTest(unittest.TestCase):
+    """The refusals and in-between states of install, uninstall, share and
+    status. launchctl, the network and sleeps are all stubbed."""
+
+    setUp = GatewayCommandsInProcessTest.setUp
+    tearDown = GatewayCommandsInProcessTest.tearDown
+    run_cmd = GatewayCommandsInProcessTest.run_cmd
+    hub_data = GatewayCommandsInProcessTest.hub_data
+
+    def gc(self):
+        from swe.mcp import gateway_commands as gc
+
+        return gc
+
+    def test_fetch_reads_json_and_treats_garbage_as_nothing(self):
+        import io
+
+        gc = self.gc()
+
+        def answering(body):
+            return patch.object(gc.urllib.request, "urlopen",
+                                return_value=io.BytesIO(body))
+
+        with answering(b'{"ok": true}'):
+            self.assertEqual(gc._fetch(9300, "/health"), {"ok": True})
+        with answering(b""):
+            self.assertIsNone(gc._fetch(9300, "/health"))
+        with answering(b"<html>"):
+            self.assertIsNone(gc._fetch(9300, "/health"))
+
+    def test_supports_gateway_needs_a_swe_that_knows_the_command(self):
+        gc = self.gc()
+        for outcome, expected in ((subprocess.CompletedProcess([], 0), True),
+                                  (subprocess.CompletedProcess([], 2), False),
+                                  (FileNotFoundError(2, "gone"), False),
+                                  (subprocess.TimeoutExpired("swe", 30), False)):
+            kwargs = ({"side_effect": outcome} if isinstance(outcome, BaseException)
+                      else {"return_value": outcome})
+            with patch.object(gc.subprocess, "run", **kwargs):
+                self.assertIs(gc._supports_gateway("/x/swe"), expected, outcome)
+
+    def test_gateway_program_without_a_runnable_swe(self):
+        gc = self.gc()
+        with patch.object(gc.launchd, "bundled_swe", return_value=None), \
+                patch.object(gc.sys, "argv", [str(self.home / "missing-swe")]):
+            program, err = gc.gateway_program(9300)
+        self.assertEqual(program, [])
+        self.assertIn("cannot find a swe with `mcp gateway`", err)
+
+    def test_gateway_program_runs_a_swe_outside_the_protected_folders(self):
+        gc = self.gc()
+        swe = self.home / "bin" / "swe"
+        swe.parent.mkdir()
+        swe.write_text("#!/bin/sh\n")
+        swe.chmod(0o755)
+        with patch.object(gc.launchd, "bundled_swe", return_value=pathlib.Path("/Old.app/swe")), \
+                patch.object(gc, "_supports_gateway", side_effect=lambda p: p == str(swe)), \
+                patch.object(gc.sys, "argv", [str(swe)]):
+            program, err = gc.gateway_program(9300)
+        self.assertIsNone(err)
+        self.assertEqual(program, [str(swe), "mcp", "gateway", "serve", "--port=9300"])
+
+    def test_install_refuses_an_unknown_flag(self):
+        with patch.object(self.gc().sys, "platform", "darwin"):
+            code, _, err = self.run_cmd("install", "--verbose")
+        self.assertEqual(code, 1)
+        self.assertIn("Unknown flag(s): --verbose", err)
+        self.assertNotIn("gateway", self.hub_data())
+
+    def test_install_that_launchctl_refuses_saves_nothing(self):
+        gc = self.gc()
+        with patch.object(gc.sys, "platform", "darwin"), \
+                patch.object(gc, "gateway_program", return_value=(["swe"], None)), \
+                patch.object(gc.launchd, "install", side_effect=RuntimeError("bootstrap failed: 5")):
+            code, _, err = self.run_cmd("install")
+        self.assertEqual(code, 1)
+        self.assertIn("launchctl could not load the gateway: bootstrap failed: 5", err)
+        self.assertNotIn("gateway", self.hub_data())
+
+    def test_install_that_never_answers_still_saves_and_says_where_to_look(self):
+        gc = self.gc()
+        with patch.object(gc.sys, "platform", "darwin"), \
+                patch.object(gc, "gateway_program", return_value=(["swe"], None)), \
+                patch.object(gc.launchd, "install", return_value=self.home / "agent.plist"), \
+                patch.object(gc, "_fetch", return_value=None) as fetch, \
+                patch.object(gc.time, "sleep") as sleep:
+            code, out, err = self.run_cmd("install", "--port=9301")
+        self.assertEqual(code, 0)
+        self.assertIn("not answering on port 9301 yet", err)
+        self.assertEqual((fetch.call_count, sleep.call_count), (20, 20))
+        self.assertEqual(self.hub_data()["gateway"], {"enabled": True, "port": 9301})
+
+    def test_uninstall_off_macos_only_switches_sync_back(self):
+        gc = self.gc()
+        gc._save_settings(enabled=True)
+        with patch.object(gc.sys, "platform", "linux"), \
+                patch.object(gc.launchd, "uninstall") as uninstall:
+            code, out, _ = self.run_cmd("uninstall")
+        uninstall.assert_not_called()
+        self.assertEqual(code, 0)
+        self.assertIn("swe mcp sync swe --all", out)
+        self.assertIs(self.hub_data()["gateway"]["enabled"], False)
+
+    def test_uninstall_with_nothing_installed_or_enabled_hints_nothing(self):
+        gc = self.gc()
+        with patch.object(gc.sys, "platform", "darwin"), \
+                patch.object(gc.launchd, "uninstall", return_value=False):
+            code, out, _ = self.run_cmd("uninstall")
+        self.assertEqual(code, 0)
+        self.assertIn("no gateway LaunchAgent was installed", out)
+        self.assertNotIn("swe mcp sync", out)
+
+    def test_uninstall_that_launchctl_refuses_keeps_the_setting(self):
+        gc = self.gc()
+        gc._save_settings(enabled=True)
+        with patch.object(gc.sys, "platform", "darwin"), \
+                patch.object(gc.launchd, "uninstall", side_effect=RuntimeError("busy")):
+            code, _, err = self.run_cmd("uninstall")
+        self.assertEqual(code, 1)
+        self.assertIn("could not stop the gateway: busy", err)
+        self.assertIs(self.hub_data()["gateway"]["enabled"], True)
+
+    def test_share_with_the_gateway_on_hints_a_sync_of_just_those(self):
+        self.gc()._save_settings(enabled=True)
+        code, out, _ = self.run_cmd("share", "api")
+        self.assertEqual(code, 0)
+        self.assertIn("swe mcp sync swe --all --only=api --force", out)
+
+    def _status(self, *, platform="darwin", plists=(), loaded=(False, None)):
+        gc = self.gc()
+        for label in plists:
+            path = launchd.plist_path(label=label)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("<plist/>")
+        with patch.object(gc.sys, "platform", platform), \
+                patch.object(gc, "_fetch", return_value=None), \
+                patch.object(gc.launchd, "loaded_pid", return_value=loaded) as pid:
+            code, out, _ = self.run_cmd("status")
+        self.assertEqual(code, 0)
+        return out, pid
+
+    def test_status_off_macos_never_asks_launchd(self):
+        out, pid = self._status(platform="linux", plists=[self.gc().LABEL])
+        pid.assert_not_called()
+        self.assertIn("not installed", out)
+
+    def test_status_of_an_old_label_plist_that_is_not_running(self):
+        gc = self.gc()
+        out, pid = self._status(plists=[gc.OLD_LABEL])
+        self.assertEqual([c.kwargs["label"] for c in pid.call_args_list], [gc.OLD_LABEL])
+        self.assertIn("installed but not answering on port 8478", out)
+        self.assertIn("installed, but sync still writes commands", out)
+
+    def test_status_enabled_without_an_agent_says_to_install(self):
+        self.gc()._save_settings(enabled=True)
+        out, _ = self._status()
+        self.assertIn("no LaunchAgent runs it: swe mcp gateway install", out)
+
+    def test_status_with_nothing_shared(self):
+        hub = self.hub_data()
+        for server in hub["mcpServers"].values():
+            server.pop("shared", None)
+        self.hub.write_text(json.dumps(hub))
+        out, _ = self._status()
+        self.assertIn("no shared servers yet: swe mcp gateway share <server...>", out)
+
+
 def _env(home: pathlib.Path) -> dict:
     env = os.environ.copy()
     env["HOME"] = str(home)
