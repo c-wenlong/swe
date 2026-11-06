@@ -205,6 +205,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The web app marks its own requests with `X-Swe-Pair`.** The header
+  that lets the hub owner's tailnet identity in without a bearer was
+  still called `X-Quiver-Pair`. The web app now sends `X-Swe-Pair: 1`;
+  the hub accepts either, so a browser tab still holding an older page
+  keeps working until it reloads.
+
 - **A stored Linear task's refresh no longer downloads its
   description.** The hub asked Linear for each issue's full body on
   every task read and never used it. The unused Notion page-body

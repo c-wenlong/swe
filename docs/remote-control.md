@@ -1548,7 +1548,7 @@ that takes over the window, native sidebar included, pinned to that
 hub's origin. The title-bar strip names the machine and keeps the
 machine menu for the way back. The hub treats it as a
 browser on the Mac: the owner's own tailnet node gets in with no pairing
-(the web app sends `X-Quiver-Pair: 1` from the hub's own origin), and any
+(the web app sends `X-Swe-Pair: 1` from the hub's own origin; the hub also reads `X-Quiver-Pair`, its name before the rename, for a tab holding an older page), and any
 other node sees the web app's pairing card, whose credential stays in
 that hub's persistent web data store. The switcher lists the hub this
 Mac's `agent.json` names and hubs added by address in Settings ›
@@ -1685,7 +1685,7 @@ usage/limits dashboard (`swe list` data); transcript FTS across machines
 - Owner devices: a request without a bearer is still let in when its
   tailnet node belongs to the hub owner's login (not tagged), isn't the
   hub machine's own node, it sends
-  `X-Quiver-Pair: 1` from an allowed Host, and its `Origin` is the hub's
+  `X-Swe-Pair: 1` from an allowed Host, and its `Origin` is the hub's
   own; the web app at `/` relies on this. Behind `tailscale serve` the
   node comes from `X-Forwarded-For` only on a connection the OS places
   in the Tailscale daemon. The `whois` answer is
