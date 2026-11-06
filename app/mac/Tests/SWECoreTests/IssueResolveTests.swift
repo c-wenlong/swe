@@ -33,7 +33,7 @@ import Testing
         #expect(issue.comments[0].author == "c-wenlong")
         #expect(issue.comments[1].createdAt?.date != nil)
         #expect(issue.comments[1].url?.hasSuffix("issuecomment-2") == true)
-        #expect(issue.branch == "quiver/issue-816")
+        #expect(issue.branch == "swe/issue-816")
         #expect(issue.worktree == "/Users/k/.swe/worktrees/c-wenlong__swe-issue816")
         #expect(issue.suggestedPrompt?.contains("Closes #816") == true)
     }
@@ -393,7 +393,7 @@ import Testing
     @Test func pendingNotesShowThenTheKeyComesBack() async {
         let flow = IssueLaunchFlow()
         let script = Script([
-            HubLaunchStatus(launchId: "l1", state: "pending", note: "Creating worktree quiver/issue-7…"),
+            HubLaunchStatus(launchId: "l1", state: "pending", note: "Creating worktree swe/issue-7…"),
             HubLaunchStatus(launchId: "l1", state: "pending", note: "Starting claude…"),
             HubLaunchStatus(launchId: "l1", state: "started", key: "claude:s9"),
         ])
@@ -406,7 +406,7 @@ import Testing
             pause: { script.notes.append(flow.note) })
         #expect(key == "claude:s9")
         #expect(flow.phase == .started("claude:s9"))
-        #expect(script.notes == ["Cloning mirror…", "Creating worktree quiver/issue-7…", "Starting claude…"])
+        #expect(script.notes == ["Cloning mirror…", "Creating worktree swe/issue-7…", "Starting claude…"])
         #expect(flow.busy)
     }
 

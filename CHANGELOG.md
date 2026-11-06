@@ -66,6 +66,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   menu rows), and text with line breaks goes in as one bracketed paste
   instead of one Enter per line.
 
+- **Issue resolves work on `swe/issue-<n>`.** `swe gh issue worktree`
+  and the hub's Resolve with agent still cut `quiver/issue-<n>`. New
+  resolves branch `swe/issue-<n>`; a checkout or branch a resolve left
+  under the old name is resumed on it (and the prompt names it), and
+  the Tasks rows still find the PR such a branch opened, so no work in
+  flight is orphaned. The Mac, iPhone and web sheets' fallback label
+  says `swe/issue-<n>` too.
+
 - **swe's tmux panes are named `swe-…`.** Sessions the hub runs under
   tmux were still named `qv-<slug>`. New panes are `swe-<slug>`, so
   `tmux attach -t swe-…` is what the web chip, the Run in terminal

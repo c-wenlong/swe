@@ -22,15 +22,16 @@ that launch id, the way a ``POST /v1/sessions`` launch does:
 
 1. read the issue (``github/issues.py``), for the prompt and the title;
 2. ``manage.issue_worktree``: the repo's mirror (cloned on first use),
-   then branch ``quiver/issue-<n>`` checked out under
+   then branch ``swe/issue-<n>`` checked out under
    ``~/.swe/worktrees``. A second resolve of the same issue resumes
-   in the same checkout;
+   in the same checkout (on ``quiver/issue-<n>`` when a resolve from
+   before the rename made it);
 3. ``supervise.launch_new`` in that checkout with the client's prompt,
    or ``build_prompt`` when none was sent. ``context`` is added as a
    "Context for this run" block either way (once).
 
 While pending, the launch's ``note`` names the step ("Cloning mirror…",
-"Creating worktree quiver/issue-<n>…", "Starting <harness>…"), so
+"Creating worktree swe/issue-<n>…", "Starting <harness>…"), so
 ``GET /v1/launches/<id>`` reads as progress. Any failure settles the
 launch ``failed`` with a readable note. When adoption names the new
 session, its title becomes ``<owner>/<repo>#<n> <issue title>``
@@ -47,6 +48,7 @@ client can't post anywhere the hub's ``gh`` login reaches.
 
 from __future__ import annotations
 
+import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -232,7 +234,8 @@ def detail(state, owner: str, name: str, number_raw: str,
         # ``shape``'s) still answers with the fields only this route adds.
         worktree = manage.issue_worktree_path(pinned, number, state.home)
         issue = {**issue,
-                 "branch": manage.issue_branch(number),
+                 "branch": manage.resolve_branch(pinned, number,
+                                                  state.home),
                  "worktree": worktree,
                  "suggested_prompt": gh_issues.build_prompt(
                      pinned, issue, worktree)}
@@ -354,15 +357,35 @@ def _pinned(home, name: str) -> str | None:
         return None
 
 
+def _on_branch(prompt: str, number: int, branch: str) -> str:
+    """``prompt`` with the issue's other branch name swapped for
+    ``branch``, the one its worktree is on.
+
+    A client prefills its prompt from the detail's ``suggested_prompt``,
+    which names the branch a resolve would use as far as the hub could
+    tell then. The checkout can still land on the other name (a mirror
+    first cloned by this resolve brings a pre-rename ``quiver/issue-<n>``
+    branch with it), and an agent told the wrong branch would commit to
+    a branch nobody reads. Only this issue's own two names are swapped,
+    and only whole ones (``swe/issue-5`` never inside ``swe/issue-50``).
+    """
+    for other in manage.issue_branches(number):
+        if branch and other != branch:
+            prompt = re.sub(rf"(?<![\w/.-]){re.escape(other)}(?![\w/-]|\.\w)",
+                            branch, prompt)
+    return prompt
+
+
 def final_prompt(cmd: dict, issue: dict | None, cwd: str,
-                 login: str = "") -> str:
+                 login: str = "", branch: str = "") -> str:
     """The prompt the agent starts with: the client's, else the built
-    one, with the context block added once."""
+    one, naming ``branch`` (the one the worktree is on) either way, with
+    the context block added once."""
     if not cmd["prompt"]:
         return gh_issues.build_prompt(
             cmd["repo"], issue or {"number": cmd["number"]}, cwd,
-            context=cmd["context"], context_author=login)
-    prompt = cmd["prompt"]
+            context=cmd["context"], context_author=login, branch=branch)
+    prompt = _on_branch(cmd["prompt"], cmd["number"], branch)
     block = gh_issues.context_block(cmd["context"], login)
     if block and cmd["context"].strip() not in prompt:
         prompt = prompt.rstrip() + "\n\n" + block
@@ -522,7 +545,8 @@ def _prepare_and_launch(state, launch_id: str, cmd: dict, binary: str,
         return made.error or made.status
     cwd = made.data["path"]
     state.settle_launch(launch_id, cwd=cwd)
-    prompt = final_prompt(cmd, issue, cwd, login)
+    prompt = final_prompt(cmd, issue, cwd, login,
+                          branch=str(made.data.get("branch") or ""))
     if len(prompt) > protocol.MAX_LAUNCH_PROMPT:
         return (f"The prompt is over {protocol.MAX_LAUNCH_PROMPT} "
                 "characters; shorten it or the context")

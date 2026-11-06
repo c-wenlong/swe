@@ -832,7 +832,7 @@ struct IssueDetail: Decodable {
     let createdAt: String?
     let updatedAt: String?
     let comments: [IssueComment]?
-    /// `quiver/issue-<n>`: the branch a resolve works on.
+    /// `swe/issue-<n>`: the branch a resolve works on.
     let branch: String?
     /// Where the hub's `issue_worktree` puts the checkout — the resolve
     /// sheet's "Starts in" line before the worktree exists.
@@ -895,7 +895,7 @@ struct TaskRepoFailure: Decodable, Identifiable, Hashable {
 }
 
 /// The PR fields a task row carries: for an issue the PR its
-/// `quiver/issue-<n>` branch produced (open or merged), for a pull
+/// `swe/issue-<n>` branch produced (open or merged), for a pull
 /// the PR itself.
 struct TaskPr: Decodable, Hashable, Sendable {
     let number: Int?

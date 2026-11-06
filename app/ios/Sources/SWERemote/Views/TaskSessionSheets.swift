@@ -141,7 +141,7 @@ struct TaskSessionSheet: View {
         let where_: String
         if let r = issueRoute {
             icon = "exclamationmark.circle"
-            where_ = "\(r.repo) · quiver/issue-\(r.number)"
+            where_ = "\(r.repo) · swe/issue-\(r.number)"
         } else if let r = pullRoute {
             icon = "arrow.triangle.pull"
             where_ = "\(r.repo)#\(r.number) worktree"
@@ -187,7 +187,7 @@ struct TaskSessionSheet: View {
 
     private func footnote(_ machine: Machine) -> String {
         if let r = issueRoute {
-            return "Runs under tmux on \(machine.displayName) on branch quiver/issue-\(r.number) in a worktree of \(r.repo). The chat opens once the session shows up."
+            return "Runs under tmux on \(machine.displayName) on branch swe/issue-\(r.number) in a worktree of \(r.repo). The chat opens once the session shows up."
         }
         if pullRoute != nil {
             return "Runs under tmux on \(machine.displayName) in a checkout of the PR's head. The chat opens once the session shows up."

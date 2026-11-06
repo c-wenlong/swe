@@ -171,6 +171,14 @@ tab and newline (an ESC or ^C in a message cancelled turns or picked
 menu rows), and text with line breaks goes in as one bracketed paste
 instead of one Enter per line.</p>
 </li>
+<li><p><strong>Issue resolves work on <code>swe/issue-&lt;n&gt;</code>.</strong> <code>swe gh issue worktree</code>
+and the hub's Resolve with agent still cut <code>quiver/issue-&lt;n&gt;</code>. New
+resolves branch <code>swe/issue-&lt;n&gt;</code>; a checkout or branch a resolve left
+under the old name is resumed on it (and the prompt names it), and
+the Tasks rows still find the PR such a branch opened, so no work in
+flight is orphaned. The Mac, iPhone and web sheets' fallback label
+says <code>swe/issue-&lt;n&gt;</code> too.</p>
+</li>
 <li><p><strong>swe's tmux panes are named <code>swe-…</code>.</strong> Sessions the hub runs under
 tmux were still named <code>qv-&lt;slug&gt;</code>. New panes are <code>swe-&lt;slug&gt;</code>, so
 <code>tmux attach -t swe-…</code> is what the web chip, the Run in terminal

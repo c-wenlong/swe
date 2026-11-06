@@ -1648,11 +1648,13 @@ def _cmd_issue_comment(number: int, opts: dict, json_view: bool) -> int:
 
 
 def _cmd_issue_worktree(number: int, opts: dict, json_view: bool) -> int:
-    """A branch ``quiver/issue-<n>`` off the default branch, checked out
+    """A branch ``swe/issue-<n>`` off the default branch, checked out
     under ``~/.swe/worktrees`` (``manage.issue_worktree``)."""
     def blocked(env, repo, msg):
         emit({**_env_emit(env), "repo": repo, "issue": number,
-              "path": None, "branch": manage.issue_branch(number),
+              "path": None,
+              "branch": (manage.resolve_branch(repo, number) if repo
+                         else manage.issue_branch(number)),
               "created": False, "error": msg})
 
     env, repo = _issue_gate(opts, json_view, blocked)

@@ -1791,7 +1791,7 @@ const PrFilter = (() => {
     const picked = pickedHarness(x);
     const model = picked && picked.launch_model ? ModelMenu.html(x.model, recentModels(x), "gh-resolve-model", busy || x.started) : "";
     const where = s.data && s.data.machine ? ` on ${esc(s.data.machine)}` : " on the hub";
-    const branch = issue.branch || `quiver/issue-${issue.number}`;
+    const branch = issue.branch || `swe/issue-${issue.number}`;
     // A refetch can find the issue closed since the panel opened: Start
     // goes off, as the sheet's Resolve with agent is for a closed issue.
     const closed = issue.state !== "open";

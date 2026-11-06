@@ -288,7 +288,7 @@ struct HubClient: Sendable {
     }
 
     /// `POST /v1/issues/resolve {repo, number, harness, prompt?, context?, model?}`
-    /// → a launch on branch `quiver/issue-<n>` in the issue's worktree;
+    /// → a launch on branch `swe/issue-<n>` in the issue's worktree;
     /// poll `launch(_:)` for the session key, as for `startSession`. An
     /// empty `prompt` lets the hub build its resolve brief; `context`
     /// joins it as a "Context for this run" block; a nil `model` sends

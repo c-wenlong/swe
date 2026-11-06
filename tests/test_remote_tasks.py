@@ -342,22 +342,60 @@ class TestTasksRoute(_Base):
         self.assertEqual(by_id["github:pull:o/r:7"]["state"], "open")
         self.assertIn("fetched_at", body)
 
-    def test_issue_on_its_quiver_branch_reads_pr_open(self):
-        pr = {**_row(9), "branch": "quiver/issue-5"}
-        pulls = lambda name, login: {"name": name, "status": "ok",
-                                     "pulls": [pr]}
-        with self._stubs(pulls=pulls):
-            _s, body = self._get("/v1/tasks")
-        row = {t["id"]: t for t in body["tasks"]}["github:issue:o/r:5"]
-        self.assertEqual(row["state"], "pr_open")
-        self.assertEqual(row["status"], "PR open")
-        self.assertEqual(row["pr"]["number"], 9)
-        self.assertEqual(row["pr"]["state"], "open")
+    def test_issue_on_its_branch_reads_pr_open(self):
+        # swe/issue-<n>, or quiver/issue-<n> from a pre-rename resolve.
+        for number, branch in ((9, "swe/issue-5"), (11, "quiver/issue-5")):
+            pr = {**_row(number), "branch": branch}
+            pulls = lambda name, login: {"name": name, "status": "ok",
+                                         "pulls": [pr]}
+            # Each case reads its own pulls: refresh=1 alone still takes
+            # a reply younger than the refresh floor from the cache.
+            G.CACHE.clear()
+            with self._stubs(pulls=pulls):
+                _s, body = self._get("/v1/tasks")
+            row = {t["id"]: t for t in body["tasks"]}["github:issue:o/r:5"]
+            self.assertEqual(row["state"], "pr_open", branch)
+            self.assertEqual(row["status"], "PR open")
+            self.assertEqual(row["pr"]["number"], number)
+            self.assertEqual(row["pr"]["state"], "open")
+
+    def test_linked_pr_falls_back_to_the_pre_rename_branch(self):
+        old = {"number": 9, "title": "mine", "state": "MERGED",
+               "headRefName": "quiver/issue-5",
+               "headRepositoryOwner": {"login": "o"}}
+
+        def run_json(args, **_kw):
+            head = args[args.index("--head") + 1]
+            return gh.GhResult("ok", data=[old] if head == "quiver/issue-5"
+                               else [])
+
+        with patch("swe.github.gh.run_json", side_effect=run_json) as run:
+            answered, pr = tasks_mod.GitHubTasks(
+                self.srv.home)._linked_pr("o/r", 5)
+        self.assertTrue(answered)
+        self.assertEqual(pr["number"], 9)
+        heads = [c[0][0][c[0][0].index("--head") + 1]
+                 for c in run.call_args_list]
+        self.assertEqual(heads, ["swe/issue-5", "quiver/issue-5"])
+        # A PR on the new branch is the answer: the old one isn't asked.
+        new = {**old, "number": 12, "headRefName": "swe/issue-5"}
+        with patch("swe.github.gh.run_json",
+                   return_value=gh.GhResult("ok", data=[new])) as run:
+            _answered, pr = tasks_mod.GitHubTasks(
+                self.srv.home)._linked_pr("o/r", 5)
+        self.assertEqual(pr["number"], 12)
+        self.assertEqual(run.call_count, 1)
+        # gh failing on either ask is "couldn't tell", not "no PR".
+        with patch("swe.github.gh.run_json", side_effect=[
+                gh.GhResult("ok", data=[]),
+                gh.GhResult("upstream-error", error="x")]):
+            self.assertEqual(tasks_mod.GitHubTasks(
+                self.srv.home)._linked_pr("o/r", 5), (False, None))
 
     def test_a_fork_branch_does_not_mark_the_issue(self):
-        """Someone else's fork with a quiver/issue-<n> branch is not
+        """Someone else's fork with a swe/issue-<n> branch is not
         the PR the hub's worktree produced."""
-        fork = {**_row(9), "branch": "quiver/issue-5",
+        fork = {**_row(9), "branch": "swe/issue-5",
                 "head_owner": "someone-else"}
         pulls = lambda name, login: {"name": name, "status": "ok",
                                      "pulls": [fork]}
@@ -372,10 +410,10 @@ class TestTasksRoute(_Base):
         # same-named branch can come back first, and a limit of 1 then
         # hid the repo's own merged PR.
         fork = {"number": 11, "title": "fork", "state": "OPEN",
-                "headRefName": "quiver/issue-5",
+                "headRefName": "swe/issue-5",
                 "headRepositoryOwner": {"login": "someone-else"}}
         own = {"number": 9, "title": "mine", "state": "MERGED",
-               "headRefName": "quiver/issue-5",
+               "headRefName": "swe/issue-5",
                "headRepositoryOwner": {"login": "o"}}
         with patch("swe.github.gh.run_json",
                    return_value=gh.GhResult("ok", data=[fork, own])) as run:

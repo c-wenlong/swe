@@ -213,7 +213,7 @@ public struct HubClient: Sendable {
     }
 
     /// Starts a session on the hub machine to resolve issue `number`:
-    /// the hub makes the `quiver/issue-<n>` worktree, sends the first
+    /// the hub makes the `swe/issue-<n>` worktree, sends the first
     /// prompt and titles the session. Answers with the launch to poll.
     public func resolveIssue(repo: String, number: Int, harness: String,
                              prompt: String?, context: String?,

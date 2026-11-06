@@ -30,7 +30,8 @@ each row carries ``agent_running`` (a linked session is active, or its
 launch is still pending), ``sessions``, ``last_active_at`` and the
 ``state`` the linked objects imply — ``open``, ``in_progress``,
 ``pr_open``, ``merged`` or ``closed``. For an issue the linked PR is
-the one on its ``quiver/issue-<n>`` branch.
+the one on its ``swe/issue-<n>`` branch (``quiver/issue-<n>`` for a
+resolve from before the rename).
 
 A stored task the sources can't read this round — the source is
 blocked or down, or the task sits outside the ``MAX_REFRESH`` window
@@ -511,7 +512,7 @@ def list_view(state, args) -> tuple[int, dict]:
     the TaskRef fields plus ``id``, derived ``state``, ``sessions``,
     ``launches``, ``agent_running``, ``linked``, ``last_active_at``,
     ``created_at`` (linked tasks) and ``pr`` (the PR an issue's
-    ``quiver/issue-<n>`` branch produced — open or merged — so the
+    ``swe/issue-<n>`` branch produced — open or merged — so the
     issue's ``pr_open``/``merged`` reads off one row) and
     ``state_source`` (``live``, ``cached`` or ``links``; see
     ``_last_known``).
@@ -629,7 +630,7 @@ def list_view(state, args) -> tuple[int, dict]:
             readers[name] = sources[name].get
     if readers:
         # A stored task's own read sees what the open list can't: the
-        # merged PR behind a ``quiver/issue-<n>`` branch, a closed
+        # merged PR behind a ``swe/issue-<n>`` branch, a closed
         # issue. Bounded and fanned — the store keeps every link ever
         # made, so old history keeps its last-known state rather than
         # stall the whole answer behind serial source reads.
@@ -950,31 +951,34 @@ class GitHubTasks:
         return out
 
     def _linked_pr(self, repo: str, number) -> tuple[bool, dict | None]:
-        """``(answered, pr)``: the PR ``quiver/issue-<n>`` produced, in
-        any state — the open list only sees open ones, and a resolved
-        issue's PR is usually merged. ``answered`` is False when ``gh``
-        failed, so "no PR" and "couldn't tell" stay apart.
+        """``(answered, pr)``: the PR ``swe/issue-<n>`` produced, in any
+        state — the open list only sees open ones, and a resolved
+        issue's PR is usually merged. A resolve from before the rename
+        pushed ``quiver/issue-<n>``, asked only when the new name has no
+        PR. ``answered`` is False when ``gh`` failed, so "no PR" and
+        "couldn't tell" stay apart.
 
         ``--head`` matches the branch name only (gh takes no
         ``owner:branch``), so forks' PRs from a same-named branch come
         back too: read a page and keep the first the repo owns, since a
         limit of 1 could return just a fork's."""
-        result = gh.run_json([
-            "pr", "list", "--repo", repo, "--head",
-            manage.issue_branch(number), "--state", "all",
-            "--limit", str(LINKED_PR_PAGE), "--json", ghcli._PR_FIELDS])
-        if result.status != "ok" or not isinstance(result.data, list):
-            return False, None
-        for raw in result.data:
-            if isinstance(raw, dict):
-                pr = ghcli._pr_row(raw)
-                if _same_repo_head(repo, pr):
-                    return True, _pr_brief(pr)
+        for branch in manage.issue_branches(number):
+            result = gh.run_json([
+                "pr", "list", "--repo", repo, "--head", branch,
+                "--state", "all", "--limit", str(LINKED_PR_PAGE),
+                "--json", ghcli._PR_FIELDS])
+            if result.status != "ok" or not isinstance(result.data, list):
+                return False, None
+            for raw in result.data:
+                if isinstance(raw, dict):
+                    pr = ghcli._pr_row(raw)
+                    if _same_repo_head(repo, pr):
+                        return True, _pr_brief(pr)
         return True, None
 
 
 def _same_repo_head(name: str, pr: dict) -> bool:
-    """A fork's ``quiver/issue-<n>`` branch is not this repo's: only a
+    """A fork's ``swe/issue-<n>`` branch is not this repo's: only a
     head the repo itself owns counts. ``head_owner`` empty means gh
     couldn't say — match on the branch alone, as before."""
     head = str(pr.get("head_owner") or "").lower()
@@ -983,7 +987,8 @@ def _same_repo_head(name: str, pr: dict) -> bool:
 
 def _repo_tasks(name: str, issues: dict, pulls: dict) -> dict:
     """One repo's open issues and PRs as source rows; each issue's open
-    ``quiver/issue-<n>`` PR rides along so ``pr_open`` reads off it."""
+    ``swe/issue-<n>`` (or pre-rename ``quiver/issue-<n>``) PR rides
+    along so ``pr_open`` reads off it."""
     status = "ok"
     error = ""
     for reply in (issues, pulls):
@@ -1000,8 +1005,8 @@ def _repo_tasks(name: str, issues: dict, pulls: dict) -> dict:
     for issue in issues.get("issues") or []:
         if not isinstance(issue, dict):
             continue
-        pr = open_by_branch.get(
-            manage.issue_branch(issue.get("number") or 0))
+        pr = next((open_by_branch[b] for b in manage.issue_branches(
+            issue.get("number") or 0) if b in open_by_branch), None)
         tasks.append({
             "task": {"source": "github", "kind": "issue", "repo": name,
                      "ref": str(issue.get("number")),

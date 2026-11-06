@@ -19,7 +19,7 @@
 
   /* The header's tabs. "Running" is a linked agent in flight
    * (``agent_running``); "PR open" is a task whose PR is open — an
-   * issue's ``quiver/issue-<n>`` PR, or a pull task until it lands, as
+   * issue's ``swe/issue-<n>`` PR, or a pull task until it lands, as
    * the phone counts it; "Done" is merged or closed. */
   const FILTERS = [
     { id: "all", title: "All", test: () => true },
@@ -476,7 +476,7 @@
       : `<div class="gh-empty caption gh-muted">No session is linked to this task yet.</div>`;
   }
 
-  /* The linked PR: an issue's ``quiver/issue-<n>`` PR, or a pull task
+  /* The linked PR: an issue's ``swe/issue-<n>`` PR, or a pull task
    * itself. The row deep-links into Repositories' PR sheet, the same
    * surface a PR row opens. */
   function prCard(t) {

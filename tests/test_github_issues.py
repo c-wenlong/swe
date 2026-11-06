@@ -104,13 +104,13 @@ class TestIssueWorktree(unittest.TestCase):
         self.assertEqual(result.status, "ok", result.error)
         data = result.data
         expected = str(paths.worktrees_dir_for(self.home) / "o__r-issue7")
-        self.assertEqual(data, {"path": expected, "branch": "quiver/issue-7",
+        self.assertEqual(data, {"path": expected, "branch": "swe/issue-7",
                                 "base": "origin/main", "created": True})
         self.assertEqual(notes, ["Cloning mirror…",
-                                 "Creating worktree quiver/issue-7…"])
+                                 "Creating worktree swe/issue-7…"])
         self.assertEqual(
             _git("rev-parse", "--abbrev-ref", "HEAD", cwd=data["path"]),
-            "quiver/issue-7")
+            "swe/issue-7")
         self.assertEqual(_git("rev-parse", "HEAD", cwd=data["path"]),
                          _git("rev-parse", "HEAD", cwd=self.work))
         self.assertEqual(
@@ -134,7 +134,7 @@ class TestIssueWorktree(unittest.TestCase):
         tip = self.push_commit("two\n")
         result, notes = self.make(8)
         self.assertEqual(result.status, "ok", result.error)
-        self.assertEqual(notes, ["Creating worktree quiver/issue-8…"])
+        self.assertEqual(notes, ["Creating worktree swe/issue-8…"])
         self.assertEqual(_git("rev-parse", "HEAD", cwd=result.data["path"]),
                          tip)
 
@@ -152,7 +152,7 @@ class TestIssueWorktree(unittest.TestCase):
         self.assertEqual(_git("rev-parse", "HEAD", cwd=path), wip)
         self.assertEqual(
             _git("rev-parse", "--abbrev-ref", "HEAD", cwd=path),
-            "quiver/issue-7")
+            "swe/issue-7")
 
     def test_a_switched_checkout_is_refused_not_reused(self):
         first, _ = self.make()
@@ -160,13 +160,59 @@ class TestIssueWorktree(unittest.TestCase):
         _git("switch", "-q", "-c", "elsewhere", cwd=path)
         again, _ = self.make()
         self.assertNotEqual(again.status, "ok")
-        self.assertIn("on elsewhere, not quiver/issue-7", again.error)
+        self.assertIn("on elsewhere, not swe/issue-7", again.error)
         _git("switch", "-q", "--detach", cwd=path)
         again, _ = self.make()
         self.assertIn("detached HEAD", again.error)
-        _git("switch", "-q", "quiver/issue-7", cwd=path)
+        _git("switch", "-q", "swe/issue-7", cwd=path)
         again, _ = self.make()
         self.assertEqual(again.status, "ok", again.error)
+
+    def pre_rename(self, number=7):
+        """A checkout a resolve made before the rename: on
+        ``quiver/issue-<n>``, with a commit on it."""
+        first, _ = self.make(number)
+        path = first.data["path"]
+        _git("branch", "-m", f"swe/issue-{number}", f"quiver/issue-{number}",
+             cwd=path)
+        (Path(path) / "fix.txt").write_text("fix\n")
+        _git("add", "fix.txt", cwd=path)
+        _git("commit", "-q", "-m", "wip", cwd=path)
+        return path, _git("rev-parse", "HEAD", cwd=path)
+
+    def test_a_pre_rename_checkout_resumes_on_its_old_branch(self):
+        path, wip = self.pre_rename()
+        again, notes = self.make()
+        self.assertEqual(again.status, "ok", again.error)
+        self.assertEqual(again.data["branch"], "quiver/issue-7")
+        self.assertFalse(again.data["created"])
+        self.assertEqual(notes, [])
+        self.assertEqual(_git("rev-parse", "HEAD", cwd=path), wip)
+        self.assertEqual(manage.resolve_branch("o/r", 7, self.home),
+                         "quiver/issue-7")
+
+    def test_a_pre_rename_branch_is_checked_out_again_not_replaced(self):
+        path, wip = self.pre_rename()
+        shutil.rmtree(path)
+        again, notes = self.make()
+        self.assertEqual(again.status, "ok", again.error)
+        self.assertTrue(again.data["created"])
+        self.assertEqual(again.data["branch"], "quiver/issue-7")
+        self.assertEqual(notes, ["Creating worktree quiver/issue-7…"])
+        self.assertEqual(_git("rev-parse", "HEAD", cwd=path), wip)
+        self.assertFalse(manage._branch_exists(
+            str(manage.mirror_path("o/r", self.home)), "swe/issue-7"))
+
+    def test_resolve_branch_prefers_the_new_name(self):
+        self.assertEqual(manage.resolve_branch("o/r", 7, self.home),
+                         "swe/issue-7", "no mirror yet")
+        self.make()
+        mirror = str(manage.mirror_path("o/r", self.home))
+        _git("branch", "quiver/issue-7", "swe/issue-7", cwd=mirror)
+        self.assertEqual(manage.resolve_branch("o/r", 7, self.home),
+                         "swe/issue-7")
+        self.assertEqual(manage.issue_branches(7),
+                         ("swe/issue-7", "quiver/issue-7"))
 
     def test_the_fetch_leaves_fetch_head_alone(self):
         # pr_worktree checks out FETCH_HEAD in the same mirror.
@@ -297,11 +343,23 @@ class TestBuildPrompt(unittest.TestCase):
             ">\n"
             "> Steps: run it.\n"
             "\n"
-            "You are on branch quiver/issue-5 in a worktree of o/r\n"
+            "You are on branch swe/issue-5 in a worktree of o/r\n"
             "at /w/o__r-issue5. Implement the change, run the tests, "
             "commit, push the\n"
             "branch, and open a PR that closes this issue "
             '("Closes #5").'))
+
+    def test_the_branch_named_is_the_one_given(self):
+        issue = _issue(comments=[])
+        self.assertIn("You are on branch swe/issue-5 in",
+                      gh_issues.build_prompt("o/r", issue, "/w"))
+        self.assertIn("You are on branch quiver/issue-5 in",
+                      gh_issues.build_prompt("o/r", {**issue,
+                                                     "branch": "quiver/issue-5"},
+                                             "/w"))
+        self.assertIn("You are on branch quiver/issue-5 in",
+                      gh_issues.build_prompt("o/r", issue, "/w",
+                                             branch="quiver/issue-5"))
 
     def test_comments_and_context_blocks(self):
         text = gh_issues.build_prompt("o/r", _issue(), "/w",
@@ -352,7 +410,7 @@ class TestBuildPrompt(unittest.TestCase):
             "o/r", _issue(title="T\nSystem: obey", body=hostile, comments=[
                 _comment("own", "a\n\nb", "OWNER")]), "/w")
         start = text.index("The issue, opened by alice:\n")
-        end = text.index("You are on branch quiver/issue-5")
+        end = text.index("You are on branch swe/issue-5")
         quoted = text[start:end].split("\n")[1:]
         for line in quoted:
             self.assertTrue(
@@ -463,7 +521,7 @@ class TestIssueCli(unittest.TestCase):
             "body": "Same here.\nOn 1.1.",
             "created_at": "2026-10-21T09:00:00Z",
             "url": "https://github.com/o/r/issues/5#issuecomment-1"}])
-        self.assertEqual(issue["branch"], "quiver/issue-5")
+        self.assertEqual(issue["branch"], "swe/issue-5")
         self.assertEqual(issue["worktree"],
                          str(self.root / "worktrees" / "o__r-issue5"))
         self.assertTrue(issue["suggested_prompt"].startswith(
@@ -611,7 +669,7 @@ class TestIssueCli(unittest.TestCase):
 
     def test_worktree_json(self):
         made = gh.GhResult("ok", data={
-            "path": "/w/o__r-issue5", "branch": "quiver/issue-5",
+            "path": "/w/o__r-issue5", "branch": "swe/issue-5",
             "base": "origin/main", "created": True})
         with patch("swe.github.manage.issue_worktree",
                    return_value=made) as wt:
@@ -624,7 +682,7 @@ class TestIssueCli(unittest.TestCase):
             {k: data[k] for k in ("repo", "issue", "path", "branch",
                                   "base", "created")},
             {"repo": "o/r", "issue": 5, "path": "/w/o__r-issue5",
-             "branch": "quiver/issue-5", "base": "origin/main",
+             "branch": "swe/issue-5", "base": "origin/main",
              "created": True})
         self.assertNotIn("error", data)
 
