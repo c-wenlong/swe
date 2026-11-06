@@ -203,7 +203,20 @@ public struct LimitsView: View {
     }
 }
 
-private struct LimitLine: View {
+struct LimitLine: View {
+    /// A row's words. Cut in the middle, since the window at the end is
+    /// what tells two limits of one account apart. The small widget also
+    /// drops the "Claude: " before an account name: the logo says it, and
+    /// "Claude: Pers…" twice read the same.
+    static func label(title: String, window: String?, compact: Bool) -> String {
+        var name = title
+        if compact, let colon = title.range(of: ": "), !title[colon.upperBound...].isEmpty {
+            name = String(title[colon.upperBound...])
+        }
+        guard let window else { return name }
+        return "\(name) · \(window)"
+    }
+
     var reading: LimitReading
     var now: Date
     var compact: Bool
@@ -217,8 +230,9 @@ private struct LimitLine: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 5) {
                 HarnessLogo(harness: reading.harness, size: 12)
-                Text(reading.window.isEmpty ? reading.title : "\(reading.title) · \(UsageFormat.window(reading.harness, reading.window))")
-                    .font(.system(size: 11, weight: .medium)).lineLimit(1)
+                Text(Self.label(title: reading.title, window: reading.window.isEmpty ? nil
+                                : UsageFormat.window(reading.harness, reading.window), compact: compact))
+                    .font(.system(size: 11, weight: .medium)).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 4)
                 if !compact, !reset, old, let taken = reading.fetchedAt {
                     Text(UsageFormat.ago(taken, now: now))

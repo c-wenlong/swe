@@ -45,3 +45,16 @@ import Testing
         #expect(LimitsView.spreadSpacing(for: 340, count: 1) == 0)
     }
 }
+
+@Suite struct LimitLabelTests {
+    @Test func theSmallWidgetDropsTheHarnessBeforeAnAccount() {
+        #expect(LimitLine.label(title: "Claude: Personal", window: "session", compact: true) == "Personal · session")
+        #expect(LimitLine.label(title: "Codex", window: "weekly", compact: true) == "Codex · weekly")
+    }
+
+    @Test func largerWidgetsKeepTheWholeTitle() {
+        #expect(LimitLine.label(title: "Claude: Personal", window: "session", compact: false)
+                == "Claude: Personal · session")
+        #expect(LimitLine.label(title: "Cursor", window: nil, compact: false) == "Cursor")
+    }
+}
