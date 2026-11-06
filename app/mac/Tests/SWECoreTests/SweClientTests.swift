@@ -418,20 +418,24 @@ func fixture(_ name: String) throws -> Data {
     @Test func theHubIsARealSyncSource() async {
         let model = await McpModel()
         let hubOnly = McpServer(name: "s", harnesses: [], inHub: true)
-        #expect(await model.sources(for: hubOnly) == ["quiver"])
+        #expect(await model.sources(for: hubOnly) == ["swe"])
         let shared = McpServer(name: "s", harnesses: ["claude"],
                                variants: [["claude"]], inHub: true)
         // The harness group wins; the hub is the default only when no
         // harness defines the server.
-        #expect(await model.sources(for: shared) == ["claude", "quiver"])
-        let targets = await model.targets(for: hubOnly, from: "quiver",
+        #expect(await model.sources(for: shared) == ["claude", "swe"])
+        let targets = await model.targets(for: hubOnly, from: "swe",
                                           in: ["claude", "codex"])
         #expect(targets.missing == ["claude", "codex"])
         #expect(targets.differing == [])
-        let targets2 = await model.targets(for: shared, from: "quiver",
+        let targets2 = await model.targets(for: shared, from: "swe",
                                            in: ["claude", "codex"])
         #expect(targets2.missing == ["codex"])
         #expect(targets2.differing == ["claude"])
+        // "quiver", the hub's name before the rename, reads the same.
+        let legacy = await model.targets(for: shared, from: "quiver", in: ["claude", "codex"])
+        #expect(legacy.missing == ["codex"])
+        #expect(legacy.differing == ["claude"])
     }
 
     @Test func aRemoteServerIsNotOfferedToClaudeDesktop() async {
@@ -440,13 +444,17 @@ func fixture(_ name: String) throws -> Data {
                                harnesses: [], inHub: true)
         let local = McpServer(name: "l", harnesses: [], inHub: true)
         let all = ["claude", "claude-desktop", "codex"]
-        #expect(await model.targets(for: remote, from: "quiver", in: all).missing == ["claude", "codex"])
-        #expect(await model.targets(for: local, from: "quiver", in: all).missing == all)
+        #expect(await model.targets(for: remote, from: "swe", in: all).missing == ["claude", "codex"])
+        #expect(await model.targets(for: local, from: "swe", in: all).missing == all)
         // Local in claude, remote in the hub: the copied definition decides.
         let mixed = McpServer(name: "m", harnesses: ["claude"], variants: [["claude"]], inHub: true,
-                              remoteIn: ["quiver"])
+                              remoteIn: ["swe", "quiver"])
         #expect(await model.targets(for: mixed, from: "claude", in: all).missing == ["claude-desktop", "codex"])
-        #expect(await model.targets(for: mixed, from: "quiver", in: all).missing == ["codex"])
+        #expect(await model.targets(for: mixed, from: "swe", in: all).missing == ["codex"])
+        // An older swe lists the hub as "quiver" alone.
+        let older = McpServer(name: "m", harnesses: ["claude"], variants: [["claude"]], inHub: true,
+                              remoteIn: ["quiver"])
+        #expect(await model.targets(for: older, from: "swe", in: all).missing == ["codex"])
     }
 
     @Test func inHubDefaultsFalseForAnOlderSwe() throws {

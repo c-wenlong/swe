@@ -328,6 +328,13 @@ Safe Storage item.</p>
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The MCP pages name the hub <code>swe</code> when they sync or remove.</strong> The
+Mac and web MCP sheets still sent the hub's pre-rename name, <code>quiver</code>,
+as a sync source and remove place. Both now send <code>swe</code>; the hub's web
+API, the Mac model and <code>swe mcp</code> keep accepting <code>quiver</code>, and server
+rows still list the hub under both names in <code>remote_in</code>, so an older
+app build or an open page keeps working.</p>
+</li>
 <li><p><strong>The web app marks its own requests with <code>X-Swe-Pair</code>.</strong> The header
 that lets the hub owner's tailnet identity in without a bearer was
 still called <code>X-Quiver-Pair</code>. The web app now sends <code>X-Swe-Pair: 1</code>;
