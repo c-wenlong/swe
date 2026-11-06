@@ -1468,6 +1468,9 @@ private struct ProviderCatalogueSheet: View {
                             }
                         }
                     }
+                    // The rows' borders sit on their edges: without the
+                    // inset the scroll view clips the first row's top.
+                    .padding(1)
                 }
             }
             .frame(height: 420)

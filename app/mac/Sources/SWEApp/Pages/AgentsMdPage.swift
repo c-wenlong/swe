@@ -1451,7 +1451,7 @@ private struct NewChapterSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("New chapter")
-                .font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+                .font(Theme.sectionTitle).tracking(-0.5)
             Text("Folders group the chapters so you and agents can navigate without reading everything.")
                 .font(Theme.caption).foregroundStyle(Theme.textSecondary)
             FormField("Folder") {
