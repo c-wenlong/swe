@@ -24,6 +24,8 @@ struct PluginsPage: View {
     @State private var opened: Set<String> = []
     /// The Add marketplace sheet's visibility.
     @State private var addingMarketplace = false
+    /// A plugin's detail is on screen (`DetailOpenKey`).
+    @State private var detailOpen = false
 
     /// App-wide, so a check outlives a trip to another page and the last
     /// report shows at once.
@@ -33,7 +35,9 @@ struct PluginsPage: View {
     var body: some View {
         @Bindable var app = app
         Page(title: "Plugins",
-             subtitle: "Every plugin in every marketplace, and where Claude Code and Codex no longer match ~/.swe/plugins.") {
+             subtitle: "Every plugin in every marketplace, and where Claude Code and Codex no longer match ~/.swe/plugins.",
+             back: app.pluginsTab == .explore && detailOpen
+                ? ("Back to all plugins", { app.navReselects += 1 }) : nil) {
             switch app.pluginsTab {
             case .explore:
                 Button("Add marketplace", systemImage: "plus") { addingMarketplace = true }
@@ -69,6 +73,7 @@ struct PluginsPage: View {
             case .explore:
                 PluginExplorer(model: catalog, openHealth: { app.pluginsTab = .health },
                                addMarketplace: { addingMarketplace = true }) { confirmingAction = $0 }
+                    .onPreferenceChange(DetailOpenKey.self) { detailOpen = $0 }
             case .health: health
             }
         }
