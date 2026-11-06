@@ -660,7 +660,7 @@ private struct ComputeLine: View {
 
 /// The small widget's row: the name on its own line, the figures under
 /// it where they cannot squeeze the name out.
-private struct ComputeLineCompact: View {
+struct ComputeLineCompact: View {
     var row: WidgetSnapshot.ComputeSection.Row
 
     var body: some View {
@@ -670,16 +670,25 @@ private struct ComputeLineCompact: View {
                 Text(UsageFormat.harness(row.harness))
                     .font(.system(size: 11, weight: .medium)).lineLimit(1)
             }
-            // The GB unit marks RAM; the percents keep the medium's
-            // column order, CPU then GPU.
-            Text("\(ComputeSummary.bytes(row.memoryBytes)) · \(ComputeSummary.percent(row.cpuPercent))%"
-                 + (row.gpuPercent.map { " · \(ComputeSummary.percent($0))%" } ?? ""))
+            Text(Self.figures(row))
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(Palette.textSecondary)
                 .lineLimit(1)
+                // Three labelled figures fill the small widget's line: it
+                // shrinks a little rather than cutting the GPU off.
+                .minimumScaleFactor(0.75)
                 .padding(.leading, 17)
         }
         .frame(height: ComputeView.rowHeight(compact: true), alignment: .top)
+    }
+
+    /// "858.3 MB  CPU 12%  GPU 4.0%": the GB or MB unit marks RAM, and
+    /// the percents carry the medium widget's column names, CPU then GPU,
+    /// since the small one has no room for its column labels. The labels
+    /// part the figures, so no dots: the line has no width to spare.
+    nonisolated static func figures(_ row: WidgetSnapshot.ComputeSection.Row) -> String {
+        "\(ComputeSummary.bytes(row.memoryBytes))  CPU \(ComputeSummary.percent(row.cpuPercent))%"
+            + (row.gpuPercent.map { "  GPU \(ComputeSummary.percent($0))%" } ?? "")
     }
 }
 
