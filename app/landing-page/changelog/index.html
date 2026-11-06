@@ -312,6 +312,12 @@ nothing there. Hubs keep writing <code>quiver://pair</code> until the next
 release, which switches to <code>swe://pair</code>: rebuild the iPhone app from a
 current checkout before then.</p>
 </li>
+<li><p><strong>The web app marks its own requests with <code>X-Swe-Pair</code>.</strong> The header
+that lets the hub owner's tailnet identity in without a bearer was
+still called <code>X-Quiver-Pair</code>. The web app now sends <code>X-Swe-Pair: 1</code>;
+the hub accepts either, so a browser tab still holding an older page
+keeps working until it reloads.</p>
+</li>
 <li><p><strong>A stored Linear task's refresh no longer downloads its
 description.</strong> The hub asked Linear for each issue's full body on
 every task read and never used it. The unused Notion page-body
