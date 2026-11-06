@@ -454,9 +454,20 @@ def install_service(program: list[str], log_path: Path, home: Path | None = None
                                        old_unit=service.old_unit)
     except RuntimeError as exc:
         raise RuntimeError(f"systemctl could not start the {service.name}: {exc}") from exc
-    note = (f"it runs only while you're logged in; to keep it after logout, run `{linger}`"
-            if linger else "")
-    return path, note
+    notes = []
+    if linger:
+        notes.append(f"it runs only while you're logged in; to keep it after logout, "
+                     f"run `{linger}`")
+    old = systemd.unit_path(home, service.old_unit)
+    if old.exists():
+        # systemd.install keeps the pre-rename unit's file only when it
+        # would not stop: that one may still hold the port the new
+        # service needs, so the upgrade is not done.
+        notes.append(f"the pre-rename {service.old_unit} would not stop and may still be "
+                     f"running in place of the new {service.name}; stop it with "
+                     f"`systemctl --user disable --now {service.old_unit}`, then run "
+                     f"--install again")
+    return path, "; ".join(notes)
 
 
 def _cmd_uninstall_service(service: Service) -> int:
