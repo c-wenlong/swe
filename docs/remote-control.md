@@ -441,7 +441,7 @@ transcript appears as its own session.
 
 `POST /v1/sessions` (and a satellite's `launch` command) for a harness
 `auto` would attach over ACP starts it over ACP too, when the launch
-carries no `model`, `effort`, `yolo` or `provider` pick and swe can read
+carries no `model`, `effort` or `provider` pick and swe can read
 the harness's sessions (`supervise.acp_launch_eligible`). No resume
 mapping is needed: `_launch_acp` reserves the folder with a pending
 marker (`mode: acp`), runs `initialize` and `session/new` within
@@ -460,7 +460,18 @@ agent that exits on the first prompt, falls back to the tmux launch,
 with the reason in the launch's note (kept on the launch record, so
 `GET /v1/launches/{id}` shows it), and the fallback never adopts the
 session the dead agent created. An agent that refuses the first prompt
-fails the launch. The launch wire is unchanged: the 202's note
+fails the launch. With `yolo: true` (Autonomy) the connection
+answers each `session/request_permission` itself with the first option
+of kind `allow_once`, never an `allow_always` one, and journals the pair
+so the apps show what was allowed: `approval.requested` with `auto:
+true` (no ntfy push) and `approval.resolved` with `decision: "allow"`,
+`source: "autonomy"`. A request offering no `allow_once` option gets the
+usual approval card. After Stop, any request still arriving in that
+turn is answered `cancelled`, never allowed. While a launch's events are
+held for its tailer, the record of auto-answers is what gets shed past
+64 events; a request that needs an answer is always kept. `yolo` rides
+onto the row at adoption, so a
+restarted agent keeps answering this way. The launch wire is unchanged: the 202's note
 reads "starting over ACP", and an ACP launch needs no tmux.
 
 The attach's live agent stays registered with the injector, so the

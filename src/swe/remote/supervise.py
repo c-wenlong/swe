@@ -1898,7 +1898,7 @@ def launch_new(
                            yolo=yolo, provider=provider, tracked=exclusive):
         outcome, note, abandoned = _launch_acp(
             home, tool_name, cwd, prompt, known_ids=known_ids,
-            launch_id=launch_id)
+            launch_id=launch_id, yolo=yolo)
         if outcome != "fallback":
             return outcome == "ok", note, None
         acp_note = note
@@ -1933,11 +1933,13 @@ def acp_launch_eligible(
     """Whether a fresh launch of ``tool_name`` runs over ACP: the harness
     has an ACP mode ``auto`` picks (``acp.auto_eligible``), swe can read
     its sessions (adoption needs the transcript), there is a first
-    prompt to start it, and no model/effort/yolo/provider pick rides the
+    prompt to start it, and no model/effort/provider pick rides the
     launch (ACP has no verified control for any of them; the tmux
-    launch applies them on the command line or in the pane)."""
-    if not tracked or not prompt.strip() or model or effort or yolo \
-            or provider:
+    launch applies them on the command line or in the pane). ``yolo``
+    is fine: the channel answers each permission request with the
+    agent's allow-once option itself (``acp.Connection.auto_allow``)."""
+    del yolo  # the ACP channel honours it either way
+    if not tracked or not prompt.strip() or model or effort or provider:
         return False
     from swe.remote import acp
 
@@ -1946,7 +1948,7 @@ def acp_launch_eligible(
 
 def _launch_acp(
     home: Path | None, tool_name: str, cwd: str, prompt: str, *,
-    known_ids: list[str] | None, launch_id: str,
+    known_ids: list[str] | None, launch_id: str, yolo: bool = False,
 ) -> tuple[str, str, str]:
     """``launch_new`` over ACP: start the agent, ``session/new`` (no
     resume mapping needed), send the first prompt. Returns ``(outcome,
@@ -1977,6 +1979,9 @@ def _launch_acp(
         "exclude": list(known_ids or []),
         "launched_at": time.time(),
         "launch_id": launch_id,
+        # Rides onto the row at adoption, so a restarted agent keeps
+        # answering with allow-once (``AcpInjector.open``).
+        "yolo": bool(yolo),
     }
     with _registry_lock(home):
         busy = fork_blocker(home, tool_name, cwd)
@@ -1996,7 +2001,7 @@ def _launch_acp(
         return outcome, note, sid
 
     try:
-        conn = acp.Connection(argv, cwd)
+        conn = acp.Connection(argv, cwd, auto_allow=bool(yolo))
     except OSError as exc:
         return give_up(None, "fallback", f"{argv[0]} failed to launch: {exc}")
     try:
