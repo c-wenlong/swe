@@ -553,18 +553,231 @@ import Testing
             #expect(!AdministratorInstaller.isTeamIdentifier(odd), "\(odd)")
         }
         // Refused before any prompt: neither the hash nor osascript runs.
-        let odd = AdministratorInstaller(owner: { .team("AB'; rm -rf", identifier: "com.cwenlong.swe") })
+        let odd = AdministratorInstaller(owner: { .team("AB'; rm -rf", identifier: "com.cwenlong.swe") },
+                                         runScript: Self.noScript)
         await #expect(throws: FanHelperInstallError.self) {
             try await odd.install(executable: "/nonexistent", control: URL(fileURLWithPath: "/tmp/c.json"))
         }
-        let unreadable = AdministratorInstaller(owner: { throw FanHelperInstallError.failed("no signature") })
+        let unreadable = AdministratorInstaller(owner: { throw FanHelperInstallError.failed("no signature") },
+                                                runScript: Self.noScript)
         await #expect(throws: FanHelperInstallError.failed("no signature")) {
             try await unreadable.install(executable: "/nonexistent", control: URL(fileURLWithPath: "/tmp/c.json"))
         }
-        let oddHash = AdministratorInstaller(owner: { .cdhash("not-a-hash") })
+        let oddHash = AdministratorInstaller(owner: { .cdhash("not-a-hash") }, runScript: Self.noScript)
         await #expect(throws: FanHelperInstallError.self) {
             try await oddHash.install(executable: "/nonexistent", control: URL(fileURLWithPath: "/tmp/c.json"))
         }
+    }
+
+    // MARK: - The helper's entry
+
+    /// The root helper's start-up checks, in order: its flag, a control
+    /// path, a valid owner pin, then root. Each refusal exits 2 before
+    /// anything opens the SMC.
+    @Test func theHelpersEntryRefusesBadArgumentsAndNonRoot() throws {
+        let control = "/Users/me/.swe/fan-control.json"
+        let hash = String(repeating: "ab", count: 20)
+        let good = ["SWEFanHelper", FanHelper.flag, "--control", control, "--owner-cdhash", hash]
+        if case .notHelper = FanHelper.start(["SWE"], uid: 0) {} else { Issue.record("no flag still started") }
+        if case .notHelper = FanHelper.start(["SWE", "--control", control], uid: 0) {} else {
+            Issue.record("a control path without the flag started the helper")
+        }
+        if case .survey = FanHelper.start(["SWE", FanHelper.surveyFlag], uid: 501) {} else {
+            Issue.record("the survey needs no root")
+        }
+        func refusal(_ arguments: [String], uid: uid_t) -> String?? {
+            if case .refuse(let why) = FanHelper.start(arguments, uid: uid) { return .some(why) }
+            return nil
+        }
+        // No control path, or a relative one: refused without a word.
+        #expect(refusal(["SWEFanHelper", FanHelper.flag, "--owner-cdhash", hash], uid: 0) == .some(nil))
+        #expect(refusal(["SWEFanHelper", FanHelper.flag, "--control", "fan.json", "--owner-cdhash", hash], uid: 0)
+                    == .some(nil))
+        // No pin, a malformed one, or two: nobody's requests are taken.
+        let noOwner = "no valid owner signature in the arguments"
+        #expect(refusal(Array(good.prefix(4)), uid: 0) == .some(noOwner))
+        #expect(refusal(Array(good.prefix(5)) + ["XYZ"], uid: 0) == .some(noOwner))
+        #expect(refusal(good + ["--owner-cdhash", hash], uid: 0) == .some(noOwner))
+        // The pin is checked before root, so a bad job says what is wrong.
+        #expect(refusal(Array(good.prefix(4)), uid: 501) == .some(noOwner))
+        #expect(refusal(good, uid: 501) == .some("needs root"))
+        guard case .serve(let url, let pin, _) = FanHelper.start(good, uid: 0) else {
+            Issue.record("good arguments as root didn't serve")
+            return
+        }
+        #expect(url.path == control)
+        #expect(pin == .cdhash(hash))
+    }
+
+    /// What `serve` saw: reports, log lines, beats and the stop wiring.
+    final class HelperRun: @unchecked Sendable {
+        var reports: [FanHelperStatus.State] = []
+        var log: [String] = []
+        var beats = 0
+        var stop: (@Sendable () -> Void)?
+        var undone = 0
+        var passes = 0
+    }
+
+    private func runtime(_ run: HelperRun, smc: (any SMCAccess)?,
+                         stopAfter passes: Int = 2, during: @escaping () -> Void = {}) -> FanHelper.Runtime {
+        FanHelper.Runtime(
+            openSMC: { smc },
+            report: { run.reports.append($0.state) },
+            onStop: { stop in
+                run.stop = stop
+                return { run.undone += 1 }
+            },
+            underPressure: { false },
+            sleep: { seconds in
+                guard seconds >= 1 else { return }
+                run.passes += 1
+                during()
+                // The job's SIGTERM, as the signal source would deliver it.
+                if run.passes == passes { run.stop?() }
+            },
+            beat: { run.beats += 1 },
+            log: { run.log.append($0) })
+    }
+
+    /// No SMC: the helper says so in its status file and exits 1 for
+    /// launchd to retry, without wiring a stop it would never use.
+    @Test func theHelperReportsAnSMCItCannotOpenAndExits() {
+        let run = HelperRun()
+        let status = FanHelper.serve(control: scratch.path("control.json"), ownerAlive: { _ in true },
+                                     runtime: runtime(run, smc: nil))
+        #expect(status == 1)
+        #expect(run.reports == [.error])
+        #expect(run.log == ["couldn't open the AppleSMC"])
+        #expect(run.stop == nil)
+    }
+
+    /// The daemon end to end on a fake SMC: ready, then the control
+    /// file's request held with both fans manual, then the stop signal
+    /// hands the fans back and serve returns 0 with the signal undone.
+    @Test func theHelperHoldsTheControlFilesRequestUntilStopped() throws {
+        let control = scratch.path("control.json")
+        try FanControlFile(level: 0.5, owner: 77, requested: Date(timeIntervalSince1970: 1)).write(to: control)
+        let smc = FakeSMC.twoFans(gate: false)
+        let run = HelperRun()
+        var manualWhileHeld = false
+        let status = FanHelper.serve(
+            control: control, ownerAlive: { $0 == 77 },
+            runtime: runtime(run, smc: smc) {
+                if run.passes == 1 { manualWhileHeld = smc.number("F0Md") == 1 && smc.number("F1Md") == 1 }
+            })
+        #expect(status == 0)
+        #expect(run.reports == [.ready, .held])
+        #expect(manualWhileHeld)
+        // Stopped: both fans automatic again.
+        #expect(smc.number("F0Md") == 0 && smc.number("F1Md") == 0)
+        #expect(run.passes == 2)
+        #expect(run.undone == 1)
+        #expect(run.log.last == "stopped")
+        // The watchdog's beats: start-up's three, then one a pass.
+        #expect(run.beats >= 5)
+    }
+
+    /// A request whose owner isn't a running, pinned SWE is refused with
+    /// the reason, and the fans are never taken.
+    @Test func theHelperIgnoresARequestFromAnUnpinnedOwner() throws {
+        let control = scratch.path("control.json")
+        try FanControlFile(level: 1, owner: 4242, requested: Date(timeIntervalSince1970: 1)).write(to: control)
+        let smc = FakeSMC.twoFans(gate: false)
+        var modeWrites = 0
+        smc.onWrite = { key, _ in if key.hasSuffix("Md") { modeWrites += 1 } }
+        let run = HelperRun()
+        let status = FanHelper.serve(control: control, ownerAlive: { _ in false },
+                                     runtime: runtime(run, smc: smc))
+        #expect(status == 0)
+        #expect(run.reports == [.ready, .refused])
+        #expect(modeWrites == 0)
+    }
+
+    /// The installed job is read only when its executable is there and
+    /// its plist is a dictionary: a half-finished install or a damaged
+    /// plist reads as no job, never as a crash or someone else's args.
+    @Test func aJobsArgumentsNeedItsExecutableAndAReadablePlist() throws {
+        let tool = scratch.path("helper"), plist = scratch.path("job.plist")
+        let arguments = FanHelper.programArguments(control: scratch.path("control.json"),
+                                                   owner: .cdhash(String(repeating: "ab", count: 20)))
+        try PropertyListSerialization.data(fromPropertyList: ["ProgramArguments": arguments], format: .xml, options: 0)
+            .write(to: plist)
+        // No executable yet.
+        #expect(FanControl.jobArguments(executable: tool.path, plist: plist.path) == nil)
+        try Data().write(to: tool)
+        // There but not executable.
+        #expect(FanControl.jobArguments(executable: tool.path, plist: plist.path) == nil)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+        #expect(FanControl.jobArguments(executable: tool.path, plist: plist.path) == arguments)
+        // A missing plist, one that isn't a plist, and one that is an array.
+        #expect(FanControl.jobArguments(executable: tool.path, plist: scratch.path("none.plist").path) == nil)
+        try Data("not a plist".utf8).write(to: plist)
+        #expect(FanControl.jobArguments(executable: tool.path, plist: plist.path) == nil)
+        try PropertyListSerialization.data(fromPropertyList: arguments, format: .xml, options: 0).write(to: plist)
+        #expect(FanControl.jobArguments(executable: tool.path, plist: plist.path) == nil)
+    }
+
+    /// A script runner for installers that must never reach osascript.
+    static let noScript: @Sendable (String) async -> (status: Int32, stderr: String) = { _ in
+        Issue.record("osascript ran")
+        return (0, "")
+    }
+
+    /// The scripts an installer ran, answering each with `reply`.
+    final class Scripts: @unchecked Sendable {
+        private let lock = NSLock()
+        private var ran: [String] = []
+        let reply: (status: Int32, stderr: String)
+        init(_ status: Int32, _ stderr: String) { reply = (status, stderr) }
+        var all: [String] { lock.withLock { ran } }
+        func run(_ script: String) -> (status: Int32, stderr: String) {
+            lock.withLock { ran.append(script) }
+            return reply
+        }
+    }
+
+    /// Uninstall runs one administrator script: the removal command
+    /// under its own prompt. osascript's answer maps to the error the
+    /// popover shows: -128 anywhere in stderr is the user's Cancel, any
+    /// other failure says what osascript said, or a plain line when it
+    /// said nothing.
+    @Test func uninstallRunsOneScriptAndMapsItsAnswer() async throws {
+        let ok = Scripts(0, "")
+        try await AdministratorInstaller(runScript: { ok.run($0) }).uninstall()
+        #expect(ok.all == [AdministratorInstaller.script(
+            AdministratorInstaller.uninstallCommand, prompt: "SWE wants to remove its fan helper.")])
+
+        let cases: [(Int32, String, FanHelperInstallError)] = [
+            (1, "0:91: execution error: User canceled. (-128)\n", .cancelled),
+            // A cancel wins even on a zero status.
+            (0, "(-128)", .cancelled),
+            (1, "  0:52: execution error: launchctl: no such job (1)\n", .failed("0:52: execution error: launchctl: no such job (1)")),
+            (1, " \n", .failed("The fan helper didn't install.")),
+            (-1, "The file “osascript” doesn’t exist.", .failed("The file “osascript” doesn’t exist.")),
+        ]
+        for (status, stderr, expected) in cases {
+            let scripts = Scripts(status, stderr)
+            await #expect(throws: expected, "\(status) \(stderr)") {
+                try await AdministratorInstaller(runScript: { scripts.run($0) }).uninstall()
+            }
+            #expect(scripts.all.count == 1)
+        }
+    }
+
+    /// The real runner, on scripts that need no privileges: a clean exit
+    /// answers 0, and an AppleScript error answers osascript's failing
+    /// status with the error's text on stderr, which is what `run` maps.
+    @Test func theOsascriptRunnerAnswersStatusAndStderr() async {
+        let fine = await AdministratorInstaller.osascript("return 1")
+        #expect(fine.status == 0)
+        #expect(fine.stderr.isEmpty)
+        let failed = await AdministratorInstaller.osascript("error \"no such job\" number 7")
+        #expect(failed.status != 0)
+        #expect(failed.stderr.contains("no such job"))
+        #expect(failed.stderr.contains("(7)"))
+        let cancelled = await AdministratorInstaller.osascript("error number -128")
+        #expect(cancelled.stderr.contains("-128"))
     }
 
     /// The test runner's own signature reads without error, as a team or
@@ -672,6 +885,12 @@ import Testing
     /// The real check, run on real processes: the test runner meets its
     /// own pin; a program named SWE meets only a pin for its own code,
     /// never the app's, whatever it is called; a gone pid meets nothing.
+    ///
+    /// The impostor is a copy of /bin/sleep signed ad hoc. A bare copy
+    /// keeps Apple's platform signature, and macOS kills a platform
+    /// binary run from outside the system volume a few milliseconds
+    /// after it starts: the checks below then raced that kill and failed
+    /// now and then on a gone process (1 run in 3 under load).
     @Test func theOwnerIsCheckedBySignatureNotName() throws {
         let check = try #require(FanOwnerCheck(pin: try FanOwnerPin.current()))
         #expect(check.isOwner(getpid()))
@@ -681,6 +900,13 @@ import Testing
 
         let impostor = scratch.url.appending(path: "SWE")
         try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: impostor.path)
+        let sign = Process()
+        sign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        sign.arguments = ["--force", "--sign", "-", impostor.path]
+        sign.standardError = FileHandle.nullDevice
+        try sign.run()
+        sign.waitUntilExit()
+        try #require(sign.terminationStatus == 0, "couldn't sign the impostor ad hoc")
         let process = Process()
         process.executableURL = impostor
         process.arguments = ["30"]
@@ -700,6 +926,8 @@ import Testing
         let unique = try #require((info as? [String: Any])?[kSecCodeInfoUnique as String] as? Data)
         let own = FanOwnerPin.cdhash(unique.map { String(format: "%02x", $0) }.joined())
         #expect(FanOwnerCheck(pin: own)?.isOwner(pid) == true)
+        // Every answer above was about a live process, not a gone one.
+        #expect(process.isRunning)
     }
 
     /// The signature is checked once per process, not on every call: the
@@ -1581,7 +1809,7 @@ import Testing
         // executable can never be read, so no prompt can appear here.
         let pin = FanOwnerPin.cdhash(String(repeating: "ab", count: 20))
         #expect(pin.isValid)
-        let installer = AdministratorInstaller(owner: { pin }, replacing: { false })
+        let installer = AdministratorInstaller(owner: { pin }, replacing: { false }, runScript: Self.noScript)
         let missing = "/nonexistent/\(UUID().uuidString)/SWE"
         await #expect(throws: FanHelperInstallError.failed("SWE's paths can't hold a line break for the fan helper.")) {
             try await installer.install(executable: missing, control: URL(fileURLWithPath: "/tmp/a\nb/control.json"))

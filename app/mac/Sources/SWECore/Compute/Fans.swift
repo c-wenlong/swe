@@ -508,84 +508,142 @@ public enum FanHelper {
             .joined()
     }
 
+    /// What the helper's entry makes of its arguments and user, decided
+    /// before anything touches the SMC.
+    enum Start {
+        /// Not the helper's flags: start the app.
+        case notHelper
+        /// `--fan-survey`: print the fan keys and exit.
+        case survey
+        /// Exit 2 without serving, saying why on stderr when there is a why.
+        case refuse(String?)
+        /// Serve `control`'s requests from owners meeting `pin`.
+        case serve(control: URL, pin: FanOwnerPin, owner: FanOwnerCheck)
+    }
+
+    /// The entry's checks in their order: a missing control path, then
+    /// a missing or invalid owner pin, then not being root, each refuse.
+    static func start(_ arguments: [String], uid: uid_t) -> Start {
+        if arguments.dropFirst().first == surveyFlag { return .survey }
+        guard arguments.dropFirst().first == flag else { return .notHelper }
+        guard let control = parse(arguments) else { return .refuse(nil) }
+        // No pin, or one that doesn't compile, means a job written by
+        // something other than this version's install: take no one's
+        // requests rather than anyone's.
+        guard let pin = FanOwnerPin.parse(arguments), let owner = FanOwnerCheck(pin: pin) else {
+            return .refuse("no valid owner signature in the arguments")
+        }
+        guard uid == 0 else { return .refuse("needs root") }
+        return .serve(control: control, pin: pin, owner: owner)
+    }
+
+    /// What `serve` reaches outside itself: the SMC, the status file,
+    /// the stop signals, the clock and the log. `live` is the daemon's.
+    struct Runtime {
+        var openSMC: () -> (any SMCAccess)?
+        var report: (FanHelperStatus) -> Void
+        /// Calls `stop` when the job is told to stop; returns the undo.
+        var onStop: (_ stop: @escaping @Sendable () -> Void) -> () -> Void
+        var underPressure: () -> Bool
+        var sleep: (TimeInterval) -> Void
+        var beat: () -> Void
+        var log: (String) -> Void
+
+        static func live(beat: @escaping () -> Void) -> Runtime {
+            Runtime(
+                openSMC: { AppleSMC() },
+                report: { status in
+                    do { try status.write() } catch { FanHelper.log("couldn't write \(statusFile): \(error.localizedDescription)") }
+                },
+                onStop: { stop in
+                    let sources = [SIGTERM, SIGINT, SIGHUP].map { sig in
+                        signal(sig, SIG_IGN)
+                        let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
+                        source.setEventHandler { stop() }
+                        source.resume()
+                        return source
+                    }
+                    return { sources.forEach { $0.cancel() } }
+                },
+                underPressure: {
+                    let state = ProcessInfo.processInfo.thermalState
+                    return state == .serious || state == .critical
+                },
+                sleep: { Thread.sleep(forTimeInterval: $0) },
+                beat: beat,
+                log: FanHelper.log)
+        }
+    }
+
     /// Runs the helper when the arguments ask for it and answers its exit
     /// status; nil means "not the helper, start the app".
     public static func runIfRequested(_ arguments: [String] = CommandLine.arguments) -> Int32? {
-        if arguments.dropFirst().first == surveyFlag {
+        switch start(arguments, uid: getuid()) {
+        case .notHelper:
+            return nil
+        case .survey:
             guard let smc = AppleSMC() else {
                 FileHandle.standardError.write(Data("Couldn't open the AppleSMC.\n".utf8))
                 return 1
             }
             print(FanKeys.survey(smc).joined(separator: "\n"))
             return 0
-        }
-        guard arguments.dropFirst().first == flag else { return nil }
-        guard let control = parse(arguments) else { return 2 }
-        // No pin, or one that doesn't compile, means a job written by
-        // something other than this version's install: take no one's
-        // requests rather than anyone's.
-        guard let pin = FanOwnerPin.parse(arguments), let owner = FanOwnerCheck(pin: pin) else {
-            FileHandle.standardError.write(Data("fan helper: no valid owner signature in the arguments\n".utf8))
+        case .refuse(let why):
+            if let why { FileHandle.standardError.write(Data("fan helper: \(why)\n".utf8)) }
             return 2
-        }
-        guard getuid() == 0 else {
-            FileHandle.standardError.write(Data("fan helper: needs root\n".utf8))
-            return 2
-        }
-        func report(_ status: FanHelperStatus) {
-            do { try status.write() } catch { log("couldn't write \(statusFile): \(error.localizedDescription)") }
-        }
-        log("started (pid \(getpid()), version \(version)), control \(control.path), owner \(pin.requirement)")
-        // A pass runs on the one thread with no timeout around the SMC
-        // calls, and one that hangs leaves the daemon deaf to every
-        // request while looking alive to launchd. The watchdog exits so
-        // KeepAlive relaunches it with a fresh connection.
-        let heartbeat = Heartbeat()
-        let watchdog = DispatchSource.makeTimerSource(queue: .global())
-        watchdog.schedule(deadline: .now() + watchdogTick, repeating: watchdogTick)
-        watchdog.setEventHandler {
-            if heartbeat.silentFor > watchdogTimeout {
-                log("no beat in \(Int(watchdogTimeout)) s; exiting so launchd restarts the helper")
-                _exit(1)
+        case .serve(let control, let pin, let owner):
+            log("started (pid \(getpid()), version \(version)), control \(control.path), owner \(pin.requirement)")
+            // A pass runs on the one thread with no timeout around the SMC
+            // calls, and one that hangs leaves the daemon deaf to every
+            // request while looking alive to launchd. The watchdog exits so
+            // KeepAlive relaunches it with a fresh connection. It stays out
+            // of `serve`, which tests run in-process.
+            let heartbeat = Heartbeat()
+            let watchdog = DispatchSource.makeTimerSource(queue: .global())
+            watchdog.schedule(deadline: .now() + watchdogTick, repeating: watchdogTick)
+            watchdog.setEventHandler {
+                if heartbeat.silentFor > watchdogTimeout {
+                    log("no beat in \(Int(watchdogTimeout)) s; exiting so launchd restarts the helper")
+                    _exit(1)
+                }
             }
+            watchdog.resume()
+            defer { watchdog.cancel() }
+            return serve(control: control, ownerAlive: owner.isOwner,
+                         runtime: .live(beat: { heartbeat.beat() }))
         }
-        watchdog.resume()
-        defer { watchdog.cancel() }
-        heartbeat.beat()
-        guard let smc = AppleSMC() else {
-            log("couldn't open the AppleSMC")
-            report(FanHelperStatus(state: .error, reason: "The fan helper couldn't open the SMC."))
+    }
+
+    /// The daemon proper: open the SMC, say it is ready, then hold the
+    /// control file's requests until told to stop. 1 when the SMC won't
+    /// open, 0 after a stop.
+    static func serve(control: URL, ownerAlive: @escaping (Int32) -> Bool, runtime: Runtime) -> Int32 {
+        runtime.beat()
+        guard let smc = runtime.openSMC() else {
+            runtime.log("couldn't open the AppleSMC")
+            runtime.report(FanHelperStatus(state: .error, reason: "The fan helper couldn't open the SMC."))
             return 1
         }
-        heartbeat.beat()
-        FanKeys.survey(smc).forEach { log($0) }
-        report(FanHelperStatus(state: .ready))
-        heartbeat.beat()
+        runtime.beat()
+        FanKeys.survey(smc).forEach { runtime.log($0) }
+        runtime.report(FanHelperStatus(state: .ready))
+        runtime.beat()
         let stop = StopFlag()
-        let sources = [SIGTERM, SIGINT, SIGHUP].map { sig in
-            signal(sig, SIG_IGN)
-            let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
-            source.setEventHandler { stop.set() }
-            source.resume()
-            return source
-        }
-        defer { sources.forEach { $0.cancel() } }
+        let undo = runtime.onStop { stop.set() }
+        defer { undo() }
         var hold = FanHold(
             smc: smc,
             request: { FanControlFile.request(at: control) },
-            ownerAlive: owner.isOwner,
-            underPressure: {
-                let state = ProcessInfo.processInfo.thermalState
-                return state == .serious || state == .critical
-            },
+            ownerAlive: ownerAlive,
+            underPressure: runtime.underPressure,
             shouldStop: { stop.isSet },
-            sleep: { Thread.sleep(forTimeInterval: $0) }
+            sleep: runtime.sleep
         )
-        hold.log = log
-        hold.report = report
-        hold.beat = { heartbeat.beat() }
+        hold.log = runtime.log
+        hold.report = runtime.report
+        hold.beat = runtime.beat
         hold.run()
-        log("stopped")
+        runtime.log("stopped")
         return 0
     }
 }
