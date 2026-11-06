@@ -105,12 +105,12 @@ public struct McpServer: Codable, Sendable, Equatable, Identifiable {
 
     /// Whether the definition a sync copies from `source` is at a URL: a
     /// server can be local in one harness and remote in another. The hub
-    /// answers to both names: swe writes `swe` now, older swe wrote
-    /// `quiver`, and a mixed list carries both.
+    /// answers to both names: swe lists it as `swe` and `quiver` (for apps
+    /// from before the rename), and an older swe wrote `quiver` alone.
     public func isRemote(from source: String) -> Bool {
         guard let remoteIn else { return isRemote }
         if McpServer.isHubSource(source) {
-            return remoteIn.contains("swe") || remoteIn.contains("quiver")
+            return remoteIn.contains(where: McpServer.isHubSource)
         }
         return remoteIn.contains(source)
     }
@@ -119,16 +119,17 @@ public struct McpServer: Codable, Sendable, Equatable, Identifiable {
     /// `local_only` marks them: Claude Desktop adds a remote server in the
     /// app itself (Settings › Connectors).
     public static let localOnly: Set<String> = ["claude-desktop"]
-    /// The hub's names on the wire: swe's own files call it `swe`, the
-    /// JSON `from`/`remote_in` vocabulary still says `quiver` for older
-    /// clients, and both are accepted everywhere a source is named.
+    /// The hub's name as a sync source or remove place. `quiver`, its
+    /// name before the rename, is still read wherever a source is named:
+    /// an older swe's `remote_in` says only that.
+    public static let hubSource = "swe"
     public static func isHubSource(_ source: String) -> Bool {
-        source == "swe" || source == "quiver"
+        source == hubSource || source == "quiver"
     }
     /// Whether ~/.swe/mcp.json defines this server. A hub-only row has
     /// no harnesses; an older swe sends nothing and decodes false.
     public let inHub: Bool
-    /// The places (harnesses, "quiver" for the hub) whose definition is at
+    /// The places (harnesses, "swe" and "quiver" for the hub) whose definition is at
     /// a URL. Absent from an older swe, which leaves `transport` to say.
     public let remoteIn: [String]?
     /// Set only on a saved server, which keeps `summary` in place of the
@@ -798,7 +799,7 @@ public final class McpModel {
     /// hub when mcp.json holds the server.
     public func sources(for server: McpServer) -> [String] {
         var out = server.groups.map { $0.first ?? "" }.filter { !$0.isEmpty }
-        if server.inHub && !out.contains("quiver") { out.append("quiver") }
+        if server.inHub && !out.contains(where: McpServer.isHubSource) { out.append(McpServer.hubSource) }
         return out
     }
 
