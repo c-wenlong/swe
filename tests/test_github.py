@@ -2,6 +2,7 @@
 
 import io
 import json
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -392,6 +393,56 @@ class TestCatalog(unittest.TestCase):
                       ["a"], self.db)
         hits = catalog.search("qu_ver", 10, self.db)
         self.assertEqual([h["name"] for h in hits], ["a/qu_ver"])
+
+    def _set_meta(self, **values):
+        conn = sqlite3.connect(self.db)
+        with conn:
+            for key, value in values.items():
+                if value is None:
+                    conn.execute("DELETE FROM meta WHERE key=?", (key,))
+                else:
+                    conn.execute(
+                        "INSERT INTO meta(key, value) VALUES(?, ?)"
+                        " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        (key, value))
+        conn.close()
+
+    def test_status_none_until_a_sync_finished(self):
+        # The schema exists (a write was interrupted before its meta
+        # landed): no synced_at means no sync has run.
+        catalog.write(self._rows("a", ["x"]), ["a"], self.db)
+        self._set_meta(synced_at=None)
+        self.assertIsNone(catalog.status(self.db))
+
+    def test_status_tolerates_hand_edited_meta(self):
+        catalog.write(self._rows("a", ["x"]), ["a"], self.db)
+        for owners in ('{"a": 1}', "[not json", ""):
+            with self.subTest(owners=owners):
+                self._set_meta(owners=owners, synced_at="soon")
+                st = catalog.status(self.db)
+                self.assertEqual(st["owners"], [])
+                self.assertEqual(st["synced_at"], 0.0)
+                self.assertEqual(st["repos"], 1)
+        self._set_meta(owners='["a", 7]', synced_at="12.5")
+        self.assertEqual(catalog.status(self.db)["owners"], ["a", "7"])
+        self.assertEqual(catalog.status(self.db)["synced_at"], 12.5)
+
+    def test_a_file_that_is_not_a_catalog_reads_as_empty(self):
+        self.db.write_bytes(b"not a sqlite database at all " * 20)
+        self.assertIsNone(catalog.status(self.db))
+        self.assertEqual(catalog.search("x", 5, self.db), [])
+        # A real SQLite file without the tables answers the same.
+        self.db.unlink()
+        sqlite3.connect(self.db).close()
+        self.assertIsNone(catalog.status(self.db))
+        self.assertEqual(catalog.search("x", 5, self.db), [])
+
+    def test_a_new_account_starts_the_catalog_over(self):
+        catalog.write(self._rows("a", ["one"]), ["a"], self.db, login="a")
+        catalog.write(self._rows("b", ["two"]), ["b"], self.db, login="b")
+        self.assertEqual([r["name"] for r in catalog.search("", 9, self.db)],
+                         ["b/two"])
+        self.assertEqual(catalog.status(self.db)["owners"], ["b"])
 
 
 class TestCommands(unittest.TestCase):
