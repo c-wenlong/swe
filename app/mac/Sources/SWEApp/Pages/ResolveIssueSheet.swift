@@ -2,7 +2,7 @@ import SWECore
 import SwiftUI
 
 /// Starts an agent on an issue through this Mac's hub
-/// (`POST /v1/issues/resolve`): the hub makes the `quiver/issue-<n>`
+/// (`POST /v1/issues/resolve`): the hub makes the `swe/issue-<n>`
 /// worktree off the default branch, sends the first prompt and titles the
 /// session. The sheet shows the hub's steps while it works, then closes
 /// and opens the new session's chat in Sessions. A failed launch stays
@@ -109,7 +109,7 @@ struct ResolveIssueSheet: View {
                     HStack(spacing: 8) {
                         Image(systemName: "arrow.triangle.branch")
                             .font(Theme.font(size: 13)).foregroundStyle(Theme.textMuted)
-                        Text("\(selection.repo) · \(issue.branch ?? "quiver/issue-\(issue.number)")")
+                        Text("\(selection.repo) · \(issue.branch ?? "swe/issue-\(issue.number)")")
                             .font(Theme.rowTitle).foregroundStyle(Theme.textPrimary)
                             .lineLimit(1).truncationMode(.middle)
                     }

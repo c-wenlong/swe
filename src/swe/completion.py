@@ -635,7 +635,7 @@ _NESTED_SUBCOMMANDS: dict[tuple[str, str], list[tuple[str, str]]] = {
         ("list", "List issues"),
         ("view", "One issue: body, comments, resolve prompt"),
         ("comment", "Comment on an issue (--body=TEXT)"),
-        ("worktree", "Branch quiver/issue-N under ~/.swe/worktrees"),
+        ("worktree", "Branch swe/issue-N under ~/.swe/worktrees"),
     ],
     ("gh", "run"): [
         ("list", "List workflow runs"),

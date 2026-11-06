@@ -156,7 +156,7 @@ are server changes in `src/swe/remote/`.
 - [x] Pull to refresh (`?refresh=1` bypasses the hub's `gh` cache); `env_blocked` shows the `gh` fix on an empty list
 - [x] Detail page: the row plus rendered body (the chat's Markdown) and its comments — author, relative age, rendered markdown
 - [x] Swipe Resolve and a context menu (Resolve with agent / Copy link / Open on GitHub / Share) on the row — Resolve opens the same sheet, never a blind launch; Copy link writes the `swe://issue/<o>/<r>/<n>` deep link
-- [x] "Resolve with agent" sheet: "Starts in" card naming `repo · quiver/issue-<n>`, the harness icon grid, prompt field prefilled with `suggested_prompt` — a row's Resolve has no detail yet, so the sheet fetches it for the prefill and a blank field still lets the hub build the brief
+- [x] "Resolve with agent" sheet: "Starts in" card naming `repo · swe/issue-<n>`, the harness icon grid, prompt field prefilled with `suggested_prompt` — a row's Resolve has no detail yet, so the sheet fetches it for the prefill and a blank field still lets the hub build the brief
 - [x] Hub: `GET /v1/issues` (list + `mine`, `?state=` picks the `gh` list state for the Closed chip), `GET /v1/issues/<o>/<r>/<n>` (detail), `POST /v1/issues/resolve {repo, number, harness, prompt?}` → `launch_id`, followed on `GET /v1/launches/<id>`; the adopted session pushes its chat onto the issues stack
 - [x] Comments on the detail page
 - [x] Comment box under the thread, posting through the hub's `gh` login (`POST /v1/issues/comment {repo, number, body}`); a refusal keeps the draft, a post reads the issue again

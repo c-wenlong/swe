@@ -85,7 +85,7 @@ def shape(raw: dict, repo: str, home: Path | None = None) -> dict:
              "created_at": c.get("createdAt"),
              "url": c.get("url") or ""}
             for c in (raw.get("comments") or []) if isinstance(c, dict)],
-        "branch": manage.issue_branch(number),
+        "branch": manage.resolve_branch(repo, number, home),
         "worktree": manage.issue_worktree_path(repo, number, home),
     }
     issue["suggested_prompt"] = build_prompt(repo, issue, issue["worktree"])
@@ -168,9 +168,10 @@ def _comment_line(comment: dict) -> str:
 
 def build_prompt(repo: str, issue: dict, worktree_path: str,
                  context: str = "", context_author: str = "",
-                 limit: int = PROMPT_LIMIT) -> str:
+                 limit: int = PROMPT_LIMIT, branch: str = "") -> str:
     """The first prompt of an agent resolving ``issue`` (``shape``'s
-    dict) in the checkout at ``worktree_path``.
+    dict) in the checkout at ``worktree_path``, on ``branch`` (else the
+    issue's own ``branch``, else ``manage.issue_branch``).
 
     Anyone can write on a public issue, so its title, body and comments
     arrive quoted line by line behind a note that they are data, not
@@ -192,7 +193,8 @@ def build_prompt(repo: str, issue: dict, worktree_path: str,
     comments = [_comment_line(c) for c in every if trusted(c)]
     others = len(every) - len(comments)
     ctx = context_block(context, context_author)
-    foot = (f"You are on branch {manage.issue_branch(number)} in a worktree "
+    branch = branch or issue.get("branch") or manage.issue_branch(number)
+    foot = (f"You are on branch {branch} in a worktree "
             f"of {repo}\nat {worktree_path}. Implement the change, run the "
             "tests, commit, push the\nbranch, and open a PR that closes this "
             f'issue ("Closes #{number}").')

@@ -562,7 +562,8 @@ same minute cache — so a row answers "what's happening on X": the
 derived `state` (`open` → `in_progress` → `pr_open` → `merged|closed`),
 `sessions`, `agent_running` (a linked session is active, or its launch
 is still pending), `last_active_at`, and `pr` — for an issue the PR its
-`quiver/issue-<n>` branch produced, so a merged PR reads `merged` even
+`swe/issue-<n>` branch (or a pre-rename `quiver/issue-<n>`) produced,
+so a merged PR reads `merged` even
 after it leaves the open list. A stored task no source can read this
 round (the source is blocked or down, or the task is past the 24 most
 recently active and off the open list) keeps the state its source last
@@ -1064,7 +1065,7 @@ while the others answer; a missing or signed-out `gh` answers
 `gh` cache (`github/shared.py`), and a `refresh=1` bypasses it.
 
 `GET /v1/issues/<owner>/<repo>/<n>` answers one issue in full: the row
-plus `body`, `comments`, `branch` (`quiver/issue-<n>`), `worktree`
+plus `body`, `comments`, `branch` (`swe/issue-<n>`), `worktree`
 (where a resolve puts the checkout) and `suggested_prompt` (the resolve
 brief `github/issues.build_prompt` writes — what the resolve sheet
 prefills). Anyone can write on a public issue, so the brief quotes the
@@ -1098,9 +1099,13 @@ note: "preparing worktree"}` and does the rest on a thread, like a
 new-session launch. It reads the issue, then runs `swe gh issue
 worktree`'s `manage.issue_worktree`: the repo's bare mirror (cloned on
 first use), a fetch of its default branch, and branch
-`quiver/issue-<n>` checked out under
+`swe/issue-<n>` checked out under
 `~/.swe/worktrees/<owner>__<repo>-issue<n>`. A second resolve of the
-same issue resumes in that checkout. The harness then starts there under
+same issue resumes in that checkout. A resolve started before the
+rename cut `quiver/issue-<n>`: its checkout resumes on that branch, a
+branch whose folder was deleted is checked out again under its old
+name, and the prompt names whichever branch the checkout is on. The
+harness then starts there under
 tmux with the client's `prompt`, or the one `swe gh issue view` shows as
 `suggested_prompt` when none was sent. A non-empty `context` is added as
 a "Context for this run" block either way, unless the client's prompt
@@ -1108,7 +1113,7 @@ already holds that text.
 
 While the launch is pending, `GET /v1/launches/{launch_id}` reads as
 progress: `note` steps through "Cloning mirror…" (first run only),
-"Creating worktree quiver/issue-<n>…" and "Starting <harness>…", and
+"Creating worktree swe/issue-<n>…" and "Starting <harness>…", and
 `cwd` becomes the worktree. A failure at any step settles it `failed`
 with a readable note. The entry also carries `title`, `<owner>/<repo>#<n>
 <issue title>`: when `session.launched` adopts the new session, the hub

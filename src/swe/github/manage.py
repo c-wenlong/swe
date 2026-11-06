@@ -407,9 +407,36 @@ def _pr_worktree_locked(repo: str, number: str,
 
 # ------------------------------------------------------------------ issue worktree
 
+# Resolves before the quiver -> swe rename cut ``quiver/issue-<n>``.
+# Their branches (and checkouts, and PRs) keep that name, so anything
+# that finds an issue's branch tries both, the new name first.
+ISSUE_BRANCH_PREFIX = "swe/issue-"
+LEGACY_ISSUE_BRANCH_PREFIX = "quiver/issue-"
+
+
 def issue_branch(number) -> str:
-    """The branch an agent resolving issue ``number`` works on."""
-    return f"quiver/issue-{int(number)}"
+    """The branch a new resolve of issue ``number`` works on."""
+    return f"{ISSUE_BRANCH_PREFIX}{int(number)}"
+
+
+def issue_branches(number) -> tuple[str, str]:
+    """Every name issue ``number``'s branch can have, newest first: a
+    resolve started before the rename is still on the old one."""
+    return issue_branch(number), f"{LEGACY_ISSUE_BRANCH_PREFIX}{int(number)}"
+
+
+def resolve_branch(repo: str, number, home: Path | None = None) -> str:
+    """The branch a resolve of issue ``number`` would work on: the old
+    name when only a pre-rename resolve's branch is in the mirror (its
+    commits are there to resume), else ``issue_branch``. No mirror yet
+    means no old branch either, so nothing is spawned for it."""
+    new, old = issue_branches(number)
+    mirror = mirror_path(repo, home)
+    if not mirror.is_dir():
+        return new
+    if not _branch_exists(str(mirror), new) and _branch_exists(str(mirror), old):
+        return old
+    return new
 
 
 def issue_worktree_path(repo: str, number, home: Path | None = None) -> str:
@@ -445,7 +472,7 @@ def issue_worktree(repo: str, number, home: Path | None = None,
                    progress: Callable[[str], None] | None = None,
                    ) -> gh.GhResult:
     """``swe gh issue worktree``: a checkout of a new branch
-    ``quiver/issue-<n>`` off the default branch's tip, for an agent to
+    ``swe/issue-<n>`` off the default branch's tip, for an agent to
     resolve the issue on.
 
     Unlike a PR checkout this is a named branch, since the agent's job
@@ -454,11 +481,15 @@ def issue_worktree(repo: str, number, home: Path | None = None,
     it), so the branch starts from today's tip. Asking again resumes: a
     registered checkout comes back as is (``created`` false), and a
     branch whose checkout folder was deleted is checked out again
-    rather than recreated, so the commits on it survive.
+    rather than recreated, so the commits on it survive. A resolve
+    started before the rename is on ``quiver/issue-<n>``: its checkout
+    is resumed on that branch, and so is the branch itself when it has
+    no ``swe/issue-<n>`` twin, so no in-flight work is orphaned.
 
     ``progress`` hears each slow step ("Cloning mirror…", "Creating
-    worktree quiver/issue-<n>…"); the hub shows them as the launch note.
-    ``data`` is ``{"path", "branch", "base", "created"}``, ``base`` the
+    worktree swe/issue-<n>…"); the hub shows them as the launch note.
+    ``data`` is ``{"path", "branch", "base", "created"}``, ``branch``
+    the one checked out, ``base`` the
     ``origin/<default>`` ref the branch was cut from. A failure's
     ``error`` names the step, as ``pr_worktree``'s does.
 
@@ -479,6 +510,7 @@ def issue_worktree(repo: str, number, home: Path | None = None,
 def _issue_worktree_locked(repo: str, number: int, home: Path | None,
                            say: Callable[[str], None]) -> gh.GhResult:
     branch = issue_branch(number)
+    names = issue_branches(number)
     mirror, failed = _ensure_mirror(repo, home)
     if failed is not None:
         return failed
@@ -507,22 +539,27 @@ def _issue_worktree_locked(repo: str, number: int, home: Path | None,
     # "checked out" there) until pruned, so the folder must exist too.
     if os.path.isdir(path) and _is_registered(mirror, path):
         # Someone may have switched branches in there; an agent told it
-        # is on quiver/issue-<n> must not commit to something else.
+        # is on swe/issue-<n> must not commit to something else. A
+        # checkout a pre-rename resolve made is on quiver/issue-<n>,
+        # and resumes there.
         head = run_git(["-C", path, "symbolic-ref", "--quiet", "--short",
                         "HEAD"])
         current = (head.data or "").strip() if head.status == "ok" else ""
-        if current != branch:
+        if current not in names:
             return gh.GhResult(
                 "upstream-error",
                 error=f"Worktree is on {current or 'a detached HEAD'}, not "
                       f"{branch}: switch {path} back to {branch} or "
                       "remove that folder")
-        return gh.GhResult("ok", data=data)
+        return gh.GhResult("ok", data={**data, "branch": current})
 
+    existing = next((b for b in names if _branch_exists(mirror, b)), None)
+    if existing:
+        branch = existing
     say(f"Creating worktree {branch}…")
     run_git(["-C", mirror, "worktree", "prune"])
     worktrees_dir(home).mkdir(parents=True, exist_ok=True)
-    if _branch_exists(mirror, branch):
+    if existing:
         args = ["-C", mirror, "worktree", "add", path, branch]
     else:
         # --no-track: the agent's first push sets the upstream; tracking
@@ -532,4 +569,5 @@ def _issue_worktree_locked(repo: str, number: int, home: Path | None,
     result = run_git(args, timeout=300)
     if result.status != "ok":
         return _fail("Worktree failed", result)
-    return gh.GhResult("ok", data={**data, "created": True})
+    return gh.GhResult("ok", data={**data, "branch": branch,
+                                   "created": True})
