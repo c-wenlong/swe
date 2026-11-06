@@ -53,6 +53,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A report no longer lists a follow-up it refused to create.** When
+  the report writer suggested a new follow-up whose `evidence` was not a
+  list, the pipeline dropped the suggestion with a warning but had
+  already put its id in the report manifest's `follow_up_ids`, naming a
+  follow-up that never reached the ledger. The evidence check now runs
+  before the id is recorded.
 - **A second launch in a folder no longer strands both.** Adoption tells
   a new session apart only by harness, folder and start time, so two
   launches of one harness waiting in one folder each saw both
