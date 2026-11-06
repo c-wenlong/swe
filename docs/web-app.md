@@ -21,6 +21,7 @@ client sees it.
 | Piece | Where | What |
 |---|---|---|
 | Pages | `src/swe/webapp/static/` | Plain HTML, CSS and JS. No build step, no framework, no CDN. Same Devin-derived look as the Mac app (`Theme.swift`); the CSS variables in `styles.css` carry the same names. |
+| Install | `static/manifest.webmanifest`, `index.html`, `styles.css` | The manifest makes it installable (`display: standalone`, `id`, `start_url`; its colours are the light default's `--wash`, with `color_scheme_dark` for dark). `index.html` has one `theme-color` meta per scheme, which `syncThemeColor` in `app.js` overrides when Settings forces Light or Dark. `viewport-fit=cover` draws under the notch, so layout pads by `--safe-top/right/bottom/left` (`env(safe-area-inset-*)`). `tests/test_webapp_pwa.py` keeps the colours in step with `styles.css`. |
 | Page data | `src/swe/webapp/api.py`, `src/swe/webapp/pages/` | Builds each page's JSON from the domain services, in process, the way `/v1/usage` does. |
 | Ledger | `src/swe/ledger/` | The Python port of `SWECore/Ledger`: scans harness logs into its own SQLite store and prices tokens. |
 | Routes | `src/swe/remote/hub.py` | `/` serves the app and its assets as flat names beside it (`_serve_static`, names checked by `webapp/static.py`); `/v1/app/*` serves their data. Old `/app/…` paths redirect to the same name at the root. |

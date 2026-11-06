@@ -46,6 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The web app installs as an app and respects the notch.** Its
+  manifest now says `display: "standalone"` and carries an `id`, and its
+  background and theme colours follow the light default and the dark
+  scheme (`color_scheme_dark`). The page declares one `theme-color` per
+  scheme, and a Light or Dark picked in Settings overrides both, so the
+  status bar matches the page. The sidebar, pages and chat composer pad
+  themselves by `env(safe-area-inset-*)`, since the viewport covers the
+  whole screen.
+
 - **`swe harness discover --json --apply NAME` answers in JSON when NAME
   is not a new match.** It printed red text, which the app could not
   decode. It now prints the usual document with `applied.refused` and the
