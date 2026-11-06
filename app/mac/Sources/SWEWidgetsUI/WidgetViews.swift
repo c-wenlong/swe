@@ -203,7 +203,23 @@ public struct LimitsView: View {
     }
 }
 
-private struct LimitLine: View {
+struct LimitLine: View {
+    /// A row's words. Cut in the middle, since the window at the end is
+    /// what tells two limits of one account apart. The small widget also
+    /// drops the harness's own name before an account ("Claude Code: "):
+    /// the logo says it, and "Claude Code: Pers…" twice read the same.
+    /// Only that exact prefix goes; an account named "Cursor Work: Shared"
+    /// keeps its words.
+    static func label(title: String, harness: String, window: String?, compact: Bool) -> String {
+        var name = title
+        let prefix = UsageFormat.harness(harness) + ": "
+        if compact, title.hasPrefix(prefix), title.count > prefix.count {
+            name = String(title.dropFirst(prefix.count))
+        }
+        guard let window else { return name }
+        return "\(name) · \(window)"
+    }
+
     var reading: LimitReading
     var now: Date
     var compact: Bool
@@ -217,8 +233,13 @@ private struct LimitLine: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 5) {
                 HarnessLogo(harness: reading.harness, size: 12)
-                Text(reading.window.isEmpty ? reading.title : "\(reading.title) · \(UsageFormat.window(reading.harness, reading.window))")
-                    .font(.system(size: 11, weight: .medium)).lineLimit(1)
+                let window = reading.window.isEmpty ? nil : UsageFormat.window(reading.harness, reading.window)
+                Text(Self.label(title: reading.title, harness: reading.harness, window: window, compact: compact))
+                    .font(.system(size: 11, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                    // The logo is hidden from VoiceOver, so the spoken
+                    // label keeps the whole title the small widget trims.
+                    .accessibilityLabel(Self.label(title: reading.title, harness: reading.harness,
+                                                   window: window, compact: false))
                 Spacer(minLength: 4)
                 if !compact, !reset, old, let taken = reading.fetchedAt {
                     Text(UsageFormat.ago(taken, now: now))
