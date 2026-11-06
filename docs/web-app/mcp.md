@@ -108,7 +108,9 @@ listed then, as in the app.
  "fingerprint": "…"}
 ```
 
-`source` is a harness or `quiver` (the hub); `targets` are harnesses from
+`source` is a harness or `swe` (the hub; `quiver`, its name before the
+rename, is read the same so an open page from an older hub keeps
+working); `targets` are harnesses from
 the page's own list; `replace` names the targets whose own definition the
 user agreed to replace. `fingerprint` (sync only) is the preview's. Both
 answer:
@@ -197,8 +199,8 @@ the list repaints from the answer, with "Removed demo from Claude Code,
 SWE hub." above it until the list is read again; a refusal stays in
 the sheet and the list is read again.
 
-`POST /v1/app/mcp/remove` with `{"server", "from": [places]}` (`quiver`
-is the hub) runs `mcp/cli.py`'s `remove_places` and `remove_server`, the
+`POST /v1/app/mcp/remove` with `{"server", "from": [places]}` (`swe`
+is the hub, and `quiver` still reads as it) runs `mcp/cli.py`'s `remove_places` and `remove_server`, the
 two halves of `swe mcp remove <name> --from=<places>`, under the sync
 lock. `from` is what the confirm listed: every place must still hold the
 server (409 `state_changed` otherwise), and a place it has reached since
