@@ -145,6 +145,14 @@ public struct LimitsView: View {
         return max(1, Int((height + gap) / (rowHeight + gap)))
     }
 
+    /// The large widget's spacing: the rows spread evenly down the
+    /// height, up to a gap of two rows.
+    static func spreadSpacing(for height: CGFloat, count: Int) -> CGFloat {
+        guard count > 1 else { return 0 }
+        return max(minGap(compact: false),
+                   min(2 * rowHeight, (height - CGFloat(count) * rowHeight) / CGFloat(count - 1)))
+    }
+
     /// The spacing `count` rows spread over `height`: the minimum when it
     /// is tight, up to the maximum when there is room to spare.
     static func rowSpacing(for height: CGFloat, count: Int, compact: Bool) -> CGFloat {
@@ -153,12 +161,28 @@ public struct LimitsView: View {
                    (height - CGFloat(count) * rowHeight) / CGFloat(count - 1))
     }
 
+    /// How many limits to draw when `capacity` rows fit: all of them, or
+    /// one fewer than fit plus a "+N more" line, so a dropped limit is
+    /// never dropped silently.
+    static func shown(total: Int, capacity: Int) -> (rows: Int, more: Int) {
+        guard total > capacity else { return (total, 0) }
+        let rows = max(capacity - 1, 0)
+        return (rows, total - rows)
+    }
+
     public var body: some View {
         let compact = effectiveFamily == .systemSmall
         GeometryReader { geo in
-            let limits = snapshot.limits.prefix(Self.rows(for: geo.size.height, compact: compact))
-            VStack(alignment: .leading,
-                   spacing: Self.rowSpacing(for: geo.size.height, count: limits.count, compact: compact)) {
+            let fit = Self.shown(total: snapshot.limits.count,
+                                 capacity: Self.rows(for: geo.size.height, compact: compact))
+            let limits = snapshot.limits.prefix(fit.rows)
+            let lines = limits.count + (fit.more > 0 ? 1 : 0)
+            // The large widget spreads a short list over its height instead
+            // of leaving its lower half blank; the others keep tight rows.
+            let spacing = effectiveFamily == .systemLarge
+                ? Self.spreadSpacing(for: geo.size.height, count: lines)
+                : Self.rowSpacing(for: geo.size.height, count: lines, compact: compact)
+            VStack(alignment: .leading, spacing: spacing) {
                 if limits.isEmpty {
                     Text("No limits yet").font(.system(size: 12, weight: .medium))
                     Text("Add an account in SWE, or star a harness in swe.")
@@ -167,6 +191,11 @@ public struct LimitsView: View {
                 ForEach(Array(limits), id: \.id) { reading in
                     LimitLine(reading: reading, now: now, compact: compact,
                               old: reading.isOld(now: now, fallback: snapshot.generatedAt))
+                }
+                if fit.more > 0 {
+                    Text("+\(fit.more) more")
+                        .font(.system(size: 11)).foregroundStyle(Palette.textSecondary)
+                        .frame(height: Self.rowHeight, alignment: .leading)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -344,11 +373,14 @@ public struct ModelsView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             if snapshot.models.isEmpty {
                 Text("No usage in the last 30 days").font(.system(size: 12, weight: .medium))
             }
-            ForEach(Array(snapshot.models.enumerated()), id: \.offset) { _, model in
+            ForEach(Array(snapshot.models.enumerated()), id: \.offset) { index, model in
+                // Flexible gaps: a short list spreads down the widget
+                // instead of leaving its bottom quarter blank.
+                if index > 0 { Spacer(minLength: 8).frame(maxHeight: 24) }
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
                         ModelBrandLogo(model: model.name, harnesses: model.harnesses)
@@ -499,6 +531,14 @@ public struct ComputeView: View {
         }
     }
 
+    /// The first `count` sensors, then "+N" for the rest.
+    static func tempsText(_ temps: [(component: ThermalComponent, celsius: Double)], count: Int) -> String {
+        let shown = temps.prefix(count)
+        return shown.map { "\($0.component.title) \(Int($0.celsius.rounded())) °C" }
+            .joined(separator: " · ")
+            + (shown.count < temps.count ? " · +\(temps.count - shown.count)" : "")
+    }
+
     /// The temperature lines plus the figures' age. The age always shows,
     /// so a frozen timeline can never pass an old sample off as live.
     @ViewBuilder
@@ -508,23 +548,27 @@ public struct ComputeView: View {
         if !temps.isEmpty || compute.sampledAt != nil {
             // The small's footer fits about two temperatures; past that
             // it counts the rest rather than cut a sensor name in half.
-            let shown = compact ? temps.prefix(2) : temps.prefix(temps.count)
-            let tempsText = shown.map { "\($0.component.title) \(Int($0.celsius.rounded())) °C" }
-                .joined(separator: " · ")
-                + (shown.count < temps.count ? " · +\(temps.count - shown.count)" : "")
             let age = compute.sampledAt.map { "as of \(UsageFormat.ago($0, now: now))" }
             Group {
                 if compact {
                     // The small has no room for temps and age side by
                     // side, so they stack and the temps get a full line.
                     VStack(alignment: .leading, spacing: 1) {
-                        if !temps.isEmpty { Text(tempsText).lineLimit(1) }
+                        if !temps.isEmpty { Text(Self.tempsText(temps, count: 2)).lineLimit(1) }
                         if let age { Text(age).foregroundStyle(Palette.textSecondary) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     HStack(spacing: 4) {
-                        if !temps.isEmpty { Text(tempsText).lineLimit(1) }
+                        // As many sensors as fit whole, then "+N", the
+                        // small's rule: never a name cut off by "…".
+                        if !temps.isEmpty {
+                            ViewThatFits(in: .horizontal) {
+                                ForEach(Array((1...temps.count).reversed()), id: \.self) { count in
+                                    Text(Self.tempsText(temps, count: count)).lineLimit(1).fixedSize()
+                                }
+                            }
+                        }
                         Spacer(minLength: 0)
                         if let age { Text(age).foregroundStyle(Palette.textSecondary) }
                     }

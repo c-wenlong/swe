@@ -639,8 +639,8 @@ private struct CalendarContent: View {
         .frame(width: Self.axisWidth)
     }
 
-    /// Scroll to the range's earliest block (or 08:00 when it is empty),
-    /// once per visible range. Until the load finishes an empty range
+    /// Scroll to the opening hour `CalendarScroll` picks (now, or today's
+    /// first session), once per visible range. Until the load finishes an empty range
     /// stays at the top, since later blocks may still arrive.
     private func scrollToFirstBlock(_ proxy: ScrollViewProxy) {
         // Kept blocks from outside the window must not mark it scrolled:
@@ -649,9 +649,10 @@ private struct CalendarContent: View {
         guard scrolledRange != model.visibleRange,
               !model.visibleWindowBlocks.isEmpty || model.loadedRange == model.renderRange
         else { return }
-        let earliest = model.visibleWindowBlocks.map(\.start).min()
-        let hour = earliest.map { model.calendar.component(.hour, from: $0) } ?? 8
-        proxy.scrollTo("h\(max(0, min(23, hour)))", anchor: .top)
+        let hour = CalendarScroll.openingHour(blockStarts: model.visibleWindowBlocks.map(\.start),
+                                              range: model.visibleRange, now: Date(),
+                                              calendar: model.calendar)
+        proxy.scrollTo("h\(hour)", anchor: .top)
         scrolledRange = model.visibleRange
     }
 
@@ -1312,7 +1313,8 @@ private struct HarnessLegend: View {
                 .accessibilityLabel(expanded ? "Collapse \(HarnessMark(harness).name) accounts"
                                            : "Expand \(HarnessMark(harness).name) accounts")
             } else {
-                Spacer().frame(width: 10)
+                // The disclosure button's width, so every checkbox lines up.
+                Spacer().frame(width: 20)
             }
             LegendToggle(action: { model.toggle(harness) }) {
                 HStack(spacing: 6) {
@@ -1438,7 +1440,8 @@ private struct UsageLegend: View {
                 .accessibilityLabel(expanded ? "Collapse \(card.usageTitle) windows"
                                            : "Expand \(card.usageTitle) windows")
             } else {
-                Spacer().frame(width: 10)
+                // The disclosure button's width, so every checkbox lines up.
+                Spacer().frame(width: 20)
             }
             LegendToggle(action: toggle) {
                 HStack(spacing: 6) {

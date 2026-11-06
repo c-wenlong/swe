@@ -288,3 +288,45 @@ import Testing
         #expect(DayHeaderStyle.forWidth(35.9) == .compact)
     }
 }
+
+@Suite struct CalendarScrollTests {
+    private var calendar: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }
+
+    private func at(_ day: Int, _ hour: Int) -> Date {
+        calendar.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: 10))!
+    }
+
+    private var week: DateInterval { DateInterval(start: at(6, 0), end: at(15, 0)) }
+
+    @Test func todayOpensAtItsFirstSessionWhenNowStillShows() {
+        // A 10:00 block later in the week no longer wins over this morning.
+        let hour = CalendarScroll.openingHour(blockStarts: [at(11, 10), at(6, 4), at(6, 5)],
+                                              range: week, now: at(6, 9), calendar: calendar)
+        #expect(hour == 4)
+    }
+
+    @Test func nowWinsWhenTodaysFirstSessionIsTooEarly() {
+        let hour = CalendarScroll.openingHour(blockStarts: [at(6, 1)], range: week,
+                                              now: at(6, 20), calendar: calendar)
+        #expect(hour == 19)
+    }
+
+    @Test func aTodayWithoutSessionsOpensJustBeforeNow() {
+        #expect(CalendarScroll.openingHour(blockStarts: [at(11, 10)], range: week,
+                                           now: at(6, 6), calendar: calendar) == 5)
+        #expect(CalendarScroll.openingHour(blockStarts: [], range: week,
+                                           now: at(6, 0), calendar: calendar) == 0)
+    }
+
+    @Test func aRangeWithoutTodayKeepsItsEarliestBlockOrEight() {
+        let past = DateInterval(start: at(1, 0), end: at(4, 0))
+        #expect(CalendarScroll.openingHour(blockStarts: [at(2, 13), at(3, 11)], range: past,
+                                           now: at(6, 9), calendar: calendar) == 11)
+        #expect(CalendarScroll.openingHour(blockStarts: [], range: past,
+                                           now: at(6, 9), calendar: calendar) == 8)
+    }
+}

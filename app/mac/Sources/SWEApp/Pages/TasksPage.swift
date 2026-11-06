@@ -149,9 +149,12 @@ struct TasksPage: View {
     private var chips: some View {
         HStack(spacing: 6) {
             ForEach(TaskFilter.allCases) { filter in
+                // No count until the first load lands: "Running 0" over
+                // skeleton rows claimed nothing was running.
                 FilterChip(title: filter.title,
-                           count: TaskGrouping.count(model.tasks, filter: filter,
-                                                     scope: shownScope),
+                           count: model.loaded
+                               ? TaskGrouping.count(model.tasks, filter: filter, scope: shownScope)
+                               : nil,
                            selected: model.filter == filter) {
                     model.filter = filter
                 }
@@ -422,7 +425,8 @@ private struct TaskRail: View {
 /// A filter chip with its count: All / Running / PR open / Done.
 private struct FilterChip: View {
     var title: String
-    var count: Int
+    /// Nil while the tasks load.
+    var count: Int?
     var selected: Bool
     var action: () -> Void
     @State private var hovering = false
@@ -431,8 +435,10 @@ private struct FilterChip: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Text(title)
-                Text("\(count)").monospacedDigit()
-                    .foregroundStyle(selected ? Theme.textSecondary : Theme.textMuted)
+                if let count {
+                    Text("\(count)").monospacedDigit()
+                        .foregroundStyle(selected ? Theme.textSecondary : Theme.textMuted)
+                }
             }
             .font(Theme.control)
             .foregroundStyle(selected || hovering ? Theme.textPrimary : Theme.textTab)

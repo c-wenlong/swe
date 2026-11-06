@@ -29,3 +29,19 @@ import Testing
         #expect(LimitsView.rowSpacing(for: 128, count: 1, compact: false) == 0)
     }
 }
+
+@Suite struct LimitsOverflowTests {
+    @Test func aDroppedLimitIsCountedNotHidden() {
+        // Six limits, five rows: four limits and "+2 more".
+        #expect(LimitsView.shown(total: 6, capacity: 5) == (rows: 4, more: 2))
+        #expect(LimitsView.shown(total: 5, capacity: 5) == (rows: 5, more: 0))
+        #expect(LimitsView.shown(total: 0, capacity: 5) == (rows: 0, more: 0))
+    }
+
+    @Test func theLargeWidgetSpreadsAShortList() {
+        // Six rows in 340pt: as wide as two rows apart, not 8pt.
+        #expect(LimitsView.spreadSpacing(for: 340, count: 6) == 40)
+        #expect(LimitsView.spreadSpacing(for: 140, count: 6) == 4)
+        #expect(LimitsView.spreadSpacing(for: 340, count: 1) == 0)
+    }
+}
