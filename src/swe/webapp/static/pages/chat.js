@@ -2435,7 +2435,22 @@ const SessionChat = (() => {
         else applyMeta(d);
       }
     } else if (ev.type === "approval.requested") {
-      appendMessage({ kind: "approval", text: d.prompt || "Approval requested", request_id: d.request_id || "", options: d.options || [] }, live, ev.seq);
+      // Asked again under the same id (a satellite resends a refused batch
+      // whole): an open card moves to the newest ask, as it is, so an
+      // answer still on its way (disabled buttons, the pick, data-queued)
+      // keeps its card; an answered one stands, folded into chat.earlier
+      // or not. One card per request (the Mac and iPhone chats agree).
+      const rid = d.request_id || "";
+      const log = $("chat-log");
+      const same = !rid || !log ? [] : [...log.querySelectorAll(".msg.approval"), ...chat.earlier]
+        .filter((c) => c.classList.contains("approval") && c.dataset.req === rid);
+      const open = same.find((c) => !c.classList.contains("resolved"));
+      if (open) {
+        if (ev.seq) open.dataset.seq = String(ev.seq);
+        logAppend(log, open);
+      } else if (!same.length) {
+        appendMessage({ kind: "approval", text: d.prompt || "Approval requested", request_id: rid, options: d.options || [] }, live, ev.seq);
+      }
     } else if (ev.type === "command.result") {
       commandResult(d);
     } else if (ev.type === "approval.resolved") {
