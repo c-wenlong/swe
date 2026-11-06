@@ -26,24 +26,51 @@ public protocol RunningInstances {
     func activate(pid: Int32)
 }
 
+/// What the matching rules need of one running process, so a test can hand
+/// them plain values instead of live `NSRunningApplication`s.
+struct RunningApp: Equatable, Sendable {
+    var pid: Int32
+    /// Nil for an app re-launched while its bundle was replaced.
+    var bundleURL: URL?
+    var bundleIdentifier: String?
+}
+
 /// The `NSRunningApplication` implementation. SWECore already links
 /// AppKit (MarkdownStyleAttributes), so the system call can live here while
 /// AccountsModel keeps a fake in tests.
 @MainActor
 public struct AppRunningInstances: RunningInstances {
-    public init() {}
+    private let apps: @MainActor () -> [RunningApp]
+    private let arguments: @MainActor (Int32) -> [String]
+
+    public init() {
+        self.init(apps: Self.liveApps, arguments: { ProcessArguments.of(pid: $0) })
+    }
+
+    /// Tests pass the app list and each process's argv as plain values.
+    init(apps: @escaping @MainActor () -> [RunningApp],
+         arguments: @escaping @MainActor (Int32) -> [String]) {
+        self.apps = apps
+        self.arguments = arguments
+    }
+
+    private static func liveApps() -> [RunningApp] {
+        NSWorkspace.shared.runningApplications.map {
+            RunningApp(pid: $0.processIdentifier, bundleURL: $0.bundleURL,
+                       bundleIdentifier: $0.bundleIdentifier)
+        }
+    }
 
     public func instances(ofAppAt path: String) -> [RunningInstance] {
         let target = URL(fileURLWithPath: path).standardizedFileURL
         // bundleURL can be nil for an app re-launched while its bundle was
         // replaced; fall back to the bundle id from the app's own plist.
         let bundleID = Bundle(url: target)?.bundleIdentifier
-        return NSWorkspace.shared.runningApplications.compactMap { app in
+        return apps().compactMap { app in
             let belongs = app.bundleURL.map { $0.standardizedFileURL == target }
                 ?? (bundleID != nil && app.bundleIdentifier == bundleID)
-            guard belongs, app.processIdentifier > 0 else { return nil }
-            return RunningInstance(pid: app.processIdentifier,
-                                   arguments: ProcessArguments.of(pid: app.processIdentifier))
+            guard belongs, app.pid > 0 else { return nil }
+            return RunningInstance(pid: app.pid, arguments: arguments(app.pid))
         }
     }
 
