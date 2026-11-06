@@ -34,7 +34,7 @@ import Testing
         #expect(issue.comments[1].createdAt?.date != nil)
         #expect(issue.comments[1].url?.hasSuffix("issuecomment-2") == true)
         #expect(issue.branch == "quiver/issue-816")
-        #expect(issue.worktree == "/Users/k/.swe/worktrees/c-wenlong__quiver-issue816")
+        #expect(issue.worktree == "/Users/k/.swe/worktrees/c-wenlong__swe-issue816")
         #expect(issue.suggestedPrompt?.contains("Closes #816") == true)
     }
 
@@ -81,20 +81,26 @@ import Testing
 /// The model's issue slots and comment write, over canned replies.
 @MainActor
 @Suite struct IssueModelTests {
-    final class Router: CommandRunning, @unchecked Sendable {
-        var replies: [String: CommandResult]
-        private(set) var calls: [[String]] = []
-        private(set) var inputs: [Data?] = []
-        private let lock = NSLock()
+    /// Answers by command prefix and records every call and its input.
+    /// Calls arrive off the test's actor, so all of it sits behind a lock.
+    final class Router: CommandRunning, Sendable {
+        private struct Log {
+            var calls: [[String]] = []
+            var inputs: [Data?] = []
+        }
+        private let replies: [String: CommandResult]
+        private let log = Mutex(Log())
+        var calls: [[String]] { log.withLock { $0.calls } }
+        var inputs: [Data?] { log.withLock { $0.inputs } }
         init(_ replies: [String: CommandResult]) { self.replies = replies }
         func run(_ arguments: [String]) async throws -> CommandResult {
-            lock.withLock { calls.append(arguments) }
+            log.withLock { $0.calls.append(arguments) }
             let line = arguments.joined(separator: " ")
             for (prefix, reply) in replies where line.hasPrefix(prefix) { return reply }
             return .init(status: 1, stdout: Data(), stderr: "no route")
         }
         func run(_ arguments: [String], input: Data?) async throws -> CommandResult {
-            lock.withLock { inputs.append(input) }
+            log.withLock { $0.inputs.append(input) }
             return try await run(arguments)
         }
     }

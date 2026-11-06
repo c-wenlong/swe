@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **The hub's session journals are private to your account.** Every
+  prompt, reply and tool call a remote session sees is journaled under
+  `~/.swe/data/remote/journal/`, which was created 0755 with 0644 files,
+  so any other local account could read them. The folder is now 0700
+  (an existing one is tightened) and its files 0600.
+
+- **A pairing poll's secret no longer travels in the URL.** The web
+  app and the iPhone app polled `/v1/pair/request/<id>?secret=…`, so
+  the secret that collects a new device's credential could land in
+  proxy and access logs. Both now send it in an `X-Pair-Secret` header;
+  the hub still reads `?secret=` for iPhone builds already out.
+
+- **An Open in session prompt no longer carries a stranger's PR text.**
+  Anyone can open a pull request on a public repo, and its title, body
+  and failing check names (which a fork's own workflow can name) went
+  word for word into the first prompt of the agent reviewing it. The
+  brief now follows the resolve prompt's rule: it quotes the title and
+  body line by line behind a note that they are untrusted data, only
+  when the author's `author_association` is `OWNER`, `MEMBER` or
+  `COLLABORATOR`, and otherwise says in one line that they were left
+  out. Failing check names are always quoted, and the web's Open in
+  session sheet no longer puts the title in the prompt it prefills.
+  The hub's PR detail gains `association`.
+
 - **A resolve prompt no longer carries strangers' comments.** Anyone can
   comment on a public issue, and every comment went word for word into
   the first prompt of the agent resolving it. The prompt now quotes the
@@ -22,11 +46,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The web app's model search and price edits no longer wait on the
+  daily price download.** The LiteLLM price list was fetched while
+  holding the lock every catalog read and price save takes, so a slow
+  network stalled the Models search and the Pricing page. The fetch now
+  runs outside it, and a download cut short counts as tried for the day.
+
+- **A model or effort switch is no longer typed into a TUI that can't
+  take it.** On a tmux session the hub typed `/model <v>` or `/effort
+  <v>` into any harness's pane, so opencode or codex (for effort) got the
+  line as a prompt to the model. It now refuses with `unsupported_control`
+  unless the harness's TUI is known to run the command, the rule the
+  session's `model_modes` and a launch already follow.
+
+- **A status feed with a `NaN` or out-of-range time no longer blanks
+  the web Status page.** Python's JSON reader takes `NaN`, `Infinity`
+  and `1e400`, and the incident time went back out as bare `NaN`, which
+  the browser refuses to parse. Such a time now reads as unknown, as it
+  does in the Mac app.
+
+- **A late approval tap can no longer answer the next terminal prompt.**
+  Once a prompt was answered at the terminal, its request id stopped
+  being checked, so a phone's delayed tap on it could answer the next
+  prompt the agent showed before the hub had named it. A replaced or
+  cleared id is now refused. An approval's key walk also shares the
+  pane's write lock, so a message steered in at the same moment can't
+  land between its arrow keys.
+
+- **One odd message from codex no longer stalls a Codex session.** An
+  app-server message the hub couldn't read (an approval with list
+  `params`, an unhashable id) ended the reader while codex kept running,
+  so every later send waited its full 60 s and failed until a detach.
+  The reader now skips such a message, and a server whose reader did
+  die is replaced on the next send.
+
+- **Archiving Qwen Code stops its shared hooks, and its hook settings
+  count.** The hook contract table keyed Qwen Code as `qwen`, its
+  command, while harness.json calls it `qwen-code`. Archiving qwen-code
+  still deployed shared-hook wrappers into `~/.qwen/hooks`, and a
+  `capabilities.hooks` entry on qwen-code was never read. The row is now
+  `qwen-code`, and `swe init` (or `swe hooks sync`) moves an existing
+  `~/.swe/hooks/qwen/` to `hooks/qwen-code/` once and relinks it; a hub
+  that already has both folders is told to merge them by hand. The move
+  waits while a link to the old folder could not be relinked (qwen-code
+  archived, or the link in `.linkignore`) or a settings file names the
+  old folder, so no hook stops running.
+
+- **`swe skills new` says when it had to make `~/.swe/skills`.**
+  `create()` promised to report whether it made the hub skills root but
+  always answered no, so a skill written into a brand-new root (one no
+  harness links to yet) printed only "Created". It now adds a line
+  saying to run `swe init` to link the root into your harnesses.
+
 - **Qwen Code sessions get `@` file references for attachments again.**
   The hub's attachment fallback table keyed Qwen Code as `qwen`, its
   command, but sessions carry the registry id `qwen-code`, so a file
   sent from a phone arrived as an `[Attached file: …]` line instead of
   an `@` reference.
+
+- **A satellite's malformed push no longer breaks the hub's routes.**
+  `/v1/agent/register` answered 500 when `machine` was not an object; an
+  uploaded event whose `data` was not an object failed its whole batch,
+  which the agent then resent forever, journaling the good events again;
+  a "/" menu push with the wrong shapes turned that satellite's menu
+  route into a 500; and `NaN`/`Infinity` (or `1e400`) in any request
+  body was stored and served back, which no client's JSON parser
+  accepts. Each is now a 422, a skipped event, a skipped row or a 400.
+
+- **An approval resolved without a request id now kills its ntfy
+  buttons.** The hub clears every pending approval on such a resolve,
+  but the notification tokens were retired only by exact request id, so
+  the buttons of the cleared prompts stayed spendable until they expired
+  and could answer the next prompt on the session.
+
+- **An opencode approval's request id can no longer reach another serve
+  route.** The hub put the client's request id into the opencode serve
+  URL as typed, so an id like `../../<session>/abort` posted to a
+  different route; ids and session ids are now one quoted path segment.
 
 - **A wildcard hub bind no longer turns off the Host check, and a
   second `swe remote serve` on a taken port no longer disturbs the
@@ -96,6 +192,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Safe Storage item.
 
 ### Changed
+
+- **A stored Linear task's refresh no longer downloads its
+  description.** The hub asked Linear for each issue's full body on
+  every task read and never used it. The unused Notion page-body
+  renderer, built for a resolve route that never shipped, is gone
+  too.
 
 - **Cursor's limit meters read "Cursor models" and "Other models", and
   reset times show two units.** The rows the Cursor accounts and harness

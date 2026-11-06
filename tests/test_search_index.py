@@ -273,6 +273,20 @@ class MergeHitsTest(TempHomeTest):
         self.assertEqual(ids, {"sess-beta"})
 
 
+class ScanJsonlHeadTest(unittest.TestCase):
+    def test_a_line_nested_too_deep_is_skipped(self):
+        # json.loads raises RecursionError, not ValueError, past the
+        # interpreter's limit; it escaped and killed `swe session --search`.
+        from swe.sessions.search_index import _scan_jsonl_head
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.jsonl"
+            path.write_text("[" * 200_000 + "\n"
+                            + json.dumps({"cwd": "/w"}) + "\n")
+            cwd, _title = _scan_jsonl_head(str(path))
+        self.assertEqual(cwd, "/w")
+
+
 class MatchKeysTest(unittest.TestCase):
     def test_plain_ids_match_themselves(self):
         self.assertEqual(search_index.match_keys("abc"), frozenset({"abc"}))

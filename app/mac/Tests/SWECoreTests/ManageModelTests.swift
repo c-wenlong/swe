@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import SWECore
 
@@ -78,7 +79,7 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
         _ = try folder.write("AGENTS.md", "project\n")
         let runner = ScriptedRunner([])
         let model = AgentsModel()
-        model.openProject(folder.url)
+        await model.openProject(folder.url)
         let doc = model.document(for: model.projectFiles[0])
         await model.settled()
         doc.text = "changed"
@@ -134,7 +135,7 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
         _ = try folder.write("AGENTS.md", "project\n")
         try folder.link("CLAUDE.md", to: "AGENTS.md")
         let model = AgentsModel()
-        model.openProject(folder.url)
+        await model.openProject(folder.url)
         #expect(model.projectFiles.map(\.name) == ["AGENTS.md", "CLAUDE.md"])
         #expect(model.projectFiles.map(\.exists) == [true, true])
         #expect(model.projectFiles[0].linksTo == nil)
@@ -155,14 +156,14 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
         _ = try folder.write("OTHER.md", "other\n")
         try folder.link("CLAUDE.md", to: "AGENTS.md")
         let model = AgentsModel()
-        model.openProject(folder.url)
+        await model.openProject(folder.url)
         _ = model.document(for: model.projectFiles[1])   // CLAUDE.md first
         await model.settled()
 
         // The link now points elsewhere; AGENTS.md must still edit AGENTS.md.
         try FileManager.default.removeItem(at: folder.url.appending(path: "CLAUDE.md"))
         try folder.link("CLAUDE.md", to: "OTHER.md")
-        model.rescanProject()
+        await model.rescanProject()
         let agents = model.document(for: model.projectFiles[0])
         let other = model.document(for: model.projectFiles[1])
         await model.settled()
@@ -175,7 +176,7 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
         let folder = try TempDir()
         _ = try folder.write("AGENTS.md", "v1\n")
         let model = AgentsModel()
-        model.openProject(folder.url)
+        await model.openProject(folder.url)
         let doc = model.document(for: model.projectFiles[0])
         await model.settled()
         _ = try folder.write("AGENTS.md", "v2\n")
@@ -188,14 +189,57 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
     @Test func aMissingProjectFileCanBeCreated() async throws {
         let folder = try TempDir()
         let model = AgentsModel()
-        model.openProject(folder.url)
+        await model.openProject(folder.url)
         #expect(model.projectFiles.map(\.exists) == [false, false])
         let doc = model.document(for: model.projectFiles[0])
         await model.settled()
         doc.text = "# Project\n"
         #expect(await doc.save() == .saved)
-        model.rescanProject()
+        await model.rescanProject()
         #expect(model.projectFiles[0].exists)
+    }
+
+    /// The scan stats and reads links in a folder that may stall, so
+    /// it never runs on the main thread.
+    @Test func theProjectScanRunsOffTheMainThread() async throws {
+        let folder = try TempDir()
+        let onMain = Flag()
+        let model = AgentsModel(scan: { url in
+            onMain.set(Thread.isMainThread)
+            return AgentsModel.scan(url)
+        })
+        await model.openProject(folder.url)
+        #expect(model.projectFiles.map(\.name) == ["AGENTS.md", "CLAUDE.md"])
+        #expect(onMain.value == false)
+    }
+
+    /// A scan of the previous folder finishing late must not list its
+    /// files under the folder opened since.
+    @Test func aLateScanOfAnOldFolderIsDropped() async throws {
+        let one = try TempDir()
+        let two = try TempDir()
+        _ = try one.write("AGENTS.md", "one")
+        let parked = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let model = AgentsModel(scan: { url in
+            if url == one.url { parked.signal(); release.wait() }
+            return AgentsModel.scan(url)
+        })
+        let first = Task { await model.openProject(one.url) }
+        // The first folder's scan is under way, held on its thread.
+        await offMain { parked.wait() }
+        await model.openProject(two.url)
+        release.signal()
+        await first.value
+        #expect(model.projectFolder == two.url)
+        #expect(model.projectFiles.map(\.exists) == [false, false])
+    }
+
+    private final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: Bool?
+        func set(_ v: Bool) { lock.withLock { stored = v } }
+        var value: Bool? { lock.withLock { stored } }
     }
 
     @Test func openingAnotherProjectDropsTheOldDocuments() async throws {
@@ -203,11 +247,11 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
         let two = try TempDir()
         _ = try one.write("AGENTS.md", "one")
         let model = AgentsModel()
-        model.openProject(one.url)
+        await model.openProject(one.url)
         let doc = model.document(for: model.projectFiles[0])
         await model.settled()
         doc.text = "edit"
-        model.openProject(two.url)
+        await model.openProject(two.url)
         #expect(!model.projectHasUnsavedChanges)
         #expect(model.projectFolder == two.url)
     }
@@ -729,21 +773,31 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
 
 /// swe's plugin drift as state: each fix removes its finding, may clear
 /// others, or fails with a reason.
-final class DriftRunner: CommandRunning, @unchecked Sendable {
-    private let lock = NSLock()
-    /// Finding id -> runnable, in report order.
-    private var findings: [(id: String, runnable: Bool)]
+final class DriftRunner: CommandRunning, Sendable {
+    private struct State {
+        /// Finding id -> runnable, in report order.
+        var findings: [(id: String, runnable: Bool)]
+        var fixed: [String] = []
+        var attempted: [String] = []
+        var onFix: (@Sendable (String) async -> Void)?
+    }
+    /// Fixes run off the test's actor, so every read and write of the
+    /// state, the test's included, goes through the lock.
+    private let state: Mutex<State>
     private let clears: [String: [String]]
     private let reveals: [String: [String]]
     private let failing: [String: String]
-    private(set) var fixed: [String] = []
-    private(set) var attempted: [String] = []
+    var fixed: [String] { state.withLock { $0.fixed } }
+    var attempted: [String] { state.withLock { $0.attempted } }
     /// Runs after a fix succeeds, outside the lock.
-    var onFix: (@Sendable (String) async -> Void)?
+    var onFix: (@Sendable (String) async -> Void)? {
+        get { state.withLock { $0.onFix } }
+        set { state.withLock { $0.onFix = newValue } }
+    }
 
     init(_ findings: KeyValuePairs<String, Bool>, clears: [String: [String]] = [:],
          reveals: [String: [String]] = [:], failing: [String: String] = [:]) {
-        self.findings = findings.map { (id: $0.key, runnable: $0.value) }
+        state = Mutex(State(findings: findings.map { (id: $0.key, runnable: $0.value) }))
         self.clears = clears
         self.reveals = reveals
         self.failing = failing
@@ -758,20 +812,20 @@ final class DriftRunner: CommandRunning, @unchecked Sendable {
     }
 
     private func answer(_ arguments: [String]) -> CommandResult {
-        lock.withLock {
+        state.withLock { s in
             if let fix = arguments.first(where: { $0.hasPrefix("--fix=") }) {
                 let id = String(fix.dropFirst("--fix=".count))
-                attempted.append(id)
+                s.attempted.append(id)
                 if let reason = failing[id] {
                     return CommandResult(status: 1, stdout: Data(), stderr: reason + "\n")
                 }
                 let gone = Set([id] + (clears[id] ?? []))
-                findings.removeAll { gone.contains($0.id) }
-                findings += (reveals[id] ?? []).map { (id: $0, runnable: true) }
-                fixed.append(id)
+                s.findings.removeAll { gone.contains($0.id) }
+                s.findings += (reveals[id] ?? []).map { (id: $0, runnable: true) }
+                s.fixed.append(id)
                 return json(#"{"fixed": \#(entry(id, runnable: true))}"#)
             }
-            let rows = findings.map { entry($0.id, runnable: $0.runnable) }.joined(separator: ",")
+            let rows = s.findings.map { entry($0.id, runnable: $0.runnable) }.joined(separator: ",")
             return json(#"{"sources": 2, "drift": [\#(rows)]}"#)
         }
     }

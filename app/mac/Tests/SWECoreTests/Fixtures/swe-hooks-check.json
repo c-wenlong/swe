@@ -10,22 +10,22 @@
       {
         "kind": "undeclared",
         "harness": "claude",
-        "message": "beacon.py is linked into /tmp/quiver-fixture-home/.claude/hooks but no settings file declares it \u2014 the hook will not fire"
+        "message": "beacon.py is linked into /tmp/swe-fixture-home/.claude/hooks but no settings file declares it \u2014 the hook will not fire"
       },
       {
         "kind": "unlinked",
         "harness": "claude",
-        "message": "fixture-hook.py is not linked into /tmp/quiver-fixture-home/.claude/hooks (swe init will link it)"
+        "message": "fixture-hook.py is not linked into /tmp/swe-fixture-home/.claude/hooks (swe init will link it)"
       },
       {
         "kind": "unlinked",
         "harness": "claude",
-        "message": "night-watch.py is not linked into /tmp/quiver-fixture-home/.claude/hooks (swe init will link it)"
+        "message": "night-watch.py is not linked into /tmp/swe-fixture-home/.claude/hooks (swe init will link it)"
       },
       {
         "kind": "unlinked",
         "harness": "codex",
-        "message": "block-rm.py is not linked into /tmp/quiver-fixture-home/.codex/hooks (swe init will link it)"
+        "message": "block-rm.py is not linked into /tmp/swe-fixture-home/.codex/hooks (swe init will link it)"
       }
     ]
   }

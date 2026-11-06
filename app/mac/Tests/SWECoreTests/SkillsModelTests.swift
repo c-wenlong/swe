@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import SWECore
 
@@ -37,33 +38,31 @@ final class ScriptedRunner: CommandRunning, @unchecked Sendable {
 }
 
 /// Never answers until cancelled, like a swe stuck behind the login shell.
-final class StuckRunner: CommandRunning, @unchecked Sendable {
-    private let lock = NSLock()
-    private var count = 0
-    private let arrivals = CountGate()
-    var started: Int { lock.withLock { count } }
+final class StuckRunner: CommandRunning, Sendable {
+    private let count = Mutex(0)
+    private let hang = HoldGate()
+    var started: Int { count.withLock { $0 } }
 
-    /// True once `n` calls have started, false after `gateTimeout`.
-    func arrived(_ n: Int = 1) async -> Bool { await arrivals.reach(n) }
+    /// True once `n` calls are hanging, false after `gateTimeout`.
+    func arrived(_ n: Int = 1) async -> Bool { await hang.arrived(n) }
 
     func run(_ arguments: [String]) async throws -> CommandResult {
-        lock.withLock { count += 1 }
-        await arrivals.bump()
-        try await Task.sleep(for: .seconds(3600))
+        count.withLock { $0 += 1 }
+        try await hang.pass()
         return CommandResult(status: 0, stdout: Data(), stderr: "")
     }
 }
 
 /// Runs until cancelled, then reports the exit of a terminated child.
-final class TerminatedRunner: CommandRunning, @unchecked Sendable {
-    private let lock = NSLock()
-    private var count = 0
-    var started: Int { lock.withLock { count } }
+final class TerminatedRunner: CommandRunning, Sendable {
+    private let count = Mutex(0)
+    private let hang = HoldGate()
+    var started: Int { count.withLock { $0 } }
 
     func run(_ arguments: [String]) async throws -> CommandResult {
-        lock.withLock { count += 1 }
-        // Sleeps until cancelled: a cancelled sleep throws at once.
-        try? await Task.sleep(for: .seconds(3600))
+        count.withLock { $0 += 1 }
+        // Hangs until cancelled, then answers as a terminated swe does.
+        try? await hang.pass()
         return CommandResult(status: 15, stdout: Data(), stderr: "")
     }
 }
@@ -388,7 +387,10 @@ let inventoryJSON = #"""
 
     @Test func leavingThePageMidLoadKeepsItLoadingForTheNextVisit() async {
         let runner = StuckRunner()
-        let model = SkillsModel(swe: SweClient(runner: runner), timeout: .milliseconds(200))
+        // The timeout is what ends the stuck load, and with it the join
+        // below; long enough that a starved machine still reaches the
+        // second visit before it fires and a second load starts.
+        let model = SkillsModel(swe: SweClient(runner: runner), timeout: .seconds(2))
         let load = Task { await model.loadIfStale(for: "/bin/swe") }
         #expect(await runner.arrived())
         load.cancel()

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import SWECore
 
@@ -129,6 +130,53 @@ import Testing
         #expect(toks.contains { $0.0 == .keyword && $0.1 == "[server]" })
         #expect(toks.contains { $0.0 == .builtin && $0.1 == "port" })
         #expect(toks.contains { $0.0 == .string && $0.1 == "\"x\"" })
+    }
+
+    /// A table header counts only at a real line start: the pattern's
+    /// `^` used to match at every offset the scan tried.
+    @Test func tomlHeaderNeedsALineStart() {
+        let toks = kinds("a = [1]\n  [[bin]]", "toml")
+        #expect(toks.contains { $0.0 == .keyword && $0.1 == "  [[bin]]" })
+        #expect(!toks.contains { $0.0 == .keyword && $0.1.contains("[1]") })
+    }
+
+    /// Chat and tool text is untrusted and uncapped. A 30K-character run
+    /// of `[` in TOML took 8 s (every offset rescanned to the end); the
+    /// rest of a huge block past `maxColoured` now shows plain, as on
+    /// the web.
+    @Test func hugeBlocksHighlightInBoundedTime() {
+        let clock = ContinuousClock()
+        for (lang, text) in [("toml", String(repeating: "[", count: 120_000)),
+                             ("css", String(repeating: "#", count: 120_000)),
+                             ("rust", String(repeating: "'", count: 120_000)),
+                             ("html", "<a " + String(repeating: "b=", count: 60_000)),
+                             ("python", "# a" + String(repeating: " ", count: 120_000) + "b ##")] {
+            var toks: [SyntaxToken] = []
+            let elapsed = clock.measure { toks = SyntaxHighlight.tokens(text, language: lang) }
+            #expect(toks.map(\.text).joined() == text, "\(lang)")
+            #expect(elapsed < .seconds(2), "\(lang)")
+        }
+    }
+
+    @Test func pastTheCapIsPlainAndOpenStateIsDropped() {
+        let head = "\"\"\"" + String(repeating: "x", count: SyntaxHighlight.maxColoured)
+        let text = head + "\nmore = 1"
+        var state: ScanState?
+        let toks = SyntaxHighlight.tokens(text, language: "python", state: &state)
+        #expect(toks.map(\.text).joined() == text)
+        #expect(toks.last?.kind == .plain)
+        #expect(toks.last?.text.hasSuffix("more = 1") == true)
+        #expect(state == nil)
+        // A surrogate pair straddling the cut stays whole.
+        let lead = String(repeating: "a", count: SyntaxHighlight.maxColoured - 1)
+        let emoji = lead + "😀tail"
+        let split = SyntaxHighlight.tokens(emoji, language: "python")
+        #expect(split.map(\.text).joined() == emoji)
+        // The cut falls back before the pair: the emoji leads the plain
+        // remainder, and everything coloured is the run of a's.
+        #expect(split.last?.kind == .plain)
+        #expect(split.last?.text == "😀tail")
+        #expect(split.dropLast().map(\.text).joined() == lead)
     }
 
     @Test func sql() {

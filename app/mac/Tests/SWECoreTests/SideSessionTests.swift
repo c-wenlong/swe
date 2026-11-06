@@ -120,9 +120,22 @@ private let worktree = "/Users/k/ai-engineering/.claude/worktrees/jovial"
         defer { withExtendedLifetime(temp) {} }
         try fixture(temp.url)
         let cache = temp.path("cache/claude-desktop-sessions.json")
+        // A whole-second stamp, so putting it back below is exact.
+        let parent = temp.url.appending(path: "acct/org/local_parent.json")
+        let stamp = Date(timeIntervalSince1970: 1_790_000_000)
+        try FileManager.default.setAttributes([.modificationDate: stamp], ofItemAtPath: parent.path)
         let reader = ClaudeDesktopSessions(root: temp.url, cacheFile: cache)
         #expect(reader.parents().count == 3)
         #expect(FileManager.default.fileExists(atPath: cache.path))
+        // Same size, same modification date, new bytes: the cache answers
+        // for it, so the old title stays. A reader with no cache sees the
+        // new bytes, which shows the file did change.
+        let original = try String(contentsOf: parent, encoding: .utf8)
+        try original.replacingOccurrences(of: "design-systems-repo", with: "unchanged-stamp-ttl")
+            .write(to: parent, atomically: false, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: stamp], ofItemAtPath: parent.path)
+        #expect(reader.parents()["cli-side"]?.title == "design-systems-repo")
+        #expect(ClaudeDesktopSessions(root: temp.url).parents()["cli-side"]?.title == "unchanged-stamp-ttl")
         // A renamed parent shows its new title.
         try write(temp.url, "local_parent", #"{"sessionId":"local_parent","cliSessionId":"cli-parent","title":"renamed"}"#)
         #expect(reader.parents()["cli-side"]?.title == "renamed")
@@ -148,7 +161,7 @@ private let worktree = "/Users/k/ai-engineering/.claude/worktrees/jovial"
                                                                    info("cli-side", "codex"),
                                                                    info("other", "claude")], failures: [])),
             ledger: FakeSessionLedger(),
-            parents: { ["cli-side": parent] }, now: { now })
+            parents: { ["cli-side": parent] }, now: { now }, searchIndexingEnabled: false)
         await model.load()
         let byKey = Dictionary(uniqueKeysWithValues: model.rows.map { ("\($0.session.harness)|\($0.id)", $0) })
         #expect(byKey["claude|cli-side"]?.parent == parent)
@@ -169,7 +182,7 @@ private let worktree = "/Users/k/ai-engineering/.claude/worktrees/jovial"
         let parent = SessionParent(id: "local_parent", title: "design-systems-repo", kind: .side)
         let source = FakeSessionSource(list: SessionList(sessions: [], failures: []))
         let model = SessionsModel(source: source, ledger: FakeSessionLedger(), snapshots: file,
-                                  parents: { ["cli-side": parent] }, now: { now })
+                                  parents: { ["cli-side": parent] }, now: { now }, searchIndexingEnabled: false)
         await model.restore()
         // The saved list is fresh, so no listing runs after it.
         await model.loadIfStale(for: "/bin/swe")

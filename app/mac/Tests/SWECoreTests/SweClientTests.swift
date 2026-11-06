@@ -83,6 +83,15 @@ func fixture(_ name: String) throws -> Data {
         }
     }
 
+    @Test func aMissingSweOnAPlainRunReadsAsNotInstalled() async throws {
+        // Doctor's Run on an init row goes through runPlain, not call.
+        let runner = FakeRunner(.init(status: 127, stdout: Data(),
+                                      stderr: "env: /gone/swe: No such file or directory\n"))
+        await #expect(throws: SweError.notInstalled("/gone/swe")) {
+            try await SweClient(runner: runner).runInit()
+        }
+    }
+
     @Test func a127WithoutEnvsMessageIsNotNotInstalled() async throws {
         // swe itself failing hard keeps its real message.
         let runner = FakeRunner(.init(status: 127, stdout: Data(), stderr: "swe blew up"))
@@ -127,7 +136,9 @@ func fixture(_ name: String) throws -> Data {
 
     @Test func nonJSONOutputIsReportedAsSuch() async throws {
         let client = SweClient(runner: FakeRunner(.init(status: 0, stdout: Data("Unknown flag".utf8), stderr: "")))
-        await #expect(throws: SweError.self) {
+        // Not a --json refusal (no "--json" in it): unreadable output,
+        // quoted back.
+        await #expect(throws: SweError.malformedOutput("Unknown flag")) {
             _ = try await client.harnesses(withUsage: false)
         }
     }
@@ -271,7 +282,7 @@ func fixture(_ name: String) throws -> Data {
     @Test func aRefusalRaisesCommandFailed() async throws {
         let runner = FakeRunner(.init(status: 1, stdout: Data(),
                                       stderr: "empty value; pipe one in"))
-        await #expect(throws: SweError.self) {
+        await #expect(throws: SweError.commandFailed(status: 1, message: "empty value; pipe one in")) {
             try await SweClient(runner: runner).mcpSecretSet(name: "A", value: "")
         }
     }
@@ -489,6 +500,19 @@ func fixture(_ name: String) throws -> Data {
         _ = try await swe.registerHarnesses(["newcli", "guess"])
         #expect(runner.calls.last ==
             ["harness", "discover", "--apply", "newcli", "guess", "--json"])
+    }
+
+    @Test func aRefusedNameStillReturnsTheSkippedReason() async throws {
+        // swe exits 1 when a named pick is refused, with the reason in the
+        // body; the sheet needs that body rather than a bare failure.
+        let doc = #"{"schema": 1, "data": {"applied": {"added": [], "skipped": "#
+            + #"[{"name": "newcli", "reason": "already registered"}], "refused": true},"#
+            + findingsJSON + "}}"
+        let runner = ScriptedRunner([(["harness", "discover"],
+            CommandResult(status: 1, stdout: Data(doc.utf8), stderr: ""))])
+        let reply = try await SweClient(runner: runner).registerHarnesses(["newcli"])
+        #expect(reply.applied?.added == [])
+        #expect(reply.applied?.skipped.map(\.name) == ["newcli"])
     }
 
     @Test func addHarnessArgvOmitsEmptyOptionals() async throws {

@@ -1,5 +1,7 @@
 import AppKit
 import SWECore
+// `Color(light:dark:)`: one copy, shared with the widgets.
+import SWEWidgetsUI
 import SwiftUI
 
 /// The look: TokenTracker's component shapes re-tokenised onto the Devin
@@ -87,6 +89,10 @@ enum Theme {
     static let cardHover = Color(light: "#0d0d0d0f", dark: "#ffffff0d")
 
     static let usageTrack = Color(light: "#0d0d0d0f", dark: "#ffffff0d")
+    /// An account card's history lines: the vendor's account-wide total,
+    /// and what this Mac logged.
+    static let historyAccount = Color(light: "#3565c9", dark: "#5b8def")
+    static let historyMac = Color(light: "#a1a1aa", dark: "#8a8a92")
     /// `text.green`, `text.orange`/`text.yellow`, `bg.destructive`.
     static let success = Color(light: "#00a558", dark: "#00ec7e")
     /// Text on `success` as a fill: always white on the light hue,
@@ -275,28 +281,6 @@ enum Theme {
 extension Color {
     /// A SWECore colour (harness or model brand) as a SwiftUI colour.
     init(rgb: HarnessRGB) { self.init(red: rgb.red, green: rgb.green, blue: rgb.blue) }
-
-    /// A colour that follows the appearance, from `#rrggbb` or `#rrggbbaa`.
-    init(light: String, dark: String) {
-        self.init(nsColor: NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            return NSColor(hexString: isDark ? dark : light)
-        })
-    }
-}
-
-extension NSColor {
-    convenience init(hexString: String) {
-        var text = hexString.trimmingCharacters(in: .whitespaces)
-        if text.hasPrefix("#") { text.removeFirst() }
-        let value = UInt64(text, radix: 16) ?? 0
-        let hasAlpha = text.count == 8
-        let r = Double((value >> (hasAlpha ? 24 : 16)) & 0xff) / 255
-        let g = Double((value >> (hasAlpha ? 16 : 8)) & 0xff) / 255
-        let b = Double((value >> (hasAlpha ? 8 : 0)) & 0xff) / 255
-        let a = hasAlpha ? Double(value & 0xff) / 255 : 1
-        self.init(srgbRed: r, green: g, blue: b, alpha: a)
-    }
 }
 
 // MARK: - Surfaces
@@ -433,8 +417,8 @@ struct PageHeader<Actions: View>: View {
                     }
                     .plainButton(cornerRadius: Theme.smallRadius)
                     .keyboardShortcut("[", modifiers: .command)
-                    .help("\(back.help) (⌘[)")
                     .accessibilityLabel(back.help)
+                    .hoverTip("\(back.help) (⌘[)", replacesLabel: false, pinsOnClick: false)
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     Text(title).font(Theme.pageTitle).tracking(-0.6).foregroundStyle(Theme.textPrimary)

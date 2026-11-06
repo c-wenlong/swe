@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from swe.providers.defaults import DEFAULT_PROVIDERS
+from swe.providers.defaults import DEFAULT_PROVIDERS, derived_alias, display_name
 from swe.providers.registry import alias_map, load_registry, resolve, save_registry
 
 
@@ -315,6 +315,47 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual(set(m), {"openai", "oai", "gpt"})
         for v in m.values():
             self.assertEqual(v, "openai")
+
+
+class DerivedNamingTest(unittest.TestCase):
+    """``name`` and the alias come from ``env_vars[0]`` alone."""
+
+    def test_display_name_strips_the_suffix_and_keeps_ai_capitalised(self):
+        cases = {
+            "TOGETHER_AI_API_KEY": "Together AI",
+            "AI_GATEWAY_TOKEN": "AI Gateway",
+            "HUGGINGFACE_HUB_TOKEN": "Huggingface",
+            "GITHUB_TOKEN": "Github",
+            "PLAIN": "Plain",
+        }
+        for env_var, name in cases.items():
+            with self.subTest(env_var):
+                self.assertEqual(display_name({"env_vars": [env_var]}), name)
+
+    def test_display_name_leaves_words_that_start_with_ai_alone(self):
+        # Regression: a substring replace gave "My AIrtable".
+        self.assertEqual(display_name({"env_vars": ["MY_AIRTABLE_API_KEY"]}),
+                         "My Airtable")
+        self.assertEqual(display_name({"env_vars": ["OPEN_AIDER_TOKEN"]}),
+                         "Open Aider")
+
+    def test_no_env_var_gives_no_name_and_no_alias(self):
+        for info in ({}, {"env_vars": []}, {"env_vars": None}):
+            with self.subTest(info=info):
+                self.assertEqual(display_name(info), "")
+                self.assertIsNone(derived_alias(info))
+
+    def test_alias_is_the_lowercased_prefix(self):
+        self.assertEqual(derived_alias({"env_vars": ["TOGETHER_AI_API_KEY"]}),
+                         "together-ai")
+        # _HUB_TOKEN is stripped whole, before _TOKEN could match.
+        self.assertEqual(derived_alias({"env_vars": ["HUGGINGFACE_HUB_TOKEN"]}),
+                         "huggingface")
+
+    def test_a_bare_suffix_gives_no_alias(self):
+        # Nothing is left once the suffix goes, so there is nothing to alias.
+        self.assertIsNone(derived_alias({"env_vars": ["_API_KEY"]}))
+        self.assertEqual(display_name({"env_vars": ["_API_KEY"]}), "")
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@
  */
 "use strict";
 
-const statusPage = { data: null, loading: false, gen: 0, expanded: new Set(), loadedAt: 0, timer: null,
+const statusPage = { data: null, loading: false, loadingFor: 0, gen: 0, expanded: new Set(), loadedAt: 0, timer: null,
   catalogue: null, removing: null, removeError: "", untracking: new Set() };
 
 const STATUS_ICONS = {
@@ -113,10 +113,19 @@ async function renderStatus(_id, force = false) {
     if (status === 200 && data) statusKeep(data);
   }
   p.loading = true;
+  p.loadingFor = mine;
   if (p.data) paintStatus();
   const { status, data } = await api(`/v1/app/status${force ? "?force=1" : ""}`);
+  // The spinner is this read's unless a newer read took it over. A
+  // Track or Untrack also moves p.gen past this read, so its reply is
+  // dropped below; left set, the flag kept Refresh disabled and the
+  // five-minute check off until the page was opened again.
+  if (p.loadingFor === mine) {
+    p.loading = false;
+    p.loadingFor = 0;
+    if (mine !== p.gen && gen === routeGen && statusOnPage() && p.data) paintStatus();
+  }
   if (gen !== routeGen || mine !== p.gen) return;
-  p.loading = false;
   if (status === 401) return statusGate();
   if (status !== 200 || !data) {
     if (p.data) {

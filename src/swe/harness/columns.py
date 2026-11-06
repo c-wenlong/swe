@@ -87,7 +87,8 @@ def load_window(section: dict | None = None) -> int | None:
         return None
     try:
         value = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: a JSON 1e999 parses to inf, which int() refuses.
         return DEFAULT_WINDOW
     return value if value in SESSION_WINDOWS else DEFAULT_WINDOW
 

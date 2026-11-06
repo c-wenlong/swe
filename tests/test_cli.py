@@ -105,7 +105,7 @@ class FirstRunScaffoldingTest(unittest.TestCase):
             for p in patches:
                 p.stop()
 
-    def test_unknown_command_does_not_scaffold_quiver_dir(self):
+    def test_unknown_command_does_not_scaffold_swe_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = pathlib.Path(tmp)
             status, out, err = self._run_with_fresh_paths(home, ["bogus-cmd"])
@@ -113,7 +113,7 @@ class FirstRunScaffoldingTest(unittest.TestCase):
             self.assertIn("Unknown command: 'bogus-cmd'", out)
             self.assertFalse((home / ".swe").exists())
 
-    def test_version_does_not_scaffold_quiver_dir(self):
+    def test_version_does_not_scaffold_swe_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = pathlib.Path(tmp)
             status, out, _err = self._run_with_fresh_paths(home, ["--version"])
@@ -202,6 +202,21 @@ class LazyRemoteImportTest(unittest.TestCase):
             with self.subTest(command=key):
                 self.assertTrue(callable(getattr(importlib.import_module(module), name)))
 
+
+    def test_commands_import_the_module_that_defines_them(self):
+        # No forwarder in a package __init__ in between: `swe gh` went
+        # through one in swe/github/__init__.py, and two re-export shims
+        # (swe.history, swe.mcp_formats) outlived every importer.
+        import importlib.util
+
+        from swe.cli import COMMANDS
+
+        self.assertIn("``swe.github.cli.main``", COMMANDS["gh"].__doc__)
+        import swe.github
+        self.assertFalse(hasattr(swe.github, "main"))
+        for shim in ("swe.history", "swe.mcp_formats"):
+            with self.subTest(shim=shim):
+                self.assertIsNone(importlib.util.find_spec(shim))
 
 class ProvidersHelpRouteTest(unittest.TestCase):
     """`swe providers --help` reaches the group's own fuller help, not

@@ -336,7 +336,7 @@
 
   function listContent() {
     const d = page.data;
-    if (!d) return loadingCard("Reading the task list…");
+    if (!d) return loadingCard();
     const cards = sourceCards(d);
     const blocked = GhUI.envSetup(d.github) || githubFailed(d)
       || KEYED_SOURCES.some((src) => sourceFailing(d[src]));
@@ -352,7 +352,7 @@
       // hub is the empty state.
       if (blocked) return [...cards, error].join("");
       return [...cards, error, `<div class="card"><div class="gh-empty">${ico("stack", "gh-muted")}<span>No tasks yet. Tasks are the issues and pull requests your agents touch — resolve an issue or open a PR from Repositories, or link a running session to one.</span>
-        <a class="gh-button" href="#/repositories">${ico("expand")}<span>Repositories</span></a></div></div>`].join("");
+        <a class="btn lg hairline gh-button" href="#/repositories">${ico("expand")}<span>Repositories</span></a></div></div>`].join("");
     }
     const failedRows = failedRepos().some((r) => tasks().some((t) => t.repo === r.name));
     const stale = (blocked || failedRows) && stored
@@ -542,8 +542,8 @@
       ${x.error ? `<div class="caption gh-danger-text" role="alert">${esc(x.error)}</div>` : ""}
       ${x.note ? `<div class="caption" role="status">${esc(x.note)}</div>` : ""}
       <div class="gh-confirm-buttons">
-        <button type="button" class="gh-button" id="tk-new-cancel">${x.started ? "Close" : "Cancel"}</button>
-        <button type="button" class="gh-button gh-primary" id="tk-new-start"${x.harnesses && x.harnesses.length && !busy && !x.started ? "" : " disabled"}>${esc(x.phase || "Start")}</button>
+        <button type="button" class="btn lg hairline gh-button" id="tk-new-cancel">${x.started ? "Close" : "Cancel"}</button>
+        <button type="button" class="btn lg hairline gh-button gh-primary" id="tk-new-start"${x.harnesses && x.harnesses.length && !busy && !x.started ? "" : " disabled"}>${esc(x.phase || "Start")}</button>
       </div></div>`;
   }
 
@@ -575,7 +575,7 @@
           ${sessionLogo(s)}
           <span class="gh-row-main"><span class="gh-note-title">${esc(s.title || s.key)}</span>
           <span class="caption gh-muted gh-ellipsis">${esc(sessionName(s))} · ${esc(s.status || "")}${where}${when}</span></span></span>
-          <button type="button" class="gh-button tk-link-go" data-link="${esc(s.key)}"${busy ? " disabled" : ""}>${busy ? "Linking…" : "Link"}</button></div>`;
+          <button type="button" class="btn lg hairline gh-button tk-link-go" data-link="${esc(s.key)}"${busy ? " disabled" : ""}>${busy ? "Linking…" : "Link"}</button></div>`;
       }).join("")}</div>`;
     }
     return `<div class="gh-confirm" role="group" aria-label="Link session">
@@ -584,7 +584,7 @@
         autocomplete="off" spellcheck="false" aria-label="Filter sessions">
       ${list}
       ${x.error ? `<div class="caption gh-danger-text" role="alert">${esc(x.error)}</div>` : ""}
-      <div class="gh-confirm-buttons"><button type="button" class="gh-button" id="tk-link-cancel">Cancel</button></div></div>`;
+      <div class="gh-confirm-buttons"><button type="button" class="btn lg hairline gh-button" id="tk-link-cancel">Cancel</button></div></div>`;
   }
 
   /* "Open on GitHub", "Open in Linear", "Open in Notion". */
@@ -594,7 +594,7 @@
     const where = t.repo || t.project || "";
     return pageHeader(t.title || refLabel(t),
       `${refLabel(t)} · ${where} · ${statusOf(t)}`,
-      `<a class="gh-button" href="#/tasks" title="Back to the task list">${ico("chevronLeft")}<span>Tasks</span></a>
+      `<a class="btn lg hairline gh-button" href="#/tasks" title="Back to the task list">${ico("chevronLeft")}<span>Tasks</span></a>
        <button class="icon-button${page.loading ? " spinning" : ""}" id="page-refresh" aria-label="Refresh" title="Fetch again">${icon("rescan")}</button>
        ${safeHref(t.url) ? `<a class="icon-button" href="${safeHref(t.url)}" target="_blank" rel="noopener" title="${esc(openLabel(t))}" aria-label="${esc(openLabel(t))}">${ico("external")}</a>` : ""}`);
   }
@@ -608,8 +608,8 @@
         ${sessionRows(t)}
         ${newPanel(t)}${linkPanel(t)}
         <div class="tk-actions">
-          ${canLaunch(t) ? `<button type="button" class="gh-button gh-primary" id="tk-new"${page.action ? " disabled" : ""}>${ico("terminal")}<span>New agent session</span></button>` : ""}
-          <button type="button" class="gh-button" id="tk-link"${page.action ? " disabled" : ""}>${ico("plus")}<span>Link session</span></button>
+          ${canLaunch(t) ? `<button type="button" class="btn lg hairline gh-button gh-primary" id="tk-new"${page.action ? " disabled" : ""}>${ico("terminal")}<span>New agent session</span></button>` : ""}
+          <button type="button" class="btn lg hairline gh-button" id="tk-link"${page.action ? " disabled" : ""}>${ico("plus")}<span>Link session</span></button>
         </div></div>
       ${prCard(t)}
     </div>`;
@@ -620,12 +620,12 @@
     const t = id && task(id);
     let body;
     if (!page.data) {
-      body = `${pageHeader("Tasks", "The issues and pull requests your agents are on.")}${loadingCard("Reading the task list…")}`;
+      body = `${pageHeader("Tasks", "The issues and pull requests your agents are on.")}${loadingCard()}`;
     } else if (!t) {
       body = `${pageHeader("Task", "The issues and pull requests your agents are on.",
-        `<a class="gh-button" href="#/tasks" title="Back to the task list">${ico("chevronLeft")}<span>Tasks</span></a>`)}
+        `<a class="btn lg hairline gh-button" href="#/tasks" title="Back to the task list">${ico("chevronLeft")}<span>Tasks</span></a>`)}
         <div class="card"><div class="gh-empty">${ico("question", "gh-muted")}<span>This task isn't listed any more — it may have closed or left the pinned repos.</span></div>
-        <div class="gh-inline"><a class="gh-button" href="#/tasks">All tasks</a></div></div>`;
+        <div class="gh-inline"><a class="btn lg hairline gh-button" href="#/tasks">All tasks</a></div></div>`;
     } else {
       body = detailContent(t);
     }

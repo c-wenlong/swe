@@ -2,6 +2,7 @@
 reach the harness, and no key value reaches argv, markers, launch
 records, machine rows, the command journal or the hub's replies."""
 
+import inspect
 import json
 import os
 import shutil
@@ -122,6 +123,99 @@ class TestProviderExec(unittest.TestCase):
             {"GROQ_API_KEY": GROQ, "OPENAI_API_KEY": OPENAI})
         self.assertEqual(env, {"PATH": "/bin", "GROQ_API_KEY": GROQ, "X": "1"})
 
+    def test_build_env_takes_the_first_source_with_a_value(self):
+        # An empty first source falls through to the next one.
+        env = provider_exec.build_env(
+            {}, {"keys": {"TARGET": ["EMPTY", "SECOND", "THIRD"]}},
+            {"EMPTY": "", "SECOND": "two", "THIRD": "three"})
+        self.assertEqual(env, {"TARGET": "two"})
+        with self.assertRaises(ValueError) as caught:
+            provider_exec.build_env({}, {"keys": {"T": ["A", "B"]}}, {"A": ""})
+        self.assertIn("A or B", str(caught.exception))
+
+
+class TestProviderExecMain(unittest.TestCase):
+    """``main`` in this process, with ``execvpe`` patched: the subprocess
+    tests above run it under ``-I``, which coverage cannot follow."""
+
+    SPEC = json.dumps({"keys": {"GROQ_API_KEY": ["GROQ_API_KEY"]},
+                       "set": {"BASE": "https://x"}})
+
+    def setUp(self):
+        self.home = temp_dir(self)
+        self.keys = _write_keys(self.home)
+
+    def _main(self, *opts, command=("opencode", "run")):
+        argv = [*opts, "--", *command]
+        # main puts its package root on sys.path; keep that out of the run.
+        with patch("sys.stderr") as err, \
+                patch.object(sys, "path", list(sys.path)), \
+                patch.dict(os.environ, {"OPENAI_API_KEY": OPENAI}), \
+                patch.object(provider_exec.os, "execvpe") as execvpe:
+            code = provider_exec.main(argv)
+        printed = "".join(call.args[0] for call in err.write.call_args_list)
+        return code, execvpe, printed
+
+    def test_execs_the_command_with_the_built_env(self):
+        code, execvpe, printed = self._main(
+            f"--keys={self.keys}", f"--spec={self.SPEC}")
+        self.assertEqual(code, 0)
+        self.assertEqual(printed, "")
+        file, argv, env = execvpe.call_args.args
+        self.assertEqual((file, argv), ("opencode", ["opencode", "run"]))
+        self.assertEqual(env["GROQ_API_KEY"], GROQ)
+        self.assertEqual(env["BASE"], "https://x")
+        # The inherited key the file also names is stripped.
+        self.assertNotIn("OPENAI_API_KEY", env)
+
+    def test_missing_options_or_command_are_usage_errors(self):
+        for argv in ([f"--keys={self.keys}"],
+                     [f"--spec={self.SPEC}"],
+                     []):
+            with self.subTest(argv=argv):
+                code, execvpe, printed = self._main(*argv)
+                self.assertEqual(code, 2)
+                execvpe.assert_not_called()
+                self.assertIn("needs --keys, --spec and a command", printed)
+        code, execvpe, _ = self._main(
+            f"--keys={self.keys}", f"--spec={self.SPEC}", command=())
+        self.assertEqual(code, 2)
+        execvpe.assert_not_called()
+
+    def test_bad_spec_or_keys_file_refuses_without_exec(self):
+        folder = self.home / "keys-folder"
+        folder.mkdir()
+        cases = {
+            "not json": (f"--keys={self.keys}", "--spec={not json"),
+            "spec is a list": (f"--keys={self.keys}", "--spec=[1]"),
+            "keys file is a folder": (f"--keys={folder}",
+                                      f"--spec={self.SPEC}"),
+            "key missing": (f"--keys={self.home / 'absent'}",
+                            f"--spec={self.SPEC}"),
+        }
+        for label, opts in cases.items():
+            with self.subTest(label):
+                code, execvpe, printed = self._main(*opts)
+                self.assertEqual(code, 1)
+                execvpe.assert_not_called()
+                self.assertIn("can't start with this provider", printed)
+                _assert_no_secret(self, printed)
+
+    def test_exec_failure_names_the_command_and_exits_127(self):
+        with patch("sys.stderr") as err, \
+                patch.object(sys, "path", list(sys.path)), \
+                patch.object(provider_exec.os, "execvpe",
+                             side_effect=FileNotFoundError(
+                                 2, "No such file or directory")):
+            code = provider_exec.main(
+                [f"--keys={self.keys}", f"--spec={self.SPEC}", "--",
+                 "no-such-harness"])
+        printed = "".join(call.args[0] for call in err.write.call_args_list)
+        self.assertEqual(code, 127)
+        self.assertIn("can't start no-such-harness: No such file or directory",
+                      printed)
+        _assert_no_secret(self, printed)
+
 
 class TestLaunchNew(unittest.TestCase):
     def setUp(self):
@@ -143,15 +237,19 @@ class TestLaunchNew(unittest.TestCase):
     def test_provider_wraps_the_argv_without_secrets(self):
         (ok, note, _name), lt = self._launch(provider="groq", model="groq/m")
         self.assertTrue(ok, note)
-        argv = lt.call_args[0][1]
-        env = lt.call_args[0][3] if len(lt.call_args[0]) > 3 else \
-            lt.call_args[1].get("env")
+        # Bind the call to launch_tmux's own signature, so argv and env
+        # are found whether they came positionally or by keyword.
+        launch = inspect.signature(supervise.launch_tmux).bind(
+            *lt.call_args.args, **lt.call_args.kwargs).arguments
+        argv = launch["argv"]
         self.assertEqual(argv[0], sys.executable)
         self.assertTrue(argv[2].endswith("provider_exec.py"))
         self.assertEqual(argv[argv.index("--") + 1:],
                          ["opencode", "mini", "-m", "groq/m"])
-        _assert_no_secret(self, argv)
-        _assert_no_secret(self, env or {})
+        # provider_exec reads the key file itself: the launch hands tmux
+        # no env of its own, and nothing it passes carries a key.
+        self.assertIsNone(launch.get("env"))
+        _assert_no_secret(self, launch)
         marker = (supervise._pending_dir(self.home) / "qv-p.json").read_text()
         self.assertEqual(json.loads(marker)["provider"], "groq")
         _assert_no_secret(self, marker)

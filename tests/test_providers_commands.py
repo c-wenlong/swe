@@ -1,5 +1,9 @@
-"""Tests for the migration of ``cmd_list`` (providers/commands.py) to
-``swe.table.Table``.
+"""Tests for ``swe providers`` (providers/commands.py): list, info, add
+and remove. The discover layer they read through has its own file,
+test_providers_discover.py.
+
+Most of the list and info tests come from the migration of ``cmd_list``
+to ``swe.table.Table``.
 
 The migration replaces hand-rolled f-string padding with a single
 5-column Table build (PROVIDER | ALIASES | ENV VAR | API KEY | URL)
@@ -64,14 +68,60 @@ def _setup(tmp_path: Path, *, create_keys_dir: bool = True):
 
 
 def _run_cmd_list(args):
+    """``cmd_list``'s stdout; every list these tests run succeeds."""
     buf = io.StringIO()
     with redirect_stdout(buf):
-        cmd_list(list(args))
+        rc = cmd_list(list(args))
+    if rc != 0:
+        raise AssertionError(f"cmd_list({args!r}) returned {rc!r}:\n{buf.getvalue()}")
     return buf.getvalue()
 
 
 # Labels printed at the outer 2-space page padding.
 HEADER_LABELS = ("PROVIDER", "ALIASES", "ENV VAR", "API KEY", "URL")
+
+
+# Two providers: one with a description, one long-named without.
+_FAKE_PROVIDERS = {
+    "alpha": {
+        "name": "alpha", "aliases": ["alpha", "al"],
+        "env_vars": ["ALPHA_API_KEY"], "url": "https://alpha.example.com",
+        "description": "Alpha blurb", "key_filename": "alpha",
+    },
+    "very-long-provider-name-that-exceeds-cap": {
+        "name": "very-long-provider-name-that-exceeds-cap",
+        "aliases": ["vlpn"], "env_vars": ["VLP_API_KEY"],
+        "url": "https://very-long-provider-name-that-exceeds-cap.example.com",
+        "description": "", "key_filename": "very-long",
+    },
+}
+
+
+def _body_block(output: str) -> list[str]:
+    """The lines from below the header separator to the first blank one."""
+    lines = output.split("\n")
+    hdr = next(i for i, raw in enumerate(lines)
+               if all(lbl in strip_ansi(raw) for lbl in HEADER_LABELS))
+    body = []
+    for ln in lines[hdr + 2:]:
+        if not ln.strip():
+            break
+        body.append(ln)
+    return body
+
+
+def _row_cells(output: str, provider: str) -> list[str]:
+    """The raw (ANSI-carrying) cells of ``provider``'s row."""
+    row = next(ln for ln in _body_block(output)
+               if strip_ansi(ln).split(" │ ")[0].strip() == provider)
+    return row.split(" │ ")
+
+
+def _info_value(output: str, label: str) -> str:
+    """The plain value printed after ``label:`` in cmd_info."""
+    line = next(ln for ln in strip_ansi(output).split("\n")
+                if ln.strip().startswith(f"{label}:"))
+    return line.split(f"{label}:", 1)[1].strip()
 
 
 class CmdListMigrationTest(unittest.TestCase):
@@ -132,20 +182,11 @@ class CmdListMigrationTest(unittest.TestCase):
             with patches[0], patches[1], patches[2]:
                 output = _run_cmd_list([])
             lines = output.split("\n")
-            hdr_idx = self._hdr_idx(lines)
-            expected_width = visible_len(lines[hdr_idx])
-            # Collect every line after the separator whose visible
-            # width equals the header visible width — those are
-            # exclusively body rows (description sub-lines and blanks
-            # cannot accidentally match the header width).
-            body_rows = [
-                ln for ln in lines[hdr_idx + 2:]
-                if visible_len(ln) == expected_width
-            ]
-            self.assertGreater(
-                len(body_rows), 0,
-                "expected at least one body row matching header width",
-            )
+            expected_width = visible_len(lines[self._hdr_idx(lines)])
+            # Without --desc every body line is a provider row, one per
+            # default provider, and each one is padded to the header.
+            body_rows = _body_block(output)
+            self.assertEqual(len(body_rows), len(DEFAULT_PROVIDERS))
             for row in body_rows:
                 self.assertEqual(
                     expected_width, visible_len(row),
@@ -170,9 +211,10 @@ class CmdListMigrationTest(unittest.TestCase):
             patches = self._patches(tmp_path)
             with patches[0], patches[1], patches[2]:
                 output = _run_cmd_list([])
-            # cpad("dim", aliases_text, w) → \033[2m prefix. OpenAI's
-            # aliases are non-empty so a dim cell renders.
-            self.assertIn("\033[2m", output)
+            # cpad("dim", aliases_text, w): fireworks_ai's alias cell is
+            # the dim escape, then the alias.
+            aliases = _row_cells(output, "fireworks_ai")[1]
+            self.assertTrue(aliases.startswith("\033[2mfireworks-ai"), repr(aliases))
 
     def test_api_key_dim_when_no_key_file(self):
         # No key file for any provider → every masked == "-" →
@@ -204,6 +246,8 @@ class CmdListMigrationTest(unittest.TestCase):
                 output = _run_cmd_list([])
             # cpad("green", "sk-proj-...***...", w) → \033[32m prefix.
             self.assertIn("\033[32m", output)
+            # The cell shows the prefix, the last four and the length.
+            self.assertIn("sk-proj-***5678 (35)", strip_ansi(output))
 
     def test_url_strips_https_www_prefix(self):
         with TemporaryDirectory() as tmp:
@@ -229,7 +273,9 @@ class CmdListMigrationTest(unittest.TestCase):
             patches = self._patches(tmp_path)
             with patches[0], patches[1], patches[2]:
                 output = _run_cmd_list([])
-            self.assertIn("—", output)
+            self.assertEqual(strip_ansi(_row_cells(output, "anthropic")[1]).strip(), "—")
+            self.assertEqual(strip_ansi(_row_cells(output, "fireworks_ai")[1]).strip(),
+                             "fireworks-ai")
 
     def test_env_var_column_shows_matched_env(self):
         # Shell-export file layout → matched_env is set on the row.
@@ -275,32 +321,32 @@ class CmdListMigrationTest(unittest.TestCase):
                         f"description for {name!r} not rendered with --desc",
                     )
 
+    def test_short_desc_flag_and_no_description_by_default(self):
+        with TemporaryDirectory() as tmp:
+            patches = self._patches(Path(tmp))
+            with patches[0], patches[1], patches[2]:
+                plain = strip_ansi(_run_cmd_list(["openai"]))
+                short = strip_ansi(_run_cmd_list(["-d", "openai"]))
+        self.assertNotIn("OpenAI API (ChatGPT", plain)
+        self.assertIn("OpenAI API (ChatGPT", short)
+
     def test_desc_flag_skips_empty_descriptions(self):
-        # Even with --desc, rows whose description is empty MUST NOT
-        # emit a dim-indented sub-line that just whitespace-fills to
-        # 90 chars.
+        # Even with --desc, a row whose description is empty gets no
+        # sub-line: alpha's row is followed by its blurb, the long-named
+        # provider's row by nothing.
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             patches = self._patches(tmp_path)
-            with patches[0], patches[1], patches[2]:
+            with patches[0], patches[1], patches[2], patch(
+                "swe.providers.commands.load_registry",
+                return_value=_FAKE_PROVIDERS,
+            ):
                 output = _run_cmd_list(["--desc"])
-            # Walk lines: a description sub-line is dim-ANSI + many
-            # whitespace chars + nothing (because it's empty). That
-            # pattern must NOT appear in the body region.
-            # We assert non-presence by counting dim-ANSI lines that
-            # have no visible chars after the indent.
-            # Implementation sanity: the dim-ANSI escape is \033[2m;
-            # if any line is `\033[2m` + only spaces, that's an empty
-            # description that slipped through.
-            for ln in output.split("\n"):
-                if not ln:
-                    continue
-                if ln.startswith("\033[2m"):
-                    payload = strip_ansi(ln)
-                    self.assertTrue(
-                        payload.strip(),
-                        f"empty description slipped through: {ln!r}",
-                    )
+            body = [strip_ansi(ln).strip() for ln in _body_block(output)]
+            self.assertEqual(len(body), 3, body)
+            self.assertTrue(body[0].startswith("alpha"))
+            self.assertEqual(body[1], "Alpha blurb")
+            self.assertTrue(body[2].startswith("very-long-provider"))
 
     def test_description_sub_line_indent_under_aliases_column(self):
         # The description sub-line must sit under the ALIASES column
@@ -348,73 +394,26 @@ class CmdListMigrationTest(unittest.TestCase):
             )
 
     def test_provider_width_capped_at_24(self):
-        # A provider whose name is longer than 24 chars should truncate
-        # cleanly at exactly 24 visible chars in the PROVIDER cell,
-        # preserving alignment with the header label width.
+        # A provider whose name is longer than 24 chars truncates to
+        # exactly 24 visible chars in the PROVIDER cell, keeping the
+        # header and every row aligned.
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            config_dir, registry_file, keys_dir = _setup(tmp_path)
-            p1, p2 = _registry_patches(config_dir, registry_file)
-            fake_providers = {
-                "very-long-provider-name-that-exceeds-cap": {
-                    "name": "very-long-provider-name-that-exceeds-cap",
-                    "aliases": ["vlpn"],
-                    "env_vars": ["VLP_API_KEY"],
-                    "url": "https://very-long-provider-name-that-exceeds-cap.example.com",
-                    "description": "",
-                    "key_filename": "very-long",
-                },
-            }
-            with p1, p2, patch(
-                "swe.providers.commands.default_keys_dir",
-                return_value=keys_dir,
-            ), patch(
+            patches = self._patches(tmp_path)
+            with patches[0], patches[1], patches[2], patch(
                 "swe.providers.commands.load_registry",
-                return_value=fake_providers,
+                return_value=_FAKE_PROVIDERS,
             ):
                 output = _run_cmd_list([])
             lines = output.split("\n")
-            hdr_idx = self._hdr_idx(lines)
-            hdr_w = visible_len(lines[hdr_idx])
-            expected_provider_w = min(
-                24,
-                max(
-                    len("PROVIDER"),
-                    len("very-long-provider-name-that-exceeds-cap"),
-                ),
-            )
-            # Body rows whose visible width equals the header — those
-            # are the cpad-aligned rows. The PROVIDER cell of the
-            # long-name row must arrive at exactly expected_provider_w
-            # visible chars. We assert by checking the column width
-            # math: header width = sum_of_column_widths + 4*gap(2) +
-            # 2(outer pad) = expected_provider_w + summed_w + 8
-            # (which equals hdr_w). So expected_provider_w must agree
-            # with the table's column_widths["provider"] which the
-            # header partially encodes.
-            # Walk body rows: every body row's visible width is hdr_w.
-            body_rows = [
-                ln for ln in lines[hdr_idx + 2:]
-                if visible_len(ln) == hdr_w
-            ]
-            self.assertEqual(
-                len(body_rows), 1,
-                f"expected exactly 1 body row, got {len(body_rows)} "
-                f"(header width={hdr_w})",
-            )
-            # Pin: header PROVIDER column is exactly expected_provider_w
-            # visible chars (cell cap = 24). PROVIDER cell width
-            # computed from idx_aliases subtracts the outer page
-            # padding (HEADER_OUTER_PAD = 2) and the visible width of
-            # the column_gap (" │ " = 3 visible chars).
-            hdr_plain = strip_ansi(lines[hdr_idx])
-            idx_aliases = hdr_plain.find("ALIASES")
-            self.assertEqual(
-                expected_provider_w, idx_aliases - 5,
-                f"PROVIDER column width ({idx_aliases - 5}) is not "
-                f"the expected cap ({expected_provider_w}); idx_aliases "
-                f"was {idx_aliases}",
-            )
+            hdr_plain = strip_ansi(lines[self._hdr_idx(lines)])
+            # Outer pad (2) + PROVIDER column (24) + gap " │ " (3).
+            self.assertEqual(hdr_plain.find("ALIASES"), 2 + 24 + 3)
+            cell = strip_ansi(_row_cells(output, "very-long-provider-na...")[0])
+            self.assertEqual(cell, "  very-long-provider-na...")
+            self.assertEqual(visible_len(cell) - 2, 24)
+            for row in _body_block(output):
+                self.assertEqual(visible_len(row), visible_len(lines[self._hdr_idx(lines)]))
 
     def test_filter_drops_non_matching_providers(self):
         with TemporaryDirectory() as tmp:
@@ -445,6 +444,9 @@ class CmdListMigrationTest(unittest.TestCase):
             idx_dashes = output.find("\u2500" * 10)
             self.assertGreater(idx_dashes, 0)
             self.assertGreater(idx_tip, idx_dashes)
+            # It counts against the whole catalog and names the next step.
+            self.assertIn(f"0/{len(DEFAULT_PROVIDERS)}", output)
+            self.assertIn("swe providers info", output)
 
     def test_no_keys_dir_advisory_after_table(self):
         with TemporaryDirectory() as tmp:
@@ -508,6 +510,9 @@ class CmdListMigrationTest(unittest.TestCase):
             self.assertNotIn("ShouldNotLeakAnywhere", output)
             # Masked summary IS rendered.
             self.assertIn("***", output)
+            # A provider with no key shows the dash placeholder in its
+            # API KEY cell ("sk-proj-" has a hyphen too, so read the cell).
+            self.assertEqual(strip_ansi(_row_cells(output, "anthropic")[3]).strip(), "-")
 
     def test_visible_bar_column_gap_matches_swe_list(self):
         # Cross-Table regression: ``swe providers list`` is supposed
@@ -604,77 +609,32 @@ class CmdInfoMigrationTest(unittest.TestCase):
             tmp_path = Path(tmp)
             patches = self._patches(tmp_path)
             with patches[0], patches[1], patches[2]:
-                output, _ = self._run_cmd_info(["openai"])
+                output, rc = self._run_cmd_info(["openai"])
+        self.assertEqual(rc, 0)
         body_rows = self._body_rows(output)
-        self.assertGreater(
-            len(body_rows), 0,
-            f"no body rows found in: {strip_ansi(output)!r}",
-        )
-        # Body rows do NOT share a uniform visible width — the value
-        # column grows to fit the longest observed value
-        # (fit="content"), and rows whose value is shorter than the
-        # column max trail at their natural value width. This mirrors
-        # the pre-migration behaviour, where the original
-        # f"{val}" ultimately emitted the value at its visible length
-        # too.
-        #
-        # The migration's actual invariant is that the LABEL cell
-        # arrives at exactly label_cell_width (= 14 chars for the
-        # default fixtures) on every body row. We pin that explicitly.
+        self.assertEqual(len(body_rows), 8, strip_ansi(output))
+        # Rows end at their own value's width (fit="content"), but every
+        # value starts in the same column: outer pad (2) + the label cell
+        # (15, "  Key filename:") + the gap (1).
         for ln in body_rows:
-            label_visible = strip_ansi(ln)[2:16]
-            self.assertEqual(
-                visible_len(label_visible),
-                14,
-                f"body row label cell not 14 chars wide: "
-                f"{label_visible!r} (full row: {strip_ansi(ln)!r})",
-            )
+            plain = strip_ansi(ln)
+            start = len(plain) - len(plain.lstrip(" ").split(":", 1)[1].lstrip(" "))
+            self.assertEqual(start, 18, f"value misaligned: {plain!r}")
 
     def test_label_column_width_pre_measured_to_longest_label(self):
-        # Production: ``label_cell_width = max(
-        #     len("  LABEL:") for LABEL, _ in rows_out)``. The seven
-        # table rows for a non-key-default provider have labels Slug,
-        # URL, Aliases, Description, Env vars, Key filename, Key
-        # status — longest = "  Description:" (14 chars). The width
-        # is encoded in the visible_len of every body row minus the
-        # FIELD_GAP(1) minus the value cell's longest visible_len.
+        # Production: ``label_cell_width = max(len("  LABEL:") ...)``.
+        # The longest label is "  Key filename:" (15 chars), so it sits
+        # flush against the gap while shorter labels pad out to it.
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             patches = self._patches(tmp_path)
             with patches[0], patches[1], patches[2]:
                 output, _ = self._run_cmd_info(["openai"])
-        plain = strip_ansi(output)
-        # Find the line for "Description" to verify the label width.
-        desc_line = next(
-            (ln for ln in plain.split("\n") if "Description:" in ln),
-            None,
-        )
-        self.assertIsNotNone(desc_line, "no Description row in output")
-        # Take the substring up to "Description:" end + 1 (colon).
-        # Then assert the next char(s) until the value are pure pad.
-        idx_desc = desc_line.find("Description:")
-        # The cyan-wrapped label occupied from after outer's 2 spaces
-        # through up to and including the colon. We assert pad after
-        # the label up until the value is all whitespace (the label
-        # column was padded to its pre-measured max width).
-        after_label = desc_line[idx_desc + len("Description:"):]
-        # The label cell should be padded such that the cyan-wrapped
-        # block ends before significant value text. We assert that
-        # no value text (URL / dimension / etc) appears within the
-        # first label_cell_width - len("Description:") = 14 - 13 = 1
-        # chars after the colon. Since the label was ljust to 14, the
-        # label cell ends at desc_line[idx_desc + 1 + (14 - 13)] =
-        # desc_line[idx_desc + 2]. Strip ANSI for len calc.
-        # Body row layout: outer pad (FIELD_OUTER_PAD=2) + label cell
-        # (= label_cell_width) + FIELD_GAP(1) + value. The cyan-label
-        # cell starts at index 2 and spans exactly 14 chars (the
-        # pre-measured max of "  LABEL:" lengths = "  Description:").
-        self.assertEqual(
-            visible_len(desc_line[2:16]),
-            14,
-            f"'Description:' label cell visible_len != 14: "
-            f"{desc_line[2:2 + 14 + 5]!r}",
-        )
+        plain = strip_ansi(output).split("\n")
+        key_line = next(ln for ln in plain if "Key filename:" in ln)
+        self.assertEqual(key_line, "    Key filename: openai")
+        desc_line = next(ln for ln in plain if "Description:" in ln)
+        self.assertTrue(desc_line.startswith("    Description:  OpenAI API"), repr(desc_line))
 
     def test_label_inner_pad_two_spaces(self):
         # The label cell carries an inner 2-space pad BEFORE the
@@ -798,29 +758,29 @@ class CmdInfoMigrationTest(unittest.TestCase):
         self.assertIn("No key found", output)
 
     def test_em_dash_for_providers_without_aliases(self):
-        # mistral / cohere / deepseek / groq ship with no aliases.
-        # Their Aliases cell must show "—" not blank.
+        # mistral ships with no aliases: its Aliases cell shows "—".
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             patches = self._patches(tmp_path)
             with patches[0], patches[1], patches[2]:
                 output, _ = self._run_cmd_info(["mistral"])
-        plain = strip_ansi(output)
-        self.assertIn("—", plain)
+        self.assertEqual(_info_value(output, "Aliases"), "—")
 
     def test_em_dash_for_empty_description(self):
-        # providers without description → Description cell renders "—".
+        # A provider without a description shows "—" in that cell (every
+        # default has one, so this uses a stand-in registry).
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             patches = self._patches(tmp_path)
-            with patches[0], patches[1], patches[2]:
-                output, _ = self._run_cmd_info(["groq"])
-        plain = strip_ansi(output)
-        # The "—" character must appear (em-dash fallback for at
-        # least one description empty field).
-        self.assertIn("—", plain)
-
-    # ----------------------------------------------------- env vars display
+            with patches[0], patches[1], patches[2], patch(
+                "swe.providers.commands.load_registry",
+                return_value=_FAKE_PROVIDERS,
+            ):
+                output, _ = self._run_cmd_info(
+                    ["very-long-provider-name-that-exceeds-cap"])
+                with_desc, _ = self._run_cmd_info(["alpha"])
+        self.assertEqual(_info_value(output, "Description"), "—")
+        self.assertEqual(_info_value(with_desc, "Description"), "Alpha blurb")
 
     def test_env_vars_comma_list_when_no_match(self):
         # Shell-export file layout with NO matching export → the
@@ -904,6 +864,8 @@ class CmdInfoMigrationTest(unittest.TestCase):
         self.assertIn("MOONSHOT_API_KEY", plain)
         self.assertIn("KIMI_API_KEY", plain)
         self.assertIn("(matched; fallbacks:", plain)
+        # A key read from the export file is masked too.
+        self.assertNotIn("infoFallback", plain)
 
     # ------------------------------------------------------------ error paths
 
@@ -996,35 +958,20 @@ class CmdInfoMigrationTest(unittest.TestCase):
         self.assertIn("***", output)
 
     def test_aliases_filter_excludes_canonical_slug(self):
-        # openai's aliases list contains "openai" itself (auto-derived
-        # by load_registry) — cmd_info must NOT display "openai" as
-        # an alias (it's the canonical name).
+        # A registry's alias list may carry the slug itself; cmd_info
+        # shows only the other aliases, or "—" when none are left.
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             patches = self._patches(tmp_path)
+            with patches[0], patches[1], patches[2], patch(
+                "swe.providers.commands.load_registry",
+                return_value=_FAKE_PROVIDERS,
+            ):
+                alpha, _ = self._run_cmd_info(["alpha"])
             with patches[0], patches[1], patches[2]:
-                output, _ = self._run_cmd_info(["openai"])
-        plain = strip_ansi(output)
-        # Find the Aliases row and check its value does NOT contain
-        # "openai, openai" or similar duplicate. Walk lines for the
-        # Aliases label and inspect the value portion.
-        for ln in plain.split("\n"):
-            if "Aliases:" in ln:
-                # The value comes after "Aliases:" plus pad. Strip
-                # outer trim and assert "openai" is not the only alias
-                # (i.e. the value is NOT "--, openai" or similar).
-                idx_val = ln.find("Aliases:") + len("Aliases:")
-                val = ln[idx_val:].strip()
-                # The value should be a comma-joined list minus "openai".
-                # Acceptable: "oa" (single alias) or "—". Must not be
-                # "openai" alone (canonical-slug-only is filtered).
-                self.assertNotIn(
-                    "fireworks_ai,",
-                    val,
-                    f"Aliases value contains canonical slug: "
-                    f"{val!r} (full line: {ln!r})",
-                )
-                break
+                openai, _ = self._run_cmd_info(["openai"])
+        self.assertEqual(_info_value(alpha, "Aliases"), "al")
+        self.assertEqual(_info_value(openai, "Aliases"), "—")
 
 
 class CmdAddTest(unittest.TestCase):
@@ -1159,6 +1106,73 @@ class CmdAddTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("not valid", out)
 
+    def test_add_registers_a_new_provider(self):
+        from swe.providers.registry import load_registry
+
+        with TemporaryDirectory() as tmp:
+            patches, _ = self._patches(Path(tmp))
+            with patches[0], patches[1]:
+                rc, _ = self._run_add([
+                    "myprov", "My Provider blurb", "--env=MY_API_KEY",
+                    "--url=https://example.com", "--file=myprov",
+                ])
+                providers = load_registry()
+        self.assertEqual(rc, 0)
+        info = providers["myprov"]
+        self.assertEqual(info["url"], "https://example.com")
+        self.assertEqual(info["env_vars"], ["MY_API_KEY"])
+        self.assertEqual(info["key_filename"], "myprov")
+        # `name` and `aliases` are derived from env_vars[0] at load time
+        # (API_KEY is the source of truth); the blurb only lands in
+        # `description`.
+        self.assertEqual(info["aliases"], ["my"])
+        self.assertEqual(info["name"], "My")
+        self.assertEqual(info["description"], "My Provider blurb")
+
+    def test_add_rejects_an_unknown_flag(self):
+        with TemporaryDirectory() as tmp:
+            patches, registry_file = self._patches(Path(tmp))
+            with patches[0], patches[1]:
+                rc, _ = self._run_add(["myprov", "--aliases=my-provider"])
+        self.assertEqual(rc, 1)
+        self.assertFalse(registry_file.exists())
+
+
+class CmdRemoveTest(unittest.TestCase):
+    def test_add_then_remove_roundtrip(self):
+        from swe.providers.commands import cmd_add, cmd_remove
+        from swe.providers.registry import load_registry
+
+        with TemporaryDirectory() as tmp:
+            config_dir, registry_file, keys_dir = _setup(Path(tmp))
+            patches = _registry_patches(config_dir, registry_file)
+            with patches[0], patches[1], patch(
+                "swe.providers.commands.default_keys_dir",
+                return_value=keys_dir,
+            ), redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(cmd_add(["myprov", "--env=MY_KEY"]), 0)
+                self.assertIn("myprov", load_registry())
+                self.assertEqual(cmd_remove(["myprov"]), 0)
+                self.assertNotIn("myprov", load_registry())
+                # A second remove reports the provider as not found.
+                self.assertEqual(cmd_remove(["myprov"]), 1)
+        self.assertIn("Provider 'myprov' not found", out.getvalue())
+
+    def test_remove_keeps_the_key_file(self):
+        from swe.providers.commands import cmd_remove
+
+        with TemporaryDirectory() as tmp:
+            config_dir, registry_file, keys_dir = _setup(Path(tmp))
+            key_file = keys_dir / "openai"
+            key_file.write_text("sk-proj-DontDeleteMe1234567890")
+            patches = _registry_patches(config_dir, registry_file)
+            with patches[0], patches[1], patch(
+                "swe.providers.commands.default_keys_dir",
+                return_value=keys_dir,
+            ), redirect_stdout(io.StringIO()):
+                self.assertEqual(cmd_remove(["openai"]), 0)
+            self.assertEqual(key_file.read_text(), "sk-proj-DontDeleteMe1234567890")
+
 
 class CmdRemoveHelpTest(unittest.TestCase):
     def test_remove_help_token_prints_help_not_lookup(self):
@@ -1232,11 +1246,88 @@ class CmdStoreWordingTest(unittest.TestCase):
     ``~/.api_keys/`` directory.
     """
 
+    def setUp(self):
+        # A home outside the temp folders, so printed key paths stay
+        # absolute (not "~/...") even when TMPDIR sits under HOME.
+        self.enterContext(patch.object(Path, "home", return_value=Path("/nonexistent-home")))
+
     def _patches(self, tmp_path: Path):
         return _registry_patches(
             tmp_path / ".config" / "swe",
             tmp_path / ".config" / "swe" / "providers.json",
         )
+
+    def _add(self, tmp_path: Path, store: Path) -> str:
+        from swe.providers.commands import cmd_add
+
+        buf = io.StringIO()
+        patches = self._patches(tmp_path)
+        with patches[0], patches[1], patch(
+            "swe.providers.commands.default_keys_dir", return_value=store,
+        ), redirect_stdout(buf):
+            self.assertEqual(
+                cmd_add(["myprov", "--env=MY_API_KEY", "--file=myprov"]), 0)
+        return buf.getvalue()
+
+    def test_add_hint_points_at_the_export_file(self):
+        # The default store is one file of export lines; a directory of
+        # per-provider files is only for --api-keys-dir overrides.
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            store = tmp_path / "keys" / ".api_keys"
+            store.parent.mkdir()
+            store.write_text("export OLD=1\n")
+            out = self._add(tmp_path, store)
+        self.assertIn("export MY_API_KEY", out)
+        self.assertIn(str(store), out)
+        self.assertNotIn(str(store / "myprov"), out)
+
+    def test_add_hint_points_inside_a_real_keys_directory(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            store = tmp_path / ".api_keys"
+            store.mkdir()
+            out = self._add(tmp_path, store)
+        self.assertIn(str(store / "myprov"), out)
+
+    def test_api_keys_dir_flag_overrides_the_default_store(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            default = tmp_path / ".api_keys"
+            default.mkdir()
+            other = tmp_path / "other_keys"
+            other.mkdir()
+            (other / "openai").write_text("sk-proj-OtherDirTest1234567")
+            patches = self._patches(tmp_path)
+            with patches[0], patches[1], patch(
+                "swe.providers.commands.default_keys_dir", return_value=default,
+            ):
+                output = strip_ansi(_run_cmd_list([f"--api-keys-dir={other}"]))
+        # The key comes from the override, not the default dir.
+        self.assertIn("sk-proj-***4567 (27)", output)
+        self.assertIn(f"dir: {other}", output)
+
+    def test_footer_names_the_store_through_the_display_helper(self):
+        with TemporaryDirectory() as tmp:
+            patches = self._patches(Path(tmp))
+            with patches[0], patches[1], patch(
+                "swe.providers.commands._display_keys_dir",
+                return_value="~/.api_keys",
+            ):
+                output = _run_cmd_list([])
+        self.assertIn("~/.api_keys", output)
+        self.assertNotIn(str(Path.home()), output)
+
+    def test_display_keys_dir_tildes_only_under_home(self):
+        from swe.providers.commands import _display_keys_dir
+
+        home = Path("/Users/someone")
+        with patch.object(Path, "home", return_value=home):
+            self.assertEqual(_display_keys_dir(home / ".api_keys"), "~/.api_keys")
+            self.assertEqual(_display_keys_dir(home / "projects" / "keys"),
+                             "~/projects/keys")
+            self.assertEqual(_display_keys_dir(Path("/tmp/somewhere/else")),
+                             "/tmp/somewhere/else")
 
     def test_missing_default_store_advises_export_lines(self):
         # The default store is a single file: telling users to "add a file
@@ -1265,10 +1356,7 @@ class CmdStoreWordingTest(unittest.TestCase):
             patches = self._patches(tmp_path)
             missing_dir = tmp_path / "keys"
             with patches[0], patches[1]:
-                buf = io.StringIO()
-                with redirect_stdout(buf):
-                    cmd_list([f"--api-keys-dir={missing_dir}"])
-                output = buf.getvalue()
+                output = _run_cmd_list([f"--api-keys-dir={missing_dir}"])
             self.assertIn("No key store", output)
             self.assertIn("one bare-key file per provider", output)
             self.assertIn("export NAME=<key>", output)

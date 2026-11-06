@@ -111,7 +111,7 @@ struct NewSessionSheet: View {
             } else {
                 form
             }
-            status
+            LaunchStatus(flow: flow)
             footer
         }
         .sheetScaffold(width: 700)
@@ -366,7 +366,7 @@ struct NewSessionSheet: View {
                 }
             }
         }
-        .task(id: browse.path) { await browseFolders(browse) }
+        .task(id: browse.asked) { await browseFolders(browse) }
     }
 
     private func browseRow(name: String, path: String) -> some View {
@@ -393,7 +393,9 @@ struct NewSessionSheet: View {
             let listing = try await app.hub.withClient {
                 try await $0.folders(path: place.path.isEmpty ? nil : place.path)
             }
-            guard browse?.path == place.path else { return }
+            guard browse?.asked == place.asked else { return }
+            // The hub's spelling of the folder ("~" expanded); `asked`
+            // stays, so the task keyed on it doesn't list it again.
             place.path = listing.path
             place.parent = listing.parent
             place.folders = listing.folders
@@ -403,34 +405,14 @@ struct NewSessionSheet: View {
             browse = place
         } catch is CancellationError {
         } catch {
-            guard browse?.path == place.path else { return }
+            guard browse?.asked == place.asked else { return }
             place.loading = false
             place.error = (error as? HubError)?.message ?? error.localizedDescription
             browse = place
         }
     }
 
-    // MARK: - status + footer
-
-    @ViewBuilder private var status: some View {
-        switch flow.phase {
-        case .failed(let message):
-            Text(message).font(Theme.caption).foregroundStyle(Theme.dangerText)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-        case .unconfirmed(let message):
-            Text(message).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        default:
-            if let note = flow.note {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(note).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                        .lineLimit(2)
-                }
-            }
-        }
-    }
+    // MARK: - footer
 
     private var footer: some View {
         HStack(spacing: 10) {
@@ -447,28 +429,9 @@ struct NewSessionSheet: View {
                     .fixedSize()
                     .disabled(browse?.loading != false)
             } else {
-                Button("Cancel") {
-                    launchTask?.cancel()
-                    dismiss()
-                }
-                .secondaryButton()
-                .fixedSize()
-                .keyboardShortcut(.cancelAction)
-                Button {
-                    launchTask = Task { await start() }
-                } label: {
-                    HStack(spacing: 6) {
-                        if flow.busy {
-                            ProgressView().controlSize(.small).tint(Theme.primaryForeground)
-                        }
-                        Text(flow.busy ? "Starting" : "Start")
-                    }
-                }
-                .primaryButton()
-                .fixedSize()
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(!ready || flow.busy)
-                .hoverTip("Start the session (⌘↩)")
+                LaunchFormButtons(flow: flow, ready: ready, startTip: "Start the session",
+                              cancel: { launchTask?.cancel(); dismiss() },
+                              start: { launchTask = Task { await start() } })
             }
         }
     }
@@ -486,11 +449,19 @@ struct NewSessionSheet: View {
 
     /// The sheet's folder browse state for one path.
     private struct FolderBrowse: Equatable {
+        /// The folder shown, as the hub spelled it once it answered.
         var path: String
+        /// The folder asked for, which keys the listing task.
+        var asked: String
         var parent: String?
         var folders: [HubFolderListing.Entry] = []
         var error: String?
         var loading = false
+
+        init(path: String) {
+            self.path = path
+            asked = path
+        }
     }
 
     /// One read of machines and sessions: the pickers and the folder

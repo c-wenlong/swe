@@ -644,7 +644,8 @@ class TestPin(_Base):
         self.assertFalse(any(c[:2] == ["search", "repos"] for c in fake.calls()))
         # A "-" after the first word is GitHub's own "not" and stays.
         R.get(self.ctx, {"search": "swe -fork"})
-        self.assertIn(["search", "repos", "swe -fork"], [c[:3] for c in fake.calls()])
+        self.assertIn(["--", "swe -fork"],
+                      [c[-2:] for c in fake.calls() if c[:2] == ["search", "repos"]])
 
     def test_add_pins_githubs_spelling_and_answers_the_pins(self):
         _pin(self.home, "o/a")
@@ -1012,6 +1013,30 @@ class TestMarkdown(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         return done.stdout
 
+    def test_a_huge_body_renders_in_linear_time(self):
+        """An issue body can hold 65k characters of anyone's text: a long
+        heading line or a run of "[" used to rescan to the end of the line
+        from every position. The heading still loses its closing run."""
+        script = (
+            "global.esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;')"
+            ".replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')"
+            ".replace(/'/g, '&#39;');\n"
+            "global.safeHref = () => '';\nglobal.Fmt = { ago: () => '' };\n"
+            + (STATIC / "github.js").read_text()
+            + r"""
+const body = "# a" + " ".repeat(30000) + "b ##\n\n" + "[".repeat(30000) + "\n\n"
+  + "![".repeat(15000) + "\n\n## C# ##\n\n### Title###";
+const t0 = Date.now();
+const html = GhUI.markdown(body);
+const heads = [...html.matchAll(/gh-md-h(\d)">([^<]*)</g)].map((m) => [+m[1], m[2].length > 20 ? m[2].length : m[2]]);
+process.stdout.write(JSON.stringify({ ms: Date.now() - t0, heads }));
+""")
+        done = _node(script)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+        self.assertLess(out["ms"], 2000)
+        self.assertEqual(out["heads"], [[1, 30002], [2, "C#"], [3, "Title"]])
+
     def test_a_details_fold_becomes_one(self):
         html = self.render("<details><summary>More</summary>\n\nhidden **text**\n</details>")
         self.assertIn('<details class="gh-md-fold">', html)
@@ -1366,6 +1391,18 @@ class TestFocusFilter(unittest.TestCase):
             "focusedWhileLoading": True, "focusedAfter": True,
             "keptDuringComposition": True, "rowsDuringComposition": ["alpha", "beta"],
             "repaintedAfter": True, "rowsAfter": ["beta"]})
+
+
+class TestPrSessionPrompt(unittest.TestCase):
+    def test_the_prefilled_prompt_leaves_the_pr_title_out(self):
+        """Anyone can open a PR; its title must not reach an agent's
+        prompt word for word (github/pulls.build_prompt's rule)."""
+        js = (STATIC / "repositories.js").read_text(encoding="utf-8")
+        start = js.index("async function openSession(s, pr)")
+        block = js[start:js.index("\n  }\n", start)]
+        self.assertIn("prompt: `Review pull request #${pr.number} in "
+                      "${pr.repo}.", block)
+        self.assertNotIn("pr.title", block)
 
 
 if __name__ == "__main__":

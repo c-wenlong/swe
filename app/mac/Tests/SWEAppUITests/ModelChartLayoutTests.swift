@@ -185,8 +185,8 @@ struct ModelChartLayoutTests {
         #expect(hosting.bounds.width > 0 && hosting.bounds.height > 0)
         withExtendedLifetime(scratch) {}
 
-        // QUIVER_CHART_SNAPSHOT=<path> renders the tested chart offscreen.
-        if let snap = ProcessInfo.processInfo.environment["QUIVER_CHART_SNAPSHOT"],
+        // SWE_CHART_SNAPSHOT=<path> renders the tested chart offscreen.
+        if let snap = ProcessInfo.processInfo.environment["SWE_CHART_SNAPSHOT"],
            let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) {
             hosting.cacheDisplay(in: hosting.bounds, to: rep)
             if let png = rep.representation(using: .png, properties: [:]) {

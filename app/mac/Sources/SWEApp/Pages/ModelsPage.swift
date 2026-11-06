@@ -48,7 +48,7 @@ private struct ModelsContent: View {
         .task(id: app.overview?.completedScans) {
             await model.loadIfNeeded(usageStamp: app.overview?.completedScans)
         }
-        .quiverSheet(isPresented: Binding(get: { linking != nil },
+        .cardSheet(isPresented: Binding(get: { linking != nil },
                                     set: { if !$0 { linking = nil; linkError = nil } })) {
             if let linking {
                 LinkSheet(model: model, logged: linking, error: $linkError) {
@@ -839,7 +839,7 @@ private struct ListPriceCell: View {
     static func help(_ price: ModelsModel.ListPrice) -> String {
         let source = switch price.source {
         case .liteLLM: "LiteLLM"
-        case .quiver: "SWE's price list"
+        case .swe: "SWE's price list"
         case .yours: "your price"
         }
         return "\(price.key), from \(source)\nCache write \(ModelCard.price(price.cacheWrite)) / 1M"

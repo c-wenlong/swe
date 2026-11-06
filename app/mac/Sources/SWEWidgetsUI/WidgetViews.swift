@@ -41,15 +41,10 @@ extension Color {
 }
 
 extension NSColor {
+    /// `HexColor.rgba`'s colour; black for text it can't read.
     convenience init(hex: String) {
-        var text = hex
-        if text.hasPrefix("#") { text.removeFirst() }
-        let value = UInt64(text, radix: 16) ?? 0
-        let hasAlpha = text.count == 8
-        self.init(srgbRed: Double((value >> (hasAlpha ? 24 : 16)) & 0xff) / 255,
-                  green: Double((value >> (hasAlpha ? 16 : 8)) & 0xff) / 255,
-                  blue: Double((value >> (hasAlpha ? 8 : 0)) & 0xff) / 255,
-                  alpha: hasAlpha ? Double(value & 0xff) / 255 : 1)
+        let c = HexColor.rgba(hex) ?? (0, 0, 0, 1)
+        self.init(srgbRed: c.red, green: c.green, blue: c.blue, alpha: c.alpha)
     }
 }
 
@@ -295,12 +290,23 @@ public struct HeatmapView: View {
         self.now = now
     }
 
+    static let gap: CGFloat = 2
+    static let caption: CGFloat = 22
+
+    /// The cell side and how many weeks fit. The cell is at least a point:
+    /// a widget too short for the caption would make it negative, and at
+    /// exactly -gap the weeks division is by zero and `Int` traps.
+    static func grid(for size: CGSize) -> (cell: CGFloat, weeks: Int) {
+        let cell = max(1, min((size.height - caption - 6 * gap) / 7, 10))
+        let fit = ((size.width + gap) / (cell + gap)).rounded(.down)
+        let weeks = fit.isFinite ? Int(max(0, min(fit, CGFloat(WidgetSnapshot.heatmapWeeks)))) : 0
+        return (cell, weeks)
+    }
+
     public var body: some View {
         GeometryReader { geo in
-            let gap: CGFloat = 2
-            let caption: CGFloat = 22
-            let cell = min((geo.size.height - caption - 6 * gap) / 7, 10)
-            let weeks = min(WidgetSnapshot.heatmapWeeks, Int((geo.size.width + gap) / (cell + gap)))
+            let gap = Self.gap
+            let (cell, weeks) = Self.grid(for: geo.size)
             let map = snapshot.heatmap(weeks: max(weeks, 1), now: now, calendar: .current)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top, spacing: gap) {

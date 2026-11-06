@@ -25,6 +25,16 @@ struct AddMarketplaceSheet: View {
 
     private static let actionable: Set<String> = ["claude", "codex"]
 
+    /// `swe plugins marketplace add` takes the source as a positional
+    /// word, where one that starts with "-" reads as a flag; the CLI
+    /// refuses it, so the sheet says so before Add.
+    nonisolated static func sourceProblem(_ source: String) -> String? {
+        source.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("-")
+            ? "A source can't start with -" : nil
+    }
+
+    private var trimmedSource: String { source.trimmingCharacters(in: .whitespacesAndNewlines) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Add marketplace").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
@@ -44,16 +54,21 @@ struct AddMarketplaceSheet: View {
                     }
                     .secondaryButton()
                 }
+                if let problem = Self.sourceProblem(source) {
+                    Text(problem).font(Theme.caption).foregroundStyle(Theme.dangerText)
+                }
             }
             FormField("Harnesses") {
                 HStack(spacing: 14) {
                     ForEach(harnesses, id: \.self) { harness in
-                        Toggle(HarnessMark(harness).name,
-                               isOn: Binding(get: { chosen.contains(harness) },
+                        // The harness's logo, its name only as the fallback.
+                        Toggle(isOn: Binding(get: { chosen.contains(harness) },
                                              set: { on in
                                                  if on { chosen.insert(harness) }
                                                  else { chosen.remove(harness) }
-                                             }))
+                                             })) {
+                            HarnessMarkView(harness: harness)
+                        }
                             .toggleStyle(.checkbox)
                             .disabled(lookingUp)
                     }
@@ -88,7 +103,7 @@ struct AddMarketplaceSheet: View {
                         adding = Task {
                             do {
                                 let reply = try await app.swe.addMarketplace(
-                                    source: source, harnesses: harnesses.filter { chosen.contains($0) })
+                                    source: trimmedSource, harnesses: harnesses.filter { chosen.contains($0) })
                                 // Added: a close from here on leaves the
                                 // reloads below to finish.
                                 adding = nil
@@ -106,7 +121,8 @@ struct AddMarketplaceSheet: View {
                         }
                     }
                     .primaryButton()
-                    .disabled(working || lookingUp || source.isEmpty || chosen.isEmpty)
+                    .disabled(working || lookingUp || trimmedSource.isEmpty || chosen.isEmpty
+                              || Self.sourceProblem(source) != nil)
                 }
             }
         }

@@ -212,7 +212,7 @@ private struct AgentsStep: View {
                 }
             }
         }
-        .quiverSheet(item: $installing) { provider in
+        .cardSheet(item: $installing) { provider in
             ProviderSetupSheet(provider: provider, isInstalled: false).environment(app)
         }
     }
@@ -336,7 +336,7 @@ private struct LinksStep: View {
                 Link("Demo hub: \(demo)", destination: url).font(Theme.caption)
             }
             HStack(spacing: 8) {
-                TextField("https://github.com/you/quiver-hub.git", text: $model.hubURL)
+                TextField("https://github.com/you/swe-hub.git", text: $model.hubURL)
                     .sweField(monospaced: true)
                     .onSubmit { Task { await model.cloneHub() } }
                     .disabled(model.cloning || model.applying)

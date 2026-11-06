@@ -479,7 +479,7 @@ final class AppModel {
         didSet { githubNotify.windowVisible = mainWindowOnScreen }
     }
     /// Banners provider incidents from the Service status poll, which it
-    /// also drives. Assigned in init, where `~/.quiver` is known.
+    /// also drives. Assigned in init, where `~/.swe` is known.
     let serviceNotify: ServiceStatusNotifier
     /// The MCP servers page's "Server folders" section.
     let mcpRepo = McpServerRepoModel()
@@ -498,6 +498,8 @@ final class AppModel {
     /// SWE's display names for marketplaces and plugins, from
     /// ~/.swe/config/plugin-display-names.json.
     var primitiveNames: PluginDisplayNames
+    /// The last display-name save, which the next one waits for.
+    @ObservationIgnored var displayNamesSave: Task<Void, Never>?
     private let userHome = FileManager.default.homeDirectoryForCurrentUser
     /// This Mac's hub, which the Sessions page's chat talks to.
     private(set) var hub: LocalHub
@@ -515,8 +517,24 @@ final class AppModel {
     /// and leave a `~/.quiver` → `.swe` symlink so harness links and older
     /// copies of the CLI keep resolving. A `~/.quiver` that is itself a
     /// link is mirrored as `~/.swe`, never moved out from under whatever
-    /// put it there. On any failure the old root keeps serving.
-    private static func migrateDataRoot(home: URL) {
+    /// put it there, unless it points at `~/.swe` itself (the link an
+    /// earlier move left, after `~/.swe` was deleted): mirroring that would
+    /// make `~/.swe` a link to itself, and every path under it would fail.
+    /// On any failure the old root keeps serving.
+    /// `path` with every link in its folder followed, for a last part
+    /// that need not exist. realpath(3) on the folder, since Foundation's
+    /// resolving standardizes first and folds "link/.." away before the
+    /// link is followed. Python's `os.path.realpath` twin.
+    private static func realPath(_ path: String) -> String {
+        let ns = path as NSString
+        guard let folder = realpath(ns.deletingLastPathComponent, nil) else {
+            return ns.standardizingPath
+        }
+        defer { free(folder) }
+        return String(cString: folder) + "/" + ns.lastPathComponent
+    }
+
+    static func migrateDataRoot(home: URL) {
         let fm = FileManager.default
         let new = home.appending(path: ".swe")
         let old = home.appending(path: ".quiver")
@@ -525,6 +543,10 @@ final class AppModel {
               let type = attrs[.type] as? FileAttributeType else { return }
         if type == .typeSymbolicLink {
             if let target = try? fm.destinationOfSymbolicLink(atPath: old.path) {
+                // Links followed, not just "..": "link/../.swe" through a
+                // linked folder is somewhere else entirely.
+                let full = target.hasPrefix("/") ? target : home.path + "/" + target
+                guard Self.realPath(full) != Self.realPath(new.path) else { return }
                 try? fm.createSymbolicLink(atPath: new.path, withDestinationPath: target)
             }
             return

@@ -21,6 +21,7 @@ from swe.webapp.api import WebApp
 from tests.test_remote_hub import HubBase, _AttachedServer
 from tests.test_remote_owner_device import _OWNER_IP, OwnerBase
 
+from tests._node_timers import FAKE_TIMERS
 from tests._tempdir import temp_dir
 
 STATIC = Path(__file__).resolve().parent.parent / "src" / "swe" / "webapp" / "static"
@@ -518,7 +519,7 @@ class TestChatScript(unittest.TestCase):
             "globalThis.window = { addEventListener() {} };\n"
             "const registered = {};\n"
             "globalThis.document = { addEventListener(t, f) { registered[t] = f; } };\n"
-            "globalThis.location = { hash: '' };\n")
+            "globalThis.location = { hash: '' };\n" + FAKE_TIMERS)
         source = (STATIC / "pages" / "chat.js").read_text(encoding="utf-8")
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
             f.write(prelude + source + "\nconst T = SessionChat._test;\n"
@@ -796,6 +797,63 @@ return div.innerHTML;
             "return [T.heading('## C#'), T.heading('## #123'), T.heading('## Title ##'),"
             " T.heading('#'), T.heading('###')];")
         self.assertEqual(out, [[2, "C#"], [2, "#123"], [2, "Title"], None, None])
+
+    # Each parser's best-of-three time at 4n over its time at n. Linear
+    # work comes out near 4 and quadratic near 16, however loaded the
+    # machine is, since both sizes run under the same load. The n time
+    # is floored at 5 ms so timer noise on a tiny run cannot fake a jump.
+    # T.hl's scanner can retry from every position, so it is quadratic up
+    # to HL_MAX (8,000) characters by design and escapes the rest plain.
+    # Its samples sit above the cap on purpose: what they guard is the
+    # cap: with HL_MAX lifted this test fails (node runs past its timeout).
+    GROWTH_JS = r"""
+const pieces = {
+  heading: (n) => T.heading("# a" + " ".repeat(n) + "b ##"),
+  inline: (n) => T.inline("[".repeat(n)),
+  blocks: (n) => T.mdBlocks("<json-render>\n" + "x".repeat(100).concat("\n").repeat(n / 4)),
+  html: (n) => T.hl("-".repeat(n), "html"),
+  bash: (n) => T.hl("${".repeat(n / 2), "bash"),
+};
+const best = (f, n) => {
+  let b = Infinity;
+  for (let i = 0; i < 3; i++) {
+    const t0 = performance.now();
+    f(n);
+    b = Math.min(b, performance.now() - t0);
+  }
+  return b;
+};
+const growth = {};
+for (const [name, f] of Object.entries(pieces)) {
+  f(1000);  // compile before timing
+  growth[name] = best(f, 80000) / Math.max(best(f, 20000), 5);
+}
+"""
+
+    def test_long_agent_text_parses_in_linear_time(self):
+        """A prompt-injected agent can print one huge line or block. Each
+        of these took seconds when a regex rescanned to the end from every
+        position; they now grow linearly with the input, and read the same."""
+        out = self.run_js(self.GROWTH_JS + r"""
+const n = 40000;
+const head = T.heading("# a" + " ".repeat(n) + "b ##");
+const view = T.mdBlocks("<json-render>\n" + "x".repeat(100).concat("\n").repeat(10000));
+const html = T.hl("-".repeat(n), "html");
+return { growth, head, view: view.map((b) => b.t), tail: html.endsWith("-".repeat(100)),
+  link: T.inline("[[x](https://a.test)"), hash: T.heading("## a  ###"),
+  // A cut inside a long comment leaves no comment open for the next row.
+  after: (() => { const st = { s: null }; T.hl("/*" + "c".repeat(9000) + "*/", "js", st);
+    return T.hl("let x = 1", "js", st).includes("tk-c"); })() };
+""")
+        for name, ratio in out["growth"].items():
+            with self.subTest(parser=name):
+                self.assertLess(ratio, 10, f"{name} grew {ratio:.1f}x for 4x the input")
+        self.assertEqual(out["head"], [1, "a" + " " * 40000 + "b"])
+        self.assertEqual(out["view"], ["rendered"])
+        self.assertTrue(out["tail"])
+        self.assertEqual(out["link"], '[<a href="https://a.test" target="_blank" rel="noopener">x</a>')
+        self.assertEqual(out["hash"], [2, "a"])
+        self.assertFalse(out["after"])
 
     def test_blocks_indented_under_a_list_item(self):
         """A fence or table indented under a list item parses as its own
@@ -1443,7 +1501,10 @@ return div.innerHTML;
           Object.defineProperty(document, "activeElement", { get: () => els["chat-text"] });
           const input = els["chat-text"];
           const type = (v) => { input.value = v; input.selectionStart = input.selectionEnd = v.length; T.trackMenus(); };
-          T.FILES.debounce = 0;
+          const advance = fakeTimers();
+          const settle = () => new Promise((r) => setImmediate(r));
+          // The debounce runs out, then the answer lands.
+          const step = async () => { advance(T.FILES.debounce); await settle(); };
           T.chat.key = "claude:s 1";
           T.chat.row = { machine: "mini" };
           const urls = [];
@@ -1453,14 +1514,18 @@ return div.innerHTML;
           type("see @s");
           out.searching = els["chat-menu"].innerHTML;
           type("see @s&x");
-          await new Promise((r) => setTimeout(r, 20));
+          advance(T.FILES.debounce - 1);
+          await settle();
+          out.early = urls.length;
+          advance(1);
+          await settle();
           out.urls = urls.slice();
           out.label = els["chat-menu"]["aria-label"];
           out.html = els["chat-menu"].innerHTML;
           out.rows = T.menu.rows.map((r) => r.path);
           // A caret move inside the same word doesn't search again.
           T.trackMenus();
-          await new Promise((r) => setTimeout(r, 20));
+          await step();
           out.again = urls.length;
           // The Enter key picks the highlighted file.
           T.menu.active = 0;
@@ -1468,12 +1533,13 @@ return div.innerHTML;
           // The satellite refusal, worded with the machine.
           globalThis.api = async () => ({ status: 409, data: { error: { code: "files_unavailable" } } });
           type("see @q");
-          await new Promise((r) => setTimeout(r, 20));
+          await step();
           out.error = els["chat-menu"].innerHTML;
           out.errors = [T.filesError(404, null, ""), T.filesError(0, null, ""), T.filesError(500, null, "")];
           return out;
         """)
         self.assertIn("Searching files", out["searching"])
+        self.assertEqual(out["early"], 0, "nothing is asked before the debounce ends")
         # The first keystroke's search was replaced before it fired.
         self.assertEqual(out["urls"], ["/v1/sessions/claude%3As%201/files?q=s%26x&limit=50"])
         self.assertEqual(out["label"], "Files")
@@ -1501,8 +1567,9 @@ return div.innerHTML;
           Object.defineProperty(document, "activeElement", { get: () => els["chat-text"] });
           const input = els["chat-text"];
           const type = (v) => { input.value = v; input.selectionStart = input.selectionEnd = v.length; T.trackMenus(); };
-          const tick = () => new Promise((r) => setTimeout(r, 10));
-          T.FILES.debounce = 0;
+          const advance = fakeTimers();
+          // The debounce runs out, then whatever was answered lands.
+          const tick = async () => { advance(T.FILES.debounce); await new Promise((r) => setImmediate(r)); };
           T.chat.key = "s1";
           T.chat.row = {};
           // Each request waits for its own release; the signal is kept.

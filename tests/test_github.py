@@ -48,6 +48,11 @@ class TestNormalize(unittest.TestCase):
         self.assertEqual(repos.normalize_repo_input("o/r"), "o/r")
         self.assertEqual(repos.normalize_repo_input("a-b_c.d/e"), "a-b_c.d/e")
 
+    def test_an_owner_that_reads_as_a_flag_is_no_repo(self):
+        # owner/name reaches gh argv as a bare word.
+        for text in ("-w/x", "--web/x", "https://github.com/-w/x"):
+            self.assertIsNone(repos.normalize_repo_input(text), text)
+
     def test_urls(self):
         self.assertEqual(
             repos.normalize_repo_input("https://github.com/cli/cli"),
@@ -424,6 +429,25 @@ class TestCommands(unittest.TestCase):
         rc, out, _ = self._run_cli([])
         self.assertEqual(rc, 0)
         self.assertIn("o/r", out)
+
+    def test_overview_names_a_gh_that_did_not_answer(self):
+        # A timed-out `gh auth status` is not a sign-out.
+        env = gh.GhEnv(installed=True, authenticated=False,
+                       error="timed out")
+        _rc, out, _ = self._run_cli([], env=env)
+        self.assertIn("gh is not responding (timed out)", out)
+        self.assertNotIn("not authenticated", out)
+
+    def test_numbers_must_be_ascii_digits(self):
+        # "²".isdigit() is True but int("²") raises: each is refused
+        # with the command's own message, never a traceback.
+        for args in (["run", "rerun", "²", "--repo=o/r", "--json"],
+                     ["pr", "worktree", "²", "--repo=o/r", "--json"],
+                     ["inbox", "read", "²"],
+                     ["pr", "worktree", "https://github.com/o/r/pull/٣",
+                      "--repo=o/r", "--json"]):
+            rc, _out, _err = self._run_cli(args)
+            self.assertEqual(rc, 1, args)
 
     def test_gh_missing(self):
         env = gh.GhEnv(installed=False)

@@ -68,8 +68,16 @@ class BrowserSafetyTest(unittest.TestCase):
     def test_noise_directories_are_hidden(self):
         """A plugin cache keeps lock and marker dirs beside real content;
         showing them buries what the reader opened the browser to find."""
+        from swe.find.browser import _visible_children
+
         for name in (".in_use", ".git", "__pycache__", "node_modules"):
             self.assertIn(name, HIDE_DIRS)
+        d = temp_dir(self)
+        for name in (".in_use", ".git", "__pycache__", "node_modules", "skills"):
+            (d / name).mkdir()
+        (d / "README.md").write_text("x")
+        self.assertEqual([p.name for p in _visible_children(d)],
+                         ["skills", "README.md"])
 
     def test_entry_labels_and_details_cannot_drive_the_terminal(self):
         """A directory can be named anything; the panes must not let an
@@ -195,8 +203,14 @@ class PluginRootsTest(unittest.TestCase):
     def test_every_adapter_survives_a_bogus_home(self):
         from swe.find import roots
 
-        for fn in (roots.agents_roots, roots.skills_roots, roots.plugins_roots):
-            self.assertIsInstance(fn(home=Path("/nope/nowhere")), list)
+        # The registry lives under the real home, so it is pinned empty:
+        # with nothing registered and no folders, there is nothing to list.
+        with mock.patch.object(roots, "load_registry_if_present",
+                               return_value={}):
+            for fn in (roots.agents_roots, roots.skills_roots,
+                       roots.plugins_roots):
+                self.assertEqual(fn(home=Path("/nope/nowhere")), [],
+                                 fn.__name__)
 
     def test_an_unknown_scope_does_not_raise(self):
         from swe.find import roots
@@ -268,9 +282,14 @@ class ThreePaneLayoutTest(unittest.TestCase):
             os.close(r)
 
     def test_the_footer_mentions_resizing(self):
-        from swe.find.browser import FOOTER
+        from swe.find.browser import _render
 
-        self.assertIn("resize", FOOTER)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _render([], 0, [Entry("a")], 0, [], "T", "crumb", 0, 10, 140,
+                    (3, 9, 8))
+        footer = strip_ansi(buf.getvalue()).rstrip().splitlines()[-1]
+        self.assertIn("[ ] { } resize", footer)
 
 
 class PreviewTest(unittest.TestCase):
@@ -307,7 +326,8 @@ class PreviewTest(unittest.TestCase):
     def test_an_unreadable_path_does_not_raise(self):
         from swe.find.browser import _preview
 
-        self.assertIsInstance(_preview(Entry("x", Path("/nope/nope")), 10), list)
+        self.assertEqual(_preview(Entry("x", Path("/nope/nope")), 10),
+                         ["(unreadable)"])
 
     def test_a_grouping_row_previews_its_children(self):
         from swe.find.browser import _preview
@@ -436,34 +456,266 @@ class ResizeTest(unittest.TestCase):
         self.assertNotEqual(_pane_widths(80, (2, 3, 5)),
                             _pane_widths(160, (2, 3, 5)))
 
-    def test_the_size_comes_from_the_terminal_not_the_environment(self):
-        """shutil.get_terminal_size prefers COLUMNS, which a resize never
-        updates, so a shell exporting it would pin the browser to the size
-        it started at."""
-        from pathlib import Path
 
-        source = Path("src/swe/find/browser.py").read_text()
-        measure = source[source.index("def measure()"):]
-        measure = measure[:measure.index("\n    heading")]
-        self.assertIn("os.get_terminal_size", measure)
+class SupportedTerminalTest(unittest.TestCase):
+    """Raw mode needs a terminal on both ends and the termios modules."""
 
-    def test_a_resize_handler_is_installed_and_restored(self):
-        from pathlib import Path
+    def _supported(self, stdin_tty, stdout_tty):
+        from swe.find.browser import _supported
 
-        source = Path("src/swe/find/browser.py").read_text()
-        self.assertIn("SIGWINCH", source)
-        # Restored in the finally, beside the termios reset: leaving a
-        # handler installed would outlive the browser.
-        tail = source[source.index("    finally:"):]
-        self.assertIn("signal.signal", tail)
+        stdin, stdout = mock.Mock(), mock.Mock()
+        stdin.isatty.return_value = stdin_tty
+        stdout.isatty.return_value = stdout_tty
+        with mock.patch("sys.stdin", stdin), mock.patch("sys.stdout", stdout):
+            return _supported()
 
-    def test_it_waits_on_select_rather_than_a_bare_read(self):
-        """PEP 475 retries an interrupted read, so a blocking os.read
-        would never notice the signal."""
-        from pathlib import Path
+    def test_both_ends_must_be_terminals(self):
+        self.assertTrue(self._supported(True, True))
+        # `swe find -i | less` and `swe find -i < file` both refuse.
+        self.assertFalse(self._supported(True, False))
+        self.assertFalse(self._supported(False, True))
 
-        source = Path("src/swe/find/browser.py").read_text()
-        self.assertIn("select.select", source)
+    def test_a_platform_without_termios_is_not_supported(self):
+        import sys
+
+        for missing in ("termios", "tty"):
+            with mock.patch.dict(sys.modules, {missing: None}):
+                self.assertFalse(self._supported(True, True), missing)
+
+    def test_empty_roots_on_a_terminal_say_so_without_raw_mode(self):
+        """The no-terminal check runs first, so the existing empty-roots
+        test never reached this branch."""
+        from swe.find.browser import browse
+
+        buf = io.StringIO()
+        with mock.patch("swe.find.browser._supported", return_value=True), \
+             mock.patch("swe.keys.raw_terminal") as raw, redirect_stdout(buf):
+            self.assertEqual(browse([], title="T"), 0)
+        self.assertIn("nothing to browse", strip_ansi(buf.getvalue()))
+        self.assertNotIn("not a terminal", strip_ansi(buf.getvalue()))
+        raw.assert_not_called()
+
+
+class ListingTest(unittest.TestCase):
+    """What a level shows for a real directory, including the parts of it
+    that cannot be read."""
+
+    def setUp(self):
+        self.d = temp_dir(self)
+
+    def test_sizes_step_up_through_the_units(self):
+        from swe.find.browser import _human_size
+
+        self.assertEqual(_human_size(0), "0 B")
+        self.assertEqual(_human_size(1023), "1023 B")
+        self.assertEqual(_human_size(1024), "1.0 KB")
+        self.assertEqual(_human_size(1536 * 1024), "1.5 MB")
+        self.assertEqual(_human_size(3 * 1024 ** 3), "3.0 GB")
+        # Nothing past GB: a terabyte still reads in GB.
+        self.assertEqual(_human_size(2 * 1024 ** 4), "2048.0 GB")
+
+    def test_a_missing_directory_is_unreadable_not_empty(self):
+        from swe.find.browser import _child_entries, _visible_children
+
+        gone = self.d / "gone"
+        self.assertIsNone(_visible_children(gone))
+        self.assertEqual(_visible_children(self.d), [])
+        self.assertEqual(_child_entries(gone), [])
+
+    def test_folders_come_first_then_names_ignoring_case(self):
+        from swe.find.browser import _visible_children
+
+        (self.d / "b.md").write_text("x")
+        (self.d / "A.md").write_text("x")
+        (self.d / "zeta").mkdir()
+        (self.d / "Beta").mkdir()
+        self.assertEqual([p.name for p in _visible_children(self.d)],
+                         ["Beta", "zeta", "A.md", "b.md"])
+
+    def test_each_child_carries_a_count_or_a_size(self):
+        from swe.find.browser import _child_entries
+
+        one = self.d / "one"
+        one.mkdir()
+        (one / "SKILL.md").write_text("x")
+        two = self.d / "two"
+        two.mkdir()
+        (two / "a").write_text("x")
+        (two / "b").write_text("x")
+        (two / ".hidden").write_text("x")      # not counted
+        (self.d / "empty").mkdir()
+        (self.d / "f.md").write_bytes(b"x" * 2048)
+        details = {e.label: e.detail for e in _child_entries(self.d)}
+        self.assertEqual(details, {"empty": "0 items", "one": "1 item",
+                                   "two": "2 items", "f.md": "2.0 KB"})
+
+    def test_a_dangling_link_is_listed_as_unreadable(self):
+        from swe.find.browser import _child_entries
+
+        (self.d / "dead").symlink_to(self.d / "nowhere")
+        [entry] = _child_entries(self.d)
+        self.assertEqual((entry.label, entry.detail), ("dead", "unreadable"))
+
+    def test_a_folder_that_refuses_listing_is_marked_unreadable(self):
+        import os
+
+        from swe.find.browser import _child_entries, _preview
+
+        if os.geteuid() == 0:
+            self.skipTest("root reads a mode-000 folder anyway")
+        locked = self.d / "locked"
+        locked.mkdir()
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o755)
+        [entry] = _child_entries(self.d)
+        self.assertEqual(entry.detail, "unreadable")
+        self.assertEqual(_preview(entry, 10), ["(unreadable)"])
+
+    def test_descend_follows_children_then_a_real_folder_and_nothing_else(self):
+        from swe.find.browser import _descend
+
+        kids = [Entry("a"), Entry("b")]
+        self.assertEqual(_descend(Entry("g", children=kids)), kids)
+        self.assertEqual(_descend(Entry("none")), [])
+        f = self.d / "f.md"
+        f.write_text("x")
+        self.assertEqual(_descend(Entry("f", f)), [])
+        (self.d / "sub").mkdir()
+        self.assertEqual([e.label for e in _descend(Entry("d", self.d))],
+                         ["sub", "f.md"])
+
+    def test_a_path_that_raises_on_stat_opens_and_previews_nothing(self):
+        """Path.is_dir lets PermissionError through on older Pythons, which
+        would otherwise end the browse with a traceback."""
+        from swe.find.browser import _descend, _preview, _preview_language
+
+        entry = Entry("x", self.d / "x.md")
+        with mock.patch.object(Path, "is_dir", side_effect=PermissionError):
+            self.assertEqual(_descend(entry), [])
+            self.assertEqual(_preview(entry, 5), ["(unreadable)"])
+            self.assertEqual(_preview_language(entry), "")
+
+
+class PreviewEdgeTest(unittest.TestCase):
+    def setUp(self):
+        self.d = temp_dir(self)
+
+    def test_a_file_that_cannot_be_opened_is_unreadable(self):
+        from swe.find.browser import _file_preview
+
+        f = self.d / "SKILL.md"
+        f.write_text("x")
+        with mock.patch.object(Path, "open", side_effect=PermissionError):
+            self.assertEqual(_file_preview(f, 5), ["(unreadable)"])
+        self.assertEqual(_file_preview(self.d / "missing.md", 5), ["(unreadable)"])
+
+    def test_an_empty_file_says_so(self):
+        from swe.find.browser import _file_preview
+
+        f = self.d / "empty.md"
+        f.write_text("")
+        self.assertEqual(_file_preview(f, 5), ["(empty file)"])
+
+    def test_a_non_text_file_is_described_by_name_and_size(self):
+        from swe.find.browser import _file_preview
+
+        f = self.d / "logo.png"
+        f.write_bytes(b"\x89PNG" + b"\x00" * 1020)
+        self.assertEqual(_file_preview(f, 5),
+                         ["logo.png", "1.0 KB", "binary or too large"])
+
+    def test_only_the_first_lines_are_read(self):
+        from swe.find.browser import _file_preview
+
+        f = self.d / "long.md"
+        f.write_text("".join(f"line {i}\n" for i in range(1000)))
+        rows = _file_preview(f, 3)
+        self.assertEqual(rows, ["line 0", "line 1", "line 2"])
+
+    def test_an_empty_folder_and_an_empty_grouping_row(self):
+        from swe.find.browser import _preview
+
+        self.assertEqual(_preview(Entry("d", self.d), 10), ["(empty)"])
+        self.assertEqual(_preview(Entry("g"), 10), ["(empty)"])
+
+    def test_a_long_folder_fills_the_pane_and_counts_the_rest(self):
+        from swe.find.browser import _preview
+
+        for i in range(25):
+            (self.d / f"f{i:02}.md").write_text("x")
+        (self.d / "sub").mkdir()
+        rows = _preview(Entry("d", self.d), 10)
+        self.assertEqual(len(rows), 10)
+        self.assertEqual(rows[0], "sub/")
+        self.assertEqual(rows[-1], "... 17 more")
+        # Exactly the limit is shown whole, with no "more" line.
+        rows = _preview(Entry("d", self.d), 26)
+        self.assertEqual(len(rows), 26)
+        self.assertFalse(any(r.startswith("...") for r in rows))
+
+    def test_a_grouping_row_marks_rows_that_descend_and_stops_at_the_limit(self):
+        from swe.find.browser import _preview
+
+        e = Entry("g", children=[Entry("leaf"), Entry("dir", children=[Entry("x")])]
+                  + [Entry(f"k{i}") for i in range(20)])
+        rows = _preview(e, 5)
+        self.assertEqual(rows, ["leaf", "dir/", "k0", "k1", "k2"])
+
+    def test_the_language_is_only_set_for_a_file(self):
+        from swe.find.browser import _preview_language
+        from swe.find.highlight import language_for
+
+        f = self.d / "x.py"
+        f.write_text("x = 1\n")
+        self.assertEqual(_preview_language(Entry("f", f)), language_for(f))
+        self.assertNotEqual(language_for(f), "")
+        self.assertEqual(_preview_language(Entry("d", self.d)), "")
+        self.assertEqual(_preview_language(Entry("g", children=[Entry("a")])), "")
+        self.assertEqual(_preview_language(Entry("none")), "")
+
+
+class RenderEdgeTest(unittest.TestCase):
+    def _render(self, entries, cursor=0, preview=(), height=10, width=140):
+        from swe.find.browser import _render
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            drawn = _render([], 0, entries, cursor, list(preview), "T", "crumb",
+                            0, height, width, (3, 9, 8))
+        return drawn, buf.getvalue()
+
+    def test_an_empty_level_says_so_once(self):
+        _, out = self._render([])
+        self.assertEqual(strip_ansi(out).count("(empty)"), 1)
+
+    def test_a_long_level_scrolls_to_keep_the_cursor_on_screen(self):
+        from swe.console import strip_ansi as plain
+
+        entries = [Entry(f"row{i:02}") for i in range(30)]
+        _, out = self._render(entries, cursor=29, height=10)
+        text = plain(out)
+        self.assertIn("row29", text)
+        self.assertIn("row20", text)
+        self.assertNotIn("row19", text)
+        self.assertIn("21–30 of 30", text)
+
+    def test_a_long_preview_line_is_cut_to_the_pane(self):
+        from swe.console import visible_len
+
+        _, out = self._render([Entry("a")], preview=["x" * 500, "short"],
+                              width=120)
+        rows = [ln for ln in out.split("\r\n") if "│" in ln]
+        widths = {visible_len(r) for r in rows}
+        self.assertEqual(len(widths), 1, sorted(widths))
+        self.assertLessEqual(widths.pop(), 120)
+
+    def test_a_wide_middle_weight_gives_back_the_overshoot_from_the_middle(self):
+        from swe.find.browser import MIN_PANE, _pane_widths
+
+        # At 40 columns the floors overshoot; the widest pane pays for it.
+        parent, current, preview = _pane_widths(40, (1, 20, 1))
+        self.assertEqual((parent, preview), (MIN_PANE, MIN_PANE))
+        self.assertEqual(parent + current + preview, 40 - 7)
 
 
 class BrowserMouseTest(unittest.TestCase):
@@ -492,9 +744,12 @@ class BrowserMouseTest(unittest.TestCase):
         # tell which level a key left the browser on.
         self.levels = []
 
+        self.widths = []
+
         def count_render(*a, **k):
             renders[0] += 1
             self.levels.append([e.label for e in a[2]])
+            self.widths.append(a[9])
             return real_render(*a, **k)
 
         sel_kwargs = ({"side_effect": select_side_effect}
@@ -534,6 +789,26 @@ class BrowserMouseTest(unittest.TestCase):
         # A notch on either side of a quit still leaves through the quit.
         code, _, _, _ = self._drive(["down", "up", "cancel"])
         self.assertEqual(code, 0)
+
+    def test_a_bare_esc_quits(self):
+        # It was ignored, so the next read came round with no key left.
+        code, _, _, renders = self._drive(["escape"])
+        self.assertEqual((code, renders), (0, 1))
+
+    def test_esc_alone_and_an_arrow_read_as_different_keys(self):
+        import os
+
+        from swe.find.browser import _read_key
+
+        # The writer stays open, as a terminal does: a lone Esc is told
+        # from an arrow by nothing else being queued behind it.
+        for raw, want in ((b"\x1b", "escape"), (b"\x1b[A", "up"),
+                          (b"\x1bOB", "down"), (b"\x1b[C", "open")):
+            r, w = os.pipe()
+            os.write(w, raw)
+            self.assertEqual(_read_key(r), want, raw)
+            os.close(w)
+            os.close(r)
 
     def test_tracking_is_on_for_the_browse_and_off_before_termios(self):
         from swe import keys
@@ -603,6 +878,166 @@ class BrowserMouseTest(unittest.TestCase):
         # a footer check would pass on the first frame alone, so count
         # the redraws the ticks forced.
         self.assertEqual(renders, 3)
+
+    def test_the_size_comes_from_the_terminal_not_the_environment(self):
+        """shutil.get_terminal_size prefers COLUMNS, which a resize never
+        updates, so a shell exporting it would pin the browser to the size
+        it started at."""
+        import os
+
+        with mock.patch.dict(os.environ, {"COLUMNS": "50", "LINES": "10"}):
+            self._drive(["cancel"],
+                        sizes=lambda _fd: os.terminal_size((120, 30)))
+        self.assertEqual(self.widths, [120])
+
+    def test_a_resize_handler_is_installed_and_restored(self):
+        """Leaving the handler installed would outlive the browser."""
+        import signal
+
+        previous = object()
+        with mock.patch("signal.signal", return_value=previous) as sig:
+            self._drive(["down", "cancel"])
+        first, last = sig.call_args_list[0].args, sig.call_args_list[-1].args
+        self.assertEqual(first[0], signal.SIGWINCH)
+        self.assertTrue(callable(first[1]))
+        self.assertEqual(last, (signal.SIGWINCH, previous))
+
+    def test_it_waits_on_select_with_a_timeout(self):
+        """PEP 475 retries an interrupted read, so a blocking os.read
+        would never notice the signal. The wait has to be a select that
+        wakes on its own."""
+        waits = []
+
+        def record(rlist, w, x, timeout=None):
+            waits.append((rlist, timeout))
+            return (rlist, [], [])
+
+        self._drive(["cancel"], select_side_effect=record)
+        self.assertEqual(len(waits), 1)
+        rlist, timeout = waits[0]
+        self.assertEqual(rlist, [0])
+        self.assertIsNotNone(timeout)
+        self.assertGreater(timeout, 0)
+
+    def test_a_resize_signal_redraws_and_a_quiet_tick_does_not(self):
+        """The SIGWINCH handler is what wakes a redraw when the size the
+        loop measures has not changed yet."""
+        import os
+
+        import signal
+
+        handlers = []
+
+        def install(sig, handler):
+            if sig == signal.SIGWINCH:
+                handlers.append(handler)
+            return signal.SIG_DFL
+
+        ticks = [0]
+
+        def tick(rlist, _w, _x, _t):
+            ticks[0] += 1
+            if ticks[0] == 3:
+                handlers[0](None, None)      # the window was resized
+            return (rlist, [], []) if ticks[0] > 3 else ([], [], [])
+
+        with mock.patch("signal.signal", side_effect=install):
+            code, _, _, renders = self._drive(
+                ["cancel"], select_side_effect=tick,
+                sizes=lambda _fd: os.terminal_size((120, 30)))
+        self.assertEqual(code, 0)
+        # Initial frame, the startup flag on tick 1, nothing on the quiet
+        # tick 2, and the signal on tick 3.
+        self.assertEqual(renders, 3)
+
+    def _winch_signal(self, outcomes):
+        """A signal.signal whose SIGWINCH calls take ``outcomes`` in turn
+        (a value to return or an error to raise). raw_terminal installs
+        its own SIGTERM and SIGHUP handlers, which pass straight through."""
+        import signal
+
+        winch = []
+
+        def fake(sig, handler):
+            if sig != signal.SIGWINCH:
+                return signal.SIG_DFL
+            winch.append(handler)
+            result = outcomes[len(winch) - 1]
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+        return fake, winch
+
+    def test_no_resize_handler_still_browses_and_restores_nothing(self):
+        for error in (ValueError("not the main thread"), OSError("no")):
+            fake, winch = self._winch_signal([error])
+            with mock.patch("signal.signal", side_effect=fake):
+                code, _, _, _ = self._drive(["down", "cancel"])
+            self.assertEqual(code, 0)
+            # Installed once, and with nothing saved nothing is put back.
+            self.assertEqual(len(winch), 1)
+
+    def test_a_failed_handler_restore_does_not_raise(self):
+        previous = object()
+        fake, winch = self._winch_signal([previous, ValueError("late")])
+        with mock.patch("signal.signal", side_effect=fake):
+            code, _, seen, _ = self._drive(["cancel"])
+        self.assertEqual(code, 0)
+        self.assertEqual(winch[1], previous)
+        self.assertEqual(len(seen), 1)    # the terminal was still restored
+
+    def test_unbound_keys_change_nothing_and_do_not_quit(self):
+        code, _, _, renders = self._drive(["", "space", "pageup", "down", "cancel"])
+        self.assertEqual(code, 0)
+        self.assertEqual(renders, 5)
+        self.assertEqual(self.levels[-1], ["a", "b"])
+
+    def test_up_from_the_top_wraps_to_the_bottom_and_down_wraps_back(self):
+        cursors = []
+        from swe.find import browser as browser_mod
+
+        real = browser_mod._preview
+
+        def spy(entry, limit):
+            cursors.append(entry.label)
+            return real(entry, limit)
+
+        with mock.patch.object(browser_mod, "_preview", side_effect=spy):
+            self._drive(["up", "down", "bottom", "top", "cancel"],
+                        roots=[Entry("a"), Entry("b"), Entry("c")])
+        self.assertEqual(cursors, ["a", "c", "a", "c", "a"])
+
+    def test_the_resize_keys_move_the_split_and_stop_at_one(self):
+        from swe.find import browser as browser_mod
+
+        ratios = []
+        real = browser_mod._pane_widths
+
+        def spy(width, ratio):
+            ratios.append(tuple(ratio))
+            return real(width, ratio)
+
+        keys = (["wider_parent"] * 10 + ["narrower_parent"]
+                + ["wider_preview", "narrower_preview", "narrower_preview", "cancel"])
+        with mock.patch.object(browser_mod, "_pane_widths", side_effect=spy):
+            self._drive(keys)
+        # The middle weight floors at 1 and the parent keeps growing.
+        self.assertEqual(ratios[8], (11, 1, 8))
+        self.assertEqual(ratios[10], (13, 1, 8))
+        self.assertEqual(ratios[11], (12, 2, 8))
+        self.assertEqual(ratios[12], (12, 1, 9))
+        self.assertEqual(ratios[13], (12, 2, 8))
+        self.assertEqual(ratios[14], (12, 3, 7))
+
+    def test_the_breadcrumb_follows_descent_and_back(self):
+        roots = [Entry("dv", children=[Entry("cloudflare", children=[Entry("skill")])])]
+        code, out, _, _ = self._drive(["open", "open", "back", "cancel"], roots=roots)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.levels, [["dv"], ["cloudflare"], ["skill"], ["cloudflare"]])
+        text = strip_ansi(out)
+        self.assertIn("top level", text)
+        self.assertIn("dv / cloudflare", text)
 
 
 if __name__ == "__main__":

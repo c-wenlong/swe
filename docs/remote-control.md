@@ -484,7 +484,7 @@ POST /v1/inbox/dismiss               {key, last_active_at} → cleared for this 
 POST /v1/sessions/{id}/read          {at?} → this device's last-read cursor; rows carry unread
 POST /v1/pair                        QR payload → device credential; optional {device:{kind,model,client,os}} metadata
 POST /v1/pair/request                a device asks to be paired; identified by tailscale whois, no credential needed → {request_id, poll_secret, code, ...}
-GET  /v1/pair/request/{id}?secret=   the requester's poll: pending|denied|approved (approved answers once with the credential)
+GET  /v1/pair/request/{id}           the requester's poll (secret in X-Pair-Secret): pending|denied|approved (approved answers once with the credential)
 GET  /v1/pair/requests               pending pair requests; a paired bearer or the hub owner's tailnet login
 POST /v1/pair/requests/approve|deny  {code, request_id?}; the owner's yes or no
 GET  /v1/devices                     every paired device (device_view rows + paired_via + this_device) and the pending pair requests, for the pair-requests-and-devices screen
@@ -646,10 +646,8 @@ property's group (To-do → `open`, In progress → `in_progress`,
 Complete → `closed`), a select option's words ("Done", "Shipped",
 "Won't do" → `closed`; "In progress", "Review" → `in_progress`;
 anything else → `open`), a ticked checkbox → `closed`. An archived page
-reads `closed`. A stored page refreshes through `GET /v1/pages/<id>`;
-`NotionTasks.detail` adds the page body, read with `GET
-/v1/blocks/<id>/children` (nested blocks to three levels, at most 12
-calls) and rendered to markdown for a resolve prompt.
+reads `closed`. A stored page refreshes through `GET /v1/pages/<id>`
+alone; nothing reads a page's body.
 
 The answer's `notion` block reads like `linear`'s: `disabled`, `ok`
 (`login` is the user's name), `auth-required` (the token won't resolve
@@ -1162,7 +1160,14 @@ plus `body`, per-check `check_runs`, `reviews`, `review_requests`,
 merge state and additions/deletions, and two fields a client shows
 before opening: `worktree` (where an open puts the checkout) and
 `suggested_prompt` (the review brief `github/pulls.build_prompt`
-writes). `400 bad_repo` for a malformed owner/repo, `422 bad_pr` for a
+writes), plus `association`, the author's `author_association` from
+one REST read (`gh pr view` has no such field). Anyone can open a PR
+on a public repo, and a fork's workflow names its own checks, so the
+brief follows the resolve prompt's rule: it quotes the title and body
+line by line (`> `) behind a note that they are untrusted data only
+when `association` is `OWNER`, `MEMBER` or `COLLABORATOR`, and
+otherwise says in one line that they were left out; failing check
+names are always quoted. `400 bad_repo` for a malformed owner/repo, `422 bad_pr` for a
 non-number, `404 not_pinned` for a repo the hub doesn't pin; a `gh`
 failure answers `200 {status, pr: null, error}` — the row's `status`
 carries `gh`'s word (`not-found`, `upstream-error`), so the client

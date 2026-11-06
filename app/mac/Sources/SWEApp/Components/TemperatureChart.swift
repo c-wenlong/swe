@@ -1,5 +1,6 @@
 import Charts
 import SWECore
+import SWEWidgetsUI
 import SwiftUI
 
 extension ThermalComponent {
@@ -107,7 +108,8 @@ struct TemperatureChart: View {
                 }
                 .plainButton(cornerRadius: 12)
                 .fixedSize()
-                .help(on ? "Hide \(component.title)" : "Show \(component.title)")
+                .hoverTip(on ? "Hide \(component.title)" : "Show \(component.title)",
+                          replacesLabel: false, pinsOnClick: false)
             }
             // A key, not a switch: the shading explains itself here.
             if fansShown {

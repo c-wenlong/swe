@@ -1428,7 +1428,7 @@ class TestHubWriteRoutes(unittest.TestCase):
     def test_server_header_names_no_python(self):
         _, pairs = self._headers("/")
         server = dict((k.lower(), v) for k, v in pairs)["server"]
-        self.assertEqual(server, "quiver-remote")
+        self.assertEqual(server, "swe-remote")
 
     def test_bad_body_400(self):
         conn = http.client.HTTPConnection(
@@ -2681,8 +2681,24 @@ class TestPairRoutes(unittest.TestCase):
 
     def _poll(self, rid, secret):
         return self.srv.request(
-            "GET", f"/v1/pair/request/{rid}?secret={secret}"
+            "GET", f"/v1/pair/request/{rid}",
+            headers={"X-Pair-Secret": secret},
         )
+
+    def test_poll_secret_header_and_legacy_query(self):
+        status, data = self._req("phone")
+        req = json.loads(data)
+        rid, secret = req["request_id"], req["poll_secret"]
+        status, data = self._poll(rid, secret)
+        self.assertEqual((status, json.loads(data)["status"]),
+                         (200, "pending"))
+        self.assertEqual(self._poll(rid, "wrong")[0], 404)
+        # Shipped iPhone builds still send it in the query.
+        status, _ = self.srv.request(
+            "GET", f"/v1/pair/request/{rid}?secret={secret}")
+        self.assertEqual(status, 200)
+        self.assertEqual(self.srv.request(
+            "GET", f"/v1/pair/request/{rid}")[0], 404)
 
     _CSRF = {"Content-Type": "application/json", "X-Quiver-Pair": "1"}
 
@@ -3574,7 +3590,7 @@ class TestServeEntry(unittest.TestCase):
         sat = state.bus.subscribe(state.sat_journal_key("sat1"))
         self.assertFalse(state.watched())
         # A session stream, or the global one the ntfy notifier holds.
-        for key in ("claude:a", hub_mod.GLOBAL_KEY, None):
+        for key in ("claude:a", hub_mod.GLOBAL_KEY):
             q = state.bus.subscribe(key)
             self.assertTrue(state.watched(), key)
             state.bus.unsubscribe(q)

@@ -1,13 +1,13 @@
 {
   "schema": 1,
   "data": {
-    "path": "/tmp/quiver-fixture-home/.swe",
+    "path": "/tmp/swe-fixture-home/.swe",
     "ready": true,
     "problem": null,
     "mode": "device",
     "branch": "device/desk",
     "machine": "desk",
-    "remote": "/tmp/quiver-fixture/remote.git",
+    "remote": "/tmp/swe-fixture/remote.git",
     "upstream": "origin/device/desk",
     "base": "origin/main",
     "ahead": 0,

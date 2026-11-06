@@ -208,23 +208,7 @@ struct ResolveIssueSheet: View {
                 .font(Theme.caption).foregroundStyle(Theme.warningText)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        switch flow.phase {
-        case .failed(let message):
-            Text(message).font(Theme.caption).foregroundStyle(Theme.dangerText)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-        case .unconfirmed(let message):
-            Text(message).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        default:
-            if let note = flow.note {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(note).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                        .lineLimit(2)
-                }
-            }
-        }
+        LaunchStatus(flow: flow)
     }
 
     private func footer(ready: Bool) -> some View {
@@ -233,28 +217,9 @@ struct ResolveIssueSheet: View {
                 .font(Theme.caption).foregroundStyle(Theme.textMuted)
                 .lineLimit(2)
             Spacer(minLength: 12)
-            Button(flow.cancelTitle) {
-                launch?.cancel()
-                dismiss()
-            }
-            .secondaryButton()
-            .fixedSize()
-            .keyboardShortcut(.cancelAction)
-            Button {
-                launch = Task { await start() }
-            } label: {
-                HStack(spacing: 6) {
-                    if flow.busy {
-                        ProgressView().controlSize(.small).tint(Theme.primaryForeground)
-                    }
-                    Text(flow.busy ? "Starting" : "Start")
-                }
-            }
-            .primaryButton()
-            .fixedSize()
-            .keyboardShortcut(.return, modifiers: .command)
-            .disabled(!ready || flow.busy)
-            .hoverTip("Start the session (⌘↩)")
+            LaunchFormButtons(flow: flow, ready: ready, startTip: "Start the session",
+                          cancel: { launch?.cancel(); dismiss() },
+                          start: { launch = Task { await start() } })
         }
     }
 
@@ -287,7 +252,8 @@ struct ResolveIssueSheet: View {
     private func loadHarnesses() async {
         await model.loadSessionHarnesses(swe: app.swe)
         let installed = model.sessionHarnesses.map(\.name)
-        let local = IssueResolve.localMachineId(home: FileManager.default.homeDirectoryForCurrentUser)
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let local = await offMain { IssueResolve.localMachineId(home: home) }
         var list = installed
         do {
             let machines = try await app.hub.withClient { try await $0.machines() }

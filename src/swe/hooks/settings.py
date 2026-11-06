@@ -429,8 +429,13 @@ def expand_command_path(token: str, home: Path) -> Path | None:
     swe cannot resolve is "unknown", never "missing".
     """
     text = _HOME_VAR_RE.sub(str(home), token.strip("'\"").rstrip(";"))
-    if text.startswith("~"):
+    if text == "~" or text.startswith("~/"):
         text = str(home) + text[1:]
+    elif text.startswith("~"):
+        # ``~user/x``: another account's home, which ``home`` says nothing
+        # about. Spliced in, ``~root/x.py`` read as ``<home>root/x.py``,
+        # reported missing, and doctor offered to drop a valid hook.
+        return None
     text = os.path.expandvars(text)
     if "$" in text:
         return None

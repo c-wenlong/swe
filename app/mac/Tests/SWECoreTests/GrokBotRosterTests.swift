@@ -46,6 +46,15 @@ import Testing
             #expect(!stem.contains("="))
             #expect(GrokBotRoster.decodeBase32(stem) == key)
         }
+        // RFC 4648 section 10 test vectors, lowercased without padding:
+        // a round trip alone would pass a bug both directions share.
+        let vectors = ["f": "my", "fo": "mzxq", "foo": "mzxw6", "foob": "mzxw6yq",
+                       "fooba": "mzxw6ytb", "foobar": "mzxw6ytboi"]
+        for (plain, stem) in vectors {
+            #expect(GrokBotRoster.encodeBase32(plain) == stem)
+            #expect(GrokBotRoster.decodeBase32(stem) == plain)
+            #expect(GrokBotRoster.decodeBase32(stem.uppercased()) == plain)
+        }
         // A key's stem keeps the roster suffix after decoding.
         let decoded = try #require(
             GrokBotRoster.decodeBase32(
@@ -188,6 +197,9 @@ import Testing
         ])
         let roster = GrokBotRoster(directory: dir)
         #expect(roster.title(for: "bot-uuid-1") == "Cortex")
+        // The transcript's row never became a Bot name: "x" is an id the
+        // roster lacks, so it reads as a deleted Bot, not "Wrong".
+        #expect(roster.title(for: "x") == "Deleted Bot (x)")
     }
 
     /// Bots hand one task between them, so every Bot shares one lane:

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -23,7 +21,7 @@ from swe.console import c, sanitize
 from swe.harness.discover import apply_findings, discover_harnesses
 from swe.init import hub as hub_repo
 from swe.mcp.discover import apply_mcp_findings, discover_mcp_servers
-from swe.paths import HARNESS_FILE, MCP_SOURCE_FILE
+from swe.paths import HARNESS_FILE, MCP_SOURCE_FILE, backup_tree
 from swe.prompt import read_line
 from swe.providers.discover import discover_provider_keys
 from swe.providers.keys import default_keys_dir
@@ -99,15 +97,19 @@ def _display_path(path: Path, home: Path) -> str:
     return "~" if str(relative) == "." else f"~/{relative}"
 
 
-def backup_file(path: Path, *, now: datetime | None = None) -> Path | None:
-    """Create a timestamped sibling backup without changing the source."""
+def backup_file(path: Path, *, home: Path | None = None) -> Path | None:
+    """Copy ``path`` into ~/.swe/backups before the wizard rewrites it.
+
+    Not a sibling: harness.json, mcp.json and config.json sit in the
+    versioned half of the hub, where a ``*.bak.<time>`` copy would be
+    picked up by git. backups/ is gitignored.
+    """
 
     if not path.exists():
         return None
-    timestamp = (now or datetime.now()).strftime("%Y%m%d_%H%M%S_%f")
-    backup = path.with_name(f"{path.name}.bak.{timestamp}")
-    shutil.copy2(path, backup)
-    return backup
+    # The contents, not a linked file's link: the wizard then writes
+    # through the link, which would change what a copied link shows.
+    return backup_tree(path.resolve() if path.is_symlink() else path, home)
 
 
 def _stage_header(number: int, total: int, label: str) -> None:
@@ -251,7 +253,7 @@ def _stage_harnesses(
     if not _ask_yes_no("Register these harnesses?", default=True, input_fn=input_fn):
         return StageOutcome("harnesses", SECTION_LABELS["harnesses"], "skipped", f"{len(new)} available")
 
-    backup = backup_file(HARNESS_FILE)
+    backup = backup_file(HARNESS_FILE, home=home)
     added, _ = apply_findings(new, min_confidence="high")
     print(c("green", f"  Saved {len(added)} harness(es): {', '.join(added) or 'none'}"))
     return StageOutcome(
@@ -304,7 +306,7 @@ def _stage_mcp(
     home: Path,
     quick: bool,
 ) -> StageOutcome:
-    del home, quick
+    del quick
     _stage_header(number, total, SECTION_LABELS["mcp"])
     new = [item for item in discover_mcp_servers() if item.status == "new"]
     if not new:
@@ -319,7 +321,7 @@ def _stage_mcp(
     if not _ask_yes_no("Import them into the MCP source-of-truth?", default=True, input_fn=input_fn):
         return StageOutcome("mcp", SECTION_LABELS["mcp"], "skipped", f"{len(new)} available")
 
-    backup = backup_file(MCP_SOURCE_FILE)
+    backup = backup_file(MCP_SOURCE_FILE, home=home)
     added = apply_mcp_findings(new).added
     print(c("green", f"  Saved {len(added)} MCP server(s): {', '.join(added) or 'none'}"))
     return StageOutcome(
@@ -389,7 +391,6 @@ def _stage_report(
     home: Path,
     quick: bool,
 ) -> StageOutcome:
-    del home
     _stage_header(number, total, SECTION_LABELS["report"])
     resolved = load_resolved_config()
     complete = report_setup_complete(resolved)
@@ -408,9 +409,12 @@ def _stage_report(
 
     try:
         configured = interactive_report_setup(load_config(), input_fn=input_fn)
-        backup = backup_file(CONFIG_FILE)
+        backup = backup_file(CONFIG_FILE, home=home)
         save_config(configured)
-    except (ConfigurationError, EOFError, KeyboardInterrupt) as exc:
+    except ConfigurationError as exc:
+        # Not EOFError or KeyboardInterrupt: Ctrl-D / Ctrl-C at a runner
+        # prompt stops the whole wizard at 130, as at every other prompt.
+        # Nothing is saved yet, since the save comes after the prompts.
         print(c("red", f"  Report configuration was not changed: {exc}"))
         return StageOutcome("report", SECTION_LABELS["report"], "attention", str(exc))
     print(c("green", f"  Saved report configuration to {CONFIG_FILE}"))

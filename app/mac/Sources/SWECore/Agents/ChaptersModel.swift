@@ -830,8 +830,30 @@ public final class ChaptersModel {
         if let open = documents[chapter.name] { return open }
         guard case .loaded(let check) = status,
               let inside = Self.inside(chapter.name, under: check.directory) else { return nil }
-        let document = InstructionDocument(url: inside)
-        documents[chapter.name] = document
+        return adopt(chapter.name, at: inside)
+    }
+
+    /// `document(for:)` with the folder check off the main actor: it
+    /// resolves links in every path component, and `~/.swe` can sit on a
+    /// synced folder that stalls. For a view opening chapters as they
+    /// are picked; an already open document comes back at once.
+    public func opening(_ chapter: InstructionsCheck.Chapter) async -> InstructionDocument? {
+        if let open = documents[chapter.name] { return open }
+        guard case .loaded(let check) = status else { return nil }
+        let name = chapter.name, directory = check.directory
+        let inside = await offMain { Self.inside(name, under: directory) }
+        // Opened by another caller while this one resolved.
+        if let open = documents[name] { return open }
+        guard let inside else { return nil }
+        return adopt(name, at: inside)
+    }
+
+    /// The chapter's document if one is open, without touching the disk.
+    public func openDocument(named name: String) -> InstructionDocument? { documents[name] }
+
+    private func adopt(_ name: String, at url: URL) -> InstructionDocument {
+        let document = InstructionDocument(url: url)
+        documents[name] = document
         Task { await document.load() }
         return document
     }
@@ -878,11 +900,6 @@ public final class ChaptersModel {
         guard NSApp != nil else { return nil }
         return NSApp.keyWindow?.undoManager ?? NSApp.mainWindow?.undoManager
     }
-
-    /// ⌘Z / ⇧⌘Z from the Edit menu: pops whatever the window's manager
-    /// holds — a chapter move or a text edit, whichever came later.
-    public func undoMove() { movesUndoManager?.undo() }
-    public func redoMove() { movesUndoManager?.redo() }
 
     /// Why the last undo/redo move failed, shown under the rail's header
     /// alongside the drag refusals the page collects itself.

@@ -68,6 +68,19 @@ struct PourBarTests {
         _ = window
     }
 
+    /// A logo order that repeats a harness reaches the fold's landed
+    /// counts; building them used to trap on the duplicate key.
+    @Test func aRepeatedHarnessFoldsWithoutTrapping() {
+        let (window, view) = hosted()
+        view.begin(order: ["claude", "claude", "codex"])
+        view.fill(order: ["claude", "claude", "codex"], landed: ["claude": 3, "codex": 1], total: 4)
+        var handedOver = 0
+        view.split { handedOver += 1 }
+        timers.fireAll()
+        #expect(handedOver == 1)
+        _ = window
+    }
+
     @Test func aWrappedRowFadesAcrossInsteadOfFolding() {
         let (window, view) = hosted()
         view.frame.size.height = 2 * PourBarView.circle + PourBarView.gap

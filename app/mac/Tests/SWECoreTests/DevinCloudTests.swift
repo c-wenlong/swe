@@ -4,19 +4,16 @@ import Testing
 @testable import SWECore
 
 /// A fake Devin API. Answers by path from `routes`, records every request,
-/// and can park the first `/v3/self` call until `release()`.
+/// and can park the first `/v3/self` call at `selfGate` until `release()`.
 private final class FakeDevinAPI: HTTPTransport, Sendable {
     private struct State {
         var routes: [String: (Data, Int)] = [:]
         var requests: [URLRequest] = []
         var gateSelf = false
-        var parked: CheckedContinuation<Void, Never>?
-        /// Set once a request is parked, so `waitUntilParked` never misses it.
-        var didPark = false
-        var parkWaiter: CheckedContinuation<Void, Never>?
     }
 
     private let state = Mutex(State())
+    private let selfGate = HoldGate()
 
     var requests: [URLRequest] { state.withLock { $0.requests } }
 
@@ -35,37 +32,18 @@ private final class FakeDevinAPI: HTTPTransport, Sendable {
             s.gateSelf = false
             return true
         }
-        if park {
-            await withCheckedContinuation { continuation in
-                state.withLock { s in
-                    // Park and announce it in one locked section.
-                    s.parked = continuation
-                    s.didPark = true
-                    s.parkWaiter?.resume()
-                    s.parkWaiter = nil
-                }
-            }
-        }
+        if park { try await selfGate.pass() }
         let (data, status) = state.withLock { s in
             s.routes[key] ?? s.routes[url.path] ?? (Data("{}".utf8), 404)
         }
         return (data, HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!)
     }
 
-    func waitUntilParked() async {
-        await withCheckedContinuation { continuation in
-            state.withLock { s in
-                if s.didPark { continuation.resume() } else { s.parkWaiter = continuation }
-            }
-        }
-    }
+    /// True once the gated `/v3/self` call is parked, false after
+    /// `gateTimeout`.
+    func parked() async -> Bool { await selfGate.arrived() }
 
-    func release() {
-        state.withLock { s in
-            s.parked?.resume()
-            s.parked = nil
-        }
-    }
+    func release() { selfGate.open() }
 }
 
 private func session(_ id: String, title: String, created: Int, updated: Int,
@@ -92,29 +70,20 @@ private let selfJSON = #"{"principal_type":"pat_user","user_id":"github|1","org_
 
 /// Collects what `onStatus` was handed, in order; `first()` waits for one.
 private final class Statuses: Sendable {
-    private struct State {
-        var values: [String?] = []
-        var waiter: CheckedContinuation<String?, Never>?
-    }
-    private let state = Mutex(State())
-    var values: [String?] { state.withLock { $0.values } }
+    private let list = Mutex<[String?]>([])
+    private let recorded = CountGate()
+    var values: [String?] { list.withLock { $0 } }
 
     func record(_ error: String?) {
-        state.withLock { s in
-            s.values.append(error)
-            s.waiter?.resume(returning: error)
-            s.waiter = nil
-        }
+        list.withLock { $0.append(error) }
+        Task { await recorded.bump() }
     }
 
-    /// The first status, waiting for it when none has come yet. Checked
-    /// and registered under one lock, so a status can't slip between.
-    func first() async -> String? {
-        await withCheckedContinuation { continuation in
-            state.withLock { s in
-                if let first = s.values.first { continuation.resume(returning: first) } else { s.waiter = continuation }
-            }
-        }
+    /// The first status, waiting for it when none has come yet; nil
+    /// (rather than `.some(nil)`) when none came within `gateTimeout`.
+    func first() async -> String?? {
+        guard await recorded.reach(1) else { return nil }
+        return values.first
     }
 }
 
@@ -328,8 +297,8 @@ private final class Changes: Sendable {
         let statuses = Statuses()
         let sync = sync(FakeDevinAPI(), dir: dir, token: nil, statuses: statuses)
         let task = Task { await sync.keepFresh(every: .seconds(3_600)) }
-        let first = await statuses.first()
-        task.cancel()
+        defer { task.cancel() }
+        let first = try #require(await statuses.first(), "no status was reported")
         #expect(first == "Devin answered HTTP 500.")
     }
 
@@ -460,22 +429,29 @@ private final class Changes: Sendable {
 
     /// A sessions.json the app can't read (locked, corrupt) is the only
     /// copy of sessions Devin no longer lists: a sync never writes over it.
-    @Test func anUnreadableStoreIsNeverOverwritten() async throws {
-        for locked in [true, false] {
-            let dir = try TempDir()
-            let file = dir.url.appending(path: "sessions.json")
-            let bytes = Data(locked ? #"{"sessions":[]}"#.utf8 : "not json".utf8)
-            try bytes.write(to: file)
-            if locked { try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: file.path) }
-            defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path) }
-            let api = FakeDevinAPI()
-            standardRoutes(api)
-            let sync = sync(api, dir: dir, token: "cog_test")
-            await sync.sync()
-            #expect(await sync.sessions.map(\.id) == ["s1", "s2"])
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-            #expect(try Data(contentsOf: file) == bytes, "locked: \(locked)")
-        }
+    private func syncLeavesTheStoreAlone(locked: Bool) async throws {
+        let dir = try TempDir()
+        let file = dir.url.appending(path: "sessions.json")
+        let bytes = Data(locked ? #"{"sessions":[]}"#.utf8 : "not json".utf8)
+        try bytes.write(to: file)
+        if locked { try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: file.path) }
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path) }
+        let api = FakeDevinAPI()
+        standardRoutes(api)
+        let sync = sync(api, dir: dir, token: "cog_test")
+        await sync.sync()
+        #expect(await sync.sessions.map(\.id) == ["s1", "s2"])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        #expect(try Data(contentsOf: file) == bytes, "locked: \(locked)")
+    }
+
+    @Test func aCorruptStoreIsNeverOverwritten() async throws {
+        try await syncLeavesTheStoreAlone(locked: false)
+    }
+
+    /// Root reads a mode-0 file anyway, so only a user run can lock it.
+    @Test(skippedAsRoot) func aLockedStoreIsNeverOverwritten() async throws {
+        try await syncLeavesTheStoreAlone(locked: true)
     }
 
     @Test func noTokenMeansNoRequests() async throws {
@@ -519,7 +495,7 @@ private final class Changes: Sendable {
         api.gateFirstSelfCall()
         let sync = sync(api, dir: dir)
         let older = Task { await sync.sync() }
-        await api.waitUntilParked()
+        try #require(await api.parked(), "the older sync never asked /v3/self")
         // The newer sync sees only s2.
         api.route("/v3/organizations/\(org)/sessions", """
         {"items":[\(session("s2", title: "Wispr notes", created: 1_791_100_000, updated: 1_791_100_900))],
@@ -639,7 +615,7 @@ private final class Changes: Sendable {
         let local = SessionInfo(id: "a", harness: "gemini", agent: "Gemini", cwd: "/c/quiver", title: "Local",
                                 titleSource: nil, lastActiveAt: now.addingTimeInterval(-60), status: nil, resume: nil)
         let model = SessionsModel(source: FakeSessionSource(list: SessionList(sessions: [local], failures: [])),
-                                  ledger: FakeSessionLedger(), now: { now })
+                                  ledger: FakeSessionLedger(), now: { now }, searchIndexingEnabled: false)
         model.hideTrivial = true
         model.ledgerScanned = true
         await model.load()

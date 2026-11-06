@@ -4,7 +4,12 @@ import Foundation
 /// every block, card, row and sheet prints them the same way.
 public enum CalendarFormat {
     private static let clock: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+        let f = DateFormatter()
+        // Fixed-format text: the user's locale must not swap in other
+        // digits or a 12-hour clock.
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "HH:mm"
+        return f
     }()
 
     /// "09:41–10:02", or just "09:41" when start and end land in the

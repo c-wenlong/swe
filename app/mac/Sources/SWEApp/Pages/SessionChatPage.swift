@@ -572,13 +572,9 @@ private struct Composer: View {
     /// A line break in place of the selection, or at the end when the
     /// field reports none.
     private func newline() {
-        guard case .selection(let range) = selection?.indices, range.upperBound <= draft.endIndex else {
-            draft += "\n"
-            return
-        }
-        let at = draft.distance(from: draft.startIndex, to: range.lowerBound)
-        draft.replaceSubrange(range, with: "\n")
-        selection = TextSelection(insertionPoint: draft.index(draft.startIndex, offsetBy: at + 1))
+        let next = Caret.newline(in: draft, replacing: selection)
+        draft = next.text
+        selection = TextSelection(insertionPoint: Caret.index(next.cursor, in: draft))
     }
 
     /// Edit: the queued message's text replaces the box's, caret at its end.
@@ -1043,25 +1039,6 @@ private struct CodeBlock: View {
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.code, in: .rect(cornerRadius: 6))
-    }
-}
-
-/// The approval card's menu rows, pure so tests can feed it events.
-enum ApprovalRows {
-    /// The rows worth a button: labelled ones whose number the hub takes
-    /// (one or two ASCII digits, as `swe.remote.protocol` checks), the same
-    /// rule as the iPhone's `ApprovalMenu.rows`. A row without one would
-    /// be a button whose every press the hub refuses. The row's digit is
-    /// the decision its button posts.
-    static func menu(_ options: [HubApprovalOption]) -> [(n: String, label: String)] {
-        options.compactMap { option in
-            guard let label = option.label,
-                  !label.trimmingCharacters(in: .whitespaces).isEmpty,
-                  let n = option.n, (1...2).contains(n.count),
-                  n.allSatisfy({ $0.isASCII && $0.isNumber })
-            else { return nil }
-            return (n, label)
-        }
     }
 }
 

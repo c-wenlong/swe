@@ -198,5 +198,9 @@ def register(
         registry[label] = merged
     config_dir.mkdir(parents=True, exist_ok=True)
     target = config_dir / "harness.json"
-    _paths.atomic_write_text(target, json.dumps(registry, indent=2))
+    # registry_text is save_registry's own encoding, trailing newline
+    # included: two writers that differ by one byte churn the hub's git.
+    from swe.harness.registry import registry_text
+
+    _paths.atomic_write_text(target, registry_text(registry))
     return registry

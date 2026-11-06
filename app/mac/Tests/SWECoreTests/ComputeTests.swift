@@ -302,7 +302,23 @@ import Testing
         let item = CleanupItem.process(swe, harness: "claude")
         let order = ComputeSummary.killOrder(for: item, in: [launchd, swe, helper],
                                              selfPID: 99, ancestors: [1])
-        #expect(order == [10])
+        // The helper runs under SWE, so it is SWE's own too.
+        #expect(order.isEmpty)
+    }
+
+    /// A `claude` SWE started for its own reads is attributed to Claude;
+    /// "Quit all" must leave it (and what it spawned) alone while the
+    /// user's own claude still goes.
+    @Test func killOrderSkipsWhatRunsUnderSWE() {
+        let swe = Self.proc(99, 1, path: "/Applications/SWE.app/Contents/MacOS/SWE")
+        let probe = Self.proc(20, 99, path: "/opt/homebrew/bin/claude")
+        let probeChild = Self.proc(21, 20, path: "/x/node")
+        let users = Self.proc(30, 1, path: "/opt/homebrew/bin/claude")
+        let samples = [swe, probe, probeChild, users]
+        #expect(ComputeSummary.killOrder(for: .process(probe, harness: "claude"), in: samples,
+                                         selfPID: 99, ancestors: [1]).isEmpty)
+        #expect(ComputeSummary.killOrder(for: .process(users, harness: "claude"), in: samples,
+                                         selfPID: 99, ancestors: [1]) == [30])
     }
 
     @Test func aHarnessRootQuitsAlone() {
@@ -382,35 +398,40 @@ import Testing
     // MARK: Auto clean
 
     /// A mutable table plus a signalled log, as the other model tests use.
-    private final class Fake: ProcessSampling, ProcessSignaller, @unchecked Sendable {
-        var table: [ProcessSample]
-        var signalled: [(Int32, Int32)] = []
-        init(_ table: [ProcessSample]) { self.table = table }
+    /// Both are locked: the model samples and signals off the test's
+    /// thread.
+    private final class Fake: ProcessSampling, ProcessSignaller, Sendable {
+        private let state: Mutex<(table: [ProcessSample], signalled: [(Int32, Int32)])>
+        init(_ table: [ProcessSample]) { state = Mutex((table, [])) }
+        var table: [ProcessSample] {
+            get { state.withLock { $0.table } }
+            set { state.withLock { $0.table = newValue } }
+        }
+        var signalled: [(Int32, Int32)] { state.withLock { $0.signalled } }
         func sample() -> [ProcessSample] { table }
-        func signal(_ pid: Int32, _ sig: Int32) -> Bool { signalled.append((pid, sig)); return true }
+        func signal(_ pid: Int32, _ sig: Int32) -> Bool {
+            state.withLock { $0.signalled.append((pid, sig)) }
+            return true
+        }
     }
 
     /// Answers each sample with the next table, then keeps answering with
     /// the last, so a test can change the process table between calls.
-    private final class Flip: ProcessSampling, ProcessSignaller, @unchecked Sendable {
+    private final class Flip: ProcessSampling, ProcessSignaller, Sendable {
         let tables: [[ProcessSample]]
-        private var calls = 0
-        private let lock = NSLock()
-        var signalled: [(Int32, Int32)] = []
+        private let state = Mutex<(calls: Int, signalled: [(Int32, Int32)])>((0, []))
         init(_ tables: [[ProcessSample]]) { self.tables = tables }
+        var signalled: [(Int32, Int32)] { state.withLock { $0.signalled } }
         func sample() -> [ProcessSample] {
-            lock.withLock {
-                calls += 1
-                return tables[min(calls, tables.count) - 1]
+            state.withLock {
+                $0.calls += 1
+                return tables[min($0.calls, tables.count) - 1]
             }
         }
-        func signal(_ pid: Int32, _ sig: Int32) -> Bool { signalled.append((pid, sig)); return true }
-    }
-
-    /// A mutable `now` for the model's clock, the trend tests' shape.
-    private final class Clock: @unchecked Sendable {
-        var now: Date
-        init(_ now: Date) { self.now = now }
+        func signal(_ pid: Int32, _ sig: Int32) -> Bool {
+            state.withLock { $0.signalled.append((pid, sig)) }
+            return true
+        }
     }
 
     @MainActor
@@ -468,52 +489,52 @@ import Testing
     }
 
     @MainActor @Test func autoCleanForceEscalatesAfterTheGrace() async {
-        let clock = Clock(.now)
-        let started = clock.now.addingTimeInterval(-30 * 3600)
+        let clock = Box(Date.now)
+        let started = clock.value.addingTimeInterval(-30 * 3600)
         let fake = Fake([
             Self.proc(10, 1, path: "/opt/homebrew/bin/npm", args: ["npm", "run", "x"],
                       cwd: "/Users/test/proj", started: started),
             Self.proc(11, 10, path: "/opt/homebrew/bin/node", started: started),
         ])
-        let model = await autoCleanModel(fake, clock: { clock.now })
+        let model = await autoCleanModel(fake, clock: { clock.value })
         model.limits.autoClean = true
         model.limits.autoCleanForce = true
         await model.refresh()
         #expect(Set(fake.signalled.map(\.1)) == [SIGTERM])
         // The tree ignores the quit signal; the grace passes, then SIGKILL.
-        clock.now = clock.now.addingTimeInterval(ComputeModel.autoCleanGrace + 1)
+        clock.value = clock.value.addingTimeInterval(ComputeModel.autoCleanGrace + 1)
         await model.refresh()
         #expect(fake.signalled.map(\.1) == [SIGTERM, SIGTERM, SIGKILL, SIGKILL])
         #expect(fake.signalled.map(\.0) == [11, 10, 11, 10])
         // Forced once: a stubborn process is not killed over and over.
-        clock.now = clock.now.addingTimeInterval(60)
+        clock.value = clock.value.addingTimeInterval(60)
         await model.refresh()
         #expect(fake.signalled.count == 4)
     }
 
     @MainActor @Test func autoCleanWithoutForceNeverEscalates() async {
-        let clock = Clock(.now)
+        let clock = Box(Date.now)
         let fake = Fake([
             Self.proc(10, 1, path: "/opt/homebrew/bin/npm", args: ["npm", "run", "x"],
                       cwd: "/Users/test/proj",
-                      started: clock.now.addingTimeInterval(-30 * 3600)),
+                      started: clock.value.addingTimeInterval(-30 * 3600)),
         ])
-        let model = await autoCleanModel(fake, clock: { clock.now })
+        let model = await autoCleanModel(fake, clock: { clock.value })
         model.limits.autoClean = true
         await model.refresh()
-        clock.now = clock.now.addingTimeInterval(60)
+        clock.value = clock.value.addingTimeInterval(60)
         await model.refresh()
         #expect(fake.signalled.map(\.1) == [SIGTERM])
     }
 
     @MainActor @Test func autoCleanForceLeavesADeadTreeAndAReusedPidAlone() async {
-        let clock = Clock(.now)
-        let started = clock.now.addingTimeInterval(-30 * 3600)
+        let clock = Box(Date.now)
+        let started = clock.value.addingTimeInterval(-30 * 3600)
         let fake = Fake([
             Self.proc(10, 1, path: "/opt/homebrew/bin/npm", args: ["npm", "run", "x"],
                       cwd: "/Users/test/proj", started: started),
         ])
-        let model = await autoCleanModel(fake, clock: { clock.now })
+        let model = await autoCleanModel(fake, clock: { clock.value })
         model.limits.autoClean = true
         model.limits.autoCleanForce = true
         await model.refresh()
@@ -523,21 +544,21 @@ import Testing
         // own age is young, so nothing more is signalled.
         fake.table = [Self.proc(10, 1, path: "/opt/homebrew/bin/node",
                                 args: ["node", "server.js"], cwd: "/Users/test/new",
-                                started: clock.now.addingTimeInterval(-60))]
-        clock.now = clock.now.addingTimeInterval(ComputeModel.autoCleanGrace + 1)
+                                started: clock.value.addingTimeInterval(-60))]
+        clock.value = clock.value.addingTimeInterval(ComputeModel.autoCleanGrace + 1)
         await model.refresh()
         #expect(fake.signalled.count == 1)
     }
 
     @MainActor @Test func autoCleanForceStillKillsASurvivingChild() async {
-        let clock = Clock(.now)
-        let started = clock.now.addingTimeInterval(-30 * 3600)
+        let clock = Box(Date.now)
+        let started = clock.value.addingTimeInterval(-30 * 3600)
         let fake = Fake([
             Self.proc(10, 1, path: "/opt/homebrew/bin/npm", args: ["npm", "run", "x"],
                       cwd: "/Users/test/proj", started: started),
             Self.proc(11, 10, path: "/opt/homebrew/bin/node", started: started),
         ])
-        let model = await autoCleanModel(fake, clock: { clock.now })
+        let model = await autoCleanModel(fake, clock: { clock.value })
         model.limits.autoClean = true
         model.limits.autoCleanForce = true
         await model.refresh()
@@ -547,7 +568,7 @@ import Testing
         // mark's grace escalation reaches it instead.
         fake.table = [Self.proc(11, 1, path: "/opt/homebrew/bin/node",
                                 cwd: "/Users/test/proj", started: started)]
-        clock.now = clock.now.addingTimeInterval(ComputeModel.autoCleanGrace + 1)
+        clock.value = clock.value.addingTimeInterval(ComputeModel.autoCleanGrace + 1)
         await model.refresh()
         #expect(fake.signalled.map(\.1) == [SIGTERM, SIGTERM, SIGKILL])
     }
@@ -582,24 +603,26 @@ import Testing
     @MainActor @Test func aSlowerEarlierRefreshCannotOverwriteANewerOne() async {
         // The first sample blocks until the test releases it; the second
         // returns at once. The parked one must not publish over the new.
-        final class Gated: ProcessSampling, @unchecked Sendable {
+        final class Gated: ProcessSampling, Sendable {
             let tables: [[ProcessSample]]
-            let entered = DispatchSemaphore(value: 0)
+            let entered = CountGate()
             let release = DispatchSemaphore(value: 0)
-            private var calls = 0
-            private let lock = NSLock()
+            /// Whether the first sample was released before the bound.
+            let released = Box(false)
+            private let calls = Mutex(0)
             init(_ tables: [[ProcessSample]]) { self.tables = tables }
             func sample() -> [ProcessSample] {
-                lock.lock()
-                calls += 1
-                let n = calls
-                lock.unlock()
-                if n == 1 { entered.signal(); waitForRelease() }
+                let n = calls.withLock { $0 += 1; return $0 }
+                if n == 1 {
+                    Task { await entered.bump() }
+                    // The sample is synchronous, so it holds on a
+                    // semaphore rather than a gate; the bound only keeps
+                    // a regression from hanging the suite.
+                    let bound = DispatchTime.now() + .seconds(Int(gateTimeout.components.seconds))
+                    released.value = release.wait(timeout: bound) == .success
+                }
                 return tables[min(n, tables.count) - 1]
             }
-            /// Sync wrappers, callable from the async test.
-            func waitForEntry() { entered.wait() }
-            func waitForRelease() { release.wait() }
         }
         let first = [Self.proc(10, 1, path: "/opt/homebrew/bin/claude")]
         let second = [Self.proc(11, 1, path: "/opt/homebrew/bin/claude")]
@@ -608,12 +631,11 @@ import Testing
                                  signaller: SystemSignaller(), defaults: TestDefaults("compute-test"), selfPID: 99)
         await model.loadMatchers()
         let slow = Task { await model.refresh() }
-        // Wait off the main actor and off the cooperative pool, so the
-        // refresh can reach its sample call.
-        await offMain { gated.waitForEntry() }
+        #expect(await gated.entered.reach(1), "the first refresh never sampled")
         await model.refresh()
         gated.release.signal()
         await slow.value
+        #expect(gated.released.value)
         #expect(model.processes["claude"]?.map(\.id) == [11])
     }
 
@@ -704,6 +726,63 @@ import Testing
         await model.quitHarness("claude", force: true)
         #expect(fake.signalled.map(\.0) == [10])
         #expect(fake.signalled.map(\.1) == [SIGKILL])
+    }
+
+    // MARK: Never SWE's own ancestors
+
+    /// SWE (pid 99) launched from inside a claude session: claude (10)
+    /// started a shell (11) that started SWE. Its siblings are fair game.
+    private static let launchedFromClaude = [
+        proc(10, 1, path: "/opt/homebrew/bin/claude"),
+        proc(11, 10, path: "/bin/zsh"),
+        proc(99, 11, path: "/Applications/SWE.app/Contents/MacOS/SWE"),
+        proc(12, 10, path: "/x/worker"),
+    ]
+
+    @MainActor @Test func quitHarnessSparesTheProcessesSWERunsUnder() async {
+        // The model walks its own parent chain in the fresh sample; the
+        // summary tests hand the chain in, so only this catches a walk
+        // that stops early or never starts.
+        for force in [false, true] {
+            let fake = Fake(Self.launchedFromClaude)
+            let model = ComputeModel(sampler: fake, matchers: { [Self.claude] },
+                                     signaller: fake, defaults: TestDefaults("compute-test"), selfPID: 99)
+            await model.loadMatchers()
+            await model.quitHarness("claude", force: force)
+            #expect(fake.signalled.map(\.0) == [12])
+        }
+    }
+
+    @MainActor @Test func quittingAnItemSparesTheProcessesSWERunsUnder() async {
+        // The same rule on the clean-up sheet's path: an orphaned runner
+        // tree that happens to hold SWE's shell keeps that shell and itself.
+        let root = Self.proc(30, 1, path: "/opt/homebrew/bin/node", cwd: "/w")
+        let shell = Self.proc(31, 30, path: "/bin/zsh", cwd: "/w")
+        let me = Self.proc(99, 31, path: "/Applications/SWE.app/Contents/MacOS/SWE")
+        let sibling = Self.proc(32, 30, path: "/x/server", cwd: "/w")
+        let fake = Fake([root, shell, me, sibling])
+        let model = ComputeModel(sampler: fake, matchers: { [] },
+                                 signaller: fake, defaults: TestDefaults("compute-test"), selfPID: 99)
+        await model.quit(.orphanTree(OrphanTree(root: root, descendants: [shell, me, sibling])))
+        #expect(fake.signalled.map(\.0) == [32])
+    }
+
+    @MainActor @Test func aParentLoopInTheSampleEndsTheWalk() async {
+        // A torn sample can link two pids to each other (and pid 0 is its
+        // own parent); the walk must stop rather than spin, and both
+        // still count as ancestors.
+        let fake = Fake([
+            Self.proc(0, 0, path: "kernel_task"),
+            Self.proc(40, 41, path: "/opt/homebrew/bin/claude"),
+            Self.proc(41, 40, path: "/bin/zsh"),
+            Self.proc(99, 40, path: "/Applications/SWE.app/Contents/MacOS/SWE"),
+            Self.proc(42, 40, path: "/x/worker"),
+        ])
+        let model = ComputeModel(sampler: fake, matchers: { [Self.claude] },
+                                 signaller: fake, defaults: TestDefaults("compute-test"), selfPID: 99)
+        await model.loadMatchers()
+        await model.quitHarness("claude")
+        #expect(!fake.signalled.contains { [0, 40, 41, 99].contains($0.0) })
     }
 
     // MARK: Earlier-launch leftovers
@@ -1031,12 +1110,16 @@ import Testing
         #expect(ComputeSummary.threads(28) == "28 threads")
     }
 
-    @Test func theTotalsLineCountsProcessesInWords() {
-        let zero = ComputeSummary.percent(0)
-        #expect(ComputeSummary.totalsLine(.init()) == "0 KB across 0 processes · CPU \(zero)% · 0 threads")
+    /// The whole line as a reader sees it, figures included, so the
+    /// expectation is not built from the formatters it checks. The figures
+    /// follow the Mac's locale, so this runs only where they read in
+    /// English with a "." decimal point.
+    @Test(.enabled(if: Locale.current.language.languageCode == .english
+                   && Locale.current.decimalSeparator == "."))
+    func theTotalsLineCountsProcessesInWords() {
+        #expect(ComputeSummary.totalsLine(.init()) == "0 KB across 0 processes · CPU 0.0% · 0 threads")
         let one = ComputeModel.Totals(memoryBytes: 5 << 20, cpuPercent: 12.4, threads: 9, processCount: 1)
-        #expect(ComputeSummary.totalsLine(one)
-                == "\(ComputeSummary.bytes(5 << 20)) across 1 process · CPU \(ComputeSummary.percent(12.4))% · 9 threads")
+        #expect(ComputeSummary.totalsLine(one) == "5 MB across 1 process · CPU 12% · 9 threads")
     }
 
     // MARK: Sampler smoke test

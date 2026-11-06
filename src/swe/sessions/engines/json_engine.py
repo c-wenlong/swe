@@ -386,8 +386,10 @@ def _to_session(entry: Any, file_path: str, config: JsonParserConfig) -> Session
             or entry.get("directory")
             or ""
         )
-        if isinstance(path, str):
-            path = strip_file_uri(path)
+        # A non-string cwd is missing (strip_file_uri returns ""), so
+        # default_path and require_path apply; Session would blank it only
+        # after the require_path check below.
+        path = strip_file_uri(path)
 
     if config.get_title:
         try:
@@ -413,8 +415,6 @@ def _to_session(entry: Any, file_path: str, config: JsonParserConfig) -> Session
 
     if not ts:
         ts = get_mtime(file_path)
-        if not ts and os.path.isdir(file_path):
-            ts = get_mtime(file_path)
 
     if not sid and file_path:
         sid = os.path.basename(file_path)

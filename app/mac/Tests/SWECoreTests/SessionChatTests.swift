@@ -340,7 +340,9 @@ extension HubStubbed {
         let release = DispatchSemaphore(value: 0)
         HubStub.handler = { _ in
             Task { await reading.bump() }
-            release.wait()
+            // Bounded so a test that fails before the signal never leaves
+            // the loading thread blocked for good.
+            _ = release.wait(timeout: .now() + .seconds(Int(gateTimeout.components.seconds)))
             return (200, rows)
         }
         async let refresh: Void = local.refreshKeys()
@@ -420,6 +422,21 @@ extension HubStubbed {
         chat.apply(event("approval.resolved", #"{"request_id": "r1", "decision": "deny"}"#))
         #expect(chat.items.last?.kind == .approval(requestId: "r1", prompt: "Run rm?",
                                                  options: [], picked: "deny", state: .resolved("deny")))
+    }
+
+    /// A menu with no row the hub takes draws Allow, Always and Deny
+    /// (ApprovalRows), so a resolved "allow" lights that button; the
+    /// label-only rule left the card with nothing lit.
+    @Test func aMenuWithoutUsableRowsLightsTheSemanticDecision() {
+        let chat = model()
+        chat.apply(event("approval.requested",
+                         #"{"request_id": "r2", "prompt": "Run?", "options": [{"label": "Yes"}, {"n": "abc", "label": "No"}]}"#))
+        chat.apply(event("approval.resolved", #"{"request_id": "r2", "decision": "allow"}"#))
+        guard case .approval(_, _, _, let picked, let state) = chat.items.last?.kind else {
+            Issue.record("expected an approval card"); return
+        }
+        #expect(picked == "allow")
+        #expect(state == .resolved("allow"))
     }
 
     @Test func anOlderPageBringsTheCallForAnOrphanResult() {
@@ -767,6 +784,73 @@ extension HubStubbed {
         #expect(await watch.opened.count == 2)
     }
 
+    /// The approval cards in the transcript, by id.
+    private func approvals(_ chat: SessionChatModel) -> [HubChatItem] {
+        chat.items.filter { $0.id.hasPrefix("approval-") }
+    }
+
+    /// A live ask (past the history the chat opened with) for the
+    /// approval the chat opened waiting on fills in that card where it
+    /// stands; it never adds a second card for the same request.
+    @Test func aLiveAskFillsInTheWaitingCardInPlace() async throws {
+        let chat = try await opened(sessions: #"{"sessions": [{"key": "claude:s1", "status": "approval"}]}"#,
+                                    inbox: #"{"items": [{"key": "claude:s1", "status": "approval", "request_id": "r1"}]}"#)
+        let before = try #require(chat.items.firstIndex { $0.id == "approval-r1" })
+        chat.apply(event("approval.requested", seq: 9,
+                         #"{"request_id": "r1", "prompt": "Edit main.swift?", "options": [{"n": "1", "label": "Yes"}]}"#))
+        #expect(approvals(chat).count == 1)
+        #expect(chat.items.firstIndex { $0.id == "approval-r1" } == before)
+        #expect(chat.items[before].kind == .approval(requestId: "r1", prompt: "Edit main.swift?",
+                                                   options: [HubApprovalOption(n: "1", label: "Yes")],
+                                                   picked: nil, state: .open))
+        // A second live ask for another request is a card of its own.
+        chat.apply(event("approval.requested", seq: 10, #"{"request_id": "r2"}"#))
+        #expect(approvals(chat).map(\.id) == ["approval-r1", "approval-r2"])
+        #expect(chat.items.last?.kind == .approval(requestId: "r2", prompt: "Approval requested",
+                                                 options: [], picked: nil, state: .open))
+        // An ask with no request id has nothing to answer and draws nothing.
+        chat.apply(event("approval.requested", seq: 11, #"{"prompt": "orphan"}"#))
+        #expect(approvals(chat).count == 2)
+    }
+
+    /// A replayed answer (inside the history already shown) settles its
+    /// own card with the decision it carries, and only that card.
+    @Test func aReplayedAnswerSettlesOnlyItsOwnCard() async throws {
+        let chat = try await opened(sessions: #"{"sessions": [{"key": "claude:s1", "status": "approval"}]}"#,
+                                    inbox: #"{"items": [{"key": "claude:s1", "status": "approval", "request_id": "r1"}]}"#)
+        chat.apply(event("approval.requested", seq: 9, #"{"request_id": "r2", "prompt": "Push?"}"#))
+        chat.apply(event("approval.resolved", seq: 2, #"{"request_id": "r1", "decision": "allow"}"#))
+        let r1 = try #require(chat.items.first { $0.id == "approval-r1" })
+        guard case .approval(_, _, _, _, let state) = r1.kind else {
+            Issue.record("approval-r1 is \(r1.kind)")
+            return
+        }
+        #expect(state == .resolved("allow"))
+        #expect(chat.items.last?.kind == .approval(requestId: "r2", prompt: "Push?",
+                                                 options: [], picked: nil, state: .open))
+        // A replayed answer for a card the chat never drew changes nothing.
+        let shown = chat.items
+        chat.apply(event("approval.resolved", seq: 2, #"{"request_id": "gone", "decision": "deny"}"#))
+        #expect(chat.items == shown)
+    }
+
+    /// A failed or degraded command other than a send gets a line of its
+    /// own naming the command; a plain success, and a send's result with
+    /// no bubble here, draw nothing.
+    @Test func aCommandsFailureGetsALineNamingIt() async throws {
+        let chat = try await opened(sessions: #"{"sessions": [{"key": "claude:s1"}]}"#)
+        let shown = chat.items.count
+        chat.apply(event("command.result", seq: 20, #"{"op": "interrupt", "ok": true}"#))
+        chat.apply(event("command.result", seq: 21, #"{"op": "message", "ok": false, "note": "x"}"#))
+        #expect(chat.items.count == shown)
+        chat.apply(event("command.result", seq: 22, #"{"op": "interrupt", "ok": false, "note": "no pane"}"#))
+        chat.apply(event("command.result", seq: 23, #"{"ok": false}"#))
+        chat.apply(event("command.result", seq: 24, #"{"op": "attach", "degraded": true, "note": "Queued for the satellite"}"#))
+        let lines = chat.items.dropFirst(shown).map(\.kind)
+        #expect(lines == [.system("Interrupt failed: no pane"), .system("Command failed: unknown error"),
+                          .system("Queued for the satellite")])
+    }
+
     /// The placeholder a waiting approval opens with learns the pane's
     /// menu when the ask replays: options ride `approval.requested`.
     @Test func aWaitingApprovalLearnsItsMenu() async throws {
@@ -787,6 +871,9 @@ extension HubStubbed {
     /// This test's own folder, removed with its contents when the test ends.
     let scratch: TempDir
     init() throws { scratch = try TempDir() }
+    /// Opens chats in another suite's folder, which that suite keeps for
+    /// as long as its test runs.
+    init(scratch: TempDir) { self.scratch = scratch }
     var dir: URL { scratch.url }
 
     /// A chat opened on an attached (or observed) session whose `POST
@@ -943,9 +1030,15 @@ extension HubStubbed {
 extension HubStubbed {
 @MainActor
 @Suite struct SessionChatAttachTests {
+    /// This test's own folder: the chat's hub keeps its device file here,
+    /// so it has to outlive every chat the test opens.
+    let scratch: TempDir
+    init() throws { scratch = try TempDir() }
+
     func opened(ownership: String = "observed", control: (Int, Data) = (200, Data(#"{"ok": true}"#.utf8)),
                 approval: (Int, Data) = (200, Data(#"{"ok": true}"#.utf8))) async throws -> SessionChatModel {
-        try await HubStubbed.SessionChatSendTests().opened(ownership: ownership, control: control, approval: approval)
+        try await HubStubbed.SessionChatSendTests(scratch: scratch)
+            .opened(ownership: ownership, control: control, approval: approval)
     }
 
     func event(_ type: String, _ data: String) -> HubEnvelope {

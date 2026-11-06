@@ -118,28 +118,33 @@ import Testing
         let s = try Setup()
         await s.attach()
         let factory = s.temp.path("factory")
-        let body = """
-            {"type":"session_start","id":"d-1","title":"Fix the parser","cwd":"/repo/x"}
+        // Each file carries its own id, named apart from the file, so each
+        // session row proves its own file was read.
+        func body(_ id: String) -> String {
+            """
+            {"type":"session_start","id":"\(id)","title":"Fix the parser","cwd":"/repo/x"}
             {"type":"message","timestamp":"2026-10-05T12:00:00Z","message":{"role":"user","content":[{"type":"text","text":"why is it failing?"}]}}
             {"type":"message","timestamp":"2026-10-05T12:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"Checking."},{"type":"tool_use","name":"Read","input":{"file_path":"/repo/x/a.swift"}}]}}
             {"type":"completion","finalText":"All sorted.","timestamp":"2026-10-05T12:00:02Z"}
             """ + "\n"
-        try s.write(body, to: factory.appendingPathComponent("sessions/-repo-x/d-1.jsonl"))
+        }
+        try s.write(body("d-1"), to: factory.appendingPathComponent("sessions/-repo-x/first.jsonl"))
         // The second droid root — `projects` — indexes identically.
-        try s.write(body, to: factory.appendingPathComponent("projects/-repo-y/d-2.jsonl"))
+        try s.write(body("d-2"), to: factory.appendingPathComponent("projects/-repo-y/second.jsonl"))
 
         let report = try await s.ledger.scan(roots: LedgerRoots(droidHomes: [factory]))
 
         #expect(report.filesIndexed == 2)
         #expect(try s.fts("failing").count == 2)
         #expect(try s.fts("swift").count == 2)
-        let session = try #require(try s.session(agent: "droid"))
-        #expect(session.fields.sessionID == "d-1" || session.fields.sessionID == "d-2")
-        #expect(session.fields.title == "Fix the parser")
-        #expect(session.fields.cwd == "/repo/x")
-        #expect(session.fields.createdAt == "2026-10-05T12:00:00Z")
-        #expect(session.fields.updatedAt == "2026-10-05T12:00:02Z")
-        #expect(session.fields.messageCount == 4)
+        for id in ["d-1", "d-2"] {
+            let session = try #require(try s.session(agent: "droid", sessionID: id), "\(id)")
+            #expect(session.fields.title == "Fix the parser")
+            #expect(session.fields.cwd == "/repo/x")
+            #expect(session.fields.createdAt == "2026-10-05T12:00:00Z")
+            #expect(session.fields.updatedAt == "2026-10-05T12:00:02Z")
+            #expect(session.fields.messageCount == 4)
+        }
     }
 
     @Test func clineSessionsIndexTheManifestAndMessagesPair() async throws {
@@ -337,7 +342,10 @@ import Testing
             roots: LedgerRoots(transcriptRoots: [.gemini: [s.temp.path("gemini/tmp")]]))
 
         #expect(report.filesIndexed == 2)
-        #expect(try s.session(agent: "gemini") != nil)
+        // Each file's own id: the document's top-level one, the stream's
+        // per-record one.
+        #expect(try s.session(agent: "gemini", sessionID: "g-json") != nil)
+        #expect(try s.session(agent: "gemini", sessionID: "g-l") != nil)
         #expect(try s.fts("document").count == 1)
         #expect(try s.fts("stream").count == 2)  // both turn records' text
         #expect(try s.store.status().sessionCount == 2)
@@ -474,6 +482,50 @@ import Testing
         #expect(found.fields.cwd == "/repo/kimi")
         #expect(found.fields.messageCount == 2)
         #expect(try s.fts("reply").count == 1)
+    }
+
+    /// The shared index is parsed once per scan; each session still gets
+    /// its own work dir from it.
+    @Test func kimiSessionsSharingAnIndexEachGetTheirWorkDir() async throws {
+        let s = try Setup()
+        await s.attach()
+        let kimiHome = s.temp.path("kimi-code")
+        for id in ["session_a", "session_b"] {
+            try s.write(#"{"title":"\#(id)"}"#,
+                        to: kimiHome.appendingPathComponent("sessions/wd_ws/\(id)/state.json"))
+        }
+        try s.write("""
+            {"sessionId":"session_a","workDir":"/repo/a"}
+            {"sessionId":"session_b","workDir":"/repo/b"}
+            """ + "\n", to: kimiHome.appendingPathComponent("session_index.jsonl"))
+
+        let report = try await s.ledger.scan(
+            roots: LedgerRoots(transcriptRoots: [.kimi: [kimiHome.appendingPathComponent("sessions")]]))
+
+        #expect(report.filesIndexed == 2)
+        #expect(try s.session(agent: "kimi", sessionID: "session_a")?.fields.cwd == "/repo/a")
+        #expect(try s.session(agent: "kimi", sessionID: "session_b")?.fields.cwd == "/repo/b")
+    }
+
+    @Test func kimiWorkDirCacheParsesOncePerStampAndAgainAfterARewrite() throws {
+        let temp = try TempDir()
+        let home = temp.path("kimi-code")
+        let index = home.appendingPathComponent("session_index.jsonl")
+        let stateA = home.appendingPathComponent("sessions/wd/session_a/state.json").path
+        let stateB = home.appendingPathComponent("sessions/wd/session_b/state.json").path
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try Data(#"{"sessionId":"session_a","workDir":"/old"}"#.utf8).write(to: index)
+
+        var cache = KimiWorkDirCache()
+        #expect(cache.map(forStateFile: stateA, indexInfo: FileInfo(path: index.path))["session_a"] == "/old")
+        _ = cache.map(forStateFile: stateB, indexInfo: FileInfo(path: index.path))
+        #expect(cache.parses == 1)
+
+        // Rewritten mid-scan: the new stamp reads the new map.
+        try Data((#"{"sessionId":"session_a","workDir":"/new"}"# + "\n"
+                  + #"{"sessionId":"session_b","workDir":"/b"}"#).utf8).write(to: index)
+        #expect(cache.map(forStateFile: stateB, indexInfo: FileInfo(path: index.path))["session_b"] == "/b")
+        #expect(cache.parses == 2)
     }
 
     @Test func kimiPrefersTheMainAgentWithoutAParent() async throws {

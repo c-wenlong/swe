@@ -70,10 +70,6 @@ PAGE_SIZE = 100
 MAX_PAGES = 5
 # Pages of ``/v1/users`` scanned to turn an email into a user id.
 MAX_USER_PAGES = 5
-# A page body's budget: child-list calls, nesting depth and characters.
-MAX_BLOCK_CALLS = 12
-MAX_DEPTH = 3
-MAX_DESCRIPTION = 20000
 # 429 handling: Notion averages three requests a second per integration
 # and says how long to back off in Retry-After. Two waits, each capped,
 # so a hub request never stalls long behind it.
@@ -547,9 +543,9 @@ class NotionTasks:
     def get(self, task: dict) -> dict | None:
         """Fresh ``{state, status_name, title, url, updated_at}`` for a
         stored page, cached like the list; ``None`` when Notion can't
-        tell. The body stays out — ``detail`` reads it — since a list
-        poll refreshes up to ``tasks.MAX_REFRESH`` stored tasks and
-        Notion allows three calls a second."""
+        tell. One page read, no body: a list poll refreshes up to
+        ``tasks.MAX_REFRESH`` stored tasks and Notion allows three calls
+        a second."""
         ref = normalize_id(str(task.get("ref") or ""))
         if ref is None:
             return None
@@ -603,33 +599,6 @@ class NotionTasks:
             out["status_name"] = "Archived"
         return {"status": "ok", **out,
                 "updated_at": page.get("last_edited_time")}
-
-    def detail(self, task: dict) -> dict | None:
-        """``get`` plus ``description``: the page body as markdown, what
-        a resolve prompt quotes (Linear's ``get`` answers its issue
-        description the same way). ``None`` when the page won't read."""
-        fresh = self.get(task)
-        if fresh is None:
-            return None
-        ref = normalize_id(str(task.get("ref") or ""))
-        value, _at = self._cached(("notion-body", ref),
-                                  lambda: self._body(ref))
-        return {**fresh, "description": value.get("description") or ""}
-
-    def _body(self, ref: str) -> dict:
-        cfg = load_section(self.home) or {}
-        token, error = self._token(cfg)
-        if token is None:
-            return {"status": "auth-required", "error": error}
-        budget = {"calls": MAX_BLOCK_CALLS, "cut": False}
-        lines = _render(token, ref, budget, 0)
-        text = "\n".join(lines).strip()
-        if len(text) > MAX_DESCRIPTION:
-            text = text[:MAX_DESCRIPTION].rstrip()
-            budget["cut"] = True
-        if budget["cut"]:
-            text += "\n\n_(truncated: the rest of the page is in Notion)_"
-        return {"status": "ok", "description": text}
 
 
 # ------------------------------------------------------------------ users
@@ -859,160 +828,3 @@ def _plain(rich) -> str:
         return ""
     return "".join(str(r.get("plain_text") or "") for r in rich
                    if isinstance(r, dict)).strip()
-
-
-# ------------------------------------------------------------------ body
-
-def _markdown(rich) -> str:
-    """Rich text as inline markdown: code, bold, italic, strikethrough
-    and links; colours and mentions read as their text."""
-    if not isinstance(rich, list):
-        return ""
-    out = []
-    for r in rich:
-        if not isinstance(r, dict):
-            continue
-        text = str(r.get("plain_text") or "")
-        if not text:
-            continue
-        marks = r.get("annotations") or {}
-        if r.get("type") == "equation":
-            text = f"${text}$"
-        elif marks.get("code"):
-            text = f"`{text}`"
-        else:
-            if marks.get("bold"):
-                text = f"**{text}**"
-            if marks.get("italic"):
-                text = f"*{text}*"
-            if marks.get("strikethrough"):
-                text = f"~~{text}~~"
-        href = r.get("href")
-        if isinstance(href, str) and href:
-            text = f"[{text}]({href})"
-        out.append(text)
-    return "".join(out)
-
-
-def _children(token: str, block_id: str, budget: dict) -> list[dict]:
-    """A block's children, paginated within the shared call budget."""
-    blocks: list[dict] = []
-    cursor = None
-    while True:
-        if budget["calls"] <= 0:
-            budget["cut"] = True
-            break
-        budget["calls"] -= 1
-        query = "?page_size=100" + (
-            f"&start_cursor={urllib.parse.quote(cursor)}" if cursor else "")
-        got = _request(token, "GET", f"/blocks/{block_id}/children{query}")
-        if got.status != "ok":
-            budget["cut"] = True
-            break
-        blocks.extend(b for b in got.data.get("results") or []
-                      if isinstance(b, dict))
-        cursor = got.data.get("next_cursor")
-        if not got.data.get("has_more") or not cursor:
-            break
-    return blocks
-
-
-_LISTS = ("bulleted_list_item", "numbered_list_item", "to_do", "toggle")
-_FLAT = ("column_list", "column", "synced_block")
-_FILES = ("image", "video", "file", "pdf", "audio")
-
-
-def _render(token: str, block_id: str, budget: dict, depth: int) -> list[str]:
-    """A block's children as markdown lines: lists stay tight, other
-    blocks are separated by a blank line, nested children indent."""
-    lines: list[str] = []
-    number = 0
-    last_list = False
-    for block in _children(token, block_id, budget):
-        kind = str(block.get("type") or "")
-        number = number + 1 if kind == "numbered_list_item" else 0
-        own = _block(block, kind, number)
-        nested: list[str] = []
-        if block.get("has_children") and kind not in (
-                "child_page", "child_database"):
-            if depth + 1 >= MAX_DEPTH:
-                budget["cut"] = True
-            elif kind == "table":
-                own = _table(_children(token, block["id"], budget))
-            else:
-                nested = _render(token, str(block.get("id")), budget,
-                                 depth + 1)
-        if own is None and not nested:
-            continue
-        is_list = kind in _LISTS
-        if lines and not (is_list and last_list):
-            lines.append("")
-        if own is not None:
-            lines.extend(own.split("\n"))
-        if nested:
-            pad = "> " if kind in ("quote", "callout") else (
-                "" if kind in _FLAT else "  ")
-            lines.extend(pad + n if n else n for n in nested)
-        last_list = is_list
-    return lines
-
-
-def _block(block: dict, kind: str, number: int) -> str | None:
-    """One block's own line(s), without its children; ``None`` to skip."""
-    body = block.get(kind) if isinstance(block.get(kind), dict) else {}
-    text = _markdown(body.get("rich_text"))
-    if kind == "paragraph":
-        return text
-    if kind in ("heading_1", "heading_2", "heading_3"):
-        return "#" * int(kind[-1]) + " " + text
-    if kind == "bulleted_list_item" or kind == "toggle":
-        return "- " + text
-    if kind == "numbered_list_item":
-        return f"{number}. {text}"
-    if kind == "to_do":
-        return ("- [x] " if body.get("checked") else "- [ ] ") + text
-    if kind == "quote":
-        return "> " + text
-    if kind == "callout":
-        icon = body.get("icon") or {}
-        emoji = icon.get("emoji") if isinstance(icon, dict) else None
-        return "> " + (f"{emoji} " if emoji else "") + text
-    if kind == "code":
-        lang = str(body.get("language") or "").replace("plain text", "")
-        return f"```{lang}\n{_plain(body.get('rich_text'))}\n```"
-    if kind == "divider":
-        return "---"
-    if kind == "equation":
-        return f"$${body.get('expression') or ''}$$"
-    if kind == "child_page":
-        return f"[child page: {body.get('title') or ''}]"
-    if kind == "child_database":
-        return f"[child database: {body.get('title') or ''}]"
-    if kind in ("bookmark", "embed", "link_preview"):
-        url = body.get("url") or ""
-        caption = _plain(body.get("caption"))
-        return f"[{caption or url}]({url})" if url else None
-    if kind in _FILES:
-        caption = _plain(body.get("caption")) or body.get("name") or kind
-        # Notion-hosted files sit behind signed links that expire in an
-        # hour, so only an external link is worth quoting.
-        external = body.get("external") if body.get("type") == "external" \
-            else None
-        url = external.get("url") if isinstance(external, dict) else ""
-        return f"[{kind}: {caption}]({url})" if url else f"[{kind}: {caption}]"
-    # A table's rows, a column's blocks: they come from the children.
-    return None
-
-
-def _table(rows: list[dict]) -> str | None:
-    """A table block's ``table_row`` children as a markdown table."""
-    out = []
-    for i, row in enumerate(rows):
-        cells = (row.get("table_row") or {}).get("cells")
-        if not isinstance(cells, list):
-            continue
-        out.append("| " + " | ".join(
-            _markdown(c).replace("|", "\\|") for c in cells) + " |")
-        if i == 0:
-            out.append("|" + " --- |" * len(cells))
-    return "\n".join(out) or None

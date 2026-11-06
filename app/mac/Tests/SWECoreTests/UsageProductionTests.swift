@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Security
 import Testing
 @testable import SWECore
@@ -179,9 +180,15 @@ extension SecItemKeychainTests {
         var calls = keychain.make()
         calls.update = { _, _ in errSecAuthFailed }
         let store = SecItemKeychain(calls: calls)
-        await #expect(throws: SweError.self) {
+        let error = await #expect(throws: SweError.self) {
             try await store.setGenericPassword(service: "svc", account: "acct", value: "v")
         }
+        // The keychain's own status, not some other failure. Its message
+        // is the system's wording, so only the status is pinned.
+        guard case .commandFailed(let status, _) = error else {
+            Issue.record("expected the keychain's status, got \(String(describing: error))"); return
+        }
+        #expect(status == errSecAuthFailed)
     }
 
     @Test func deletingAMissingItemIsNotAnError() async throws {
@@ -249,9 +256,10 @@ struct HangingRunner: CommandRunning {
 
 @Suite struct LocalFilesTests {
     @Test func readsAFileOrNilWhenMissing() throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("quiver-localfiles-\(UUID().uuidString).json")
+        let dir = try TempDir()
+        defer { withExtendedLifetime(dir) {} }
+        let url = dir.path("local.json")
         try Data("{}".utf8).write(to: url)
-        defer { try? FileManager.default.removeItem(at: url) }
         #expect(LocalFiles().read(url.path) == Data("{}".utf8))
         #expect(LocalFiles().read(url.path + ".missing") == nil)
     }
@@ -259,7 +267,13 @@ struct HangingRunner: CommandRunning {
 
 /// Answers inside URLSession, so the real transport runs without a network.
 final class StubProtocol: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
+    typealias Handler = @Sendable (URLRequest) -> (HTTPURLResponse, Data)
+    /// Set by the test, read on URLSession's loading thread: behind a lock.
+    private static let current = Mutex<Handler?>(nil)
+    static var handler: Handler? {
+        get { current.withLock { $0 } }
+        set { current.withLock { $0 = newValue } }
+    }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -297,9 +311,9 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
     }
 
     @Test func doesNotFollowARedirectWithTheBearerToken() async throws {
-        let seen = SeenURLs()
+        let seen = Box<[String]>([])
         StubProtocol.handler = { request in
-            seen.append(request.url!.absoluteString)
+            seen.value.append(request.url!.absoluteString)
             return (HTTPURLResponse(url: request.url!, statusCode: 302, httpVersion: nil,
                                     headerFields: ["Location": "https://elsewhere.invalid/steal"])!, Data())
         }
@@ -307,7 +321,7 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
         request.setValue("Bearer SECRET", forHTTPHeaderField: "Authorization")
         let (_, response) = try await transport().send(request)
         #expect(response.statusCode == 302)
-        #expect(seen.all == ["https://example.invalid/usage"])
+        #expect(seen.value == ["https://example.invalid/usage"])
     }
 
     @Test func storesNoCookiesAndNoResponseCache() {
@@ -317,11 +331,4 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
         #expect(configuration.httpShouldSetCookies == false)
         #expect(configuration.urlCredentialStorage == nil)
     }
-}
-
-final class SeenURLs: @unchecked Sendable {
-    private let lock = NSLock()
-    private var urls: [String] = []
-    func append(_ url: String) { lock.withLock { urls.append(url) } }
-    var all: [String] { lock.withLock { urls } }
 }

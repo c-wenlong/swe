@@ -73,7 +73,12 @@ class GatewayHelpersTest(unittest.TestCase):
         self.assertFalse(gateway.looks_stateful("dv__linear", {"command": "node", "args": ["l.js"]}))
 
 
-class GatewayServerTest(unittest.TestCase):
+class _GatewayServerCase(unittest.TestCase):
+    """A live gateway on localhost and the helpers to talk to it.
+
+    Holds no tests, so the classes built on it each run only their own.
+    """
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.specs = {"fake": {"command": sys.executable, "args": [str(FAKE)]}}
@@ -112,6 +117,8 @@ class GatewayServerTest(unittest.TestCase):
     def payload(body):
         return json.loads(body["result"]["content"][0]["text"])
 
+
+class GatewayServerTest(_GatewayServerCase):
     def test_initialize_comes_from_one_handshake(self):
         status, headers, body = self.request(INIT)
         self.assertEqual(status, 200)
@@ -159,6 +166,19 @@ class GatewayServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual([r["id"] for r in body], ["a", "b"])
 
+    def test_a_cancel_with_malformed_params_is_dropped(self):
+        # `params: [1]` raised AttributeError in the handler and the
+        # connection closed with no answer.
+        for params in ([1], "x", None):
+            status, _, body = self.request(
+                {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": params})
+            self.assertEqual((status, body), (202, None))
+        self.assertEqual(self.request({"jsonrpc": "2.0", "id": 3, "method": "ping"})[2]["result"], {})
+
+    def test_the_gateway_names_itself_swe(self):
+        _, headers, _ = self.request({"jsonrpc": "2.0", "id": 3, "method": "ping"})
+        self.assertTrue(headers.get("Server", "").startswith("swe-mcp-gateway"))
+
     def test_server_to_client_requests_are_refused(self):
         answer = self.payload(self.call("ask"))["args"]["answer"]
         self.assertEqual(answer["id"], "srv-1")
@@ -166,12 +186,22 @@ class GatewayServerTest(unittest.TestCase):
 
     def test_a_crashed_server_restarts_on_the_next_request(self):
         first = self.payload(self.call("echo"))["pid"]
-        with patch.object(gateway_server, "BACKOFF_MIN_S", 0.0):
+        backend = self.gateway.backends["fake"]
+        # The reader thread notes the failure once it has cleared the dead
+        # child; wait for that instead of polling the state.
+        noted = threading.Event()
+        note_failure = backend._note_failure
+
+        def note(lived):
+            note_failure(lived)
+            noted.set()
+
+        with patch.object(gateway_server, "BACKOFF_MIN_S", 0.0), \
+                patch.object(backend, "_note_failure", note):
             body = self.call("crash")
             self.assertIn("exited", body["error"]["message"])
-            deadline = time.time() + 10
-            while self.gateway.backends["fake"].status()["state"] == "running" and time.time() < deadline:
-                time.sleep(0.05)
+            self.assertTrue(noted.wait(10))
+            self.assertNotEqual(backend.status()["state"], "running")
             second = self.payload(self.call("echo"))["pid"]
         self.assertNotEqual(first, second)
         self.assertEqual(self.gateway.backends["fake"].starts, 2)
@@ -235,7 +265,7 @@ class GatewayServerTest(unittest.TestCase):
         self.assertEqual(rows["fake"]["state"], "idle")
 
 
-class GatewayHardeningTest(GatewayServerTest):
+class GatewayHardeningTest(_GatewayServerCase):
     """The review's findings: smuggled requests, bad lengths, stray
     processes, pipe errors, unreadable hubs and unbounded logs."""
 
@@ -711,6 +741,384 @@ class GatewayLaunchdTest(unittest.TestCase):
             self.assertEqual(plistlib.loads(path.read_bytes())["ProcessType"], "Interactive")
             self.assertTrue(all(LABEL in " ".join(c) or c[1] == "bootstrap" for c in calls))
             self.assertFalse((home / "Library" / "LaunchAgents" / f"{launchd.LABEL}.plist").exists())
+
+
+
+def _script(folder: pathlib.Path, name: str, body: str) -> dict:
+    """A stdio server spec running ``body`` as a Python script."""
+    path = folder / f"{name}.py"
+    path.write_text("import json, sys\n" + body)
+    return {"command": sys.executable, "args": [str(path)]}
+
+
+class GatewayBackendEdgeTest(unittest.TestCase):
+    """How a backend behaves when its server misbehaves at start-up, stops
+    answering, or has nowhere to log; each against a real child process
+    or a stand-in, never a real hub."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = pathlib.Path(self.tmp.name)
+
+    def backend(self, name, spec):
+        backend = gateway_server.Backend(name, spec, self.dir / "logs")
+        self.addCleanup(backend.stop)
+        return backend
+
+    def test_an_initialize_result_of_the_wrong_shape_stops_the_server(self):
+        # Regression: a non-object result raised ValueError out of ready(),
+        # so the process was never stopped and every later request started
+        # another one beside it.
+        spec = _script(self.dir, "bad", (
+            "for line in sys.stdin:\n"
+            "    m = json.loads(line)\n"
+            "    if m.get('method') == 'initialize':\n"
+            "        print(json.dumps({'jsonrpc': '2.0', 'id': m['id'], 'result': 'ok'}), flush=True)\n"))
+        backend = self.backend("bad", spec)
+        with patch.object(gateway_server, "KILL_GRACE_S", 2):
+            body = backend.call({"jsonrpc": "2.0", "id": 3, "method": "tools/list"},
+                                "2025-06-18")
+        self.assertEqual(body["id"], 3)
+        self.assertIn("initialize failed: the result is not an object",
+                      body["error"]["message"])
+        self.assertIsNone(backend._child)
+        self.assertEqual(backend.status()["state"], "error")
+        # The failure backs off rather than starting a second copy at once.
+        again = backend.call({"jsonrpc": "2.0", "id": 4, "method": "tools/list"},
+                             "2025-06-18")
+        self.assertIn("keeps exiting", again["error"]["message"])
+        self.assertEqual(backend.starts, 1)
+
+    def test_an_initialize_error_names_its_message_whatever_its_shape(self):
+        for error, detail in (({"code": -1, "message": "bad token"}, "bad token"),
+                              ("plain text", "plain text"),
+                              (None, "no result")):
+            with self.subTest(error=error):
+                answer = {"jsonrpc": "2.0", "id": "ID"}
+                if error is not None:
+                    answer["error"] = error
+                spec = _script(self.dir, "err", (
+                    f"answer = {json.dumps(answer)}\n"
+                    "for line in sys.stdin:\n"
+                    "    m = json.loads(line)\n"
+                    "    answer['id'] = m['id']\n"
+                    "    print(json.dumps(answer), flush=True)\n"))
+                backend = self.backend("err", spec)
+                with patch.object(gateway_server, "KILL_GRACE_S", 2):
+                    with self.assertRaises(RuntimeError) as raised:
+                        backend.ready("2025-06-18")
+                self.assertIn(f"initialize failed: {detail}", str(raised.exception))
+                self.assertIsNone(backend._child)
+
+    def test_stdout_noise_is_skipped_and_server_requests_are_refused(self):
+        # A banner, a JSON list and an answer to an id nobody asked for come
+        # before the real answer; a request to "the client" gets an error back.
+        spec = _script(self.dir, "noisy", (
+            "for line in sys.stdin:\n"
+            "    m = json.loads(line)\n"
+            "    if 'id' not in m:\n"
+            "        continue\n"
+            "    if m.get('method') == 'initialize':\n"
+            "        print('Server ready on stdio', flush=True)\n"
+            "        print('[1, 2]', flush=True)\n"
+            "        print(json.dumps({'jsonrpc': '2.0', 'id': 999, 'result': {}}), flush=True)\n"
+            "        print(json.dumps({'jsonrpc': '2.0', 'id': m['id'], 'result': {'capabilities': {}}}), flush=True)\n"
+            "    elif m.get('method') == 'tools/list':\n"
+            "        print(json.dumps({'jsonrpc': '2.0', 'id': 's1', 'method': 'sampling/createMessage'}), flush=True)\n"
+            "        refusal = json.loads(sys.stdin.readline())\n"
+            "        print(json.dumps({'jsonrpc': '2.0', 'id': m['id'], 'result': {'seen': refusal}}), flush=True)\n"))
+        backend = self.backend("noisy", spec)
+        body = backend.call({"jsonrpc": "2.0", "id": "a", "method": "tools/list"},
+                            "2025-06-18")
+        self.assertEqual(body["id"], "a")
+        seen = body["result"]["seen"]
+        self.assertEqual(seen["id"], "s1")
+        self.assertEqual(seen["error"]["code"], gateway_server.METHOD_NOT_FOUND)
+
+    def test_a_server_that_never_answers_initialize_times_out(self):
+        spec = _script(self.dir, "mute", "for line in sys.stdin:\n    pass\n")
+        backend = self.backend("mute", spec)
+        with patch.object(gateway_server, "INIT_TIMEOUT_S", 0.2), \
+                patch.object(gateway_server, "KILL_GRACE_S", 2):
+            with self.assertRaises(RuntimeError) as raised:
+                backend.ready("2025-06-18")
+        self.assertIn("no answer to initialize", str(raised.exception))
+        self.assertIsNone(backend._child)
+
+    def test_a_request_nobody_answers_is_cancelled_at_the_server(self):
+        log = self.dir / "seen.jsonl"
+        spec = _script(self.dir, "slow", (
+            f"log = open({str(log)!r}, 'a')\n"
+            "for line in sys.stdin:\n"
+            "    log.write(line); log.flush()\n"
+            "    m = json.loads(line)\n"
+            "    if m.get('method') == 'initialize':\n"
+            "        print(json.dumps({'jsonrpc': '2.0', 'id': m['id'], 'result': {}}), flush=True)\n"
+            "    if m.get('method') == 'notifications/cancelled':\n"
+            "        sys.exit(0)\n"))
+        backend = self.backend("slow", spec)
+        # Taken before the call: the cancel makes the server exit, and the
+        # reader thread then clears _child, possibly before call returns.
+        child, _ = backend.ready("2025-06-18")
+        sent = []
+        body = backend.call({"jsonrpc": "2.0", "id": 8, "method": "tools/call",
+                             "params": {"name": "x"}}, "2025-06-18",
+                            on_sent=sent.append, timeout=0.2)
+        self.assertEqual(body["id"], 8)
+        self.assertIn("did not answer in 0s", body["error"]["message"])
+        self.assertNotIn(sent[0], child.pending)
+        # The server hears the cancel for the gateway's own id (and exits
+        # on it, so the wait below needs no polling).
+        self.assertEqual(child.proc.wait(timeout=10), 0)
+        lines = [json.loads(line) for line in log.read_text().splitlines()]
+        cancels = [m for m in lines if m.get("method") == "notifications/cancelled"]
+        self.assertEqual(cancels[0]["params"]["requestId"], sent[0])
+        self.assertEqual(cancels[0]["params"]["reason"], "gateway timeout")
+
+    def test_a_command_that_cannot_start_backs_off(self):
+        backend = self.backend("ghost", {"command": str(self.dir / "no-such-binary")})
+        body = backend.call({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, "2025-06-18")
+        self.assertIn("ghost: cannot start", body["error"]["message"])
+        self.assertEqual(backend.status()["state"], "error")
+        body = backend.call({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, "2025-06-18")
+        self.assertIn("keeps exiting (cannot start", body["error"]["message"])
+        self.assertEqual(backend.starts, 0)
+
+    def test_a_stopped_backend_refuses_and_notify_without_a_server_is_quiet(self):
+        backend = self.backend("gone", {"command": "x"})
+        backend.notify({"jsonrpc": "2.0", "method": "notifications/cancelled"})
+        backend.stop()
+        body = backend.call({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, "2025-06-18")
+        self.assertIn("no longer shared", body["error"]["message"])
+
+    def test_backoff_doubles_and_a_long_run_resets_it(self):
+        backend = self.backend("b", {"command": "x"})
+        with patch.object(gateway_server.time, "monotonic", return_value=1000.0):
+            delays = []
+            for _ in range(7):
+                backend._note_failure(1)
+                delays.append(backend._retry_at - 1000.0)
+            self.assertEqual(delays, [2, 4, 8, 16, 32, 60, 60])
+            backend._note_failure(gateway_server.HEALTHY_AFTER_S)
+            self.assertEqual(backend._retry_at - 1000.0, gateway_server.BACKOFF_MIN_S)
+
+    def test_a_log_that_cannot_be_opened_is_still_drained(self):
+        # Left unread, a full stderr pipe blocks the server mid-request.
+        class Stderr:
+            read = 0
+            closed = False
+
+            def __iter__(self):
+                for _ in range(1000):
+                    self.read += 1
+                    yield b"noise\n"
+
+            def close(self):
+                self.closed = True
+
+        backend = gateway_server.Backend("nolog", {"command": "x"}, self.dir)
+        (self.dir / "nolog.log").mkdir()  # opening it as a file fails
+        stream = Stderr()
+        backend._log(stream)
+        self.assertEqual(stream.read, 1000)
+        self.assertTrue(stream.closed)
+
+    def test_a_write_waits_its_turn_then_gives_up(self):
+        proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL)
+        child = gateway_server._Child(proc)
+        self.assertTrue(child.write_lock.acquire())
+        try:
+            with self.assertRaisesRegex(TimeoutError, "another write"):
+                child.send({"jsonrpc": "2.0", "method": "x"}, timeout=0.05)
+        finally:
+            child.write_lock.release()
+        child.close()
+        with self.assertRaisesRegex(BrokenPipeError, "server exited"):
+            child.send({"jsonrpc": "2.0", "method": "x"})
+        proc.wait(timeout=5)
+        # A server gone before the request is registered says so.
+        child.fail_all("gone")
+        with self.assertRaises(BrokenPipeError):
+            child.expect(1)
+
+
+class GatewayRoutingEdgeTest(unittest.TestCase):
+    """Gateway.handle and reload against stand-in backends: no process."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.specs = {"a": {"command": "x"}}
+        self.watched = [pathlib.Path(self.tmp.name) / "mcp.json"]
+        self.loads = 0
+
+        def load():
+            self.loads += 1
+            return dict(self.specs), {}
+
+        self.gateway = Gateway(pathlib.Path(self.tmp.name), load=load,
+                               watched=lambda: self.watched)
+
+    def test_a_cancel_reaches_the_server_under_the_gateways_id(self):
+        backend = self.gateway.backends["a"]
+        notified = []
+
+        def call(message, protocol, on_sent=None, timeout=None):
+            on_sent(42)
+            # The client gives up while its request is in flight.
+            self.gateway.handle(backend, {"jsonrpc": "2.0", "method": "notifications/cancelled",
+                                          "params": {"requestId": 7, "reason": "user"}},
+                                "session-1", protocol)
+            # Another session's cancel for the same id is not this request.
+            self.gateway.handle(backend, {"jsonrpc": "2.0", "method": "notifications/cancelled",
+                                          "params": {"requestId": 7}}, "session-2", protocol)
+            return {"jsonrpc": "2.0", "id": message["id"], "result": {}}
+
+        with patch.object(backend, "call", side_effect=call), \
+                patch.object(backend, "notify", side_effect=notified.append):
+            reply = self.gateway.handle(backend, {"jsonrpc": "2.0", "id": 7,
+                                                  "method": "tools/call"},
+                                        "session-1", "2025-06-18")
+        self.assertEqual(reply["id"], 7)
+        self.assertEqual(notified, [{"jsonrpc": "2.0", "method": "notifications/cancelled",
+                                     "params": {"requestId": 42, "reason": "user"}}])
+        # Finished requests are forgotten, so a late cancel goes nowhere.
+        self.assertEqual(self.gateway._inflight, {})
+
+    def test_messages_that_are_not_requests(self):
+        backend = self.gateway.backends["a"]
+        with patch.object(backend, "call") as call, \
+                patch.object(backend, "ready", return_value=(None, {"capabilities": {}})) as ready:
+            self.assertEqual(self.gateway.handle(backend, [1], "s", "p")["error"]["code"],
+                             gateway_server.INVALID_REQUEST)
+            bad = self.gateway.handle(backend, {"id": 5, "method": "ping"}, "s", "p")
+            self.assertEqual((bad["id"], bad["error"]["code"]),
+                             (5, gateway_server.INVALID_REQUEST))
+            # A client's answer to a request: nothing to say back.
+            self.assertIsNone(self.gateway.handle(backend, {"jsonrpc": "2.0", "id": 1,
+                                                            "result": {}}, "s", "p"))
+            # A protocol version that is not a string falls back to the default.
+            init = self.gateway.handle(backend, {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                                 "params": {"protocolVersion": 7}}, "s", "p")
+            self.assertEqual(init["result"], {"capabilities": {}})
+            ready.assert_called_with(gateway_server.DEFAULT_PROTOCOL)
+        call.assert_not_called()
+
+    def test_reload_waits_between_checks_and_skips_an_unchanged_hub(self):
+        self.assertEqual(self.loads, 1)
+        # Within RELOAD_EVERY_S nothing is read, even with the file changed.
+        self.watched[0].write_text("{}")
+        self.gateway.reload()
+        self.assertEqual(self.loads, 1)
+        # Past it, an unchanged fingerprint skips the load.
+        self.gateway._checked -= gateway_server.RELOAD_EVERY_S
+        stamp = self.gateway._stamp
+        self.gateway._stamp = self.gateway._fingerprint()
+        self.gateway.reload()
+        self.assertEqual(self.loads, 1)
+        # A changed file is read again.
+        self.gateway._checked -= gateway_server.RELOAD_EVERY_S
+        self.gateway._stamp = stamp
+        self.gateway.reload()
+        self.assertEqual(self.loads, 2)
+
+    def test_a_missing_watched_file_still_has_a_fingerprint(self):
+        self.assertEqual(self.gateway._fingerprint(),
+                         ((str(self.watched[0]), None, None),))
+
+
+class GatewayHttpEdgeTest(_GatewayServerCase):
+    """The HTTP refusals and views the main tests do not reach."""
+
+    def raw(self, data: bytes) -> bytes:
+        import socket
+
+        with socket.create_connection(("127.0.0.1", self.port), timeout=10) as sock:
+            sock.sendall(data)
+            chunks = []
+            while True:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return b"".join(chunks)
+
+    def post(self, body: bytes, length: str | None = None) -> bytes:
+        size = str(len(body)) if length is None else length
+        return self.raw((f"POST /mcp/fake HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n"
+                         f"Content-Type: application/json\r\nContent-Length: {size}\r\n"
+                         "Connection: close\r\n\r\n").encode() + body)
+
+    def test_status_reloads_and_lists_the_servers(self):
+        status, _, body = self.request(method="GET", path="/status")
+        self.assertEqual(status, 200)
+        self.assertEqual([row["name"] for row in body["servers"]], ["fake"])
+        self.assertIsNone(body["error"])
+
+    def test_every_verb_refuses_a_browser(self):
+        for method in ("GET", "HEAD", "DELETE"):
+            with self.subTest(method):
+                status, headers, _ = self.request(method=method,
+                                                  headers={"Origin": "https://evil.example"})
+                self.assertEqual(status, 403)
+                self.assertEqual(headers.get("Connection"), "close")
+
+    def test_unknown_paths(self):
+        self.assertEqual(self.request(method="GET", path="/nope")[0], 404)
+        self.assertEqual(self.request(method="GET", path="/mcp/nope")[0], 404)
+        self.assertEqual(self.request(method="DELETE", path="/mcp/nope")[0], 404)
+        self.assertEqual(self.request(INIT, path="/other/fake")[0], 404)
+        # A query string and a trailing slash still name the server.
+        self.assertEqual(self.request(method="HEAD", path="/mcp/fake/?x=1")[0], 200)
+
+    def test_bad_bodies_are_refused_before_the_server_starts(self):
+        self.assertIn(b" 411 ", self.post(b"{}", length="ten").split(b"\r\n", 1)[0])
+        with patch.object(gateway_server, "MAX_BODY", 10):
+            self.assertIn(b" 413 ", self.post(b'{"jsonrpc": "2.0"}').split(b"\r\n", 1)[0])
+        reply = self.post(b"{not json")
+        self.assertIn(b" 400 ", reply.split(b"\r\n", 1)[0])
+        self.assertIn(b"invalid JSON", reply)
+        self.assertEqual(self.gateway.backends["fake"].starts, 0)
+
+    def test_a_batch_of_only_notifications_is_accepted_with_no_body(self):
+        status, _, body = self.request([{"jsonrpc": "2.0", "method": "notifications/initialized"}])
+        self.assertEqual((status, body), (202, None))
+
+    def test_a_dropped_connection_is_not_logged_as_an_error(self):
+        import sys as _sys
+
+        server = self.server
+        try:
+            raise ConnectionResetError("peer went away")
+        except ConnectionResetError:
+            with patch("socketserver.BaseServer.handle_error") as base:
+                server.handle_error(None, ("127.0.0.1", 1))
+            base.assert_not_called()
+        try:
+            raise ValueError("a real bug")
+        except ValueError:
+            with patch("socketserver.BaseServer.handle_error") as base:
+                server.handle_error(None, ("127.0.0.1", 1))
+            base.assert_called_once()
+        self.assertIsNone(_sys.exc_info()[0])
+
+
+class LoadHubSpecsEdgeTest(unittest.TestCase):
+    def test_servers_that_are_not_an_object_are_an_error(self):
+        from swe.mcp import cli as mcp_cli
+
+        with tempfile.TemporaryDirectory() as tmp:
+            hub = pathlib.Path(tmp) / "mcp.json"
+            hub.write_text(json.dumps({"mcpServers": ["api"]}))
+            with patch.object(mcp_cli, "MCP_SOURCE_FILE", hub), \
+                    patch("swe.mcp.secrets.load_secrets", return_value={}):
+                with self.assertRaisesRegex(ValueError, "mcpServers is not an object"):
+                    gateway_server.load_hub_specs()
+                hub.write_text(json.dumps({}))
+                self.assertEqual(gateway_server.load_hub_specs(), ({}, {}))
 
 
 if __name__ == "__main__":

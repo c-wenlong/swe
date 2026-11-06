@@ -380,16 +380,22 @@ class Backend:
         child.send({"jsonrpc": "2.0", "id": gid, "method": "initialize", "params": {
             "protocolVersion": protocol,
             "capabilities": {},
-            "clientInfo": {"name": "quiver-mcp-gateway", "version": __version__},
+            "clientInfo": {"name": "swe-mcp-gateway", "version": __version__},
         }})
         if not waiter.event.wait(INIT_TIMEOUT_S):
             child.forget(gid)
             self.last_error = f"no answer to initialize in {INIT_TIMEOUT_S:.0f}s"
             raise RuntimeError(f"{self.name}: {self.last_error}")
         response = waiter.response or {}
-        if "result" not in response:
-            detail = (response.get("error") or {}).get("message", "no result")
-            self.last_error = f"initialize failed: {detail}"
+        # A result or error of the wrong shape is a failed handshake too: a
+        # ValueError from reading it escaped ``ready``, so the process was
+        # never stopped and the next request started a second one.
+        if not isinstance(response.get("result"), dict):
+            error = response.get("error")
+            detail = error.get("message") if isinstance(error, dict) else error
+            if "result" in response and not error:
+                detail = "the result is not an object"
+            self.last_error = f"initialize failed: {detail or 'no result'}"
             raise RuntimeError(f"{self.name}: {self.last_error}")
         child.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
         self.last_error = ""
@@ -661,7 +667,11 @@ class Gateway:
         if method not in FORWARDED_NOTIFICATIONS:
             return  # e.g. initialized: the gateway's own handshake sent it
         if method == "notifications/cancelled":
-            params = message.get("params") or {}
+            params = message.get("params")
+            if not isinstance(params, dict):
+                # `params: [1]` raised AttributeError and dropped the
+                # connection; with no request id there is nothing to cancel.
+                return
             key = (session, json.dumps(params.get("requestId")))
             with self._inflight_lock:
                 hit = self._inflight.get(key)
@@ -673,7 +683,7 @@ class Gateway:
 
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "quiver-mcp-gateway"
+    server_version = "swe-mcp-gateway"
     sys_version = ""
 
     gateway: Gateway  # set on the subclass by make_server

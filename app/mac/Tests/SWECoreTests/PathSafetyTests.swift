@@ -15,7 +15,7 @@ import Testing
     @Test func anythingUnderTmpIsRejected() throws {
         // /tmp itself is other-writable, so a file that does not exist yet
         // is just as unsafe: another user can create it first.
-        #expect(PathSafety.rejection(of: "/tmp/quiver-safety-\(UUID().uuidString)") != nil)
+        #expect(PathSafety.rejection(of: "/tmp/swe-safety-\(UUID().uuidString)") != nil)
     }
 
     @Test func aSystemToolIsTrusted() {
@@ -23,7 +23,7 @@ import Testing
     }
 
     @Test func aMissingFileUnderHomeIsTrusted() {
-        let path = ("~/quiver-safety-\(UUID().uuidString)/file" as NSString)
+        let path = ("~/swe-safety-\(UUID().uuidString)/file" as NSString)
         #expect(PathSafety.rejection(of: path as String) == nil)
     }
 
@@ -37,8 +37,8 @@ import Testing
         try Data().write(to: file)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
         // The file itself is private, but the folder lets another user
-        // swap it — the ancestor check is what catches this.
-        #expect(PathSafety.rejection(of: file.path) != nil)
+        // swap it — the ancestor check is what catches this, and names it.
+        #expect(PathSafety.rejection(of: file.path) == "\(shared.path) is writable by other users")
     }
 
     /// Greptile: a clean-looking link under ~ can hop through a folder
@@ -57,7 +57,8 @@ import Testing
         defer {
             try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shared.path)
         }
-        #expect(PathSafety.rejection(of: link.path) != nil)
+        // The reason names the hop's folder, not the link the user wrote.
+        #expect(PathSafety.rejection(of: link.path) == "\(shared.path) is writable by other users")
     }
 
     /// A link chain that stays inside safe folders is still fine.
@@ -85,7 +86,7 @@ import Testing
         try Data().write(to: file)
         try FileManager.default.setAttributes([.posixPermissions: 0o777], ofItemAtPath: file.path)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path) }
-        #expect(PathSafety.rejection(of: file.path) != nil)
+        #expect(PathSafety.rejection(of: file.path) == "\(file.path) is writable by other users")
     }
 }
 

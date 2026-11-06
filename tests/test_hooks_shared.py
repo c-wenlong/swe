@@ -694,8 +694,12 @@ class CrudCommandsTest(unittest.TestCase):
             settings.parent.mkdir(parents=True, exist_ok=True)
             settings.write_text(json.dumps({"hooks": {
                 "Stop": [{"hooks": [{"command": "gate.py"}]}]}}))
-            code, out = _run(home, "delete", "gate")
+            # Not a terminal, so no prompt can answer for --yes. Pinned so
+            # the test does not stop at a prompt when run from a terminal.
+            with mock.patch.object(sys.stdin, "isatty", return_value=False):
+                code, out = _run(home, "delete", "gate")
             self.assertEqual(code, 1)
+            self.assertIn("Refused without --yes", out)
             self.assertTrue(src.exists())   # nothing deleted without --yes
             code, out = _run(home, "delete", "gate", "--yes")
             self.assertEqual(code, 0, out)
@@ -1486,11 +1490,18 @@ class ReviewFixesTest(unittest.TestCase):
             source.mkdir(parents=True)
             gate = source / "gate.py"
             gate.write_text("# events: [Stop]\n")
-            source.chmod(0o500)  # unlink fails on the read-only dir
-            try:
+            # Fail the unlink itself rather than chmod the folder: a
+            # read-only folder does not stop root, so that version passed
+            # or failed depending on who ran it.
+            real_unlink = Path.unlink
+
+            def _refuse(path, *a, **k):
+                if path == gate:
+                    raise PermissionError(13, "Permission denied", str(path))
+                return real_unlink(path, *a, **k)
+
+            with mock.patch.object(Path, "unlink", _refuse):
                 code, out = _run(home, "delete", "gate", "--yes")
-            finally:
-                source.chmod(0o700)
             self.assertEqual(code, 1, out)
             self.assertIn("failed", out)
             self.assertTrue(gate.is_file())
@@ -1670,6 +1681,67 @@ class ReviewFixesTest(unittest.TestCase):
             self.assertEqual(entry["command"].split("/")[-1],
                              "watcher.py")
             self.assertNotIn("matcher", entry)
+
+
+class QwenCodeRegistryKeyTest(unittest.TestCase):
+    """Qwen Code's contract row is keyed by its registry id, ``qwen-code``.
+
+    Keyed by its command (``qwen``) the row never met its registry entry:
+    archiving qwen-code still deployed wrappers under the name ``qwen``,
+    and its ``capabilities.hooks`` overrides were never read.
+    """
+
+    _GATE = "# events: [PreToolUse]\nimport sys\nsys.exit(0)\n"
+
+    def _targets(self, home: Path, registry: dict) -> dict:
+        with mock.patch("shutil.which", return_value=None):
+            return {t.harness: t for t in _shared.deploy_targets(home, registry)}
+
+    def test_deploys_under_the_registry_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            (home / ".qwen").mkdir()
+            _shared_hook(home, "gate.py", self._GATE)
+            targets = self._targets(home, {"qwen-code": {"command": "qwen"}})
+            self.assertNotIn("qwen", targets)
+            self.assertEqual(
+                targets["qwen-code"].wrapper,
+                _shared.generated_dir(home, "qwen-code") / "gate.py")
+
+    def test_archiving_qwen_code_stops_the_deploy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            (home / ".qwen").mkdir()
+            _shared_hook(home, "gate.py", self._GATE)
+            targets = self._targets(
+                home, {"qwen-code": {"command": "qwen", "state": "archived"}})
+            self.assertNotIn("qwen-code", targets)
+            self.assertNotIn("qwen", targets)
+
+    def test_registry_hook_settings_apply_to_qwen_code(self):
+        home = Path("/h")
+        reg = {"qwen-code": {"capabilities": {"hooks": {
+            "root": "~/elsewhere/hooks"}}}}
+        contract = contract_for(reg, "qwen-code", home)
+        self.assertEqual(contract.root, home / "elsewhere/hooks")
+        # The table row is still the base: Claude's schema, must print {}.
+        self.assertTrue(contract.must_print_json)
+        self.assertEqual(contract.settings, (Path(".qwen/settings.json"),))
+        off = {"qwen-code": {"capabilities": {"hooks": {"shim": False}}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            (home / ".qwen").mkdir()
+            _shared_hook(home, "gate.py", self._GATE)
+            self.assertNotIn("qwen-code", self._targets(home, off))
+
+    def test_no_contract_row_is_keyed_off_the_registry(self):
+        from swe.harness.catalog import HARNESS_CATALOG
+        # A row named after a command rather than a registry id is the bug
+        # this class pins; rows for harnesses the catalog lacks are fine.
+        commands = {e.get("command"): k for k, e in HARNESS_CATALOG.items()
+                    if isinstance(e, dict) and e.get("command") != k}
+        for name in CONTRACTS:
+            self.assertNotIn(name, commands, f"{name} should be {commands.get(name)}")
 
 
 if __name__ == "__main__":

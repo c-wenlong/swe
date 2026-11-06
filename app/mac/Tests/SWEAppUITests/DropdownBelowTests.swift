@@ -39,22 +39,12 @@ import Testing
         window.contentView = hosting
         window.orderFront(nil)
         defer { window.orderOut(nil) }
-        #expect(spin { box.drop != .zero && box.field != .zero })
+        #expect(spinMainRunLoop { box.drop != .zero && box.field != .zero })
 
         // NSHostingView is flipped: y grows downward, so the list's top
         // must land 4pt under the field's bottom edge.
         #expect(abs(box.drop.minY - (box.field.maxY + 4)) < 1.5)
         #expect(box.drop.minY > box.field.minY)
         #expect(abs(box.drop.width - box.field.width) < 1.5)
-
-    }
-
-    private func spin(timeout: TimeInterval = 60, until done: () -> Bool) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !done() {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
-            if Date() > deadline { return false }
-        }
-        return true
     }
 }

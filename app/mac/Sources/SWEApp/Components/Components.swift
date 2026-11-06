@@ -144,6 +144,8 @@ struct EllipsisMenu<Content: View>: View {
         .plainButton()
         .menuIndicator(.hidden)
         .fixedSize()
+        // `.help` on the Menu itself shows; a tip's popover could stay
+        // up over the open menu.
         .help("More")
         .accessibilityLabel("More")
     }
@@ -231,7 +233,7 @@ private struct SecondaryButtonBody: View {
             .background(hovering ? Theme.hover : Theme.secondaryBackground, in: .rect(cornerRadius: Theme.controlRadius))
             .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).strokeBorder(Theme.borderStrong, lineWidth: 1))
             .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.45)
-            .animation(.easeOut(duration: 0.2), value: hovering)
+            .animation(.easeOut(duration: Theme.fadeDuration), value: hovering)
             .contentShape(.rect(cornerRadius: Theme.controlRadius))
             .onHover { hovering = $0 }
     }
@@ -635,7 +637,7 @@ struct ExpandRow: View {
         .overlay(ring.opacity(focused && FocusVisibility.shared.fromKeyboard ? 1 : 0)
             .allowsHitTesting(false))
         .onHover { hovering = $0 }
-        .help(isExpanded ? help.collapse : help.expand)
+        .hoverTip(isExpanded ? help.collapse : help.expand, replacesLabel: false, pinsOnClick: false)
     }
 
     @ViewBuilder private var ring: some View {
@@ -1403,8 +1405,7 @@ struct RailIconButton: View {
                 .contentShape(.rect)
         }
         .plainButton(cornerRadius: Theme.controlRadius)
-        .help(help)
-        .accessibilityLabel(help)
+        .hoverTip(help, pinsOnClick: false)
     }
 }
 

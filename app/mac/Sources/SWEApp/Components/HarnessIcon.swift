@@ -80,9 +80,8 @@ struct HarnessMarkView: View {
             if let icon = mark.icon { HarnessIcon(harness: icon, size: size) }
             if let word = mark.word { Text(word).lineLimit(1) }
         }
-        .help(mark.name)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(mark.name)
+        .hoverTip(mark.name, pinsOnClick: false)
     }
 }
 
