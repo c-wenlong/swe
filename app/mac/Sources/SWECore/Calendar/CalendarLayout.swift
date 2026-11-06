@@ -227,3 +227,32 @@ public enum DayHeaderStyle: Sendable, Equatable {
         }
     }
 }
+
+/// The hour the week grid opens scrolled to.
+public enum CalendarScroll {
+    /// With today in the range: its earliest session's hour, so the day's
+    /// work shows from its start, unless that would leave now below the
+    /// fold (`shownHours` is about how many hours a window shows), in
+    /// which case an hour before now. A today with no sessions opens an
+    /// hour before now. Without today: the range's earliest session, else
+    /// 08:00. Opening at the range's earliest block, whatever the day,
+    /// hid this morning's sessions and the now line under a 10:00 block
+    /// from later in the week.
+    public static func openingHour(blockStarts: [Date], range: DateInterval, now: Date,
+                                   calendar: Calendar, shownHours: Double = 8) -> Int {
+        func hour(_ date: Date) -> Int { calendar.component(.hour, from: date) }
+        let clamp = { (h: Int) in max(0, min(23, h)) }
+        guard range.contains(now) else { return clamp(blockStarts.map(hour).min() ?? 8) }
+        let nowHour = hour(now)
+        let earliestToday = blockStarts.filter { calendar.isDate($0, inSameDayAs: now) }.map(hour).min()
+        // From the top of the first session's hour to now, minutes and
+        // all, against the hours on screen less a quarter hour of room,
+        // so the now line never lands on the bottom edge.
+        guard let first = earliestToday,
+              let top = calendar.date(bySettingHour: first, minute: 0, second: 0, of: now),
+              now.timeIntervalSince(top) < (shownHours - 0.25) * 3600 else {
+            return clamp(nowHour - 1)
+        }
+        return clamp(first)
+    }
+}
