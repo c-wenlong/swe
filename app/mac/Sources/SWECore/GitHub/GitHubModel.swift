@@ -511,13 +511,13 @@ public final class GitHubModel {
         do {
             switch tab {
             case .pulls:
-                apply(try await swe.ghPullRequests(repo: repo), to: key, \.pulls,
+                apply(try await swe.ghPullRequests(repo: repo, limit: Self.dashboardCap(.pulls)), to: key, \.pulls,
                       persist: persist(repo: repo, surface: .pulls)) { $0.pullRequests ?? [] }
             case .issues:
-                apply(try await swe.ghIssues(repo: repo), to: key, \.issues,
+                apply(try await swe.ghIssues(repo: repo, limit: Self.dashboardCap(.issues)), to: key, \.issues,
                       persist: persist(repo: repo, surface: .issues)) { $0.issues ?? [] }
             case .actions:
-                apply(try await swe.ghRuns(repo: repo), to: key, \.runs,
+                apply(try await swe.ghRuns(repo: repo, limit: Self.dashboardCap(.actions)), to: key, \.runs,
                       persist: persist(repo: repo, surface: .runs)) { $0.runs ?? [] }
             case .pages:
                 apply(try await swe.ghPages(repo: repo), to: key, \.pages,
@@ -526,13 +526,13 @@ public final class GitHubModel {
                                                 rows: site.map { [$0] } ?? []) { _ in "site" }
                       }) { $0.pages }
             case .releases:
-                apply(try await swe.ghReleases(repo: repo), to: key, \.releases,
+                apply(try await swe.ghReleases(repo: repo, limit: Self.dashboardCap(.releases)), to: key, \.releases,
                       persist: persist(repo: repo, surface: .releases)) { $0.releases ?? [] }
             case .tags:
-                apply(try await swe.ghTags(repo: repo), to: key, \.tags,
+                apply(try await swe.ghTags(repo: repo, limit: Self.dashboardCap(.tags)), to: key, \.tags,
                       persist: persist(repo: repo, surface: .tags)) { $0.tags ?? [] }
             case .branches:
-                apply(try await swe.ghBranches(repo: repo), to: key, \.branches,
+                apply(try await swe.ghBranches(repo: repo, limit: Self.dashboardCap(.branches)), to: key, \.branches,
                       persist: persist(repo: repo, surface: .branches)) { $0.branches ?? [] }
             }
         } catch is CancellationError {
@@ -540,6 +540,19 @@ public final class GitHubModel {
             var board = boards[repo] ?? RepoBoard()
             board.fail(tab, message: error.localizedDescription)
             boards[repo] = board
+        }
+    }
+
+    /// How many rows the dashboard asks `swe gh` for on each surface, the
+    /// same caps as `swe gh board` (`_BOARD_FETCHERS` in github/cli.py). A
+    /// surface that comes back this full may have more on GitHub, so the
+    /// rail shows its count as "30+" rather than a total.
+    public static func dashboardCap(_ tab: RepoTab) -> Int {
+        switch tab {
+        case .pulls, .issues, .branches: 50
+        case .actions, .tags: 30
+        case .releases: 20
+        case .pages: 1
         }
     }
 

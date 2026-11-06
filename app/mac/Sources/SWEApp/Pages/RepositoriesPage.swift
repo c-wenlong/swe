@@ -387,6 +387,11 @@ private struct RepoRail: View {
         model.visibleRepos.reduce(0) { $0 + (model.rowCount($1.name, tab: model.tab) ?? 0) }
     }
 
+    /// Whether any repo in the total hit its fetch cap, so the sum is a floor.
+    private var totalCapped: Bool {
+        model.visibleRepos.contains { model.isAtFetchCap($0.name, tab: model.tab) }
+    }
+
     var body: some View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 8) {
@@ -417,7 +422,8 @@ private struct RepoRail: View {
                             .font(Theme.font(size: 12))
                         Text("All repos").font(Theme.nav)
                         Spacer(minLength: 6)
-                        Text("\(total)").font(Theme.caption.monospacedDigit())
+                        Text(totalCapped ? "\(total)+" : "\(total)")
+                            .font(Theme.caption.monospacedDigit())
                             .foregroundStyle(Theme.textMuted)
                     }
                     ForEach(groups) { group in
@@ -492,8 +498,9 @@ private struct RepoRail: View {
                 Spacer(minLength: 6)
                 if model.loading.contains(.init(repo: pin.name, tab: model.tab)) {
                     ProgressView().controlSize(.mini)
-                } else if let count = model.rowCount(pin.name, tab: model.tab), count > 0 {
-                    Text("\(count)").font(Theme.caption.monospacedDigit())
+                } else if let count = model.rowCount(pin.name, tab: model.tab), count > 0,
+                          let label = model.rowCountLabel(pin.name, tab: model.tab) {
+                    Text(label).font(Theme.caption.monospacedDigit())
                         .foregroundStyle(Theme.textMuted)
                 }
             }

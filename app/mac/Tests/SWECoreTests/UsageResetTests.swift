@@ -25,7 +25,7 @@ import Testing
         let five = resets[0]
         #expect(five.account == "claude-work")
         #expect(five.accountName == "Work")
-        #expect(five.title == "Claude: Work")
+        #expect(five.title == "Claude Code: Work")
         #expect(five.harness == "claude")
         #expect(five.at == at)
         #expect(!five.isStale)

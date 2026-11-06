@@ -29,13 +29,13 @@ import Testing
 
     @Test func homesAreNamedAfterTheirProfile() {
         let names = directory(profiles)
-        #expect(names.label(for: "/Users/k/.claude") == "Claude: Default")
+        #expect(names.label(for: "/Users/k/.claude") == "Claude Code: Default")
         #expect(names.label(for: "/Users/k/.swe/accounts/codex/codex-side/home") == "Codex: Side")
     }
 
     @Test func homesWithoutAProfileShowTheirHarness() {
         let names = directory([])
-        #expect(names.label(for: "/Users/k/.claude") == "Claude")
+        #expect(names.label(for: "/Users/k/.claude") == "Claude Code")
         #expect(names.label(for: "/Users/k/Library/Application Support/Cursor") == "Cursor")
         #expect(names.label(for: "/Users/k/.local/share/opencode") == "OpenCode")
         #expect(names.label(for: "/Users/k/.local/share/devin/cli") == "Devin")

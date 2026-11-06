@@ -41,12 +41,12 @@ import Testing
         #expect(HarnessMark("codex-acc2").name == "Codex (acc2)")
     }
 
-    /// A Claude account is the Anthropic subscription, so it reads
-    /// "Claude"; every other account reads its harness name.
+    /// Every account reads its harness name, Claude's included: the app
+    /// says "Claude Code" everywhere.
     @Test func accountNames() {
-        #expect(Vendor.claude.title == "Claude")
+        #expect(Vendor.claude.title == "Claude Code")
         #expect(Vendor.codex.title == "Codex")
-        #expect(ProviderCatalog.provider("claude")?.name == "Claude")
+        #expect(ProviderCatalog.provider("claude")?.name == "Claude Code")
         #expect(ProviderCatalog.provider("droid")?.name == "Factory Droid")
         #expect(ProviderCatalog.provider("commandcode")?.icon == "commandcode")
     }
