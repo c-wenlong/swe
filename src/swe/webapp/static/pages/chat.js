@@ -150,7 +150,7 @@ const SessionChat = (() => {
   /* ------------------------------------------------------------ requests */
 
   /* app.js's apiPost, with its authHeaders: the paired bearer when
-   * there is one, and X-Quiver-Pair, which lets the hub owner's own
+   * there is one, and X-Swe-Pair, which lets the hub owner's own
    * tailnet devices in without pairing. status 0 means the hub never
    * answered (offline, connection lost). */
   const post = (path, body) => apiPost(path, body);

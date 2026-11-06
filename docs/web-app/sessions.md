@@ -73,7 +73,7 @@ the chat, like the Repositories rail's fold.
    asked.
 
 Every request sends app.js's `authHeaders()`: the paired bearer when the
-browser has one, and `X-Quiver-Pair: 1`, so the hub owner's own tailnet
+browser has one, and `X-Swe-Pair: 1`, so the hub owner's own tailnet
 devices work without pairing.
 
 Events handled: `message.appended` (a user message also takes its send
