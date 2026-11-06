@@ -469,6 +469,14 @@ class TestHandle(unittest.TestCase):
         actions = self.posts[0]["actions"]
         self.assertEqual([a["action"] for a in actions], ["view"])
 
+    def test_an_auto_answered_request_sends_no_push(self):
+        ev = {"type": "approval.requested", "session": "k1",
+              "data": {"request_id": "acp-2", "prompt": "ls?",
+                       "options": [{"n": "1", "label": "Allow"}],
+                       "auto": True}}
+        self.n._handle(ev, self.cfg)
+        self.assertEqual(self.posts, [])
+
     def test_rows_marked_standing_get_no_button_whatever_the_label(self):
         # An ACP agent's allow_always option, named in another language:
         # the label passes the English filter, the kind does not.

@@ -116,6 +116,11 @@ replays the journal.
 | `GET /v1/app/tasks` | the web app's Tasks: the `GET /v1/tasks` answer verbatim — `{tasks: [TaskRow], repos?, github, linear, notion, env_blocked?, machine, machine_id, fetched_at?}` — plus two joins on each `TaskRow`: `session_rows`, its linked session keys joined to catalog rows trimmed to `{key, id?, harness, agent, title, status, cwd, machine, machine_id, remote, ownership, attachable, last_active_at, trivial}` (`{"key", "gone": true}` for a key the catalog lost; a remote row's `machine` is its name from `machines.json`), and `launch_rows`, its linked launch ids joined to live launch views `{id, state: pending\|started\|failed\|untracked, harness, note, key, cwd, machine}` (a launch the hub forgot is left off). `?refresh=1` bypasses the cache as on `/v1/tasks`; `?harnesses=1` answers only `{harnesses: [{name, display_name, tracked, launch_model, launch_effort, launch_yolo, last_model, recent_models}], machine}` (`launch_model`/`launch_effort`/`launch_yolo`: the launch takes that pick or switch; `recent_models`: the harness's recently used models, newest first, at most 5; `last_model`: its head, "" when none) — `catalog.launchable_harnesses`. Built by `webapp/pages/tasks.py`; see docs/web-app/tasks.md |
 | `GET /v1/app/<page>` · `POST /v1/app/<page>/<action>` | a web app page plugin (`swe/webapp/pages/<page>.py`); each payload is documented in `docs/web-app/<page>.md`. `404` for an unknown page or action, `403 bad_origin` on a cross-site POST, `503 page_unavailable` when the page can't read its source |
 
+An `approval.requested` with `auto: true` was answered by the channel
+itself (an ACP launch with Autonomy on picking the allow-once option);
+its `approval.resolved` follows with `decision: "allow"` and `source:
+"autonomy"`, and no push goes out for it.
+
 `message.delta` is live text for a reply still being written (Codex
 app-server, opencode serve, headless Claude and ACP sessions only; a
 tmux session never streams). The envelope has no `seq` and its SSE frame no

@@ -192,6 +192,12 @@ _CHUNK_KINDS = {
 
 # Events kept for a connection nobody listens to yet.
 _HELD_MAX = 64
+_HELD_HARD_MAX = 1024
+
+
+def _informational(data: dict) -> bool:
+    """An event only recording what Autonomy answered by itself."""
+    return bool(data.get("auto")) or data.get("source") == "autonomy"
 
 # JSON-RPC "method not found".
 _NO_METHOD = -32601
@@ -202,8 +208,12 @@ class Connection:
     it serves, and the turn and permission requests in flight."""
 
     def __init__(self, argv: list[str], cwd: str, env: dict | None = None,
-                 *, spawn=None) -> None:
+                 *, spawn=None, auto_allow: bool = False) -> None:
         self.argv = list(argv)
+        # Autonomy (a launch's ``yolo``): each permission request is
+        # answered with the agent's allow-once option, never an
+        # "always" one; a request without one gets the usual card.
+        self.auto_allow = auto_allow
         self.cwd = cwd
         popen = spawn or subprocess.Popen
         self.proc = popen(
@@ -251,6 +261,8 @@ class Connection:
         self._stream_no = 0
         self._tools: set[str] = set()
         self._turn_no = 0
+        # The turn session/cancel was sent for (-1: none yet).
+        self._cancelled_turn = -1
         # Stream ids carry this, so a restarted agent's ids never repeat
         # ones the clients already closed.
         self._nonce = secrets.token_hex(4)
@@ -293,8 +305,14 @@ class Connection:
                 # stay empty until its tailer starts (a journal with no
                 # cursor makes the tailer skip the first turn), so the
                 # event waits for bind().
-                if len(self._held) < _HELD_MAX:
-                    self._held.append((etype, data))
+                # Past the soft cap only the record of auto-answered
+                # requests is shed: a request someone must answer is
+                # always kept (open requests bound it), up to a hard cap.
+                full = len(self._held) >= _HELD_MAX
+                if full and (_informational(data)
+                             or len(self._held) >= _HELD_HARD_MAX):
+                    return
+                self._held.append((etype, data))
                 return
         self._send_event(emit, etype, data)
 
@@ -482,6 +500,10 @@ class Connection:
         ``cancelled`` (the spec's rule for a cancelled turn)."""
         if self.turn_rpc is None and not self.approvals:
             return False
+        # A permission request still in flight from this turn is answered
+        # ``cancelled`` too, never auto-allowed after the Stop.
+        with self.lock:
+            self._cancelled_turn = self._turn_no
         ok = self.notify("session/cancel", {"sessionId": self.session_id})
         self._retire_approvals("cancelled", answer=True)
         return ok
@@ -651,9 +673,18 @@ class Connection:
                            (None, self.session_id)):
             self._respond(rpc_id, {"outcome": {"outcome": "cancelled"}})
             return
-        request_id = f"acp-{secrets.token_hex(6)}"
         with self.lock:
-            self.approvals[request_id] = (rpc_id, options)
+            stopped = self._cancelled_turn == self._turn_no
+        if stopped:
+            # The turn was cancelled: nothing more is granted in it.
+            self._respond(rpc_id, {"outcome": {"outcome": "cancelled"}})
+            return
+        request_id = f"acp-{secrets.token_hex(6)}"
+        once = next((o for o in options if o.get("kind") == "allow_once"),
+                    None) if self.auto_allow else None
+        if once is None:
+            with self.lock:
+                self.approvals[request_id] = (rpc_id, options)
         tool = params.get("toolCall")
         tool = tool if isinstance(tool, dict) else {}
         prompt = str(tool.get("title") or "permission requested")
@@ -665,11 +696,24 @@ class Connection:
                 detail = " ".join(str(p) for p in detail)
             if isinstance(detail, str) and detail and detail not in prompt:
                 prompt += f"\n\n`{detail[:500]}`"
-        self._emit("approval.requested", {
+        request = {
             "request_id": request_id,
             "prompt": _tr._redact_secrets(prompt),
             "options": [_menu_row(i, o) for i, o in enumerate(options, 1)],
-        })
+        }
+        if once is None:
+            self._emit("approval.requested", request)
+            return
+        # Answered here, and the pair journaled so the apps show what
+        # was allowed: the request (``auto``: no push, no inbox wait)
+        # and its resolve, naming the row that was picked.
+        if not self._respond(rpc_id, {"outcome": {
+                "outcome": "selected", "optionId": once["optionId"]}}):
+            return
+        self._emit("approval.requested", {**request, "auto": True})
+        self._emit("approval.resolved", {
+            "request_id": request_id, "decision": "allow",
+            "source": "autonomy"})
 
     def _retire_approvals(self, source: str, *, answer: bool) -> None:
         with self.lock:

@@ -379,6 +379,10 @@ class Notifier:
         data = ev.get("data") or {}
         key = str(ev.get("session") or "")
         title = self._session_title(key)
+        if etype == "approval.requested" and data.get("auto"):
+            # Answered by the channel itself (an ACP launch's Autonomy):
+            # nothing waits on anyone.
+            return
         if etype == "approval.requested":
             rid = str(data.get("request_id") or "")
             prompt = _tr._redact_secrets(

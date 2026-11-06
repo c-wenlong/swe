@@ -263,7 +263,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--mode=acp` on an agent that can't load sessions starts a new one
   and says so. A new session launched from the apps for such a harness
   starts over ACP too (`session/new`, then the first prompt), unless
-  the launch picks a model, effort, autonomy or provider; if the agent
+  the launch picks a model, effort or provider. With Autonomy on, the
+  channel answers each permission request with the agent's "allow
+  once" option (never an "always" one) and the chat shows it as
+  allowed; a request without one still asks you; if the agent
   fails to start, the launch falls back to tmux. Claude can run through the `claude-agent-acp` adapter with `--mode=acp` when it is installed;
   harness.json's `capabilities.acp` overrides or turns off detection
   ([#1637](https://github.com/c-wenlong/swe/issues/1637)).
