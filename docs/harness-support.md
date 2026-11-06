@@ -6,11 +6,12 @@ per harness, what actually works today. **Yes** means fully supported.
 each table. **No** means not implemented, usually because the harness writes
 no data SWE can read.
 
-Only harnesses `swe discover` can find are listed (Kimi, Grok, Antigravity,
-Command Code and Qoder are missing, see Known gaps), plus Jules and
-Mastracode, which `swe install` knows but discovery does not.
+Every harness `swe discover` can find is listed, plus Jules, Mastracode and
+ZCode, which `swe install` knows but discovery does not.
 
 ## Setup
+
+**Skills** means `swe` links its shared skills folder into the harness's skills folder: the harness has a `HARNESS_ROOTS` entry (`src/swe/skills/layout.py`) or a skills path in `swe init`'s `HARNESS_SIGNATURES`.
 
 | Harness | Install | Instructions | Skills | Plugins | MCP sync |
 |---|---|---|---|---|---|
@@ -26,18 +27,25 @@ Mastracode, which `swe install` knows but discovery does not.
 | Devin | Yes | Yes | Yes | No | Partial |
 | Crush | Yes | Yes | Yes | No | Partial |
 | Qwen Code | Yes | Yes | Yes | No | Partial |
-| Mistral Vibe | Yes | No | No | No | Partial |
+| Mistral Vibe | Yes | No | Yes | No | Partial |
 | Goose | Yes | No | No | No | Partial |
 | Aider | Yes | No | No | No | Partial |
-| Continue | Yes | No | No | No | Partial |
-| Pi | Yes | No | No | No | Partial |
-| Forge | Yes | No | No | No | Partial |
-| Augment | Yes | No | No | No | Partial |
-| Kiro | Yes | No | No | No | Partial |
+| Continue | Yes | No | Yes | No | Partial |
+| Pi | Yes | No | Yes | No | Partial |
+| Forge | Yes | No | Yes | No | Partial |
+| Augment | Yes | No | Yes | No | Partial |
+| Kiro | Yes | No | Yes | No | Partial |
 | Blackbox | Yes | No | No | No | Partial |
 | Freebuff | Yes | No | No | No | Partial |
+| Grok | Yes | No | Yes | No | Partial |
+| Kimi | Yes | No | No | No | Partial |
+| Antigravity | Yes | No | No | No | Partial |
+| Command Code | Yes | No | No | No | Partial |
+| Qoder | Yes | No | No | No | Partial |
+| Qoder CN | Yes | No | No | No | Partial |
 | Jules | Yes | No | No | No | No |
 | Mastracode | Yes | No | No | No | No |
+| ZCode | Yes | No | No | No | No |
 
 Notes:
 
@@ -53,8 +61,10 @@ Notes:
   `~/.<name>/mcp.json` path, which SWE cannot confirm the harness
   actually reads. Claude, Cursor, Copilot, Cline, Gemini, OpenCode, Kilo,
   Codex and Droid have verified config locations instead.
-- **Jules and Mastracode:** install-only. They are not in the discovery
-  catalog, so MCP sync never sees them.
+- **Skills without instructions:** Mistral Vibe, Forge, Augment, Continue,
+  Pi, Kiro and Grok get the shared skills link but no `AGENTS.md` link.
+- **Jules, Mastracode and ZCode:** install-only. They are not in the
+  discovery catalog, so MCP sync never sees them.
 
 ## Sessions
 
@@ -78,6 +88,7 @@ the app reads swe's output. Resume differs only for the Partial rows below.
 | Continue | Yes | Partial |
 | Crush | Yes | Partial |
 | Forge | Yes | Partial |
+| Grok | Yes | Partial |
 | Qwen Code | No | No |
 | Mistral Vibe | No | No |
 | Goose | No | No |
@@ -85,12 +96,18 @@ the app reads swe's output. Resume differs only for the Partial rows below.
 | Augment | No | No |
 | Kiro | No | No |
 | Blackbox | No | No |
+| Kimi | No | No |
+| Antigravity | No | No |
+| Command Code | No | No |
+| Qoder | No | No |
+| Qoder CN | No | No |
 | Jules | No | No |
 | Mastracode | No | No |
+| ZCode | No | No |
 
 Notes:
 
-- **Resume, Partial:** Gemini, Continue, Crush and Forge take no session id
+- **Resume, Partial:** Gemini, Continue, Crush, Forge and Grok take no session id
   on their command lines. `swe session` can only reopen the harness in the
   session's directory, not the session itself, and the app offers no
   Resume button for them.
@@ -123,8 +140,15 @@ Notes:
 | Augment | No | No | No |
 | Kiro | No | No | No |
 | Blackbox | No | No | No |
+| Grok | No | No | No |
+| Kimi | No | No | No |
+| Antigravity | No | No | No |
+| Command Code | No | No | No |
+| Qoder | No | No | No |
+| Qoder CN | No | No | No |
 | Jules | No | No | No |
 | Mastracode | No | No | No |
+| ZCode | No | No | No |
 
 Notes:
 
@@ -139,7 +163,8 @@ Notes:
   editor's own database, so feed events never draw a second calendar row.
 - **Grok Bot:** uses the Cursor account, so the same feed gives it tokens
   and cost (listed as Grok Bot) and a calendar row; it has no limits meter
-  of its own.
+  of its own. The Grok harness row above is the `grok` CLI, which has none
+  of the three.
 - **Droid and Cline, tokens and cost:** both keep token totals per
   session rather than per request, so SWE counts the whole session at
   its last activity (Droid) or its end (Cline). Droid reports credits,
@@ -185,10 +210,11 @@ Notes:
   file exists to link.
 - **Devin extra profiles are not counted in the ledger**, so their spend is
   invisible even though their limits show.
-- **Kimi, Grok, Antigravity, Command Code and Qoder (both editions)** are
-  discoverable and installable, but the tables above do not list them yet.
-  Grok also has a session reader, so its sessions appear in `swe session`
-  output and the app's Sessions page.
-- **Mistral Vibe, Goose, Aider, Augment, Kiro and Blackbox** are
-  discoverable and installable but have no instructions, skills, sessions
-  or usage support yet.
+- **Kimi, Antigravity, Command Code and Qoder (both editions)** are
+  discoverable and installable, but have no instructions, skills, sessions
+  or usage support yet. Grok gets shared skills and has a session reader,
+  so its sessions appear in `swe session` output and the app's Sessions
+  page.
+- **Goose, Aider and Blackbox** are discoverable and installable but have
+  no instructions, skills, sessions or usage support yet. **Mistral Vibe,
+  Augment and Kiro** get shared skills and nothing else.
