@@ -232,6 +232,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   setting. The old credential key stays until the next sign-in or
   sign-out, so a tab still open on an older page keeps working.
 
+- **Pair QR codes stay on `quiver://pair` for one more release.** The
+  iPhone app has opened both `swe://` and `quiver://` links since it
+  became SWE Remote (2026-11-01), but a phone still running a build from
+  before then registers only `quiver://`, and a `swe://` code would open
+  nothing there. Hubs keep writing `quiver://pair` until the next
+  release, which switches to `swe://pair`: rebuild the iPhone app from a
+  current checkout before then.
+
 - **The MCP pages name the hub `swe` when they sync or remove.** The
   Mac and web MCP sheets still sent the hub's pre-rename name, `quiver`,
   as a sync source and remove place. Both now send `swe`; the hub's web
