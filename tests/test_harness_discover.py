@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -520,6 +521,22 @@ class DiscoverCommandSelectionTest(unittest.TestCase):
         code, out, apply = self._run(["--apply", "nope"], [self._finding("a")])
         self.assertEqual(code, 1)
         self.assertIn("Not a new match: nope", out)
+        apply.assert_not_called()
+
+    def test_json_unknown_name_is_a_refused_document(self):
+        # The app decodes stdout whole: a name that is not a new match
+        # must come back as JSON in the `applied.refused` shape, exit 1,
+        # and register nothing.
+        code, out, apply = self._run(["--apply", "nope", "--json"],
+                                     [self._finding("a")])
+        self.assertEqual(code, 1)
+        doc = json.loads(out)
+        data = doc["data"]
+        self.assertEqual([f["name"] for f in data["findings"]], ["a"])
+        self.assertEqual(data["applied"]["added"], [])
+        self.assertTrue(data["applied"]["refused"])
+        self.assertEqual([s["name"] for s in data["applied"]["skipped"]], ["nope"])
+        self.assertIn("not a new match", data["applied"]["skipped"][0]["reason"])
         apply.assert_not_called()
 
     def test_names_without_apply_are_rejected(self):

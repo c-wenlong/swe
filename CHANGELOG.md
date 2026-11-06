@@ -46,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`swe harness discover --json --apply NAME` answers in JSON when NAME
+  is not a new match.** It printed red text, which the app could not
+  decode. It now prints the usual document with `applied.refused` and the
+  name under `applied.skipped`, and exits 1.
+
 - **The web app's model search and price edits no longer wait on the
   daily price download.** The LiteLLM price list was fetched while
   holding the lock every catalog read and price save takes, so a slow
