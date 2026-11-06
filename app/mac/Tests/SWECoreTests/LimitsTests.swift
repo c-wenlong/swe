@@ -37,7 +37,7 @@ func reading(
         let readings = LimitReading.all(cards: cards, others: others, now: now)
 
         #expect(readings.map(\.id) == ["claude-work|5h", "claude-work|7d", "devin|7d"])
-        #expect(readings[1].title == "Claude: Work")
+        #expect(readings[1].title == "Claude Code: Work")
         #expect(readings[1].harness == "claude")
         #expect(readings[1].usedPercent == 71)
         #expect(readings[2].title == "Devin")

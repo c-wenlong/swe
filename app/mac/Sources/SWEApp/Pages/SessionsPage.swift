@@ -802,8 +802,7 @@ private struct SessionRow: View {
     }
 
     static func duration(_ seconds: TimeInterval) -> String {
-        let minutes = Int(seconds / 60)
-        return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
+        CalendarFormat.duration(seconds)
     }
 }
 

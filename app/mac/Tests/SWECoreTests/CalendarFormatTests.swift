@@ -35,6 +35,9 @@ import Testing
         #expect(CalendarFormat.duration(60) == "1m")
         #expect(CalendarFormat.duration(59 * 60 + 30) == "59m")
         #expect(CalendarFormat.duration(2 * 3600 + 5 * 60) == "2h 5m")
+        #expect(CalendarFormat.duration(47 * 3600 + 59 * 60) == "47h 59m")
+        #expect(CalendarFormat.duration(48 * 3600) == "2d 0h")
+        #expect(CalendarFormat.duration(169 * 3600 + 49 * 60) == "7d 1h")
     }
 
     @Test func aMissingTitleKeepsAReadableSessionId() {
