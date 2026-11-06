@@ -14,9 +14,13 @@ struct SkillsPage: View {
     /// one shows at once.
     private var model: SkillsModel { app.skills }
 
+    /// A skill's detail is on screen (`DetailOpenKey`).
+    @State private var detailOpen = false
+
     var body: some View {
         Page(title: "Skills",
-             subtitle: "Every skill on this Mac outside a plugin, and which harnesses load it.") {
+             subtitle: "Every skill on this Mac outside a plugin, and which harnesses load it.",
+             back: detailOpen ? ("Back to all skills", { app.navReselects += 1 }) : nil) {
             // The harness links fold into one line in the header, so the
             // first skill sits right under the filter bar.
             if case .loaded(let inventory) = model.inventory {
@@ -39,6 +43,7 @@ struct SkillsPage: View {
                 app.pluginsTab = .explore
                 app.selection = .plugins
             }
+            .onPreferenceChange(DetailOpenKey.self) { detailOpen = $0 }
         }
         // Both at once: which skills stay here depends on the catalog. The
         // app hands the model each new catalog (AppModel.start).
