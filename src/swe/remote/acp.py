@@ -243,6 +243,7 @@ class Connection:
         self.emit = None
         self.deltas = None
         self._held: list[tuple[str, dict]] = []
+        self._flush_lock = threading.Lock()
         # The stream id currently growing per kind, and tool calls whose
         # title streams until they finish.
         self._streams: dict[str, str] = {}
@@ -268,12 +269,21 @@ class Connection:
                 self.machine = machine
             if deltas is not None:
                 self.deltas = deltas
-            held = []
-            if emit is not None:
-                self.emit = emit
-                held, self._held = self._held, []
-        for etype, data in held:
-            self._send_event(emit, etype, data)
+        if emit is None:
+            return
+        # Flush what was held, oldest first, and only then let the
+        # reader send directly: an event raised during the flush (the
+        # request's own approval.resolved) queues behind the rest. One
+        # flush at a time, so two binds can't interleave their halves.
+        with self._flush_lock:
+            while True:
+                with self.lock:
+                    held, self._held = self._held, []
+                    if not held:
+                        self.emit = emit
+                        return
+                for etype, data in held:
+                    self._send_event(emit, etype, data)
 
     def _emit(self, etype: str, data: dict) -> None:
         with self.lock:

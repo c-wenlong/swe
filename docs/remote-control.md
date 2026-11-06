@@ -448,15 +448,19 @@ marker (`mode: acp`), runs `initialize` and `session/new` within
 `LAUNCH_ACP_S` (20 s; the launch runs after the 202, so the apps'
 timeout doesn't bind it), writes the new session's id into the marker
 as `expect_id`, and sends the first prompt. Adoption then binds exactly
-that session, as `mode: acp`, once its transcript shows. The agent is
+that session, as `mode: acp`, once its transcript shows; an ACP marker
+without its `expect_id` yet adopts nothing, so a slow handshake can't
+claim someone else's session in the folder. The agent is
 held under the key that id gives (`tool:<id>`); events it raises before
 the session has a tailer (a first-turn approval) wait in the connection
 and go out once the hub's tail sync has one (`release_held`), since a
 journal written before the tailer starts would make it skip the first
 turn. An `initialize` or `session/new` that fails or times out, or an
 agent that exits on the first prompt, falls back to the tmux launch,
-with the reason in the launch's note; an agent that refuses the first
-prompt fails the launch. The launch wire is unchanged: the 202's note
+with the reason in the launch's note (kept on the launch record, so
+`GET /v1/launches/{id}` shows it), and the fallback never adopts the
+session the dead agent created. An agent that refuses the first prompt
+fails the launch. The launch wire is unchanged: the 202's note
 reads "starting over ACP", and an ACP launch needs no tmux.
 
 The attach's live agent stays registered with the injector, so the

@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -811,6 +812,45 @@ class TestLaunch(_LaunchCase):
         self.assertIsNone(supervise.fork_blocker(
             self.home, "devin", str(self.proj)))
 
+    def test_a_marker_still_handshaking_adopts_nothing(self):
+        folder = supervise._pending_dir(self.home)
+        folder.mkdir(parents=True, exist_ok=True)
+        marker = {"tmux": "acp-x", "mode": "acp", "tool_name": "devin",
+                  "cwd": str(self.proj), "exclude": [], "launch_id": "l2",
+                  "launched_at": time.time() - 5}
+        (folder / "acp-x.json").write_text(json.dumps(marker))
+        theirs = Session(timestamp=time.time() * 1000, agent="Devin",
+                         path=str(self.proj), session_id="theirs",
+                         tool_name="devin")
+        rows = [("devin:theirs", theirs, "active")]
+        # A person's new session in the folder, mid-handshake: not ours.
+        with patch("swe.remote.tail.resolve_jsonl_path", return_value=None):
+            self.assertEqual(supervise.adopt_pending(self.home, rows), [])
+            # The same marker as a tmux launch's would have taken it.
+            del marker["mode"]
+            (folder / "acp-x.json").write_text(json.dumps(marker))
+            self.assertEqual(supervise.adopt_pending(self.home, rows),
+                             ["devin:theirs"])
+
+    def test_held_events_flush_before_live_ones(self):
+        self.assertTrue(self._launch()[0])
+        conn = inject.AcpInjector._conns[self.new_key]
+        conn.idle.wait(10)
+        conn._emit("approval.requested", {"request_id": "a"})
+        conn._emit("approval.requested", {"request_id": "b"})
+        seen = []
+
+        def emit(key, ev):
+            seen.append(ev["data"]["request_id"])
+            if ev["data"]["request_id"] == "a":
+                # The reader resolving "a" mid-flush must queue behind b.
+                conn._emit("approval.resolved", {"request_id": "a-done"})
+
+        conn.bind(self.new_key, "m1", emit, None)
+        self.assertEqual(seen, ["a", "b", "a-done"])
+        conn._emit("notify", {"request_id": "live"})
+        self.assertEqual(seen[-1], "live")
+
     def test_eligibility_rules(self):
         self.assertTrue(supervise.acp_launch_eligible("devin", "hi"))
         for kw in ({"model": "m"}, {"effort": "high"}, {"yolo": True},
@@ -888,6 +928,9 @@ class TestLaunchCrashFallback(_LaunchCase):
         self.assertIn("exited on the first prompt", note)
         self.assertIn("fell back to tmux", note)
         self.tmux.assert_called_once()
+        # The dead agent's session may have a transcript: never adopted.
+        self.assertEqual(self.tmux.call_args[1]["known_ids"],
+                         ["old", "fresh-1"])
         self.assertNotIn(self.new_key, inject.AcpInjector._conns)
         self.assertEqual(self._markers(), [])
 
@@ -927,6 +970,40 @@ class TestLaunchRefused(_LaunchCase):
 
 
 class TestHubLaunch(unittest.TestCase):
+    def test_fallback_note_reaches_the_launch_poll(self):
+        from tests.test_remote_hub import _Server
+
+        srv = _Server(sessions=[], statuses=lambda ss: [])
+        self.addCleanup(srv.stop)
+        hdr = {"Authorization": f"Bearer {srv.pair()['credential']}"}
+        proj = temp_dir(self)
+        note = ("launched under tmux; the session appears on refresh "
+                "(ACP handshake failed: auth required; fell back to tmux)")
+        with patch("swe.remote.catalog.launch_command",
+                   return_value="devin"), \
+             patch("swe.remote.catalog.launchable_harnesses",
+                   return_value=[]), \
+             patch("swe.remote.catalog.untracked", return_value=[]), \
+             patch("swe.remote.catalog.known_session_ids",
+                   return_value=[]), \
+             patch("swe.remote.supervise.tmux_bin",
+                   return_value="/usr/bin/tmux"), \
+             patch.object(acp, "auto_eligible", return_value=True), \
+             patch("swe.remote.supervise.launch_new",
+                   return_value=(True, note, "qv-1")):
+            status, data = srv.request(
+                "POST", "/v1/sessions",
+                body={"harness": "devin", "cwd": str(proj),
+                      "prompt": "hi"}, headers=hdr)
+            for t in threading.enumerate():
+                if t.name.startswith("remote-launch-"):
+                    t.join(timeout=5)
+        lid = json.loads(data)["launch_id"]
+        _, view = srv.request("GET", f"/v1/launches/{lid}", headers=hdr)
+        view = json.loads(view)
+        self.assertEqual(view["state"], "pending")
+        self.assertIn("fell back to tmux", view["note"])
+
     def test_acp_launch_needs_no_tmux_and_says_so(self):
         from tests.test_remote_hub import _Server
 

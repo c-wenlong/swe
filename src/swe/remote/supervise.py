@@ -1896,19 +1896,27 @@ def launch_new(
     acp_note = ""
     if acp_launch_eligible(tool_name, prompt, model=model, effort=effort,
                            yolo=yolo, provider=provider, tracked=exclusive):
-        outcome, note = _launch_acp(home, tool_name, cwd, prompt,
-                                    known_ids=known_ids,
-                                    launch_id=launch_id)
+        outcome, note, abandoned = _launch_acp(
+            home, tool_name, cwd, prompt, known_ids=known_ids,
+            launch_id=launch_id)
         if outcome != "fallback":
             return outcome == "ok", note, None
         acp_note = note
+        if abandoned:
+            # The agent may have written a transcript before it died:
+            # the tmux launch must never adopt that one.
+            known_ids = [*(known_ids or []), abandoned]
     ok, note, name = _launch_new_tmux(
         home, tool_name, cwd, prompt, known_ids=known_ids,
         launch_id=launch_id, binary=binary, model=model, effort=effort,
         yolo=yolo, provider=provider, exclusive=exclusive)
     if acp_note:
-        note = f"{note} ({acp_note}; fell back to tmux)"
+        note = f"{note} ({acp_note}; {ACP_FALLBACK_NOTE})"
     return ok, note, name
+
+
+# Ends the note of a launch whose ACP agent did not come up.
+ACP_FALLBACK_NOTE = "fell back to tmux"
 
 
 # How long a launch gives its ACP agent to initialize and open a new
@@ -1939,12 +1947,14 @@ def acp_launch_eligible(
 def _launch_acp(
     home: Path | None, tool_name: str, cwd: str, prompt: str, *,
     known_ids: list[str] | None, launch_id: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     """``launch_new`` over ACP: start the agent, ``session/new`` (no
     resume mapping needed), send the first prompt. Returns ``(outcome,
-    note)``: ``ok``; ``failed`` (refused, nothing to fall back for); or
-    ``fallback`` when the agent could not come up (initialize failed or
-    timed out, or it died on the first prompt), with the reason.
+    note, abandoned)``: ``ok``; ``failed`` (refused, nothing to fall
+    back for); or ``fallback`` when the agent could not come up
+    (initialize failed or timed out, or it died on the first prompt),
+    with the reason. ``abandoned`` is the id of a session the agent
+    created before it was given up on, else "".
 
     The pending marker reserves the folder as a tmux launch's does, then
     names the new session's id (``expect_id``), so adoption binds exactly
@@ -1956,7 +1966,7 @@ def _launch_acp(
 
     argv = acp.command_for(tool_name)
     if argv is None:
-        return "fallback", f"{tool_name} has no ACP mode installed"
+        return "fallback", f"{tool_name} has no ACP mode installed", ""
     slot = f"acp-{secrets.token_hex(4)}"
     marker = _pending_dir(home) / f"{slot}.json"
     pending = {
@@ -1971,18 +1981,19 @@ def _launch_acp(
     with _registry_lock(home):
         busy = fork_blocker(home, tool_name, cwd)
         if busy:
-            return "failed", launch_busy_note(tool_name, busy)
+            return "failed", launch_busy_note(tool_name, busy), ""
         try:
             marker.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(marker, json.dumps(pending))
         except OSError:
-            return "fallback", "could not reserve the folder"
+            return "fallback", "could not reserve the folder", ""
 
-    def give_up(conn, outcome: str, note: str) -> tuple[str, str]:
+    def give_up(conn, outcome: str, note: str,
+                sid: str = "") -> tuple[str, str, str]:
         if conn is not None:
             conn.close()
         marker.unlink(missing_ok=True)
-        return outcome, note
+        return outcome, note, sid
 
     try:
         conn = acp.Connection(argv, cwd)
@@ -1998,14 +2009,15 @@ def _launch_acp(
         with _registry_lock(home):
             atomic_write_text(marker, json.dumps(pending))
     except OSError:
-        return give_up(conn, "fallback", "could not record the new session")
+        return give_up(conn, "fallback", "could not record the new session",
+                       conn.session_id)
     conn.bind(key, "", None, None)
     inject.AcpInjector.register(key, conn)
     try:
         q = conn.prompt(prompt)
     except acp.AcpError as exc:
         inject.AcpInjector.close(key)
-        return give_up(None, "fallback", str(exc))
+        return give_up(None, "fallback", str(exc), conn.session_id)
     import queue as queue_mod
 
     try:
@@ -2015,13 +2027,14 @@ def _launch_acp(
     if reply is None:
         inject.AcpInjector.close(key)
         return give_up(None, "fallback",
-                       f"{conn.label} exited on the first prompt")
+                       f"{conn.label} exited on the first prompt",
+                       conn.session_id)
     if isinstance(reply, dict) and "error" in reply:
         inject.AcpInjector.close(key)
         return give_up(None, "failed", f"{conn.label} refused the prompt: "
                                        f"{conn.last_error or 'error'}")
     return "ok", (f"launched over ACP ({conn.label}); the session appears "
-                  "on refresh")
+                  "on refresh"), ""
 
 
 def _launch_new_tmux(
@@ -2397,6 +2410,10 @@ def adopt_pending(
         # never wrote a transcript or was missed by the parser.
         if now - float(pending.get("launched_at") or 0) > PENDING_MAX_AGE_S:
             marker.unlink(missing_ok=True)
+            continue
+        if pending.get("mode") == "acp" and not pending.get("expect_id"):
+            # Still handshaking: it adopts the id session/new names and
+            # nothing else, never a folder-and-time match meanwhile.
             continue
         hit = _pending_match(home, pending, rows, claimed)
         if hit is None:

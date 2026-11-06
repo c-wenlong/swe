@@ -629,6 +629,11 @@ class HubState:
                     lid, state="failed", note=str(data.get("note") or "")
                 )
             elif lid and data.get("op") == "launch":
+                note = str(data.get("note") or "")
+                if supervise.ACP_FALLBACK_NOTE in note:
+                    # The launch poll says why ACP's live controls
+                    # aren't there.
+                    self.settle_launch(lid, note=note)
                 self._settle_untracked(lid)
         written = self.journal.append(key, event)
         self.bus.publish(key, written)
@@ -3002,6 +3007,10 @@ class _Handler(BaseHTTPRequestHandler):
                     f"its sessions, so there's no chat to open"
                 ))
             else:
+                if supervise.ACP_FALLBACK_NOTE in note:
+                    # Kept on the launch record: the poll says why the
+                    # session runs under tmux, not ACP.
+                    state.settle_launch(launch_id, note=note)
                 # The transcript lands any second: the catalog loop must
                 # not sleep out its 10 s tick before looking for it.
                 state._catalog_wake.set()
