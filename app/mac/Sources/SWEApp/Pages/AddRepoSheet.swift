@@ -28,7 +28,7 @@ struct AddRepoSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Pin a repository").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+            Text("Pin a repository").font(Theme.sectionTitle).tracking(-0.5)
             Text("The pinned repos drive the Repositories page and act as the fallback when a command runs outside a checkout.")
                 .font(Theme.caption).foregroundStyle(Theme.textSecondary)
             FormField("Repository") {
