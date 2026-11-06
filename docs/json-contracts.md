@@ -117,15 +117,15 @@ replays the journal.
 | `GET /v1/app/<page>` · `POST /v1/app/<page>/<action>` | a web app page plugin (`swe/webapp/pages/<page>.py`); each payload is documented in `docs/web-app/<page>.md`. `404` for an unknown page or action, `403 bad_origin` on a cross-site POST, `503 page_unavailable` when the page can't read its source |
 
 `message.delta` is live text for a reply still being written (Codex
-app-server, opencode serve and headless Claude sessions only; a tmux
-session never streams). The envelope has no `seq` and its SSE frame no
+app-server, opencode serve, headless Claude and ACP sessions only; a
+tmux session never streams). The envelope has no `seq` and its SSE frame no
 `id:` line: deltas are never journaled, never replayed, and must not
 move a client's resume cursor. `data` is `{id, kind, text, seq, done}`:
 
 | Field | Meaning |
 |---|---|
 | `id` | the channel's id for the streamed message (Codex item id, opencode part id, `<Claude API message id>:<block index>`); one bubble per id |
-| `kind` | the RemoteMessage kind it will become; `assistant` for now |
+| `kind` | the RemoteMessage kind it will become: `assistant`, or on ACP sessions also `thinking` (thought chunks) and `tool_use` (a tool call's title). Clients draw only `assistant` and keep the rest for matching |
 | `text` | the cleaned, redacted text appended since this id's last delta (concatenate in `seq` order) |
 | `seq` | this id's delta count, from 1; a gap means one was dropped, so stop drawing that bubble and wait for the final message |
 | `done` | true on the id's last delta |

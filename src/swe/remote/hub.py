@@ -3652,6 +3652,16 @@ class _Handler(BaseHTTPRequestHandler):
                 422, "bad_mode", "appserver attach only exists for codex"
             )
             return
+        if mode == "acp":
+            from swe.remote import acp
+
+            if acp.command_for(session.tool_name) is None:
+                self._send_error(
+                    422, "bad_mode",
+                    f"{session.tool_name} has no Agent Client Protocol "
+                    "mode installed",
+                )
+                return
         if str(row.get("status") or "") == "active" and \
                 key not in supervise.kept(self._state.home):
             # Busy beats environment: on a box with no tmux the truest
@@ -3662,19 +3672,20 @@ class _Handler(BaseHTTPRequestHandler):
                 "session is mid-turn; try again when it is idle",
             )
             return
-        resolved = supervise.resolve_mode(session, mode)
+        try:
+            model = protocol._launch_value(body, "model")
+            effort = protocol._launch_value(body, "effort")
+        except ValueError as exc:
+            self._send_error(422, "bad_command", str(exc))
+            return
+        resolved = supervise.resolve_mode(session, mode, model=model,
+                                          effort=effort)
         if resolved == "tmux" and supervise.tmux_bin() is None:
             # Environment failure, not a state conflict: 409/not_idle
             # would tell the client to retry, which never helps.
             self._send_error(
                 422, "not_attachable", "tmux is not available"
             )
-            return
-        try:
-            model = protocol._launch_value(body, "model")
-            effort = protocol._launch_value(body, "effort")
-        except ValueError as exc:
-            self._send_error(422, "bad_command", str(exc))
             return
         blocked = supervise.channel_tuning_error(
             resolved, session.tool_name, model, effort)
