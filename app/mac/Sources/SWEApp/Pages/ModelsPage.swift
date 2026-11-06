@@ -22,7 +22,7 @@ struct ModelsPage: View {
     }
 }
 
-private struct ModelsContent: View {
+struct ModelsContent: View {
     @Bindable var model: ModelsModel
     @Environment(AppModel.self) private var app
     /// The logged name the link sheet is editing.
@@ -187,7 +187,7 @@ private struct ModelsContent: View {
     /// on one row. Until the widths are measured, assume they do.
     private var fitsOneRow: Bool {
         guard toolbarWidth > 0, controlsWidth > 0 else { return true }
-        return controlsWidth + 8 + Self.searchMinWidth + 8 + trailingWidth <= toolbarWidth
+        return Self.oneRowWidth(controls: controlsWidth, stamp: nil, trailing: trailingWidth) <= toolbarWidth
     }
 
     /// Whether the stamp fits: beside everything on one row, or beside
@@ -195,9 +195,20 @@ private struct ModelsContent: View {
     private var roomForStamp: Bool {
         guard model.updatedAt != nil, toolbarWidth > 0 else { return false }
         if fitsOneRow {
-            return controlsWidth + 8 + Self.searchMinWidth + 8 + stampWidth + 8 + trailingWidth <= toolbarWidth
+            return Self.oneRowWidth(controls: controlsWidth, stamp: stampWidth,
+                                    trailing: trailingWidth) <= toolbarWidth
         }
-        return Self.searchMinWidth + 8 + stampWidth <= toolbarWidth
+        return Self.searchMinWidth + Self.gap + stampWidth <= toolbarWidth
+    }
+
+    static let gap: CGFloat = 8
+
+    /// The one-row toolbar's narrowest width: controls, search floor,
+    /// spacer floor, the stamp if any and the buttons, with the HStack's
+    /// gap between every pair (the spacer is an item too).
+    static func oneRowWidth(controls: CGFloat, stamp: CGFloat?, trailing: CGFloat) -> CGFloat {
+        let items = [controls, searchMinWidth, gap /* Spacer(minLength:) */, stamp, trailing].compactMap { $0 }
+        return items.reduce(0, +) + gap * CGFloat(items.count - 1)
     }
 
     /// The freshness stamp lives here too, for when the row drops it.

@@ -122,6 +122,16 @@ struct ModelChartLayoutTests {
     /// Columns never drop below their floors; room above the floors is
     /// shared by weight, so the table fills the card exactly and the model
     /// name gets about a quarter of the extra width, not all of it.
+    /// The one-row toolbar counts every HStack gap, the spacer's included:
+    /// 4 items need 3 gaps plus the spacer's floor, 5 need 4.
+    @Test func theToolbarCountsEveryGap() {
+        let floor = ModelsContent.searchMinWidth
+        #expect(ModelsContent.oneRowWidth(controls: 700, stamp: nil, trailing: 36)
+                == 700 + floor + 8 + 36 + 3 * 8)
+        #expect(ModelsContent.oneRowWidth(controls: 700, stamp: 114, trailing: 80)
+                == 700 + floor + 8 + 114 + 80 + 4 * 8)
+    }
+
     /// A benchmark no listed row has a score for drops its column, and
     /// the room goes to the others.
     @Test func emptyBenchmarkColumnsDrop() {
