@@ -198,6 +198,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Pair QR codes stay on `quiver://pair` for one more release.** The
+  iPhone app has opened both `swe://` and `quiver://` links since it
+  became SWE Remote (2026-11-01), but a phone still running a build from
+  before then registers only `quiver://`, and a `swe://` code would open
+  nothing there. Hubs keep writing `quiver://pair` until the next
+  release, which switches to `swe://pair`: rebuild the iPhone app from a
+  current checkout before then.
+
 - **A stored Linear task's refresh no longer downloads its
   description.** The hub asked Linear for each issue's full body on
   every task read and never used it. The unused Notion page-body

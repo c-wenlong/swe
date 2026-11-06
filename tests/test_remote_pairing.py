@@ -71,6 +71,13 @@ class TestPairing(unittest.TestCase):
         url = pairing.pair_url("100.1.2.3", 8477, "tok")
         self.assertIn("#pair=tok", url)
 
+    def test_pair_payload_keeps_the_scheme_every_iphone_build_opens(self):
+        # iPhone builds from before the SWE Remote rename register only
+        # quiver://, so the QR stays on it for one more release (see
+        # PAIR_LINK_SCHEME); newer builds read both.
+        self.assertEqual(pairing.PAIR_LINK_SCHEME, "quiver")
+        self.assertTrue(pairing.pair_payload("h", 1, "t").startswith("quiver://pair?"))
+
     def test_pair_payload_carries_name(self):
         payload = pairing.pair_payload("h", 1, "tok", "dev's phone")
         self.assertIn("name=dev%27s%20phone", payload)
