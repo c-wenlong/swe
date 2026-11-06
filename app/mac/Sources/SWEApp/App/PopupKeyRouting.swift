@@ -80,6 +80,6 @@ import AppKit
                          timestamp: ProcessInfo.processInfo.systemUptime,
                          windowNumber: window.windowNumber, context: nil,
                          characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
-                         isARepeat: false, keyCode: 53)!
+                         isARepeat: false, keyCode: SheetKeys.escapeKeyCode)!
     }
 }

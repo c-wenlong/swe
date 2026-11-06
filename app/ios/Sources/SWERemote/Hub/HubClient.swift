@@ -599,7 +599,17 @@ struct HubClient: Sendable {
     }
 
     func pollPairRequest(id: String, secret: String) async throws -> PairPoll {
-        try await send(request("GET", "/v1/pair/request/\(Self.encodeKey(id))", query: ["secret": secret]))
+        try await send(pairPollRequest(id: id, secret: secret))
+    }
+
+    /// The poll's secret collects the new device's credential, so it goes
+    /// in `X-Pair-Secret`, never the URL, where proxy and access logs
+    /// would keep it. The hub reads the header (and still takes
+    /// `?secret=` from builds that sent it there).
+    func pairPollRequest(id: String, secret: String) -> URLRequest {
+        var req = request("GET", "/v1/pair/request/\(Self.encodeKey(id))")
+        req.setValue(secret, forHTTPHeaderField: "X-Pair-Secret")
+        return req
     }
 
     func pairRequests() async throws -> [PendingPairRequest] {

@@ -13,7 +13,7 @@ remembering CLI commands.
 | Look | The TokenTracker style package in design-systems (`systems/tokentracker`); values come from its `tokens.json`. Borderless sidebar on the window wash, rounded content panel, hairline cards, sentence case everywhere (no all caps), green only for money and "on" states, and a visible focus ring. |
 | Data that refreshes often | Native Swift: usage, cost, limits, account profiles |
 | Data that writes harness config | `swe … --json`, so the tested Python code stays the only writer |
-| Sidebar | Usage: Overview, Sessions. Manage: Accounts, Harnesses, Compute, Skills, AGENTS.md, MCP servers, Plugins. System: Menu bar, Widgets, Service status, Settings |
+| Sidebar | Usage: Overview, Sessions, Calendar, Pricing. GitHub: Repositories, Tasks, Inbox. Manage: Accounts, Harnesses, Compute. Primitives: Plugins, Skills, AGENTS.md, MCP servers, Hooks, Models. System: Menu bar, Widgets, Service status, Settings |
 | Accounts page | Limits merged with Switchboard-style profiles: each account card has its limit bars, when they were fetched, and Open app / Terminal buttons |
 | Kept from TokenTracker | Sessions and Limits (the most important), menu bar and widgets, Skills (built on swe hub), Service Status (extended to more services), Settings, Tokens overview. Claude IP Check at low priority. |
 | Out of scope | Leaderboard, Achievements, Pet. Cloud sync narrowed by M9: syncing app state stays out, remote access to sessions is in. |
@@ -96,7 +96,7 @@ Modelled on TokenTracker's Sessions page.
 - [x] WidgetKit widgets after TokenTracker's designs (`screenshots/widgets-dark-full.png`): usage summary, activity heatmap, top models, usage limits
 - [x] Notifications when a limit resets or crosses 90%, once per crossing
 - [x] Launch at login (`SMAppService.mainApp`, a switch in Settings)
-- [ ] Signing, notarization, Sparkle updates
+- [x] Signing, notarization, Sparkle updates (the release items below)
 
 ### M7. Service status
 - [x] Status of the services the harnesses depend on (Anthropic, OpenAI, GitHub, Cursor and more), from their public status pages
@@ -120,7 +120,7 @@ Phases in order. Phase 4 can run alongside 1 to 3.
 - [x] `swe providers add` tells users `~/.api_keys/<name>` is a directory of files, but the app reads `~/.api_keys` as one file and fails on a directory. Make them agree. ([#408](https://github.com/c-wenlong/swe/pull/408))
 
 **Phase 1. Bundle `swe` inside the app**
-- [x] python-build-standalone CPython 3.13 plus `src/quiver` at `Contents/Resources/swe`, used when Settings names no `swe` ([#371](https://github.com/c-wenlong/swe/pull/371))
+- [x] python-build-standalone CPython 3.13 plus `src/swe` (then `src/quiver`) at `Contents/Resources/swe`, used when Settings names no `swe` ([#371](https://github.com/c-wenlong/swe/pull/371))
 - [x] Check Droid limits with the bundled Python. `rate_limits.py` loads `libcrypto` through ctypes and falls back to an unversioned dylib. ([#413](https://github.com/c-wenlong/swe/pull/413))
 
 **Phase 2. First-run setup**
@@ -172,11 +172,11 @@ tmux fallback). A session is `attached` (supervised, writable) or
 `observed` (someone's terminal owns it, read-only) so two writers never
 share one transcript.
 
-- [ ] R1: hub, byte-offset tailers, session catalog, SSE journal, web read-only chat
-- [ ] R2: claude headless-resume inject + tmux supervisor + Attach flow
-- [ ] R3: satellite daemon, machine registry, offline command queue
-- [ ] R4: native iOS app, Inbox of pending decisions, push via ntfy
-- [ ] R5: opencode serve + codex app-server adapters, diff pane, Queue/Steer
+- [x] R1: hub, byte-offset tailers, session catalog, SSE journal, web read-only chat
+- [x] R2: claude headless-resume inject + tmux supervisor + Attach flow
+- [x] R3: satellite daemon, machine registry, offline command queue
+- [x] R4: native iOS app, Inbox of pending decisions, push via ntfy
+- [x] R5: opencode serve + codex app-server adapters, diff pane, Queue/Steer
 
 ### Later
 - [ ] Claude IP check (low priority)
