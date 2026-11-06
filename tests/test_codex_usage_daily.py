@@ -24,6 +24,12 @@ import os
 import sys
 import time
 
+# Write the pid before reading anything: on a loaded machine the child can be
+# killed by the caller's timeout before it ever answers initialize.
+if os.environ.get("FAKE_CODEX_MODE") == "sleep" and os.environ.get("FAKE_CODEX_PID"):
+    with open(os.environ["FAKE_CODEX_PID"], "w") as f:
+        f.write(str(os.getpid()))
+
 for line in sys.stdin:
     line = line.strip()
     if not line:
@@ -49,10 +55,6 @@ for line in sys.stdin:
     elif message.get("method") == "account/usage/read":
         mode = os.environ.get("FAKE_CODEX_MODE", "ok")
         if mode == "sleep":
-            pid_file = os.environ.get("FAKE_CODEX_PID")
-            if pid_file:
-                with open(pid_file, "w") as f:
-                    f.write(str(os.getpid()))
             time.sleep(60)
         elif mode == "noise":
             print("not json at all", flush=True)
@@ -202,7 +204,7 @@ class CodexUsageDailyTest(unittest.TestCase):
         pid_file = os.path.join(self.tmp.name, "fake.pid")
         env = self._fake_codex("sleep")
         env["FAKE_CODEX_PID"] = pid_file
-        report = self._fetch(env, timeout=1.0)
+        report = self._fetch(env, timeout=2.0)
         self.assertEqual(report["status"], "unavailable")
         with open(pid_file) as f:
             pid = int(f.read())
