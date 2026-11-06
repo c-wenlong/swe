@@ -759,5 +759,116 @@ class WalkStatsTest(unittest.TestCase):
         self.assertEqual(realpath.call_count, 2)  # the directory and link.jsonl
 
 
+class WriterFailureTests(_Home):
+    """What the writer does when the disk, SQLite or a source lets it
+    down: nothing half-written stays behind and a pass goes on."""
+
+    def indexer(self):
+        conn = writer.open_index(search_index.index_path(self.home))
+        self.addCleanup(conn.close)
+        store = writer.Store(conn)
+        return writer.Indexer(store), store, conn
+
+    def test_a_failed_state_write_leaves_the_old_file_and_no_temp(self):
+        path = self.home / "state" / "indexer.json"
+        writer._write_json(path, {"enabled": True})
+        with mock.patch("swe.sessions.search_writer.os.replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                writer._write_json(path, {"enabled": False})
+        self.assertEqual(json.loads(path.read_text()), {"enabled": True})
+        self.assertEqual(sorted(p.name for p in path.parent.iterdir()), ["indexer.json"])
+
+    def test_emptying_a_missing_or_torn_database(self):
+        path = self.home / "search.sqlite"
+        writer._empty_database(path)
+        self.assertFalse(path.exists())
+        path.write_bytes(b"not a database " * 100)
+        writer._empty_database(path)
+        self.assertFalse(path.exists())
+
+    def test_an_sqlite_without_fts5_or_a_locked_file_is_left_alone(self):
+        path = search_index.index_path(self.home)
+        with mock.patch.object(writer, "_fts5_available", return_value=False):
+            with self.assertRaisesRegex(writer.IndexUnavailable, "no FTS5"):
+                writer.open_index(path)
+        self.assertTrue(writer._fts5_available(sqlite3.connect(":memory:")))
+        broken = mock.MagicMock()
+        broken.execute.side_effect = sqlite3.OperationalError("no such module: fts5")
+        self.assertFalse(writer._fts5_available(broken))
+        with mock.patch.object(writer, "_open_existing",
+                               side_effect=sqlite3.OperationalError("database is locked")) as opener:
+            with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
+                writer.open_index(path)
+        self.assertEqual(opener.call_count, 1)
+
+    def test_a_container_read_that_fails_is_held_out(self):
+        indexer, store, conn = self.indexer()
+        stat = writer.FileStat(ino=None, mtime_ms=1000.0, size=3)
+
+        def bad(row, store):
+            raise ValueError("text SQLite can't take")
+
+        self.assertEqual(indexer.index_session("/db#s1", stat, bad), "failed")
+        self.assertEqual(conn.execute("SELECT state, fail_count FROM files WHERE path = '/db#s1'").fetchone(),
+                         ("failed", 1))
+        with mock.patch.object(store, "mark_failed", side_effect=sqlite3.OperationalError("locked")):
+            self.assertEqual(indexer.index_session("/db#s2", stat, bad), "failed")
+            path = self.write(self.projects / "a.jsonl", claude_line("user", "hi"))
+            with mock.patch.object(indexer, "_read", side_effect=OSError("gone")):
+                self.assertEqual(indexer.index_file(path, "claude"), "failed")
+
+    def test_a_subagent_transcript_handed_in_directly_is_never_read(self):
+        indexer, _store, conn = self.indexer()
+        (self.projects / "s1" / "subagents").mkdir(parents=True)
+        path = self.write(self.projects / "s1" / "subagents" / "a.jsonl", claude_line("user", "hi"))
+        self.assertEqual(indexer.index_file(path, "claude"), writer.SKIP)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM files").fetchone()[0], 0)
+
+    def test_an_unfinished_oversized_last_line_waits(self):
+        path = self.projects / "a.jsonl"
+        path.write_bytes(claude_line("user", "first").encode() + b"x" * 3000)
+        with open(path, "rb") as handle, mock.patch.object(writer, "MAX_LINE_BYTES", 1024):
+            lines = list(writer._lines(handle, 0))
+        self.assertEqual(len(lines), 1)
+        self.assertIn(b"first", lines[0][0])
+
+    def test_stamps_that_do_not_parse_still_bound_the_session(self):
+        pending = writer._Pending(path="p", harness="claude", appending=False, row=None,
+                                  decoder=decode.Decoder("claude"))
+        pending.fold_ts("yesterday")
+        pending.fold_ts("today")
+        self.assertEqual((pending.first_ts, pending.last_ts), ("yesterday", "today"))
+        pending.fold_ts("2026-10-01T10:00:00.000Z")
+        self.assertEqual((pending.first_ts, pending.last_ts),
+                         ("2026-10-01T10:00:00.000Z", "2026-10-01T10:00:00.000Z"))
+
+    def test_cursor_meta_and_chat_index_edges(self):
+        meta = self.home / "meta.json"
+        for text in ("{broken", "[1]"):
+            meta.write_text(text)
+            self.assertIsNone(writer.cursor_meta_fields(str(meta)))
+        self.assertIsNone(writer.cursor_meta_fields(str(self.home / "missing.json")))
+        chats = self.home / "chats"
+        self.assertEqual(writer.cursor_chat_meta_index(chats), {})
+        (chats / "b-ws" / "c1").mkdir(parents=True)
+        (chats / "b-ws" / "c1" / "meta.json").write_text("{}")
+        (chats / "a-ws" / "c1").mkdir(parents=True)
+        (chats / "a-ws" / "c1" / "meta.json").write_text("{}")
+        (chats / "a-ws" / "c2").mkdir()
+        (chats / "loose.txt").write_text("x")
+        self.assertEqual(writer.cursor_chat_meta_index(chats),
+                         {"c1": str(chats / "a-ws" / "c1" / "meta.json")})
+
+    def test_status_of_an_index_sqlite_cannot_open(self):
+        path = search_index.index_path(self.home)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x")
+        with mock.patch("swe.sessions.search_writer.sqlite3.connect",
+                        side_effect=sqlite3.OperationalError("unable to open database file")):
+            body = writer.status(self.home)
+        self.assertEqual(body["error"], "unable to open database file")
+        self.assertFalse(body["exists"])
+
+
 if __name__ == "__main__":
     unittest.main()

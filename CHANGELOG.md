@@ -53,6 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **One unreadable log no longer empties `swe models` for its harness.**
+  The model tally read each Claude, Codex and Freebuff log with the
+  locale's strict decoder and no error handling, so a single file with a
+  stray non-UTF-8 byte, or one it lacked permission to open, raised out
+  of that harness's whole scan and dropped every model count it had
+  gathered. Each log is now read as UTF-8 with bad bytes replaced, and a
+  file that can't be opened counts nothing on its own.
 - **A report no longer lists a follow-up it refused to create.** When
   the report writer suggested a new follow-up whose `evidence` was not a
   list, the pipeline dropped the suggestion with a warning but had
