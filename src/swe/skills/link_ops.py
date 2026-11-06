@@ -24,6 +24,19 @@ from swe.skills.layout import (
 __all__ = ["SkillLayoutError", "link_skill_root", "unlink_skill_root", "move_skill"]
 
 
+def _same_tree(a: Path, b: Path) -> bool:
+    """Whether two roots resolve to one directory.
+
+    A root that cannot be resolved (a symlink loop, which ``resolve()``
+    reports as RuntimeError before Python 3.13) is not the same tree as
+    anything, so linking replaces it instead of crashing.
+    """
+    try:
+        return a.resolve() == b.resolve()
+    except (OSError, RuntimeError):
+        return False
+
+
 def link_skill_root(
     source_ref: str,
     target_ref: str | None = None,
@@ -41,7 +54,7 @@ def link_skill_root(
     src_label, src_path = resolve_root_ref(source_ref, home=home, cwd=cwd)
     _tgt_label, tgt_path = resolve_root_ref(target_ref, home=home, cwd=cwd)
 
-    if src_path.resolve() == tgt_path.resolve():
+    if _same_tree(src_path, tgt_path):
         raise SkillLayoutError(f"{src_label} already resolves to {tgt_path}")
 
     # lexists, not exists: a dangling symlink at the source is invisible to
@@ -133,7 +146,7 @@ def _find_skill_matches(name: str, scope: str, home: Path, cwd: Path) -> list[di
     if scope_root is not None:
         try:
             scope_resolved = scope_root.resolve()
-        except OSError:
+        except (OSError, RuntimeError):
             scope_resolved = None
     all_skills = discover_skills(home=home, cwd=cwd)
     rooted: list[dict] = []
@@ -193,7 +206,8 @@ def move_skill(
     try:
         from_resolved = from_root.resolve()
         to_resolved = to_root.resolve()
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
+        # RuntimeError: a symlink loop, before Python 3.13.
         raise SkillLayoutError(str(exc)) from exc
 
     # Unconditional: destination would be the source itself, so a forced

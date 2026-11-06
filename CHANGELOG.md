@@ -53,6 +53,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A skills root that links to itself no longer crashes the skills
+  commands on Python 3.11 and 3.12.** Before Python 3.13, `resolve()`
+  raises `RuntimeError` on a symlink loop, and the skills root scan
+  and root lookups only caught `OSError`, so a `~/.codex/skills`
+  pointing at itself ended `swe skills <filter>`, `swe skills tree`,
+  `swe skills link` and `swe skills move` in a traceback. A looped root
+  is now handled like a dangling one: `swe skills link` replaces it, a
+  path argument skips it, and `move` names it in an error.
 - **One unreadable log no longer empties `swe models` for its harness.**
   The model tally read each Claude, Codex and Freebuff log with the
   locale's strict decoder and no error handling, so a single file with a

@@ -446,5 +446,186 @@ class SkillsLayoutTest(unittest.TestCase):
                 json.loads(links_file.read_text())["links"][0]["label"], "x")
 
 
+
+class SkillsLayoutEdgeTest(unittest.TestCase):
+    """Root shapes and refusals the happy-path tests above never reach."""
+
+    # The same per-test records file as SkillsLayoutTest, without
+    # inheriting (and so rerunning) its tests.
+    setUp = SkillsLayoutTest.setUp
+    _write_skill = SkillsLayoutTest._write_skill
+
+    def _home(self) -> Path:
+        home = temp_dir(self)
+        (home / ".swe" / "skills").mkdir(parents=True)
+        return home
+
+    def _loop(self, home: Path, rel: str = ".codex/skills") -> Path:
+        """A root that is a symlink to itself."""
+        link = home / rel
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(link)
+        return link
+
+    def test_a_file_where_a_root_goes_is_kind_file(self):
+        home = self._home()
+        (home / ".codex").mkdir()
+        (home / ".codex" / "skills").write_text("not a folder\n")
+
+        entry = {e.label: e for e in enumerate_skill_roots(home=home, cwd=home)}["codex"]
+        self.assertEqual((entry.exists, entry.kind, entry.resolved), (True, "file", None))
+
+    def test_a_root_under_a_linked_parent_names_its_canonical_root(self):
+        # ~/.claude links to ~/.swe, so ~/.claude/skills is a plain
+        # directory (not a link) that resolves to the shared tree.
+        home = self._home()
+        (home / ".claude").symlink_to(home / ".swe")
+
+        entries = {e.label: e for e in enumerate_skill_roots(home=home, cwd=home)}
+        self.assertEqual(entries["claude"].kind, "directory")
+        self.assertEqual(entries["claude"].link_target_label, "shared")
+        self.assertIsNone(entries["shared"].link_target_label)
+
+    def test_catalog_roots_are_candidates(self):
+        from swe.skills.layout import all_skill_root_candidates, resolve_root_ref
+
+        home = self._home()
+        catalogs = [{"label": "team", "path": str(home / "team-skills")},
+                    {"path": str(home / "unlabelled")}]
+        with patch("swe.skills.layout.load_skill_catalogs", return_value=catalogs):
+            candidates = all_skill_root_candidates(home, home)
+            self.assertEqual(resolve_root_ref("TEAM", home=home, cwd=home),
+                             ("team", home / "team-skills"))
+        self.assertIn(("catalog", home / "unlabelled"), candidates)
+
+    def test_layout_groups_join_aliases_and_keep_missing_roots_together(self):
+        from swe.skills.layout import layout_groups
+
+        home = self._home()
+        (home / ".codex").mkdir()
+        (home / ".codex" / "skills").symlink_to(home / ".swe" / "skills")
+
+        groups = {g["resolved"]: g for g in layout_groups(home=home, cwd=home)}
+        shared = groups[(home / ".swe" / "skills").resolve()]
+        self.assertEqual(shared["canonical"].label, "shared")
+        self.assertEqual([m.label for m in shared["members"]], ["shared", "codex"])
+        # Every root that is not on disk lands in one unresolved group,
+        # headed by its first member since none of them can be canonical.
+        missing = groups[None]
+        self.assertEqual(missing["canonical"].label, "cursor")
+        self.assertNotIn("codex", [m.label for m in missing["members"]])
+
+    def test_link_refuses_a_root_that_already_resolves_to_the_target(self):
+        home = self._home()
+        (home / ".codex").mkdir()
+        (home / ".codex" / "skills").symlink_to(home / ".swe" / "skills")
+
+        with self.assertRaises(SkillLayoutError) as ctx:
+            link_skill_root("codex", home=home, cwd=home)
+        self.assertIn("already resolves", str(ctx.exception))
+        self.assertEqual(load_link_records(), [])
+
+    def test_link_replaces_a_file_where_the_root_goes(self):
+        home = self._home()
+        (home / ".codex").mkdir()
+        (home / ".codex" / "skills").write_text("stray\n")
+
+        link_skill_root("codex", home=home, cwd=home)
+        self.assertTrue((home / ".codex" / "skills").is_symlink())
+
+    def test_link_replaces_a_root_that_is_a_symlink_loop(self):
+        # resolve() raised RuntimeError on the loop before Python 3.13,
+        # which reached the user as a traceback.
+        home = self._home()
+        link = self._loop(home)
+
+        link_skill_root("codex", home=home, cwd=home)
+        self.assertEqual(link.resolve(), (home / ".swe" / "skills").resolve())
+
+    def test_a_path_ref_skips_a_candidate_root_that_is_a_symlink_loop(self):
+        from swe.skills.layout import resolve_root_ref
+
+        home = self._home()
+        self._loop(home)
+        other = home / "elsewhere" / "skills"
+        other.mkdir(parents=True)
+
+        self.assertEqual(resolve_root_ref(str(other), home=home, cwd=home)[1], other)
+
+    def test_move_from_a_symlink_loop_is_a_layout_error(self):
+        home = self._home()
+        self._loop(home)
+
+        for from_scope, to_scope in (("codex", "shared"), ("shared", "codex")):
+            with self.assertRaises(SkillLayoutError):
+                move_skill("x", from_scope, to_scope, home=home, cwd=home)
+
+    def test_find_in_a_symlink_loop_scope_matches_nothing(self):
+        home = self._home()
+        self._write_skill(home / ".swe" / "skills", "x", "x")
+        self._loop(home)
+
+        with self.assertRaises(SkillLayoutError) as ctx:
+            find_skill_directory("x", "codex", home=home, cwd=home)
+        self.assertIn("No skill matching", str(ctx.exception))
+
+    def test_a_skill_path_that_is_a_symlink_loop_has_no_scopes(self):
+        from swe.skills.layout import shared_scopes_for_skill
+
+        home = self._home()
+        loop = self._loop(home, ".swe/skills/loop")
+        self.assertEqual(shared_scopes_for_skill(loop, home=home), [])
+
+    def test_unlink_refuses_a_missing_root_and_a_real_directory(self):
+        home = self._home()
+        with self.assertRaises(SkillLayoutError) as ctx:
+            unlink_skill_root("codex", home=home, cwd=home)
+        self.assertIn("does not exist", str(ctx.exception))
+
+        (home / ".codex" / "skills").mkdir(parents=True)
+        with self.assertRaises(SkillLayoutError) as ctx:
+            unlink_skill_root("codex", home=home, cwd=home)
+        self.assertIn("real directory", str(ctx.exception))
+        self.assertTrue((home / ".codex" / "skills").is_dir())
+
+    def test_find_refuses_an_ambiguous_partial_name(self):
+        home = self._home()
+        shared = home / ".swe" / "skills"
+        self._write_skill(shared, "review-code", "review-code")
+        self._write_skill(shared, "review-docs", "review-docs")
+
+        with self.assertRaises(SkillLayoutError) as ctx:
+            find_skill_directory("review", "shared", home=home, cwd=home)
+        self.assertIn("Multiple skills match", str(ctx.exception))
+
+    def test_move_refuses_a_skill_found_outside_the_source_root(self):
+        home = self._home()
+        (home / ".codex" / "skills").mkdir(parents=True)
+        stray = home / "stray" / "x"
+        stray.mkdir(parents=True)
+
+        with patch("swe.skills.link_ops.find_skill_directory", return_value=stray):
+            with self.assertRaises(SkillLayoutError) as ctx:
+                move_skill("x", "shared", "codex", home=home, cwd=home, force=True)
+        self.assertIn("is not under", str(ctx.exception))
+        self.assertTrue(stray.is_dir())
+
+    def test_move_force_replaces_a_file_and_an_empty_folder_without_backup(self):
+        home = self._home()
+        shared = home / ".swe" / "skills"
+        codex = home / ".codex" / "skills"
+        codex.mkdir(parents=True)
+        self._write_skill(shared, "one", "one")
+        self._write_skill(shared, "two", "two")
+        (codex / "one").write_text("a stray file\n")
+        (codex / "two").mkdir()
+
+        for name in ("one", "two"):
+            _src, dest = move_skill(name, "shared", "codex", home=home, cwd=home, force=True)
+            self.assertTrue((dest / "SKILL.md").is_file())
+        # Nothing at either destination held data, so nothing was backed up.
+        self.assertFalse((home / ".swe" / "backups").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
