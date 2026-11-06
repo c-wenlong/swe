@@ -627,6 +627,24 @@ class JsonlHarnessTests(_Home):
         again = self.run_pass()
         self.assertEqual((again.indexed, again.current), (0, again.files))
 
+    def test_a_part_row_holding_invalid_json_is_skipped_not_fatal(self):
+        db = self.home / ".local/share/opencode/opencode.db"
+        conn = sqlite3.connect(db)
+        conn.execute("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
+                     ("p_bad", "m_a1", "ses_1", 1791100001200, 1791100001200, "{not json"))
+        conn.commit()
+        session = containers.OpenCodeSession(
+            "ses_1", "Fix the flaky test", "/repo/oc", 1791100000000, 1791100003000, 2)
+        got = [(m.role, m.text) for m in containers.opencode_messages(conn, session)]
+        conn.close()
+        self.assertEqual(got, [
+            ("user", "fix the flaky zebrafish test"),
+            ("assistant", "thinking about the quokka\nfound it"),
+            ("tool", "read: /repo/x.yml\nError: File not found")])
+        # The whole pass keeps the session, bad row and all.
+        self.assertEqual(self.run_pass().failed, 0)
+        self.assertTrue(search_index.search(self.home, "zebrafish"))
+
     def test_a_meta_only_change_reads_the_cursor_chat_again(self):
         self.run_pass()
         chat = "4f9d0c1e-0000-4000-8000-00000000c0de"

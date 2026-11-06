@@ -474,12 +474,17 @@ def opencode_messages(conn: sqlite3.Connection, session: OpenCodeSession) -> lis
         messages.extend(tools)
 
     for message_id, role, kind, data, created in conn.execute(
+        # json_extract raises on malformed JSON and fails the whole query, so
+        # a part whose data is not valid JSON is filtered out through CASE
+        # (SQLite may reorder AND terms, never a CASE's branches).
         """SELECT m.id, json_extract(m.data, '$.role'),
-                  json_extract(p.data, '$.type'), p.data, m.time_created
+                  CASE WHEN json_valid(p.data) THEN json_extract(p.data, '$.type') END,
+                  p.data, m.time_created
            FROM message m JOIN part p ON p.message_id = m.id
            WHERE m.session_id = ?
              AND json_extract(m.data, '$.role') IN ('user','assistant')
-             AND json_extract(p.data, '$.type') IN ('text','reasoning','tool')
+             AND CASE WHEN json_valid(p.data) THEN json_extract(p.data, '$.type') END
+                 IN ('text','reasoning','tool')
            ORDER BY m.time_created, m.id, p.time_created, p.rowid""",
         (session.id,),
     ):

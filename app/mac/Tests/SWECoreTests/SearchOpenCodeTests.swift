@@ -227,6 +227,23 @@ import Testing
         #expect(session.fields.messageCount == 3)
     }
 
+    /// `json_extract` raises on malformed JSON, which used to fail the
+    /// whole session's read; one bad `part` row is skipped instead.
+    @Test func aPartRowWithInvalidJSONIsSkippedNotFatal() throws {
+        let f = try Fixture()
+        try f.seedTwoSessions()
+        try f.addPart("p_bad", message: "m_a1", session: "ses_1",
+                      created: 1_791_100_001_200, data: "{not json")
+
+        let messages = try SearchOpenCode.messages(in: f.source, sessionID: "ses_1")
+
+        #expect(messages.map(\.role) == [.user, .assistant, .tool, .user])
+        #expect(messages[0].text.contains("zebrafish"))
+        #expect(messages[1].text.contains("quokka"))
+        #expect(messages[1].text.contains("found the flake"))
+        #expect(messages[2].text.contains("one test passed"))
+    }
+
     @Test func anUnchangedDatabaseDoesNotReindex() async throws {
         let f = try Fixture()
         try f.seedTwoSessions()
@@ -322,13 +339,17 @@ import Testing
 
     @Test func aSessionThatAlwaysFailsHoldsOutAfterThreeScans() async throws {
         let f = try Fixture()
-        // ses_1 carries a part whose data is not JSON: the capture SELECT's
-        // json_extract throws mid-read, failing only that session.
-        try f.addSession("ses_1", title: "Broken parts",
+        // ses_1 carries a message whose data is not JSON: the capture SELECT's
+        // json_extract throws mid-read, failing only that session. (A bad
+        // part row is skipped instead; see aPartRowWithInvalidJSONIsSkippedNotFatal.)
+        try f.addSession("ses_1", title: "Broken messages",
                          created: 1_791_100_000_000, updated: 1_791_100_000_000)
-        try f.addMessage("m_u1", session: "ses_1", role: "user", created: 1_791_100_000_000)
-        try f.addPart("p_bad", message: "m_u1", session: "ses_1",
-                      created: 1_791_100_000_000, data: "this is not json")
+        try f.source.prepare("INSERT INTO message VALUES (?, ?, ?, ?, ?)")
+            .bind([.text("m_bad"), .text("ses_1"), .int(1_791_100_000_000),
+                   .int(1_791_100_000_000), .text("this is not json")])
+            .run()
+        try f.addPart("p_u1", message: "m_bad", session: "ses_1",
+                      created: 1_791_100_000_000, data: #"{"type":"text","text":"x"}"#)
         try f.addSession("ses_2", title: "Deploy otter service",
                          created: 1_791_200_000_000, updated: 1_791_200_000_000)
         try f.addMessage("m_b1", session: "ses_2", role: "user", created: 1_791_200_000_000)
@@ -346,15 +367,18 @@ import Testing
         }
 
         // Three failures at one unchanged stat hold the session out: a
-        // fourth scan adds no fourth failure and no note.
+        // fourth scan adds no fourth failure and no note for the session. (The
+        // token scan still notes the bad message row; that is the ledger's.)
         let report = try await f.scan()
-        #expect(report.notes.isEmpty)
+        #expect(!report.notes.contains { $0.contains("#ses_1") })
         #expect(report.filesIndexed == 0)
         #expect(try f.store.fileRow(for: f.dbPath + "#ses_1")?.failCount == 3)
 
-        // Only a stat move releases it: fix the part, bump the session, and
+        // Only a stat move releases it: fix the message, bump the session, and
         // the next scan indexes it whole.
-        try f.source.prepare("UPDATE part SET data = ? WHERE id = 'p_bad'")
+        try f.source.prepare("UPDATE message SET data = ? WHERE id = 'm_bad'")
+            .bind([.text(#"{"role":"user"}"#)]).run()
+        try f.source.prepare("UPDATE part SET data = ? WHERE id = 'p_u1'")
             .bind([.text(#"{"type":"text","text":"now readable zorilla text"}"#)]).run()
         try f.source.prepare("UPDATE session SET time_updated = ? WHERE id = 'ses_1'")
             .bind([.int(1_791_100_009_000)]).run()
