@@ -684,5 +684,180 @@ class ApplySkipTest(unittest.TestCase):
         self.assertEqual(reg["claude"]["aliases"], ["cc"])
 
 
+
+class DiscoverEdgeTest(unittest.TestCase):
+    """The PATH, catalog and home scans on directories that fight back."""
+
+    def setUp(self):
+        from tests._tempdir import temp_dir
+
+        self.tmp = temp_dir(self).resolve()
+        for target, value in (("EXTRA_BIN_DIRS", ()), ("live_version", lambda cmd: None)):
+            p = patch(f"swe.harness.discover.{target}", value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _exe(self, folder: Path, name: str, mode: int = 0o755) -> Path:
+        folder.mkdir(parents=True, exist_ok=True)
+        exe = folder / name
+        exe.write_text("#!/bin/sh\n")
+        exe.chmod(mode)
+        return exe
+
+    def test_path_dirs_skip_blanks_duplicates_files_and_loops(self):
+        import os
+
+        from swe.harness import discover
+
+        bindir = self.tmp / "bin"
+        bindir.mkdir()
+        afile = self.tmp / "afile"
+        afile.write_text("")
+        loop = self.tmp / "loop"
+        loop.symlink_to(loop)
+        path_env = os.pathsep.join(["", str(bindir), str(bindir), str(afile), str(loop)])
+        self.assertEqual(discover._path_dirs(path_env, self.tmp), [bindir])
+
+    def test_path_dirs_skip_an_entry_that_cannot_be_checked(self):
+        from swe.harness import discover
+
+        real = Path.is_dir
+
+        def is_dir(path):
+            if path.name == "locked":
+                raise PermissionError(13, "denied")
+            return real(path)
+
+        (self.tmp / "locked").mkdir()
+        with patch.object(Path, "is_dir", is_dir):
+            self.assertEqual(discover._path_dirs(str(self.tmp / "locked"), self.tmp), [])
+
+    def test_a_directory_that_cannot_be_listed_has_no_listing(self):
+        from swe.harness import discover
+
+        gone = self.tmp / "gone"
+        self.assertEqual(discover._dir_listings([gone]), {gone: None})
+
+    def test_a_candidate_that_cannot_be_checked_is_skipped(self):
+        from swe.harness import discover
+
+        exe = self._exe(self.tmp / "bin", "mytool")
+        with patch("swe.harness.discover.shutil.which", return_value=None), \
+                patch.object(Path, "is_file", side_effect=PermissionError(13, "denied")):
+            found = discover._resolve_executable("mytool", "mytool", "", [exe.parent], None)
+        self.assertEqual(found, (None, None))
+
+    def test_a_catalog_harness_registered_under_another_name_is_registered(self):
+        from swe.harness import discover
+
+        bindir = self.tmp / "bin"
+        self._exe(bindir, HARNESS_CATALOG["claude"]["command"])
+        registry = {"my-claude": {"command": HARNESS_CATALOG["claude"]["command"]}}
+        findings = discover._catalog_findings(registry, str(bindir), self.tmp)
+        claude = [f for f in findings if f.name == "claude"]
+        self.assertEqual([(f.status, f.confidence) for f in claude], [("registered", "high")])
+
+    def test_path_scan_keeps_only_executable_files(self):
+        from swe.harness import discover
+
+        bindir = self.tmp / "bin"
+        self._exe(bindir, "acme-code")                    # new
+        self._exe(bindir, "beta-code")                    # registered by command
+        self._exe(bindir, "gamma-code", mode=0o644)       # not executable
+        (bindir / "delta-code").mkdir()                   # a folder
+        self._exe(bindir, "unrelated")                    # no harness-shaped name
+        registry = {"beta": {"command": "beta-code"}}
+        found = {f.name: f.status
+                 for f in discover._path_scan_findings(registry, str(bindir), self.tmp, [])}
+        self.assertEqual(found, {"acme-code": "new", "beta-code": "registered"})
+
+    def test_path_scan_skips_unlisted_and_unreadable_entries(self):
+        from swe.harness import discover
+
+        bindir = self.tmp / "bin"
+        self._exe(bindir, "acme-code")
+        listings = {self.tmp / "gone": None, **discover._dir_listings([bindir])}
+        with patch.object(Path, "is_file", side_effect=PermissionError(13, "denied")):
+            self.assertEqual(
+                discover._path_scan_findings({}, "", self.tmp, [], listings), [])
+
+    def test_registered_homes_follow_capability_roots(self):
+        from swe.harness import discover
+
+        registry = {
+            "droid": {"capabilities": {"skills": {"root": "~/.factory/skills"}}},
+            "opencode": {"capabilities": {"skills": {"root": "~/.config/opencode/skills"},
+                                          "hooks": {"root": "/abs/hooks"},
+                                          "mcp": {"root": "~/"},
+                                          "flag": True}},
+            "bare": "not a dict",
+        }
+        # An absolute root, a bare "~/" and a non-dict capability add
+        # nothing beyond the names themselves.
+        self.assertEqual(discover._registered_homes(registry), {
+            ".droid", "config/droid", ".factory",
+            ".opencode", "config/opencode",
+            ".bare", "config/bare",
+        })
+
+    def test_agent_home_walk_stops_at_its_limits(self):
+        from swe.harness import discover
+
+        crowded = self.tmp / ".crowded"
+        crowded.mkdir()
+        for i in range(discover._HOME_SCAN_ENTRY_CAP + 1):
+            (crowded / f"f{i:04d}").write_text("")
+        (crowded / "zz" / "skills").mkdir(parents=True)
+        self.assertIsNone(discover._looks_like_agent_home(crowded))
+
+        noisy = self.tmp / ".noisy"
+        (noisy / "node_modules" / "skills").mkdir(parents=True)
+        self.assertIsNone(discover._looks_like_agent_home(noisy))
+
+        deep = self.tmp / ".deep"
+        (deep / "a" / "b" / "c" / "skills").mkdir(parents=True)
+        self.assertIsNone(discover._looks_like_agent_home(deep))
+        (deep / "a" / "b" / "AGENTS.md").write_text("# x\n")
+        self.assertEqual(discover._looks_like_agent_home(deep), "AGENTS.md")
+
+    def test_agent_home_walk_skips_what_it_cannot_read(self):
+        from swe.harness import discover
+
+        home = self.tmp / ".odd"
+        (home / "sub").mkdir(parents=True)
+        real_iterdir, real_is_dir = Path.iterdir, Path.is_dir
+
+        def iterdir(path):
+            if path.name == "sub":
+                raise PermissionError(13, "denied")
+            return real_iterdir(path)
+
+        def is_dir(path):
+            if path.name == "broken":
+                raise PermissionError(13, "denied")
+            return real_is_dir(path)
+
+        (home / "broken").write_text("")
+        with patch.object(Path, "iterdir", iterdir), patch.object(Path, "is_dir", is_dir):
+            self.assertIsNone(discover._looks_like_agent_home(home))
+
+    def test_home_scan_of_a_home_that_cannot_be_listed_finds_nothing(self):
+        from swe.harness import discover
+
+        self.assertEqual(discover._home_scan_findings({}, self.tmp / "missing", []), [])
+
+    def test_include_missing_lists_a_registered_harness_with_no_binary(self):
+        from swe.harness import discover
+
+        with patch("swe.harness.discover.load_registry", return_value={"claude": {}}), \
+                patch("swe.harness.discover._home_scan_findings", return_value=[]):
+            plain = discover.discover_harnesses(path_env="", home=self.tmp)
+            missing = discover.discover_harnesses(path_env="", home=self.tmp,
+                                                  include_missing=True)
+        self.assertNotIn("claude", [f.name for f in plain])
+        self.assertEqual([(f.name, f.status) for f in missing if f.name == "claude"],
+                         [("claude", "missing")])
+
+
 if __name__ == "__main__":
     unittest.main()
