@@ -601,9 +601,17 @@ class WriteFailureTest(unittest.TestCase):
     def test_a_failed_rename_is_blocked_and_leaves_no_temp_file(self):
         home = _setup(self)
         _flags(home, mcp=True)
-        before = (_acct(home) / ".claude.json").read_bytes()
-        with mock.patch.object(account_mcp.os, "replace",
-                               side_effect=PermissionError(13, "Permission denied")):
+        path = _acct(home) / ".claude.json"
+        before = path.read_bytes()
+        account_mcp._load_key(home, create=True)  # so only the account file's rename fails
+        real = os.replace
+
+        def replace(src, dst):
+            if Path(dst) == path:
+                raise PermissionError(13, "Permission denied")
+            return real(src, dst)
+
+        with mock.patch.object(account_mcp.os, "replace", replace):
             rows, _ = _rows_with_detail(home)
         self.assertEqual(rows[CLAUDE_ROW], ("blocked", "could not write: Permission denied"))
         self.assertEqual((_acct(home) / ".claude.json").read_bytes(), before)
