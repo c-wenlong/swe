@@ -179,6 +179,34 @@ final class PrimitiveHome {
         #expect(inside.contains(root.appending(path: "skills/tdd/SKILL.md").path))
         #expect(!inside.contains(root.appending(path: "commands/away.md").path))
     }
+
+    /// A skill can't work without its SKILL.md, so no row offers to trash
+    /// one by itself; every other file, and the skill folder, keep theirs.
+    @Test func aSkillsOwnSkillFileHasNoTrash() throws {
+        let t = try PrimitiveHome()
+        let skill = t.home.appending(path: "tdd")
+        try t.write("tdd/SKILL.md", "---\nname: tdd\n---\n")
+        try t.write("tdd/references/loop.md", "x")
+        let lone = PrimitiveTree(root: skill).trashablePaths(skill)
+        #expect(!lone.contains(skill.appending(path: "SKILL.md").path))
+        #expect(lone.contains(skill.appending(path: "references/loop.md").path))
+
+        // In a plugin: the skill folder and its other files stay
+        // trashable, its top-level SKILL.md does not, and a SKILL.md
+        // that is not a skill's (nested deeper, or a command) still is.
+        let root = try t.dir("plugin")
+        try t.write("plugin/skills/review/SKILL.md", "x")
+        try t.write("plugin/skills/review/scripts/run.sh", "x")
+        try t.write("plugin/skills/review/notes/SKILL.md", "x")
+        try t.write("plugin/commands/SKILL.md", "x")
+        let plugin = PrimitiveTree(root: root).trashablePaths(root)
+        let review = root.appending(path: "skills/review")
+        #expect(plugin.contains(review.path))
+        #expect(!plugin.contains(review.appending(path: "SKILL.md").path))
+        #expect(plugin.contains(review.appending(path: "scripts/run.sh").path))
+        #expect(plugin.contains(review.appending(path: "notes/SKILL.md").path))
+        #expect(plugin.contains(root.appending(path: "commands/SKILL.md").path))
+    }
 }
 
 @Suite struct DisplayNamesTests {
