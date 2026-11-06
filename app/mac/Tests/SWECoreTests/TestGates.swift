@@ -239,18 +239,58 @@ func observe(until condition: @escaping @MainActor @Sendable () -> Bool) async -
     }
 }
 
-/// Races `wait` against `gateTimeout`: the first to finish wins and the
-/// loser is cancelled, so a regression fails instead of hanging.
+/// Races `wait` against `timeout`: the first to finish answers, and the
+/// other is cancelled but never awaited. A task group waits for every
+/// child before it returns, so a `wait` that ignores cancellation (such as
+/// `await task.value` on a task that never ends) used to hold the group,
+/// and the test, past the timeout for good.
 @MainActor
-func withinTimeout(_ wait: @escaping @MainActor @Sendable () async -> Bool) async -> Bool {
-    await withTaskGroup(of: Bool.self) { group in
-        group.addTask { await wait() }
-        group.addTask {
-            try? await Task.sleep(for: gateTimeout)
+func withinTimeout(_ timeout: Duration = gateTimeout,
+                   _ wait: @escaping @MainActor @Sendable () async -> Bool) async -> Bool {
+    await withCheckedContinuation { continuation in
+        let race = FirstAnswer(continuation)
+        race.hold([
+            Task { @MainActor in race.answer(await wait()) },
+            Task {
+                try? await Task.sleep(for: timeout)
+                race.answer(false)
+            },
+        ])
+    }
+}
+
+/// The answer `withinTimeout` gives: whichever racer calls `answer` first
+/// resumes the caller and cancels both racers; later answers are dropped.
+private final class FirstAnswer: Sendable {
+    private struct State {
+        var continuation: CheckedContinuation<Bool, Never>?
+        var racers: [Task<Void, Never>] = []
+    }
+
+    private let state: Mutex<State>
+
+    init(_ continuation: CheckedContinuation<Bool, Never>) {
+        state = Mutex(State(continuation: continuation))
+    }
+
+    /// Keeps the racers to cancel, or cancels them now if one already
+    /// answered before they were handed over.
+    func hold(_ racers: [Task<Void, Never>]) {
+        let answered = state.withLock { s -> Bool in
+            guard s.continuation != nil else { return true }
+            s.racers = racers
             return false
         }
-        let winner = await group.next() ?? false
-        group.cancelAll()
-        return winner
+        if answered { racers.forEach { $0.cancel() } }
+    }
+
+    func answer(_ value: Bool) {
+        let (continuation, racers) = state.withLock { s in
+            defer { s = State() }
+            return (s.continuation, s.racers)
+        }
+        guard let continuation else { return }
+        racers.forEach { $0.cancel() }
+        continuation.resume(returning: value)
     }
 }

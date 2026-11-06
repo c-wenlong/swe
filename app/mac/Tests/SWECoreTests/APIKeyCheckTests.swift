@@ -260,7 +260,8 @@ import Testing
 /// queueing behind the limiter are observable.
 final class GateTransport: HTTPTransport {
     private let state = Mutex<(inFlight: Int, peak: Int, requests: [URLRequest], open: Bool,
-                              waiters: [CheckedContinuation<Void, Never>])>((0, 0, [], false, []))
+                              waiters: [CheckedContinuation<Void, Never>],
+                              credit: Int)>((0, 0, [], false, [], 0))
     private let sendsStarted = CountGate()
 
     var peak: Int { state.withLock { $0.peak } }
@@ -273,12 +274,16 @@ final class GateTransport: HTTPTransport {
         await sendsStarted.reach(n)
     }
 
-    /// Answer `n` parked requests, or all of them.
+    /// Answer `n` requests: parked ones first, then the next ones to
+    /// arrive, so a release that lands before its request has parked is
+    /// kept rather than lost. With no count, answers every request parked
+    /// now and none later.
     func release(_ n: Int = Int.max) {
         let released = state.withLock { s -> [CheckedContinuation<Void, Never>] in
             let count = min(n, s.waiters.count)
             let first = Array(s.waiters.prefix(count))
             s.waiters.removeFirst(count)
+            if n != Int.max { s.credit += n - count }
             return first
         }
         for waiter in released { waiter.resume() }
@@ -304,8 +309,13 @@ final class GateTransport: HTTPTransport {
                 s.inFlight += 1
                 s.peak = max(s.peak, s.inFlight)
                 s.requests.append(request)
-                if !s.open { s.waiters.append(waiter) }
-                return !s.open
+                if s.open { return false }
+                if s.credit > 0 {
+                    s.credit -= 1
+                    return false
+                }
+                s.waiters.append(waiter)
+                return true
             }
             if !parked { waiter.resume() }
             Task { await started.bump() }

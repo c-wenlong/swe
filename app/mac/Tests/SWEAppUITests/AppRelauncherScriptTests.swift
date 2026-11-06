@@ -6,8 +6,8 @@ import Testing
 /// app quits. It runs `mv` and `rm -rf` on paths it is handed, so these
 /// runs check it against a scratch HOME: the swap lands, every failure
 /// leaves the installed app in place, and nothing outside the two bundles
-/// and the one rebuild folder is ever removed. `open` is a stub that
-/// records what it was asked to open.
+/// and the one rebuild folder is ever removed. `open` is a stand-in that
+/// prints what it was asked to open.
 @Suite struct AppRelauncherScriptTests {
     /// Above any real pid, so `kill -0` says the app has already quit.
     private static let deadPID = "99999999"
@@ -30,12 +30,15 @@ import Testing
             try fm.createDirectory(at: home.appending(path: ".Trash"), withIntermediateDirectories: true)
             try fm.createDirectory(at: rebuild, withIntermediateDirectories: true)
             try fm.createDirectory(at: applications, withIntermediateDirectories: true)
+            // `open` is a link to /bin/echo, so each path the script opens
+            // is a line on its stdout. A stub script written here would be
+            // a fresh executable, and macOS checks one before its first
+            // run: on a loaded machine that held the stub in `_dyld_start`
+            // for minutes. The script prints nothing else to stdout.
             let bin = dir.url.appending(path: "bin")
             try fm.createDirectory(at: bin, withIntermediateDirectories: true)
-            let open = bin.appending(path: "open")
-            try "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$HOME/opened\"\n"
-                .write(to: open, atomically: true, encoding: .utf8)
-            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: open.path)
+            try fm.createSymbolicLink(at: bin.appending(path: "open"),
+                                      withDestinationURL: URL(fileURLWithPath: "/bin/echo"))
         }
 
         /// A stand-in app bundle whose one file says which copy it is.
@@ -55,6 +58,9 @@ import Testing
             (try? FileManager.default.contentsOfDirectory(atPath: home.appending(path: ".Trash").path)) ?? []
         }
 
+        /// Runs the script to its end, or for at most `gateTimeout`: past
+        /// that the script and everything it started are killed and the
+        /// test fails, rather than hang the suite on a stalled child.
         func run(src: String, dest: String) throws -> Run {
             let script = dir.url.appending(path: "relaunch-\(UUID().uuidString).sh")
             try AppRelauncher.script.write(to: script, atomically: true, encoding: .utf8)
@@ -65,16 +71,52 @@ import Testing
                 "HOME": home.path,
                 "PATH": dir.url.appending(path: "bin").path + ":/usr/bin:/bin",
             ]
+            let out = Pipe()
             let err = Pipe()
+            task.standardOutput = out
             task.standardError = err
-            task.standardOutput = FileHandle.nullDevice
+            let ended = DispatchSemaphore(value: 0)
+            task.terminationHandler = { _ in ended.signal() }
+            // Both pipes drain while the script runs, so a full pipe never
+            // blocks it; each read ends once every writer has gone.
+            let outText = PipeText(out)
+            let errText = PipeText(err)
             try task.run()
-            let errText = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            task.waitUntilExit()
-            let opened = (try? String(contentsOf: home.appending(path: "opened"), encoding: .utf8))?
-                .split(separator: "\n").map(String.init) ?? []
+
+            let (seconds, attoseconds) = gateTimeout.components
+            let deadline = DispatchTime.now() + Double(seconds) + Double(attoseconds) / 1e18
+            if ended.wait(timeout: deadline) == .timedOut {
+                killTree(task.processIdentifier)
+                ended.wait()
+                Issue.record("the relaunch script was still running after \(gateTimeout); killed it")
+            }
+            let opened = (outText.wait(until: deadline) ?? "")
+                .split(separator: "\n").map(String.init)
             #expect(!FileManager.default.fileExists(atPath: script.path), "the script removes itself")
-            return Run(status: task.terminationStatus, opened: opened, stderr: errText)
+            return Run(status: task.terminationStatus, opened: opened,
+                       stderr: errText.wait(until: deadline) ?? "")
+        }
+    }
+
+    /// A pipe's text, read to its end on a background queue.
+    private final class PipeText: @unchecked Sendable {
+        private let done = DispatchSemaphore(value: 0)
+        private var text = ""
+
+        init(_ pipe: Pipe) {
+            let handle = pipe.fileHandleForReading
+            DispatchQueue.global().async {
+                self.text = String(decoding: handle.readDataToEndOfFile(), as: UTF8.self)
+                self.done.signal()
+            }
+        }
+
+        /// The text, or nil if the pipe was still open at `deadline` (a
+        /// child that outlived the kill still holds it). The semaphore
+        /// orders the write before this read.
+        func wait(until deadline: DispatchTime) -> String? {
+            guard done.wait(timeout: max(deadline, .now())) == .success else { return nil }
+            return text
         }
     }
 
@@ -210,4 +252,21 @@ import Testing
         #expect(s.trashed().isEmpty)
         #expect(run.opened == [dest.path])
     }
+}
+
+/// SIGKILLs `pid` and every process under it, leaves first, so nothing the
+/// script started reparents to launchd and keeps running. Called as soon
+/// as the wait on `pid` runs out, while the script is still running.
+private func killTree(_ pid: pid_t) {
+    var tree: [pid_t] = []
+    var queue = [pid]
+    while let parent = queue.popLast() {
+        tree.append(parent)
+        var children = [pid_t](repeating: 0, count: 256)
+        let count = proc_listchildpids(parent, &children,
+                                       Int32(MemoryLayout<pid_t>.stride * children.count))
+        guard count > 0 else { continue }
+        queue += children.prefix(min(Int(count), children.count)).filter { $0 > 0 }
+    }
+    for member in tree.reversed() { kill(member, SIGKILL) }
 }

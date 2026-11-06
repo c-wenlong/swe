@@ -536,18 +536,25 @@ public enum LoginShell {
         await resolve(shell: shell, base: base, timeout: timeout, deadline: .wallClock)
     }
 
-    /// `resolve` with the deadline fired by `deadline`, for tests.
+    /// `resolve` for tests: the deadline fired by `deadline`, and a stub
+    /// shell run as a script by `interpreter` (`/bin/sh stub -ilc ...`).
+    /// macOS checks a freshly written executable before its first run, and
+    /// on a loaded machine that check held a stub in `_dyld_start` for over
+    /// a minute; an interpreter that only reads the stub skips it.
     static func resolve(shell: String, base: [String: String], timeout: Duration,
-                        deadline: DeadlineTimer) async -> [String: String] {
-        await resolveIfAnswered(shell: shell, base: base, timeout: timeout, deadline: deadline)
+                        deadline: DeadlineTimer,
+                        interpreter: String? = nil) async -> [String: String] {
+        await resolveIfAnswered(shell: shell, base: base, timeout: timeout, deadline: deadline,
+                                interpreter: interpreter)
             ?? scrubbed(base)
     }
 
     /// `resolve`, or nil when the shell gave no PATH in time.
     static func resolveIfAnswered(shell: String, base: [String: String], timeout: Duration,
-                                  deadline: DeadlineTimer = .wallClock) async -> [String: String]? {
+                                  deadline: DeadlineTimer = .wallClock,
+                                  interpreter: String? = nil) async -> [String: String]? {
         guard let output = await envOutput(shell: shell, base: base, timeout: timeout,
-                                           deadline: deadline),
+                                           deadline: deadline, interpreter: interpreter),
               let path = path(fromEnvOutput: output) else { return nil }
         var env = base
         env["PATH"] = path
@@ -577,10 +584,11 @@ public enum LoginShell {
     }
 
     private static func envOutput(shell: String, base: [String: String], timeout: Duration,
-                                  deadline: DeadlineTimer = .wallClock) async -> String? {
+                                  deadline: DeadlineTimer = .wallClock,
+                                  interpreter: String? = nil) async -> String? {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-ilc", "/usr/bin/env"]
+        process.executableURL = URL(fileURLWithPath: interpreter ?? shell)
+        process.arguments = (interpreter == nil ? [] : [shell]) + ["-ilc", "/usr/bin/env"]
         process.environment = base
         process.standardInput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice

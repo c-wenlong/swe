@@ -149,6 +149,14 @@ Tests use Swift Testing (`@Suite` / `@Test` / `#expect`). Conventions:
   is public.
 - A new dependency that sleeps or polls takes an injectable clock or a
   gate so the test can drive it deterministically.
+- A test gate remembers a release that lands before its caller parks,
+  and every wait is bounded by `gateTimeout`. Bound a wait with
+  `withinTimeout`, which never awaits the loser, not a task group: a group
+  waits for every child, and `await task.value` ignores cancellation.
+- Never execute a stub script the test just wrote. macOS checks a new
+  executable before its first run, and on a loaded machine that held a
+  stub in `_dyld_start` for minutes. Run it as `/bin/sh <stub>`, or link
+  the stub name to a system binary.
 
 ### Capturing swe contract fixtures
 

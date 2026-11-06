@@ -2,12 +2,15 @@ import Testing
 @testable import SWEApp
 
 /// A sleep the test fires by hand. Each call parks until `fire` or until
-/// its task is cancelled, which throws as `Task.sleep` does.
+/// its task is cancelled, which throws as `Task.sleep` does. A `fire`
+/// that lands before its sleep has parked is kept, so that sleep returns
+/// at once instead of waiting for a fire that already happened.
 @MainActor
 private final class ManualSleep {
     private(set) var durations: [Duration] = []
     private var parked: [Int: CheckedContinuation<Void, Error>] = [:]
     private var cancelled: Set<Int> = []
+    private var fired: Set<Int> = []
     private let starts = CountGate()
     private let cancellations = CountGate()
 
@@ -27,6 +30,7 @@ private final class ManualSleep {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 if cancelled.contains(id) { continuation.resume(throwing: CancellationError()) }
+                else if fired.remove(id) != nil { continuation.resume() }
                 else { parked[id] = continuation }
                 // Counted once parked, so a test that fires it after
                 // `started` always finds it there.
@@ -40,7 +44,8 @@ private final class ManualSleep {
     var waiting: Int { parked.count }
 
     func fire(_ id: Int) {
-        parked.removeValue(forKey: id)?.resume()
+        if let continuation = parked.removeValue(forKey: id) { continuation.resume() }
+        else { fired.insert(id) }
     }
 
     private func cancel(_ id: Int) async {

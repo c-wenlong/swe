@@ -215,15 +215,21 @@ import Testing
     }
 }
 
+/// Each stub shell is a plain file run by `/bin/sh` (`sh`), never
+/// executed itself: macOS checks a freshly written executable before its
+/// first run, and on a loaded machine that check held a stub for over a
+/// minute, so it never wrote its pids and the tests failed slowly.
 @Suite struct LoginShellTimeoutTests {
+    private let sh = "/bin/sh"
+
     @Test func aShellThatHangsFallsBackWithinTheTimeLimit() async throws {
         let temp = try TempDir()
         let shell = temp.path("slow-shell")
         try "#!/bin/sh\nsleep 30\n".write(to: shell, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shell.path)
 
         let started = Date()
-        let env = await LoginShell.resolve(shell: shell.path, base: ["PATH": "/usr/bin:/bin"], timeout: .milliseconds(500))
+        let env = await LoginShell.resolve(shell: shell.path, base: ["PATH": "/usr/bin:/bin"], timeout: .milliseconds(500),
+                                           deadline: .wallClock, interpreter: sh)
         // The bound catches a hang, not latency: it sits under the
         // shell's 30s sleep, so a broken timeout still fails while a
         // starved CI runner cannot trip it.
@@ -238,13 +244,13 @@ import Testing
         let shell = temp.path("stubborn-shell")
         try "#!/bin/sh\ntrap '' TERM\nsleep 30 &\n\(writePid("$$ $!", to: "pids", in: temp))\nwait\n"
             .write(to: shell, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shell.path)
 
         // The deadline fires once the shell has started its child and
         // said so; on a wall clock a busy machine could fire it first,
         // and the pids were never written.
         let env = await LoginShell.resolve(shell: shell.path, base: ["PATH": "/usr/bin:/bin"],
-                                           timeout: .seconds(1), deadline: .once(["pids"], appearIn: temp))
+                                           timeout: .seconds(1), deadline: .once(["pids"], appearIn: temp),
+                                           interpreter: sh)
         #expect(env["PATH"] == "/usr/bin:/bin")
         let pids = ((try? String(contentsOf: temp.path("pids"), encoding: .utf8)) ?? "")
             .split(whereSeparator: \.isWhitespace).compactMap { pid_t($0) }
@@ -262,13 +268,13 @@ import Testing
         let inner = "sleep 30 & " + writePid("\\$!", to: "grandchild.pid", in: temp) + "; wait"
         try "#!/bin/sh\ntrap '' TERM\n/bin/sh -c \"\(inner)\" &\nwait\n"
             .write(to: shell, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shell.path)
 
         // The deadline fires once the grandchild exists. On a wall clock
         // a busy machine fired it before the helper had started its
         // command, so no pid was written and the test failed.
         _ = await LoginShell.resolve(shell: shell.path, base: ["PATH": "/usr/bin:/bin"],
-                                     timeout: .seconds(1), deadline: .once(["grandchild.pid"], appearIn: temp))
+                                     timeout: .seconds(1), deadline: .once(["grandchild.pid"], appearIn: temp),
+                                     interpreter: sh)
         let pid = try #require(await pid(in: "grandchild.pid", of: temp))
         #expect(await processEnds(pid))
     }
@@ -277,9 +283,9 @@ import Testing
         let temp = try TempDir()
         let shell = temp.path("fake-shell")
         try "#!/bin/sh\necho HOME=/x\necho PATH=/custom/bin:/usr/bin\n".write(to: shell, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shell.path)
 
-        let env = await LoginShell.resolve(shell: shell.path, base: ["PATH": "/usr/bin"], timeout: .seconds(5))
+        let env = await LoginShell.resolve(shell: shell.path, base: ["PATH": "/usr/bin"], timeout: .seconds(5),
+                                           deadline: .wallClock, interpreter: sh)
         #expect(env["PATH"] == "/custom/bin:/usr/bin")
     }
 
@@ -300,12 +306,11 @@ import Testing
         let shell = temp.path("fake-shell")
         try "#!/bin/sh\necho PATH=/fake/answered/bin\necho SWE_RATE_LIMITS_TTL=inf\n"
             .write(to: shell, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shell.path)
 
         let env = await LoginShell.resolve(
             shell: shell.path,
             base: ["PATH": "/usr/bin:/bin", "SWE_RATE_LIMITS_TTL": "inf", "HOME": "/tmp"],
-            timeout: .seconds(5))
+            timeout: .seconds(5), deadline: .wallClock, interpreter: sh)
         #expect(env["PATH"] == "/fake/answered/bin")
         #expect(env["SWE_RATE_LIMITS_TTL"] == nil)
         #expect(env["HOME"] == "/tmp")
