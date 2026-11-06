@@ -115,7 +115,7 @@ see `.github/workflows/release.yml` and [RELEASE_CHECKLIST.md](../../RELEASE_CHE
 | `script/SWEWidgets.entitlements` | The extension's sandbox: read access to `~/.swe/cache/widgets/` only |
 | `script/trim-litellm-pricing.py` | Regenerates `Resources/pricing.json` from LiteLLM's price list |
 | `THIRD_PARTY_NOTICES.md` | Licences for the LiteLLM snapshot, ported code, logos, Sparkle and the bundled Python |
-| `Licenses/` | Licence texts for the bundled Python's libraries; `build-app.sh` copies them, with Sparkle's, into `Contents/Resources/Licenses/` |
+| `Licenses/` | Licence texts for the bundled Python's libraries; `script/bundle-licenses.sh` (run by `build-app.sh`) copies them, with Sparkle's, into `Contents/Resources/Licenses/` and fails if a listed text is missing |
 
 Behaviour lives in SWECore behind seams the tests replace: `CommandRunning`
 stands in for the `swe` process, `PricingTransport` for the network. The app

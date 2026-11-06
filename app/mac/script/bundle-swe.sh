@@ -22,9 +22,9 @@
 # don't fetch it again. It matches the host architecture, as the swift build
 # does. build-app.sh signs the binaries afterwards.
 #
-# Licences: the app/mac/Licenses/python-*.txt texts that build-app.sh copies
-# into Contents/Resources/Licenses come from the python/licenses/ folder of
-# the pinned release's full archive (cpython-*-pgo+lto-full.tar.zst; the
+# Licences: the app/mac/Licenses/python-*.txt texts, which bundle-licenses.sh
+# copies into Contents/Resources/Licenses, come from the python/licenses/
+# folder of the pinned release's full archive (cpython-*-pgo+lto-full.tar.zst; the
 # install_only archive used here carries only CPython's). They cover what
 # the interpreter links statically (libffi, expat, sqlite, xz, bzip2,
 # mpdecimal, libuuid, OpenSSL) and what macOS provides and the interpreter
