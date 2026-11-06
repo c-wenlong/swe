@@ -548,8 +548,12 @@ repo?|project?, ref, title, url}` — mapped to the sessions and launches
 the hub ran for it. Links land three ways: a resolve or a PR open
 stamps `origin` on its launch record — the launch links at once, so
 the task reads `agent_running` while it prepares, and adoption adds
-the session; `POST /v1/sessions/{id}/task` links by hand;
-`DELETE` unlinks one task (or every task, without a `task_ref`). `GET
+the session; `POST /v1/sessions/{id}/task` links by hand (a GitHub
+task the store doesn't hold yet must be in a pinned repo, `422
+not_pinned` otherwise, since every stored task is read with `gh`; a
+task already stored keeps its links and refreshes after its repo is
+unpinned); `DELETE` unlinks one task (or every task, without a
+`task_ref`). `GET
 /v1/tasks` merges the store over what the sources list — GitHub, the
 pinned repos' open issues and PRs behind the same 60-second `gh` cache
 `/v1/pulls` uses, and Linear (`remote/linear.py`), the issues assigned
@@ -1468,10 +1472,14 @@ login) the hub exits instead of binding localhost, and launchd retries.
 `--install` again restarts it; `--uninstall` stops and removes it.
 
 On Linux, `--install` writes the systemd user unit
-`~/.config/systemd/user/quiver-remote-hub.service` (under
+`~/.config/systemd/user/swe-remote-hub.service` (under
 `$XDG_CONFIG_HOME` when set) with `Restart=always`, `RestartSec=15` and
 `WantedBy=default.target`, then runs `daemon-reload`, `enable` and
-`restart`. It runs the `swe` that installed it, with the installing
+`restart`. A hub installed before the rename ran as
+`quiver-remote-hub.service`: once the new unit has started, `--install`
+stops, disables and removes that one (its file stays if it will not
+stop), `--uninstall` removes both, and `--status` reports the old unit
+while it is all a machine has. It runs the `swe` that installed it, with the installing
 shell's `PATH`, and appends to the same `serve.log`. A user service
 stops at logout unless the user lingers, so `--install` runs `loginctl
 enable-linger` when lingering is off (polkit usually lets a user do it
@@ -1486,7 +1494,8 @@ under its own init system.
 same code (`commands.Service`: one record per service with its launchd
 label, systemd unit and log). It writes its own
 `~/Library/LaunchAgents/com.cwenlong.swe.remote-agent.plist` on a
-Mac and `~/.config/systemd/user/quiver-remote-agent.service` on Linux,
+Mac and `~/.config/systemd/user/swe-remote-agent.service` on Linux
+(clearing a pre-rename `quiver-remote-agent.service` the same way),
 so installing, restarting or removing it never touches the hub's
 service. It runs `swe remote agent` (the app's bundled `swe` on a Mac,
 under the same protected-folder rule), with the installing shell's

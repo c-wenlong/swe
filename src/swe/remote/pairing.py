@@ -328,6 +328,16 @@ def mint_pair_token(home: Path | str | None = None) -> str:
     return token
 
 
+# The URL scheme the iPhone app's pair link uses. The app has read both
+# ``swe://`` and ``quiver://`` since it was renamed SWE Remote (#1496,
+# 2026-11-01), but a build from before then registers only ``quiver``,
+# and the app is installed from Xcode, so a phone keeps whatever it was
+# last built with. A ``swe://`` QR would open nothing on those phones, so
+# hubs keep writing ``quiver`` for one more release; then this becomes
+# "swe" (the tests and docs naming quiver://pair follow).
+PAIR_LINK_SCHEME = "quiver"
+
+
 def pair_payload(host: str, port: int, token: str,
                  name: str = "", scheme: str = "http") -> str:
     """The QR/URL payload handed to the phone.
@@ -336,7 +346,7 @@ def pair_payload(host: str, port: int, token: str,
     ``tailscale serve``), so older apps keep reading the links they know.
     """
     out = (
-        f"quiver://pair?host={quote(host, safe='')}"
+        f"{PAIR_LINK_SCHEME}://pair?host={quote(host, safe='')}"
         f"&port={port}&token={quote(token, safe='')}"
     )
     if scheme != "http":

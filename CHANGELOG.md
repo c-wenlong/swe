@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A task link can no longer point the hub's `gh` at any repo.**
+  `POST /v1/sessions/{key}/task` stored a GitHub task for whatever repo
+  the client named, and every `GET /v1/tasks` then ran `gh` against it
+  as the hub owner. A new link to a repo the hub hasn't pinned now
+  answers `422 not_pinned`. Tasks already stored keep their links and
+  keep refreshing after their repo is unpinned.
+
 - **The hub's session journals are private to your account.** Every
   prompt, reply and tool call a remote session sees is journaled under
   `~/.swe/data/remote/journal/`, which was created 0755 with 0644 files,
@@ -52,6 +59,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   button and the docs give. Panes a hub started before the upgrade keep
   their `qv-` name: the hub still writes to them, a satellite's rows
   still carry them, and a launch never starts a second pane beside one.
+
+- **Linux hubs and satellites run as `swe-remote-*.service`.** `swe
+  remote serve --install` and `swe remote agent --install` still wrote
+  `quiver-remote-hub.service` and `quiver-remote-agent.service`. They
+  now write `swe-remote-hub.service` and `swe-remote-agent.service`, and
+  once the new unit has started they stop, disable and remove the old
+  one, so a machine never runs two hubs after the upgrade. `--uninstall`
+  removes both names, `--status` and `swe remote setup` still see an old
+  unit that is all a machine has, and `scripts/install.sh` restarts
+  whichever is active.
+
+- **SWE.app ships the licences of the Python and Sparkle it carries.**
+  The bundle held only SWE's own licence and CPython's and OpenSSL's
+  texts. `Contents/Resources/Licenses/` now has Sparkle's `LICENSE` and
+  the licence of each library the bundled Python links (libffi, Expat,
+  SQLite, xz, bzip2, mpdecimal, libuuid, OpenSSL, zlib, libedit,
+  ncurses), and the build stops if one is missing.
+  `app/mac/THIRD_PARTY_NOTICES.md` lists them all and now names every
+  colour harness logo.
 
 - **The web app installs as an app and respects the notch.** Its
   manifest now says `display: "standalone"` and carries an `id`, and its
@@ -220,6 +246,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Safe Storage item.
 
 ### Changed
+
+- **The web app keeps its browser settings under `swe.` names.** Its
+  `localStorage` keys (the device credential, appearance, hidden pages,
+  the Settings section, Compute and Calendar choices, the Agents folder,
+  hidden MCP harnesses, the setup offer) were still `quiver.*`. Each now
+  lives under `swe.*`; the first load after the update moves a browser's
+  old keys across and deletes them, so nobody is signed out or loses a
+  setting. The old credential key stays until the next sign-in or
+  sign-out, so a tab still open on an older page keeps working.
+
+- **Pair QR codes stay on `quiver://pair` for one more release.** The
+  iPhone app has opened both `swe://` and `quiver://` links since it
+  became SWE Remote (2026-11-01), but a phone still running a build from
+  before then registers only `quiver://`, and a `swe://` code would open
+  nothing there. Hubs keep writing `quiver://pair` until the next
+  release, which switches to `swe://pair`: rebuild the iPhone app from a
+  current checkout before then.
+
+- **The MCP pages name the hub `swe` when they sync or remove.** The
+  Mac and web MCP sheets still sent the hub's pre-rename name, `quiver`,
+  as a sync source and remove place. Both now send `swe`; the hub's web
+  API, the Mac model and `swe mcp` keep accepting `quiver`, and server
+  rows still list the hub under both names in `remote_in`, so an older
+  app build or an open page keeps working.
 
 - **The web app marks its own requests with `X-Swe-Pair`.** The header
   that lets the hub owner's tailnet identity in without a bearer was

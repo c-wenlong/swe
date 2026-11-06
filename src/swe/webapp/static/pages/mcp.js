@@ -12,7 +12,7 @@
  */
 "use strict";
 
-const MCP_HIDDEN_KEY = "quiver.mcpHiddenHarnesses";
+const MCP_HIDDEN_KEY = "swe.mcpHiddenHarnesses";
 const MCP_FILTERS = [["all", "All"], ["drift", "Out of sync"], ["conflicts", "Conflicts"]];
 // McpModel's maxAge: a list younger than this is shown without a reread.
 const MCP_MAX_AGE_MS = 60 * 1000;
@@ -391,10 +391,15 @@ function mcpBind() {
 
 /* ---------------------------------------------------------------- sheet */
 
+/* The hub as a sync source or remove place is "swe". Hubs from before the
+ * rename called it "quiver", and their rows still list both in remote_in. */
+const MCP_HUB = "swe";
+const mcpIsHub = (p) => p === MCP_HUB || p === "quiver";
+
 /* McpModel.sources: each definition's first harness, then the hub. */
 function mcpSources(s) {
   const out = mcpGroups(s).map((g) => g[0]).filter(Boolean);
-  if (s.in_hub && !out.includes("quiver")) out.push("quiver");
+  if (s.in_hub && !out.some(mcpIsHub)) out.push(MCP_HUB);
   return out;
 }
 
@@ -402,13 +407,14 @@ function mcpSources(s) {
  * ones with a different definition (opt-in, since that replaces theirs).
  * From the hub every harness with the server counts as different. */
 /* Whether the definition copied from ``source`` is reached at a URL. */
-const mcpSourceIsRemote = (s, source) => (s.remote_in ? s.remote_in.includes(source) : mcpIsRemote(s));
+const mcpSourceIsRemote = (s, source) => (!s.remote_in ? mcpIsRemote(s)
+  : mcpIsHub(source) ? s.remote_in.some(mcpIsHub) : s.remote_in.includes(source));
 
 function mcpSyncTargets(s, source, harnesses) {
   // A config that launches local servers only can't take a URL one.
   const caps = (mcpPage.data && mcpPage.data.caps) || {};
   if (mcpSourceIsRemote(s, source)) harnesses = harnesses.filter((h) => !caps[h] || caps[h].remote);
-  if (source === "quiver") {
+  if (mcpIsHub(source)) {
     return { missing: harnesses.filter((h) => !s.harnesses.includes(h)),
              differing: harnesses.filter((h) => s.harnesses.includes(h)) };
   }
@@ -423,7 +429,6 @@ function mcpSyncTargets(s, source, harnesses) {
   return { missing, differing };
 }
 
-const mcpIsHub = (p) => p === "quiver" || p === "swe";
 const mcpSourceName = (src) => (mcpIsHub(src) ? "SWE hub" : Fmt.mark(src).name);
 
 /* McpSyncReport.sentence: "Added to cursor and cline. Updated codex." */
@@ -701,7 +706,7 @@ async function mcpSaveSecret(s, name) {
 
 /* Where Remove takes the server out of: every harness that has it, and the
  * hub (McpServersPage.removeServer). The hub refuses if any has changed. */
-const mcpRemovePlaces = (s) => [...s.harnesses, ...(s.in_hub ? ["quiver"] : [])];
+const mcpRemovePlaces = (s) => [...s.harnesses, ...(s.in_hub ? [MCP_HUB] : [])];
 
 function mcpRemoveConfirm(s) {
   const places = mcpRemovePlaces(s);
@@ -837,7 +842,7 @@ function mcpOpenSheet(s) {
 
   const canSync = !!s.name && !s.name.includes(",");
   // Sync from the hub is refused by swe while a ${NAME} has no value.
-  const blocked = st.source === "quiver" && (s.secrets_missing || []).length > 0;
+  const blocked = mcpIsHub(st.source) && (s.secrets_missing || []).length > 0;
   const targets = mcpSyncTargets(s, st.source, d.harnesses);
   const request = mcpRequest(s, st);
   const chosenAny = request.targets.length > 0;
@@ -850,10 +855,10 @@ function mcpOpenSheet(s) {
       form += `<div class="field-row mcp-source-row"><label class="caption" for="mcp-source">Copy from</label><span><select class="field" id="mcp-source"${
         st.running || st.done ? " disabled" : ""}>${sources.map((src) => `<option value="${esc(src)}"${src === st.source ? " selected" : ""}>${esc(mcpSourceName(src))}</option>`).join("")}</select></span></div>`;
     } else if (sources.length) {
-      form += `<div class="fields">${fact("Copy from", st.source === "quiver" ? `<span>SWE hub</span>` : marks([st.source]))}</div>`;
+      form += `<div class="fields">${fact("Copy from", mcpIsHub(st.source) ? `<span>SWE hub</span>` : marks([st.source]))}</div>`;
     }
     if (!targets.missing.length && !targets.differing.length) {
-      form += `<p class="caption">${st.source === "quiver" ? "Every harness already has this server." : "Every harness already has this definition."}</p>`;
+      form += `<p class="caption">${mcpIsHub(st.source) ? "Every harness already has this server." : "Every harness already has this definition."}</p>`;
     }
     const toggle = (h, replaces) => {
       const m = Fmt.mark(h);
