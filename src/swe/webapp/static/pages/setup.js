@@ -726,6 +726,7 @@ function setLook(mode) {
   } catch { /* storage off: the choice lasts until reload */ }
   const root = document.documentElement;
   if (mode === "light" || mode === "dark") root.dataset.theme = mode; else delete root.dataset.theme;
+  syncThemeColor();
 }
 
 /* WindowSketch: a tiny SWE window in light, dark, or both halves for

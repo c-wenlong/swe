@@ -40,6 +40,7 @@ function settingsApplyAppearance(mode) {
   const root = document.documentElement;
   if (mode === "light" || mode === "dark") root.dataset.theme = mode;
   else delete root.dataset.theme;
+  syncThemeColor();
 }
 
 // SidebarSection.isCore: Settings must stay reachable, and Overview and
