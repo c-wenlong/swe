@@ -10,6 +10,8 @@ public final class UpdatesModel {
     public let build: BuildInfo
     /// The effective choices: saved overrides over the stamped defaults.
     public private(set) var channel: UpdateChannel
+    /// nil until the checkout has been resolved off the main actor, and
+    /// whenever there is none. `refresh` and `rebuild` wait for it.
     public private(set) var checkout: String?
     /// swe's own version string, nil when the configured swe cannot say.
     public private(set) var sweVersion: String?
@@ -31,6 +33,15 @@ public final class UpdatesModel {
     public private(set) var rebuildNotice: String?
 
     private var preferences: UpdatePreferences
+    /// Finds the checkout on disk. Runs off the main actor: AppModel builds
+    /// this model before the first window, and a stalled Desktop folder
+    /// once held that window back for minutes.
+    private let resolveCheckout: @Sendable (_ stored: String, _ stamped: String?) -> String?
+    /// Internal for tests, which watch an older answer being dropped.
+    let resolving = LatestBuild<String?>()
+    /// The stamped folder's hint, resolved apart from the checkout so a
+    /// stalled stamped folder never holds back a valid saved one.
+    private let hinting = LatestBuild<String?>()
     private let localCheck: LocalBuildCheck
     private let releaseCheck: ReleaseCheck
     private let swe: @Sendable () -> SweClient
@@ -52,7 +63,10 @@ public final class UpdatesModel {
                 swe: @escaping @Sendable () -> SweClient = { SweClient() },
                 rebuildRunner: any CommandRunning = ProcessRunner(executable: "env"),
                 rebuildDir: URL = FileManager.default.homeDirectoryForCurrentUser
-                    .appending(path: ".swe/cache/rebuild")) {
+                    .appending(path: ".swe/cache/rebuild"),
+                resolveCheckout: @escaping @Sendable (_ stored: String, _ stamped: String?)
+                    -> String? = { UpdatePreferences.resolve(stored: $0, stamped: $1) },
+                stampedExists: @escaping @Sendable (String?) -> String? = { UpdatePreferences.existing($0) }) {
         self.build = build
         self.preferences = preferences
         self.localCheck = localCheck
@@ -60,8 +74,25 @@ public final class UpdatesModel {
         self.swe = swe
         self.rebuildRunner = rebuildRunner
         self.rebuildDir = rebuildDir
+        self.resolveCheckout = resolveCheckout
         channel = preferences.channel(build: build)
-        checkout = preferences.checkout(build: build)
+        startResolvingCheckout()
+        let stamped = build.sourcePath
+        hinting.start({ stampedExists(stamped) }) { [weak self] in self?.stampedCheckout = $0 }
+    }
+
+    /// Resolve the saved checkout off the main actor; a newer start (a
+    /// changed Source checkout) drops an older answer still on disk.
+    private func startResolvingCheckout() {
+        let stored = preferences.checkoutOverride
+        let stamped = build.sourcePath
+        let resolve = resolveCheckout
+        resolving.start({ resolve(stored, stamped) }) { [weak self] in self?.checkout = $0 }
+    }
+
+    /// Returns once the latest checkout resolution has landed.
+    public func checkoutResolved() async {
+        await resolving.settled()
     }
 
     /// Dev builds own the channel picker, the Source checkout row and
@@ -73,12 +104,9 @@ public final class UpdatesModel {
     /// The saved Source checkout text, for the PathRow's draft seeding.
     public var checkoutOverride: String { preferences.checkoutOverride }
 
-    /// The stamped source folder the PathRow hints at, when it exists.
-    public var stampedCheckout: String? {
-        guard let path = build.sourcePath,
-              FileManager.default.fileExists(atPath: path) else { return nil }
-        return path
-    }
+    /// The stamped source folder the PathRow hints at, when it exists;
+    /// nil until resolved.
+    public private(set) var stampedCheckout: String?
 
     /// The stored channel pick changed.
     public func setChannel(_ channel: UpdateChannel) {
@@ -91,7 +119,10 @@ public final class UpdatesModel {
     /// discarded when it finishes.
     public func setCheckout(_ path: String) {
         preferences.checkoutOverride = path
-        checkout = preferences.checkout(build: build)
+        // Unknown until the new path is resolved; a build still running
+        // sees the change and is discarded.
+        checkout = nil
+        startResolvingCheckout()
         generation += 1
         local = nil
         switch rebuildState {
@@ -137,6 +168,8 @@ public final class UpdatesModel {
         checking = true
         defer { if mine == generation { checking = false } }
 
+        await checkoutResolved()
+        guard mine == generation else { return }
         let path = checkout
         let commit = build.commit
         let dirty = build.dirty
@@ -179,8 +212,13 @@ public final class UpdatesModel {
     /// lines of output explain a failure. If the checkout changed while
     /// the build ran, the result is stale and discarded.
     public func rebuild() async {
-        guard case .idle = rebuildState, let checkout else { return }
+        guard case .idle = rebuildState else { return }
         rebuildState = .building
+        await checkoutResolved()
+        guard let checkout else {
+            rebuildState = .idle
+            return
+        }
         rebuildNotice = nil
         removeBuildDir()
         let buildDir = rebuildDir.appending(path: UUID().uuidString)

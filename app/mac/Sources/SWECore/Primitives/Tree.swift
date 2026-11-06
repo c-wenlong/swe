@@ -1,15 +1,16 @@
 import Foundation
 
-/// A plugin or skill folder as the detail view lists it: files grouped
-/// under Skills, Commands, Agents, Hooks, then Other, each section with a
-/// count. Dotfiles and `.git` are never listed; a `skills/<name>` folder is
+/// A plugin or skill folder as the detail view lists it: a skill's own
+/// SKILL.md first as its main file, then files grouped under Skills,
+/// Commands, Agents, Hooks and Other, each section with a count. Dotfiles and `.git` are never listed; a `skills/<name>` folder is
 /// one entry that opens its SKILL.md.
 public struct PrimitiveTree: Sendable, Equatable {
     public enum Kind: String, Sendable, CaseIterable {
-        case skills, commands, agents, hooks, other
+        case main, skills, commands, agents, hooks, other
 
         public var title: String {
             switch self {
+            case .main: "Main file"
             case .skills: "Skills"
             case .commands: "Commands"
             case .agents: "Agents"
@@ -81,7 +82,12 @@ public struct PrimitiveTree: Sendable, Equatable {
             }
             if !entries.isEmpty { sections.append((kind, entries)) }
         }
-        sections.append((.other, PrimitiveTree.otherFiles(root: root)))
+        // A skill folder's own SKILL.md is the skill, not a stray file.
+        var other = PrimitiveTree.otherFiles(root: root)
+        if let i = other.firstIndex(where: { $0.name == "SKILL.md" }) {
+            sections.insert((.main, [other.remove(at: i)]), at: 0)
+        }
+        sections.append((.other, other))
         self.sections = sections.filter { !$0.1.isEmpty }
             .map { Section(kind: $0.0, entries: $0.1) }
     }
