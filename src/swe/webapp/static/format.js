@@ -22,10 +22,11 @@ const Fmt = (() => {
   function dollars(amount) {
     if (!amount) return "$0";
     if (amount < 0.01) return "<$0.01";
+    // Judged on the amount as it rounds: 99.996 prints "$100", not "$100.00".
+    const digits = Math.round(amount * 100) / 100 < 100 ? 2 : 0;
     return amount.toLocaleString("en-US", {
       style: "currency", currency: "USD",
-      minimumFractionDigits: amount < 100 ? 2 : 0,
-      maximumFractionDigits: amount < 100 ? 2 : 0,
+      minimumFractionDigits: digits, maximumFractionDigits: digits,
     });
   }
 

@@ -159,7 +159,9 @@ enum UsageFormat {
         let v = value ?? 0
         if v == 0 { return "$0" }
         if v < 0.01 { return "<$0.01" }
-        let f = v < 100 ? usdCents : usdWhole
+        // Judged on the amount as it rounds, as on the Mac and the web:
+        // 99.996 prints "$100", not "$100.00".
+        let f = (v * 100).rounded() / 100 < 100 ? usdCents : usdWhole
         return f.string(from: NSNumber(value: v)) ?? "$\(v)"
     }
 

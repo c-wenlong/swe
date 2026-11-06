@@ -404,11 +404,17 @@ private func git(_ args: String..., in dir: URL) async throws {
         #expect(installed.first?.appURL.path == "/Applications/Cursor.app")
     }
 
-    @Test func anEditorOnlyInTheHomeFolderStillCounts() {
-        let installed = CodeEditors.installed { url in
-            url.lastPathComponent == "VSCodium.app" && url.path.hasPrefix("/Users/")
+    @Test func anEditorOnlyInTheHomeFolderStillCounts() throws {
+        // A scratch home with a real app folder in it, read through the
+        // real file check: nothing here looks at the user's own home.
+        let home = try TempDir()
+        try FileManager.default.createDirectory(
+            at: home.path("Applications/VSCodium.app"), withIntermediateDirectories: true)
+        let installed = CodeEditors.installed(home: home.url) { url in
+            url.path.hasPrefix(home.url.path) && FileManager.default.fileExists(atPath: url.path)
         }
         #expect(installed.map(\.name) == ["VSCodium"])
-        #expect(installed.first?.appURL.path.contains("/Applications/VSCodium.app") == true)
+        #expect(installed.first?.appURL.standardizedFileURL
+                    == home.path("Applications/VSCodium.app").standardizedFileURL)
     }
 }

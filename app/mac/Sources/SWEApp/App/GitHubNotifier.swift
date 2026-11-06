@@ -46,7 +46,9 @@ final class GitHubNotifier {
         return max(base, banners ? hiddenInterval : idleInterval)
     }
 
-    @ObservationIgnored private var napping: Task<Void, Never>?
+    /// Observed, so a test can wait for the loop to fall asleep through
+    /// observation rather than spin on yields until it does.
+    private var napping: Task<Void, Never>?
     /// Whether the loop sits between polls; tests wait on it.
     var isNapping: Bool { napping != nil }
     /// The wall clock; tests set a fake.

@@ -420,13 +420,13 @@ public enum CodeEditors {
         ("Xcode", "Xcode.app", "xcode"),
     ]
 
-    /// The candidates present in /Applications or ~/Applications (the
-    /// system folder wins), in candidate order.
+    /// The candidates present in /Applications or `home`/Applications
+    /// (the system folder wins), in candidate order.
     public static func installed(
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
         appExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
     ) -> [CodeEditor] {
-        let bases = [URL(fileURLWithPath: "/Applications"),
-                     FileManager.default.homeDirectoryForCurrentUser.appending(path: "Applications")]
+        let bases = [URL(fileURLWithPath: "/Applications"), home.appending(path: "Applications")]
         return candidates.compactMap { name, app, _ in
             bases.lazy.map { $0.appending(path: app) }.first(where: appExists)
                 .map { CodeEditor(name: name, appURL: $0) }

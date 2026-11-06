@@ -973,6 +973,19 @@ import Testing
         #expect(ChapterIndex.newChapterProblem(folder: "eng", file: "ok") == nil)
     }
 
+    /// `load` returns with the documents it opened already read, so an
+    /// edit made straight after compares against the disk as it was at
+    /// load time. A read left in a detached task loses that race now
+    /// and then (the toggle test below flaked on it); many loads in a
+    /// row make losing it near certain.
+    @Test func loadReturnsWithItsDocumentsRead() async throws {
+        for _ in 0..<40 {
+            let dir = try TempDir()
+            let model = try await model(dir, runner: Runner([check(dir.url)]))
+            #expect(model.output?.state == .ready)
+        }
+    }
+
     @Test func aToggleHitByADiskChangeReloadsAndReports() async throws {
         let dir = try TempDir()
         let runner = Runner([check(dir.url)])
