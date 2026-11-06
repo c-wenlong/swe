@@ -16,6 +16,7 @@ from swe.console import strip_ansi
 from swe.find import commands as find_commands
 from swe.find.tree import agents_tree, flat_skills, plugin_tree, skills_tree
 from swe.harness import registry
+from tests._tempdir import temp_dir
 
 
 def _skill(root: Path, name: str) -> None:
@@ -789,6 +790,73 @@ class NestedResultTest(unittest.TestCase):
         ])
         self.assertEqual(len(rows), 3)
         self.assertTrue(all(n is not None for _i, _l, n in rows))
+
+
+class SharedSkillFoldersTest(unittest.TestCase):
+    """The shared library's skills at any depth, through symlinks, with a
+    loop walked once."""
+
+    def setUp(self):
+        self.base = temp_dir(self)
+        self.shared = self.base / "skills"
+
+    def skill(self, rel):
+        folder = self.shared / rel
+        folder.mkdir(parents=True)
+        (folder / "SKILL.md").write_text("---\nname: x\n---\n")
+        return folder
+
+    def test_nested_linked_and_looped_folders(self):
+        import os
+
+        self.skill("tdd")
+        self.skill("team/review")
+        self.skill(".hidden-skill")
+        vendor = self.base / "vendor" / "lint"
+        vendor.mkdir(parents=True)
+        (vendor / "SKILL.md").write_text("x")
+        os.symlink(self.base / "vendor", self.shared / "linked")
+        os.symlink(self.shared, self.shared / "team" / "loop")
+        found = find_commands._shared_skill_folders(self.shared)
+        self.assertEqual([p.name for p in found], [".hidden-skill", "lint", "review", "tdd"])
+        self.assertEqual(found[1], self.shared / "linked" / "lint")
+        self.assertEqual(find_commands._shared_skill_folders(self.base / "missing"), [])
+
+    def test_a_folder_that_vanishes_mid_walk_is_skipped(self):
+        import os
+
+        self.skill("keep")
+        gone = self.skill("gone")
+        real_stat = os.stat
+
+        def flaky(path, *args, **kwargs):
+            if str(path) == str(gone):
+                raise FileNotFoundError(path)
+            return real_stat(path, *args, **kwargs)
+
+        with mock.patch("os.stat", side_effect=flaky):
+            found = find_commands._shared_skill_folders(self.shared)
+        self.assertEqual([p.name for p in found], ["keep"])
+
+
+class OutsideRootTest(unittest.TestCase):
+    def test_a_path_outside_the_scan_root_reads_from_home(self):
+        from swe.find.tree import Node
+
+        home, root = Path("/h"), Path("/h/work")
+        self.assertEqual(find_commands._rel(Path("/h/.claude/CLAUDE.md"), root, home, width=30).rstrip(),
+                         "~/.claude/CLAUDE.md")
+        self.assertEqual(find_commands._rel(Path("/h/work/AGENTS.md"), root, home, width=30).rstrip(),
+                         "./AGENTS.md")
+        node = Node("x", Path("/elsewhere/AGENTS.md"), "file", "unlinked")
+        trie = find_commands._build_trie([node], root, home)
+        self.assertIs(trie["/elsewhere/AGENTS.md"][find_commands.LEAF], node)
+
+    def test_a_plugin_with_no_install_record_reads_as_cached(self):
+        from types import SimpleNamespace
+
+        states = [find_commands._plugin_state(SimpleNamespace(enabled=e)) for e in (None, True, False)]
+        self.assertEqual(states, ["cached", "enabled", "disabled"])
 
 
 if __name__ == "__main__":

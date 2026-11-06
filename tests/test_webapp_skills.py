@@ -675,5 +675,130 @@ class TestFileSheetFailures(unittest.TestCase):
             "open": True, "gates": 0, "error": "Couldn't reach the hub. Check the connection, then try again."})
 
 
+def _unreadable(case, folder: Path) -> None:
+    """Make ``folder`` unlistable for the rest of the test."""
+    if os.geteuid() == 0:
+        case.skipTest("root reads any folder")
+    folder.chmod(0)
+    case.addCleanup(folder.chmod, 0o755)
+
+
+class TestTreeEdges(unittest.TestCase):
+    def setUp(self):
+        self.root = temp_dir(self) / "skill"
+        self.root.mkdir()
+
+    def test_a_value_glued_to_its_colon_is_read_whole(self):
+        self.assertEqual(page.frontmatter("---\nname:tdd\n---\n"), [{"key": "name", "value": "tdd"}])
+
+    def test_an_unreadable_file_has_no_text(self):
+        (self.root / "a.md").write_text("x")
+        with patch.object(Path, "read_bytes", side_effect=PermissionError("denied")):
+            self.assertIsNone(page.read_text(self.root / "a.md"))
+
+    def test_a_section_subfolder_lists_its_files_but_not_its_folders(self):
+        (self.root / "commands" / "git" / "deeper").mkdir(parents=True)
+        (self.root / "commands" / "git" / "push.md").write_text("x")
+        (self.root / "commands" / "git" / ".draft.md").write_text("x")
+        (self.root / "commands" / ".hidden.md").write_text("x")
+        outside = self.root.parent / "elsewhere"
+        outside.mkdir()
+        (outside / "leak.md").write_text("x")
+        os.symlink(outside, self.root / "commands" / "linked")
+        sections = page.tree(self.root)
+        self.assertEqual([s["kind"] for s in sections], ["commands"])
+        self.assertEqual(sections[0]["entries"],
+                         [{"name": "git/push.md", "folder": False, "path": "commands/git/push.md"}])
+
+    def test_unlistable_folders_drop_out_quietly(self):
+        (self.root / "agents" / "locked").mkdir(parents=True)
+        (self.root / "hooks").mkdir()
+        (self.root / "hooks" / "pre.sh").write_text("x")
+        (self.root / "notes").mkdir()
+        (self.root / "notes" / "a.md").write_text("x")
+        _unreadable(self, self.root / "agents" / "locked")
+        _unreadable(self, self.root / "notes")
+        sections = {s["kind"]: [e["name"] for e in s["entries"]] for s in page.tree(self.root)}
+        self.assertEqual(sections, {"hooks": ["pre.sh"]})
+        _unreadable(self, self.root / "hooks")
+        self.assertEqual(page.tree(self.root), [])
+
+
+class TestExplanationStates(unittest.TestCase):
+    def test_every_state_has_its_sentence(self):
+        for root, words in (
+            ({"state": "linked"}, "Reads the shared skills in ~/.swe/skills."),
+            ({"state": "linked", "archived": True}, "Reads the shared skills. Archived in swe"),
+            ({"state": "relink", "detail": "points at /elsewhere"}, "Points somewhere else: /elsewhere."),
+            ({"state": "relink"}, "Points somewhere else."),
+            ({"state": "absorb", "detail": "empty"}, "An empty folder. Linking replaces it."),
+            ({"state": "keep", "detail": "1 skill"}, "Holds skills that exist nowhere else (1 skill)."),
+            ({"state": "ignored"}, "Ignored by swe init."),
+            ({"state": "ignored", "detail": "linkignore"}, "Ignored: linkignore."),
+            ({"state": "skipped"}, "The harness isn't installed."),
+            ({"state": "mystery"}, "mystery"),
+        ):
+            self.assertTrue(page.explanation(root).startswith(words), (root, page.explanation(root)))
+
+    def test_a_name_two_folders_share_is_refused(self):
+        roots = [{"name": "codex", "path": "/a"}, {"name": "codex", "path": "/b"}]
+        self.assertEqual(page._root(roots, "/b"), roots[1])
+        with self.assertRaises(PageError) as caught:
+            page._root(roots, "codex")
+        self.assertEqual((caught.exception.status, caught.exception.code), (422, "ambiguous_harness"))
+
+
+class TestWriteFailures(_WriteHome, unittest.TestCase):
+    def setUp(self):
+        self.make_home(temp_dir(self))
+        self.ctx = SimpleNamespace(home=self.home, machine={"name": "box"})
+
+    def refused(self, action, body):
+        with self.assertRaises(PageError) as caught:
+            page.post(self.ctx, action, body)
+        return caught.exception
+
+    def test_a_body_that_is_not_an_object(self):
+        err = self.refused("link", ["codex"])
+        self.assertEqual((err.status, err.code), (422, "bad_body"))
+
+    def test_a_folder_swe_resolves_elsewhere_is_not_linked(self):
+        from swe.skills.layout import SkillLayoutError
+
+        with patch("swe.skills.layout.resolve_root_ref", side_effect=SkillLayoutError("no such root")):
+            err = self.refused("link", {"harness": self.path("codex")})
+        self.assertEqual((err.status, err.code, err.message), (409, "link_failed", "no such root"))
+        with patch("swe.skills.layout.resolve_root_ref", return_value=("codex", Path("/other/skills"))):
+            err = self.refused("link", {"harness": self.path("codex")})
+        self.assertEqual((err.status, err.code), (409, "link_failed"))
+        self.assertIn("as /other/skills", err.message)
+        self.assertFalse(os.path.lexists(self.path("codex")))
+
+    def test_an_unlink_swe_refuses_says_why(self):
+        from swe.skills.layout import SkillLayoutError
+
+        page.post(self.ctx, "link", {"harness": self.path("codex")})
+        with patch("swe.skills.link_ops.unlink_skill_root", side_effect=SkillLayoutError("busy")):
+            err = self.refused("unlink", {"harness": self.path("codex")})
+        self.assertEqual((err.status, err.code, err.message), (409, "unlink_failed", "busy"))
+        self.assertTrue(os.path.islink(self.path("codex")))
+
+    def test_link_all_reports_a_disk_error_and_goes_on(self):
+        from swe.skills import link_ops
+
+        real = link_ops.link_skill_root
+
+        def flaky(path, **kw):
+            if path == self.path("codex"):
+                raise OSError("disk full")
+            return real(path, **kw)
+
+        with patch("swe.skills.link_ops.link_skill_root", side_effect=flaky):
+            reply = page.post(self.ctx, "link_all", {})
+        self.assertEqual(reply["result"]["failed"],
+                         [{"name": "codex", "path": self.path("codex"), "message": "disk full"}])
+        self.assertIn("kilo", {r["name"] for r in reply["result"]["linked"]})
+
+
 if __name__ == "__main__":
     unittest.main()
