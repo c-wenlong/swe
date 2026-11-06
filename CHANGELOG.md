@@ -232,6 +232,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   setting. The old credential key stays until the next sign-in or
   sign-out, so a tab still open on an older page keeps working.
 
+- **The MCP pages name the hub `swe` when they sync or remove.** The
+  Mac and web MCP sheets still sent the hub's pre-rename name, `quiver`,
+  as a sync source and remove place. Both now send `swe`; the hub's web
+  API, the Mac model and `swe mcp` keep accepting `quiver`, and server
+  rows still list the hub under both names in `remote_in`, so an older
+  app build or an open page keeps working.
+
 - **The web app marks its own requests with `X-Swe-Pair`.** The header
   that lets the hub owner's tailnet identity in without a bearer was
   still called `X-Quiver-Pair`. The web app now sends `X-Swe-Pair: 1`;
