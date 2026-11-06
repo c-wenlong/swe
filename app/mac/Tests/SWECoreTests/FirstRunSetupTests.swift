@@ -169,14 +169,18 @@ private func applied(leftAlone: Bool) -> String {
         await setup.load()
         await setup.next(order: ["claude"])
         #expect(setup.step == .links)
+        // A gate of the test's own: the app-wide one is shared by every
+        // test that runs at the same time.
+        let gate = SerialGate()
+        setup.registryGate = gate
         // A Harnesses page edit holds the gate.
-        await HarnessesModel.registryWrites.acquire()
+        await gate.acquire()
         let leave = Task { await setup.next(order: ["claude"]) }
         // Either setup queues at the gate or, without it, reaches swe.
         // The gate has no change stream to wait on, so this re-checks
         // once per turn, bounded by `gateTimeout`.
         let settled = await withinTimeout {
-            while HarnessesModel.registryWrites.waiters == 0,
+            while gate.waiters == 0,
                   !runner.calls.contains(where: { $0.contains("--apply") }) {
                 if Task.isCancelled { return false }
                 await Task.yield()
@@ -185,7 +189,7 @@ private func applied(leftAlone: Bool) -> String {
         }
         #expect(settled, "setup neither queued at the gate nor reached swe")
         #expect(!runner.calls.contains { $0.contains("--apply") })
-        HarnessesModel.registryWrites.release()
+        gate.release()
         await leave.value
         #expect(runner.calls.filter { $0.contains("--apply") }.count == 1)
     }

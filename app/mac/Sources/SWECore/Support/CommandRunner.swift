@@ -628,20 +628,31 @@ actor ShellEnvironmentCache {
     private var value: [String: String]?
     private var inFlight: Task<Void, Never>?
     private var failedAt: ContinuousClock.Instant?
+    /// Test seam: called when a caller joins the first read already in
+    /// flight rather than starting one, so a test can see the sharing.
+    private let onJoin: @Sendable () -> Void
 
     init(retryAfter: Duration,
          read: @escaping @Sendable () async -> [String: String]?,
-         fallback: @escaping @Sendable () -> [String: String]) {
+         fallback: @escaping @Sendable () -> [String: String],
+         onJoin: @escaping @Sendable () -> Void = {}) {
         self.retryAfter = retryAfter
         self.read = read
         self.fallback = fallback
+        self.onJoin = onJoin
     }
 
     func environment() async -> [String: String] {
         if let value { return value }
         if failedAt == nil {
             // The first read: every early caller waits on the same one.
-            let task = inFlight ?? start()
+            let task: Task<Void, Never>
+            if let inFlight {
+                task = inFlight
+                onJoin()
+            } else {
+                task = start()
+            }
             await task.value
             return value ?? fallback()
         }

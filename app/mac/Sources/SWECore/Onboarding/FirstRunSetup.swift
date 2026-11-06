@@ -312,6 +312,10 @@ public final class FirstRunSetupModel {
     /// Asked on the main actor at each call, so the app's current swe
     /// (whose path can change while the sheet is open) answers.
     private let swe: @MainActor () -> SweClient
+    /// The gate every harness.json write waits at: the one app-wide
+    /// gate unless a test hands the model its own, so tests holding a
+    /// gate never share one.
+    @ObservationIgnored var registryGate: SerialGate = HarnessesModel.registryWrites
     private var generation = 0
 
     public init(swe: @escaping @MainActor () -> SweClient, starred: Set<String> = []) {
@@ -447,8 +451,8 @@ public final class FirstRunSetupModel {
         let picks = selected
         // setup rewrites harness.json, so it waits behind the gate every
         // other registry write takes.
-        await HarnessesModel.registryWrites.acquire()
-        defer { HarnessesModel.registryWrites.release() }
+        await registryGate.acquire()
+        defer { registryGate.release() }
         do {
             outcome = try await swe().applySetup(starred: starredList(order: order), adopt: adopt)
             appliedSelection = picks
