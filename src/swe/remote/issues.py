@@ -48,6 +48,7 @@ client can't post anywhere the hub's ``gh`` login reaches.
 
 from __future__ import annotations
 
+import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -356,16 +357,35 @@ def _pinned(home, name: str) -> str | None:
         return None
 
 
+def _on_branch(prompt: str, number: int, branch: str) -> str:
+    """``prompt`` with the issue's other branch name swapped for
+    ``branch``, the one its worktree is on.
+
+    A client prefills its prompt from the detail's ``suggested_prompt``,
+    which names the branch a resolve would use as far as the hub could
+    tell then. The checkout can still land on the other name (a mirror
+    first cloned by this resolve brings a pre-rename ``quiver/issue-<n>``
+    branch with it), and an agent told the wrong branch would commit to
+    a branch nobody reads. Only this issue's own two names are swapped,
+    and only whole ones (``swe/issue-5`` never inside ``swe/issue-50``).
+    """
+    for other in manage.issue_branches(number):
+        if branch and other != branch:
+            prompt = re.sub(rf"(?<![\w/.-]){re.escape(other)}(?![\w/-]|\.\w)",
+                            branch, prompt)
+    return prompt
+
+
 def final_prompt(cmd: dict, issue: dict | None, cwd: str,
                  login: str = "", branch: str = "") -> str:
     """The prompt the agent starts with: the client's, else the built
-    one (naming ``branch``, the one the worktree is on), with the
-    context block added once."""
+    one, naming ``branch`` (the one the worktree is on) either way, with
+    the context block added once."""
     if not cmd["prompt"]:
         return gh_issues.build_prompt(
             cmd["repo"], issue or {"number": cmd["number"]}, cwd,
             context=cmd["context"], context_author=login, branch=branch)
-    prompt = cmd["prompt"]
+    prompt = _on_branch(cmd["prompt"], cmd["number"], branch)
     block = gh_issues.context_block(cmd["context"], login)
     if block and cmd["context"].strip() not in prompt:
         prompt = prompt.rstrip() + "\n\n" + block

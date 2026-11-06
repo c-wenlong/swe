@@ -536,6 +536,32 @@ class TestResolveRoute(unittest.TestCase):
         self.assertIn("You are on branch quiver/issue-5 in a worktree", prompt)
         self.assertNotIn("swe/issue-5", prompt)
 
+    def test_a_prefilled_prompt_follows_the_checkouts_branch(self):
+        # The sheet prefilled the brief before the hub had a mirror, so
+        # it says swe/issue-5; the clone brought a pre-rename branch and
+        # the checkout is on quiver/issue-5.
+        def old_tree(repo, number, home=None, progress=None):
+            return gh.GhResult("ok", data={
+                "path": self.tree, "branch": "quiver/issue-5",
+                "base": "origin/main", "created": True})
+
+        prompt = ("You are on branch swe/issue-5 here. Not swe/issue-50, "
+                  "nor feat/swe/issue-5.")
+        with self._stubs(worktree=old_tree) as (_wt, ln):
+            status, body = self._post({"repo": "o/r", "number": 5,
+                                       "harness": "claude", "prompt": prompt})
+        self.assertEqual(status, 202, body)
+        self.assertEqual(ln.call_args[0][3], (
+            "You are on branch quiver/issue-5 here. Not swe/issue-50, "
+            "nor feat/swe/issue-5."))
+        # On the branch it names, a client's prompt is left as written.
+        cmd = {"prompt": "Work on quiver/issue-5.", "context": "",
+               "number": 5, "repo": "o/r"}
+        self.assertEqual(issues_mod.final_prompt(
+            cmd, None, "/w", branch="quiver/issue-5"), "Work on quiver/issue-5.")
+        self.assertEqual(issues_mod.final_prompt(
+            cmd, None, "/w", branch="swe/issue-5"), "Work on swe/issue-5.")
+
     def test_resolve_carries_the_pick(self):
         with self._stubs() as (_wt, ln):
             status, body = self._post(

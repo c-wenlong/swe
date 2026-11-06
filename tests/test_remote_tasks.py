@@ -344,16 +344,19 @@ class TestTasksRoute(_Base):
 
     def test_issue_on_its_branch_reads_pr_open(self):
         # swe/issue-<n>, or quiver/issue-<n> from a pre-rename resolve.
-        for branch in ("swe/issue-5", "quiver/issue-5"):
-            pr = {**_row(9), "branch": branch}
+        for number, branch in ((9, "swe/issue-5"), (11, "quiver/issue-5")):
+            pr = {**_row(number), "branch": branch}
             pulls = lambda name, login: {"name": name, "status": "ok",
                                          "pulls": [pr]}
+            # Each case reads its own pulls: refresh=1 alone still takes
+            # a reply younger than the refresh floor from the cache.
+            G.CACHE.clear()
             with self._stubs(pulls=pulls):
-                _s, body = self._get("/v1/tasks?refresh=1")
+                _s, body = self._get("/v1/tasks")
             row = {t["id"]: t for t in body["tasks"]}["github:issue:o/r:5"]
             self.assertEqual(row["state"], "pr_open", branch)
             self.assertEqual(row["status"], "PR open")
-            self.assertEqual(row["pr"]["number"], 9)
+            self.assertEqual(row["pr"]["number"], number)
             self.assertEqual(row["pr"]["state"], "open")
 
     def test_linked_pr_falls_back_to_the_pre_rename_branch(self):
