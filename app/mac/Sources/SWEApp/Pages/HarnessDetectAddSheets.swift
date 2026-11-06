@@ -18,7 +18,7 @@ struct DetectSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Detect harnesses").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+            Text("Detect harnesses").font(Theme.sectionTitle).tracking(-0.5)
             if let error {
                 Text(error).font(Theme.caption).foregroundStyle(Theme.dangerText)
             }
@@ -152,7 +152,7 @@ struct AddHarnessSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Add harness").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+            Text("Add harness").font(Theme.sectionTitle).tracking(-0.5)
             FormField("Name") {
                 TextField("mycli", text: $name).sweField(monospaced: true)
                 if let nameProblem {

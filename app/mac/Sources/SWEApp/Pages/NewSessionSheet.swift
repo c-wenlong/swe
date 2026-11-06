@@ -146,7 +146,10 @@ struct NewSessionSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .disabled(flow.busy)
         }
-        .frame(maxHeight: 540)
+        // No fixed cap: the sheet card already stops at the window less its
+        // margin, so a tall window shows the whole folder list instead of
+        // cutting the second row in half at 540pt.
+        .frame(maxHeight: .infinity)
     }
 
     private var machineSection: some View {
@@ -185,7 +188,14 @@ struct NewSessionSheet: View {
     private var harnessSection: some View {
         group("Harness") {
             if machines == nil {
-                EmptyView()
+                // Placeholder tiles while the machines load: the card keeps
+                // its shape instead of a blank gap that jumps when they land.
+                LazyVGrid(columns: Self.columns, spacing: 8) {
+                    ForEach(0..<8, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 12).fill(Theme.subtle).frame(height: 44)
+                    }
+                }
+                .accessibilityLabel("Loading harnesses")
             } else if offered.isEmpty {
                 Text("This machine can't start any harness. Install one there, or turn it back on in Settings › Providers.")
                     .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
