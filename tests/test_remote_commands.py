@@ -417,9 +417,10 @@ class TestServe(_TempHome, unittest.TestCase):
     def test_install_on_linux_writes_a_systemd_unit(self):
         seen = {}
 
-        def fake_install(program, log_path, path_env, **_kw):
+        def fake_install(program, log_path, path_env, **kw):
             seen["program"] = program
-            return Path("/h/.config/systemd/user/quiver-remote-hub.service"), "sudo loginctl enable-linger $USER"
+            seen["old_unit"] = kw.get("old_unit")
+            return Path("/h/.config/systemd/user/swe-remote-hub.service"), "sudo loginctl enable-linger $USER"
 
         with patch.object(commands.sys, "platform", "linux"), \
              patch.object(commands.sys, "argv", ["/home/dev/.local/bin/swe"]), \
@@ -432,7 +433,8 @@ class TestServe(_TempHome, unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(seen["program"], ["/home/dev/.local/bin/swe", "remote", "serve", "--host=127.0.0.1",
                                            "--public-url=https://box.tail.ts.net:8477"])
-        self.assertIn("quiver-remote-hub.service", out)
+        self.assertIn("swe-remote-hub.service", out)
+        self.assertEqual(seen["old_unit"], "quiver-remote-hub.service")
         self.assertIn("starts at boot", out)
         self.assertIn("enable-linger", err)
 

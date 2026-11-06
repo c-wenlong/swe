@@ -17,7 +17,7 @@ const agentsPage = {
   // to confirm, and the last run's failure (AgentsModel.linking/linkError).
   running: null, confirming: false, runError: null,
 };
-const AGENTS_FOLDER_KEY = "quiver.agentsProjectFolder";
+const AGENTS_FOLDER_KEY = "swe.agentsProjectFolder";
 // The app's "link" SF Symbol.
 const AGENTS_LINK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.2 1.2"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.2-1.2"/></svg>';
 

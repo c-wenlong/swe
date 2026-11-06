@@ -1290,7 +1290,7 @@ class TestRevokeThisBrowserScript(unittest.TestCase):
         app = (self.STATIC / "app.js").read_text(encoding="utf-8")
         forget = re.search(r"^function pairForget\(\) \{.*?^\}", app, re.S | re.M).group(0)
         prelude = (
-            "const store = new Map([['quiver.remote', '{\"credential\":\"c\"}']]);\n"
+            "const store = new Map([['swe.remote', '{\"credential\":\"c\"}']]);\n"
             "globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v),"
             " removeItem: (k) => store.delete(k) };\n"
             "globalThis.location = { hash: " + json.dumps(hash_) + " };\n"
@@ -1316,7 +1316,7 @@ class TestRevokeThisBrowserScript(unittest.TestCase):
     REVOKE = ("settingsPage.data = { remote: { devices: [{ id: 'd1', this_device: %s }] } };\n"
               "settingsPage.setupBusy = true;\nsettingsPollRequests();\n"
               "settingsRevoke('d1').then(() => process.stdout.write(JSON.stringify("
-              "{ stored: store.has('quiver.remote'), signedOut: !!settingsPage.signedOut,"
+              "{ stored: store.has('swe.remote'), signedOut: !!settingsPage.signedOut,"
               " polling: settingsPage.reqPoll !== null })));\n")
 
     def test_revoking_this_browser_forgets_its_credential(self):

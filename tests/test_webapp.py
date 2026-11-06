@@ -225,6 +225,68 @@ class TestSessionUsage(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestStorageKeyMigration(unittest.TestCase):
+    """migrateStorageKeys: the quiver.* keys a browser kept before the
+    rename move to swe.* once, and the old keys go."""
+
+    def migrate(self, stored, throw_on_set=False, then=""):
+        src = 'const LEGACY_CREDENTIAL_KEY = "quiver.remote";\n' + app_js_function("migrateStorageKeys") + """
+const m = new Map(Object.entries(%s));
+const store = {
+  get length() { return m.size; },
+  key(i) { return [...m.keys()][i] ?? null; },
+  getItem(k) { return m.has(k) ? m.get(k) : null; },
+  setItem(k, v) { if (%s) throw new Error("quota"); m.set(k, String(v)); },
+  removeItem(k) { m.delete(k); },
+};
+try { migrateStorageKeys(store); } catch { }
+const localStorage = store;
+%s
+process.stdout.write(JSON.stringify(Object.fromEntries(m)));
+""" % (json.dumps(stored), "true" if throw_on_set else "false", then)
+        done = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def test_old_keys_move_to_the_swe_names(self):
+        got = self.migrate({"quiver.setup.offered": "1", "quiver.compute.range": "1h",
+                            "quiver.appearance": "dark", "other": "kept"})
+        self.assertEqual(got, {"swe.setup.offered": "1", "swe.compute.range": "1h",
+                               "swe.appearance": "dark", "other": "kept"})
+
+    def test_the_credential_is_copied_and_kept_for_older_tabs(self):
+        # A tab still running a pre-rename page shares this storage and
+        # reads quiver.remote, so the copy leaves it until a credential
+        # is banked or forgotten.
+        got = self.migrate({"quiver.remote": '{"credential":"c"}'})
+        self.assertEqual(got, {"quiver.remote": '{"credential":"c"}', "swe.remote": '{"credential":"c"}'})
+        self.assertEqual(self.migrate(got), got)
+        stored = self.migrate(got, then=app_js_function("pairStore") + 'pairStore({ credential: "n" });')
+        self.assertEqual(stored, {"swe.remote": '{"credential":"n"}'})
+        forgot = self.migrate(got, then=app_js_function("pairForget") + "pairForget();")
+        self.assertEqual(forgot, {})
+
+    def test_a_value_already_under_the_new_name_wins(self):
+        got = self.migrate({"quiver.appearance": "dark", "swe.appearance": "light"})
+        self.assertEqual(got, {"swe.appearance": "light"})
+
+    def test_a_second_load_changes_nothing(self):
+        once = self.migrate({"quiver.setup.offered": "1"})
+        self.assertEqual(self.migrate(once), once)
+
+    def test_a_full_store_keeps_the_old_key_and_still_signs_in(self):
+        # setItem throwing (quota) must not lose the value: the old key
+        # stays, and credential() still finds it there.
+        self.assertEqual(self.migrate({"quiver.appearance": "dark"}, throw_on_set=True), {"quiver.appearance": "dark"})
+        cred = APP_JS.read_text(encoding="utf-8")
+        start = cred.index("const credential = () => {")
+        cred = cred[start:cred.index("};\n", start) + 3]
+        got = self.migrate({"quiver.remote": '{"credential":"old"}'}, throw_on_set=True,
+                           then=cred + 'm.set("seen", credential());')
+        self.assertEqual(got, {"quiver.remote": '{"credential":"old"}', "seen": "old"})
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
 class TestSetupOffer(unittest.TestCase):
     """app.js's first-run offer, run under node with the browser stubbed:
     each case is a fresh page load at ``hash``."""
@@ -254,7 +316,7 @@ class TestSetupOffer(unittest.TestCase):
         return json.loads(done.stdout)
 
     FIRST = "const d = { first_run: true };"
-    RESULT = "({ went, hash: location.hash, offered: localStorage.getItem('quiver.setup.offered') })"
+    RESULT = "({ went, hash: location.hash, offered: localStorage.getItem('swe.setup.offered') })"
 
     def test_a_bare_landing_opens_setup_once(self):
         out = self.offer("", self.FIRST + "const went = offerSetupOnce(d);"
@@ -263,7 +325,7 @@ class TestSetupOffer(unittest.TestCase):
 
     def test_a_saved_offer_stays_on_overview(self):
         out = self.offer("", self.FIRST + "const went = offerSetupOnce(d); return " + self.RESULT + ";",
-                         stored={"quiver.setup.offered": "1"})
+                         stored={"swe.setup.offered": "1"})
         self.assertEqual(out, {"went": False, "hash": "", "offered": "1"})
 
     def test_a_link_to_overview_is_not_redirected(self):

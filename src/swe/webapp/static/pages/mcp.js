@@ -12,7 +12,7 @@
  */
 "use strict";
 
-const MCP_HIDDEN_KEY = "quiver.mcpHiddenHarnesses";
+const MCP_HIDDEN_KEY = "swe.mcpHiddenHarnesses";
 const MCP_FILTERS = [["all", "All"], ["drift", "Out of sync"], ["conflicts", "Conflicts"]];
 // McpModel's maxAge: a list younger than this is shown without a reread.
 const MCP_MAX_AGE_MS = 60 * 1000;
