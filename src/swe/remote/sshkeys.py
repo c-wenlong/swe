@@ -11,10 +11,12 @@ returns, so it never has to trust the first key sshd shows it.
 
 Off until ``swe remote ssh --on``: writing ``authorized_keys`` changes
 who can log in, so pairing alone never does it. The managed lines carry
-a ``quiver-remote:<device id>`` comment and are rebuilt from
+a ``swe-remote:<device id>`` comment and are rebuilt from
 ``devices.json`` on every change, so revoking a device (from any path)
 or turning the feature off removes its line and leaves every other
-line in the file alone.
+line in the file alone. Lines a pre-rename hub wrote carry
+``quiver-remote:`` instead: they still count as managed, and the next
+rewrite replaces them with the new tag.
 """
 
 from __future__ import annotations
@@ -44,7 +46,11 @@ KEY_TYPES = (
     "ecdsa-sha2-nistp384",
     "ecdsa-sha2-nistp521",
 )
-TAG = "quiver-remote:"
+TAG = "swe-remote:"
+# The tag hubs wrote before the quiver -> swe rename. Still managed, so
+# the first sync after an upgrade swaps those lines for TAG ones rather
+# than leaving a second, unrevokable copy of each key behind.
+LEGACY_TAG = "quiver-remote:"
 # A debugging shell needs a pty and nothing it could hand on.
 OPTIONS = "no-agent-forwarding,no-X11-forwarding"
 # An encoded P-521 key is ~170 characters; anything near this is junk.
@@ -197,11 +203,15 @@ class KeysNotSynced(Exception):
     already saved (a revoke, say). The cause is ``__cause__``."""
 
 
-_TAG_BYTES = TAG.encode("ascii")
+_TAG_BYTES = (TAG.encode("ascii"), LEGACY_TAG.encode("ascii"))
 
 
 def _managed(line: bytes) -> bool:
     return any(part.startswith(_TAG_BYTES) for part in line.split())
+
+
+def _line(key: str, device_id: str, tag: str = TAG) -> str:
+    return f"{OPTIONS} {key} {tag}{device_id}"
 
 
 def _desired_lines(home: Path | None) -> dict[str, str]:
@@ -211,7 +221,7 @@ def _desired_lines(home: Path | None) -> dict[str, str]:
         key = normalize_public_key(row.get("ssh_public_key"))
         if row.get("revoked_at") or not key:
             continue
-        out[device_id] = f"{OPTIONS} {key} {TAG}{device_id}"
+        out[device_id] = _line(key, device_id)
     return out
 
 
@@ -235,6 +245,9 @@ def sync(home: Path | str | None = None) -> dict:
     """Rewrite the managed lines of ``authorized_keys`` from ``devices.json``.
 
     Every line without the tag stays exactly as it was, in its place.
+    A line under the pre-rename tag is managed too, so it is replaced
+    by its ``TAG`` line (or dropped, for a device that no longer wants
+    one) on the first rewrite.
     The wanted state is read inside the lock: a sync that read it before
     a concurrent revoke and wrote after would put the revoked key back.
     Returns ``{"enabled", "installed": [device ids], "changed"}``.
@@ -262,13 +275,17 @@ def sync(home: Path | str | None = None) -> dict:
 
 
 def installed_line(home: Path | str | None, device_id: str) -> bool:
-    """True when the device's line is in ``authorized_keys`` right now."""
+    """True when the device's line is in ``authorized_keys`` right now.
+
+    A pre-rename hub's line counts: sshd lets the phone in on it just
+    the same until the next sync rewrites it under the new tag."""
     row = pairing.load_devices(_home(home)).get(device_id) or {}
     key = normalize_public_key(row.get("ssh_public_key"))
     if not key or row.get("revoked_at"):
         return False
-    want = f"{OPTIONS} {key} {TAG}{device_id}".encode("ascii")
-    return want in _read_lines(authorized_keys_file(_home(home)))
+    lines = _read_lines(authorized_keys_file(_home(home)))
+    return any(_line(key, device_id, tag).encode("ascii") in lines
+               for tag in (TAG, LEGACY_TAG))
 
 
 def set_device_key(
