@@ -906,5 +906,319 @@ class HarnessUsageEventsCommandTest(unittest.TestCase):
         self.assertIn("claude-4-sonnet", out)
 
 
+
+def _run_quiet(fn, *args, **kwargs):
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        code = fn(*args, **kwargs)
+    return code, out.getvalue(), err.getvalue()
+
+
+class RunInstallFailureTest(unittest.TestCase):
+    """run_install's failure paths: none of them may write the registry."""
+
+    def setUp(self):
+        from swe.harness.installers import Installer
+
+        self.npm = Installer("npm", "@acme/agent-cli")
+        self.brew = Installer("brew", "acme")
+        for target, kwargs in (("swe.harness.commands.load_registry", {"return_value": {}}),
+                               ("swe.harness.installers.installed_app", {"return_value": None}),
+                               ("swe.harness.installers.installed_cask", {"return_value": None})):
+            p = patch(target, **kwargs)
+            p.start()
+            self.addCleanup(p.stop)
+        save = patch("swe.harness.commands.save_registry")
+        self.save = save.start()
+        self.addCleanup(save.stop)
+
+    def _run(self, installer, run, *, capture):
+        from swe.harness.commands import run_install
+
+        with patch("swe.harness.commands.subprocess.run", side_effect=run):
+            return run_install("acme", "acme", installer, ["fake-installer"], "/bin/npm",
+                               capture=capture)
+
+    def test_a_captured_timeout_keeps_what_the_installer_printed(self):
+        def run(argv, stdout=None, **_kw):
+            stdout.write(b"downloading...\n")
+            raise subprocess.TimeoutExpired(argv, 600)
+
+        result = self._run(self.brew, run, capture=True)
+        self.assertEqual((result.code, result.exited, result.action), (1, False, None))
+        self.assertEqual(result.error, "brew install timed out.")
+        self.assertEqual(result.output, "downloading...\n")
+        self.save.assert_not_called()
+
+    def test_a_captured_installer_that_cannot_start(self):
+        result = self._run(self.brew, FileNotFoundError(2, "No such file", "brew"), capture=True)
+        self.assertEqual((result.code, result.exited), (1, False))
+        self.assertIn("brew install failed: ", result.error)
+        self.save.assert_not_called()
+
+    def test_a_captured_failure_returns_only_the_tail_of_its_output(self):
+        from swe.harness.commands import INSTALL_OUTPUT_TAIL
+
+        def run(argv, stdout=None, **_kw):
+            stdout.write(b"x" * (INSTALL_OUTPUT_TAIL + 100) + b"\nerror: nope\n")
+            return subprocess.CompletedProcess(argv, 3)
+
+        result = self._run(self.brew, run, capture=True)
+        self.assertEqual((result.code, result.exited), (3, True))
+        self.assertEqual(result.error, "brew install exited with code 3")
+        self.assertEqual(len(result.output), INSTALL_OUTPUT_TAIL)
+        self.assertTrue(result.output.endswith("error: nope\n"))
+        self.save.assert_not_called()
+
+    def test_an_interactive_timeout_or_start_failure(self):
+        for raised, error in ((subprocess.TimeoutExpired("npm", 300), "npm install timed out."),
+                              (PermissionError(13, "denied"), "npm install failed: ")):
+            result = self._run(self.npm, raised, capture=False)
+            self.assertEqual((result.code, result.exited, result.output), (1, False, ""))
+            self.assertTrue(result.error.startswith(error), result.error)
+        self.save.assert_not_called()
+
+    def test_npm_version_falls_back_to_the_global_package_json(self):
+        from tests._tempdir import temp_dir
+
+        prefix = temp_dir(self)
+        pkg = prefix / "lib" / "node_modules" / "@acme" / "agent-cli"
+        pkg.mkdir(parents=True)
+        (pkg / "package.json").write_text(json.dumps({"version": "v2.3.4"}))
+
+        def run(argv, **_kw):
+            if argv[:2] == ["/bin/npm", "prefix"]:
+                return subprocess.CompletedProcess(argv, 0, f"{prefix}\n", "")
+            return subprocess.CompletedProcess(argv, 0)
+
+        with patch("swe.harness.commands.shutil.which", return_value=None):
+            result = self._run(self.npm, run, capture=False)
+        # Off PATH, so exit 1, but registered with the package's version.
+        self.assertEqual((result.code, result.action, result.version), (1, "Added", "2.3.4"))
+        saved = self.save.call_args.args[0]["acme"]
+        self.assertEqual(saved["version"], "2.3.4")
+
+    def test_an_unreadable_npm_prefix_registers_without_a_version(self):
+        def run(argv, **_kw):
+            if argv[:2] == ["/bin/npm", "prefix"]:
+                raise subprocess.TimeoutExpired(argv, 5)
+            return subprocess.CompletedProcess(argv, 0)
+
+        from swe.harness.installers import Installer
+
+        with patch("swe.harness.commands.shutil.which", return_value=None):
+            result = self._run(Installer("npm", "plain-cli"), run, capture=False)
+        self.assertEqual((result.action, result.version), ("Added", None))
+
+    def test_install_argv_needs_its_tool_on_path(self):
+        from swe.harness.commands import InstallError, install_argv
+
+        with patch("swe.harness.path_health.preferred_npm_bin", return_value=None):
+            with self.assertRaisesRegex(InstallError, "No npm found on PATH"):
+                install_argv(self.npm)
+        with patch("swe.harness.commands.shutil.which", return_value=None):
+            with self.assertRaisesRegex(InstallError, "'brew' is needed for --via=brew"):
+                install_argv(self.brew)
+
+    def test_install_harness_refuses_a_method_the_harness_lacks(self):
+        from swe.harness.commands import InstallError, install_harness
+
+        with patch("swe.harness.commands.load_registry_readonly", return_value={}), \
+                patch("swe.harness.installers.installers_for", return_value=[self.brew]):
+            with self.assertRaisesRegex(InstallError, "'acme' has no nix installer"):
+                install_harness("acme", "nix")
+
+
+class HarnessCommandRefusalTest(unittest.TestCase):
+    """Argument and lookup refusals across the small harness commands."""
+
+    def setUp(self):
+        from tests._tempdir import temp_dir
+
+        config = temp_dir(self) / ".swe" / "config"
+        self.harness_file = config / "harness.json"
+        p = patch.multiple("swe.harness.registry", CONFIG_DIR=config,
+                           HARNESS_FILE=self.harness_file, TOOLS_FILE=config / "tools.json")
+        p.start()
+        self.addCleanup(p.stop)
+        from swe.harness.registry import save_registry
+
+        save_registry({"claude": {"command": "claude", "aliases": ["cc"]},
+                       "codex": {"command": "codex", "aliases": []}})
+
+    def test_remove_info_and_use_refuse_extra_and_unknown_names(self):
+        from swe.harness.commands import cmd_info, cmd_remove
+
+        for fn in (cmd_remove, cmd_info):
+            code, out, _ = _run_quiet(fn, [])
+            self.assertEqual(code, 1)
+            self.assertIn("Usage:", out)
+            code, out, _ = _run_quiet(fn, ["claude", "extra"])
+            self.assertEqual((code, "Unexpected args: extra" in out), (1, True))
+        code, out, _ = _run_quiet(cmd_remove, ["ghost"])
+        self.assertEqual((code, "Tool 'ghost' not found." in out), (1, True))
+        with patch("swe.harness.commands.cmd_list") as listing:
+            code, out, _ = _run_quiet(cmd_use, [])
+        listing.assert_called_once_with([])
+        self.assertIn("Usage: swe use", out)
+        code, out, _ = _run_quiet(cmd_use, ["ghost"])
+        self.assertEqual((code, "Tool 'ghost' not found" in out), (1, True))
+
+    def test_star_json_takes_exactly_one_name(self):
+        from swe.harness.commands import cmd_star
+
+        for args in (["--json"], ["claude", "codex", "--json"], ["clear", "--json"]):
+            code, out, err = _run_quiet(cmd_star, args)
+            self.assertEqual((code, out), (1, ""), args)
+            self.assertIn("exactly one harness name", err)
+
+    def test_star_listing_shows_each_star_with_its_aliases(self):
+        from swe.harness.commands import cmd_star
+        from swe.harness.stars import save_stars
+
+        _code, out, _ = _run_quiet(cmd_star, [])
+        self.assertIn("None yet", out)
+        save_stars(["codex", "claude"])
+        _code, out, _ = _run_quiet(cmd_star, ["ls"])
+        self.assertLess(out.index("codex"), out.index("claude"))
+        self.assertIn("(cc)", out)
+
+    def test_star_refuses_extra_args_and_unknown_names_and_clears(self):
+        from swe.harness.commands import cmd_star
+        from swe.harness.stars import load_stars, save_stars
+
+        code, out, _ = _run_quiet(cmd_star, ["claude", "codex"])
+        self.assertEqual((code, "Unexpected args: codex" in out), (1, True))
+        code, _, err = _run_quiet(cmd_star, ["ghost", "--json"])
+        self.assertEqual(code, 1)
+        self.assertIn("Tool 'ghost' not found", err)
+        save_stars(["claude", "gone"])
+        _run_quiet(cmd_star, ["clear"])
+        self.assertEqual(load_stars(), [])
+
+    def test_a_star_that_outlived_its_harness_can_be_unstarred(self):
+        from swe.harness.commands import cmd_star
+        from swe.harness.stars import load_stars, save_stars
+
+        save_stars(["gone"])
+        _code, out, _ = _run_quiet(cmd_star, ["gone"])
+        self.assertIn("Unstarred gone", out)
+        self.assertEqual(load_stars(), [])
+
+    def test_archive_refuses_a_bad_usage_level_and_a_missing_name(self):
+        from swe.harness.commands import cmd_archive
+
+        code, out, _ = _run_quiet(cmd_archive, ["claude", "--usage=sometimes"])
+        self.assertEqual(code, 1)
+        self.assertIn("Unknown usage level: sometimes", out)
+        code, out, _ = _run_quiet(cmd_archive, ["--usage=heavy"])
+        self.assertEqual(code, 1)
+        self.assertIn("Usage: swe hs archive <name>", out)
+        self.assertNotIn('"archived"', self.harness_file.read_text())
+        code, out, _ = _run_quiet(cmd_archive, ["help"])
+        self.assertEqual(code, 0)
+        self.assertIn("--usage levels:", out)
+
+
+class HarnessUsageArgumentTest(unittest.TestCase):
+    def test_usage_refuses_unknown_and_extra_arguments(self):
+        from swe.harness.commands import cmd_harness_usage
+
+        for args, why in ((["devin", "--verbose"], "Unknown argument: --verbose"),
+                          (["devin", "cursor"], "Unexpected argument: cursor"),
+                          (["devin", "--account-dir"], "--account-dir")):
+            code, out, err = _run_quiet(cmd_harness_usage, args + ["--json"])
+            self.assertEqual((code, out), (1, ""), args)
+            self.assertIn(why, err)
+
+    def test_usage_events_refuses_bad_arguments(self):
+        from swe.harness.commands import cmd_harness_usage_events
+
+        for args, why in ((["cursor", "--since=yesterday"], "Bad --since: yesterday"),
+                          (["cursor", "--verbose"], "Unknown argument: --verbose"),
+                          (["cursor", "devin"], "Unexpected argument: devin"),
+                          (["cursor", "--since"], "--since"),
+                          (["devin"], "Usage: swe harness usage-events cursor"),
+                          (["cursor", "--account-dir=/nonexistent/acct"], "No such directory")):
+            code, out, err = _run_quiet(cmd_harness_usage_events, args + ["--json"])
+            self.assertEqual((code, out), (1, ""), args)
+            self.assertIn(why, err)
+
+    def test_a_failure_prints_the_remedys_url_or_the_bare_detail(self):
+        from swe.harness.commands import cmd_harness_usage
+        from swe.harness.rate_limits import UsageOutcome
+        from tests._tempdir import temp_dir
+
+        account = str(temp_dir(self))
+        outcome = UsageOutcome(status="unavailable", limit=None, detail="feed is down")
+        remedy = {"summary": "Open the dashboard", "steps": ["sign in"],
+                  "url": "https://example.com/usage"}
+        with patch("swe.harness.rate_limits.get_account_usage", return_value=outcome):
+            with patch("swe.harness.remedies.remedy_for_account", return_value=remedy):
+                code, out, _ = _run_quiet(cmd_harness_usage, ["cursor", f"--account-dir={account}"])
+            self.assertEqual(code, 1)
+            self.assertIn("Open the dashboard.", out)
+            self.assertIn("1. sign in", out)
+            self.assertIn("open 'https://example.com/usage'", out)
+            with patch("swe.harness.remedies.remedy_for_account", return_value=None):
+                code, out, _ = _run_quiet(cmd_harness_usage, ["cursor", f"--account-dir={account}"])
+        self.assertEqual(code, 1)
+        self.assertIn("feed is down", out)
+
+    def test_a_value_error_from_the_fetch_is_a_refusal(self):
+        from swe.harness.commands import cmd_harness_usage
+        from tests._tempdir import temp_dir
+
+        with patch("swe.harness.rate_limits.get_account_usage",
+                   side_effect=ValueError("cursor has no per-account usage here")):
+            code, out, err = _run_quiet(cmd_harness_usage,
+                                        ["cursor", f"--account-dir={temp_dir(self)}", "--json"])
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("no per-account usage", err)
+
+
+class EditHelperTest(unittest.TestCase):
+    def test_split_csv_of_nothing_is_empty(self):
+        from swe.harness.commands import _split_csv
+
+        self.assertEqual(_split_csv(None), [])
+        self.assertEqual(_split_csv(" a, ,b,a "), ["a", "b"])
+
+    def test_a_set_string_without_a_field_is_refused(self):
+        from swe.harness.commands import _parse_set_string
+
+        with self.assertRaisesRegex(ValueError, "expected field=value"):
+            _parse_set_string("just words")
+        self.assertEqual(_parse_set_string("display-name=Acme,tags=a,b"),
+                         {"display_name": "Acme", "tags": "a,b"})
+
+    def test_alias_collisions_name_their_owner(self):
+        from swe.harness.commands import _alias_collision
+
+        tools = {"claude": {"aliases": ["cc"]}, "codex": {}}
+        self.assertEqual(_alias_collision(tools, "codex", ["cx", "cc"]),
+                         "Alias 'cc' already used by 'claude'")
+        self.assertEqual(_alias_collision(tools, "codex", ["codex", "claude"]),
+                         "Alias 'claude' already used by 'claude'")
+        self.assertIsNone(_alias_collision(tools, "codex", ["codex", "cx"]))
+
+    def test_an_unknown_field_is_a_refusal(self):
+        from swe.harness.commands import _apply_edits
+        from swe.harness.commands import HarnessRefusal
+
+        with self.assertRaisesRegex(HarnessRefusal, "Unknown field 'colour_scheme'"):
+            _apply_edits({"codex": {}}, "codex", {"colour_scheme": "dark"})
+
+    def test_prompt_field_reraises_eof_and_ctrl_c_after_a_newline(self):
+        from swe.harness import commands
+
+        for raised in (EOFError, KeyboardInterrupt):
+            out = io.StringIO()
+            with patch.object(commands, "read_line", side_effect=raised), redirect_stdout(out):
+                with self.assertRaises(raised):
+                    commands._prompt_field("command", "codex")
+            self.assertEqual(out.getvalue(), "\n")
+
+
 if __name__ == "__main__":
     unittest.main()

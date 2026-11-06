@@ -598,5 +598,207 @@ class ConfigValidationTest(unittest.TestCase):
         self.assertEqual([i.path for i in issues], ["accounts.sync"])
 
 
+
+def _sync_with(home: Path, registry: dict, check_only: bool = False):
+    rows, notes = accounts.sync_accounts(home, [], registry, check_only=check_only)
+    return {(r.primitive, str(r.status.path)): r.result for r in rows}, notes
+
+
+class RegistryTargetTest(unittest.TestCase):
+    """harness.json decides where (and whether) each primitive lands."""
+
+    def test_skills_off_in_the_registry_links_none(self):
+        home = _home(self)
+        _profiles(home, WORK)
+        _flags(home, skills=True)
+        registry = {"claude": {"capabilities": {"skills": {"supported": False}}}}
+        self.assertEqual(_sync_with(home, registry), ({}, []))
+        self.assertEqual(os.listdir(_acct(home)), [])
+
+    def test_a_declared_skills_root_lands_at_the_same_place_in_the_account(self):
+        home = _home(self)
+        _profiles(home, WORK)
+        _flags(home, skills=True)
+        registry = {"claude": {"capabilities": {"skills": {
+            "supported": True, "root": "~/.claude/my-skills"}}}}
+        rows, _ = _sync_with(home, registry)
+        self.assertEqual(rows, {("skills", str(_acct(home) / "my-skills")): "linked"})
+
+    def test_a_skills_root_outside_the_vendor_folder_links_none(self):
+        # ~/.claude-skills is not under ~/.claude, so it has no account-home
+        # equivalent: nothing is linked rather than guessing one.
+        home = _home(self)
+        _profiles(home, WORK)
+        _flags(home, skills=True)
+        registry = {"claude": {"capabilities": {"skills": {
+            "supported": True, "root": "~/.claude-skills"}}}}
+        self.assertEqual(_sync_with(home, registry), ({}, []))
+
+    def test_declared_instruction_files_inside_and_outside_the_vendor_folder(self):
+        home = _home(self)
+        _profiles(home, WORK, CODEX)
+        _flags(home, instructions=True)
+        registry = {
+            "claude": {"capabilities": {"instructions": {"file": "~/.claude/rules/MAIN.md"}}},
+            "codex": {"capabilities": {"instructions": {"file": "~/notes/AGENTS.md"}}},
+        }
+        rows, _ = _sync_with(home, registry)
+        self.assertEqual(rows, {("instructions", str(_acct(home) / "rules" / "MAIN.md")): "linked"})
+        self.assertEqual(os.listdir(_acct(home, "codex", "codex-alt")), [])
+
+    def test_hooks_need_a_hub_folder_a_supported_root_and_one_in_the_vendor_folder(self):
+        home = _home(self)
+        _profiles(home, WORK)
+        _flags(home, hooks=True)
+        self.assertEqual(_sync_with(home, {}), ({}, []))  # no ~/.swe/hooks/claude
+
+        hub = hooks_dir(home) / "claude"
+        hub.mkdir(parents=True)
+        (hub / "guard.py").write_text("print(1)\n")
+        for caps in ({"supported": False}, {"supported": True, "root": str(home / "elsewhere")}):
+            registry = {"claude": {"capabilities": {"hooks": caps}}}
+            self.assertEqual(_sync_with(home, registry), ({}, []), caps)
+        self.assertEqual(os.listdir(_acct(home)), [])
+
+
+class RecordEdgeTest(unittest.TestCase):
+    def test_a_profiles_file_without_a_list_or_missing_entirely(self):
+        home = _home(self)
+        _flags(home, skills=True)
+        self.assertEqual(_sync(home), ({}, []))  # no profiles.json: no accounts
+
+        root = home / ".swe" / "accounts"
+        root.mkdir(parents=True)
+        (root / "profiles.json").write_text(json.dumps({"profiles": {"id": "x"}}))
+        rows, notes = _sync(home)
+        self.assertEqual(rows, {})
+        self.assertEqual(len(notes), 1)
+        self.assertIn("no profiles list", notes[0])
+
+    def test_an_unparseable_or_listless_record_stops_the_pass(self):
+        home = _home(self)
+        _profiles(home, WORK)
+        _flags(home, skills=True)
+        record = accounts.manifest_file(home)
+        record.parent.mkdir(parents=True)
+        for body, why in (("{nope", "cannot read"), (json.dumps({"links": {}}), "no links list")):
+            record.write_text(body)
+            rows, notes = _sync(home)
+            self.assertEqual(rows, {})
+            self.assertIn(why, notes[0])
+            self.assertEqual(os.listdir(_acct(home)), [])
+
+    def test_a_failed_record_save_leaves_no_temp_file(self):
+        from unittest import mock
+
+        home = _home(self)
+        with mock.patch.object(accounts.os, "replace", side_effect=PermissionError(13, "denied")):
+            with self.assertRaises(PermissionError):
+                accounts.save_manifest(home, [])
+        self.assertEqual(os.listdir(accounts.manifest_file(home).parent), [])
+
+    def test_retarget_skips_empty_input_and_unchanged_sources(self):
+        from unittest import mock
+
+        home = _home(self)
+        _profiles(home, WORK)
+        _flags(home, instructions=True)
+        _sync(home)
+        link = str(_acct(home) / "CLAUDE.md")
+        with mock.patch.object(accounts, "save_manifest") as save:
+            accounts.retarget_records(home, {})
+            accounts.retarget_records(home, {link: str(agents_file(home))})
+            accounts.retarget_records(home, {"/not/recorded": "/x"})
+        save.assert_not_called()
+
+    def test_a_recorded_link_still_wanted_but_replaced_is_dropped_from_the_record(self):
+        home = _home(self)
+        _profiles(home, WORK)
+        _flags(home, skills=True)
+        _sync(home)
+        link = _acct(home) / "skills"
+        link.unlink()
+        link.mkdir()
+        rows, _ = _sync(home)
+        self.assertEqual(list(rows.values()), ["conflict"])
+        self.assertEqual(accounts.load_manifest(home), [])
+        self.assertTrue(link.is_dir())
+
+    def test_an_unlink_failure_keeps_the_link_recorded(self):
+        from unittest import mock
+
+        home = _home(self)
+        _profiles(home, WORK)
+        _flags(home, skills=True)
+        _sync(home)
+        _flags(home, skills=False)
+        with mock.patch.object(Path, "unlink", side_effect=PermissionError(13, "denied")):
+            rows, _ = _sync(home)
+        self.assertEqual(list(rows.values()), ["conflict"])
+        self.assertEqual(len(accounts.load_manifest(home)), 1)
+        # Once the folder is writable again the next pass removes it.
+        rows, _ = _sync(home)
+        self.assertEqual(list(rows.values()), ["unlinked"])
+        self.assertEqual(accounts.load_manifest(home), [])
+
+
+class LinkShapeTest(unittest.TestCase):
+    def test_a_relative_link_into_the_shared_tree_is_repointed(self):
+        home = _home(self)
+        _profiles(home, WORK)
+        _flags(home, skills=True)
+        (home / ".swe" / "skills" / "beta").mkdir()
+        dest = _acct(home) / "skills"
+        dest.symlink_to(os.path.relpath(home / ".swe" / "skills" / "beta", dest.parent))
+        rows, _ = _sync(home)
+        self.assertEqual(list(rows.values()), ["linked"])
+        self.assertEqual(os.readlink(dest), str(skills_dir(home)))
+
+    def test_a_link_that_loops_on_itself_is_repointed(self):
+        home = _home(self)
+        _profiles(home, WORK)
+        _flags(home, skills=True)
+        dest = _acct(home) / "skills"
+        dest.symlink_to(dest)
+        rows, _ = _sync(home)
+        self.assertEqual(list(rows.values()), ["linked"])
+        self.assertEqual(os.readlink(dest), str(skills_dir(home)))
+
+    def test_link_rechecks_the_disk_before_writing(self):
+        # Between plan and apply the path can change under the pass (the
+        # app runs the same sync); every such change is a conflict.
+        home = _home(self)
+        acct = accounts.AccountHome("claude", "claude-work", _acct(home))
+        _profiles(home, WORK)
+        dest = _acct(home) / "skills"
+
+        def status(state, source=skills_dir(home)):
+            return LinkStatus(acct.label, dest, state, "", source)
+
+        self.assertEqual(accounts._link(status("create", None), home), "conflict")
+        # A link planned for repointing is the account's own file now:
+        # refused before the unlink, so the file is still there.
+        dest.write_text("mine\n")
+        self.assertEqual(accounts._link(status("relink"), home), "conflict")
+        self.assertEqual(dest.read_text(), "mine\n")
+        # A path planned as free is taken now: refused without trying,
+        # so no "could not link" detail.
+        taken = status("create")
+        self.assertEqual(accounts._link(taken, home), "conflict")
+        self.assertEqual(taken.detail, "")
+        dest.unlink()
+        outside = temp_dir(self)
+        acct_link = _acct(home, "codex", "codex-alt")
+        acct_link.parent.mkdir(parents=True)
+        acct_link.symlink_to(outside)
+        moved = LinkStatus("codex", acct_link / "skills", "create", "", skills_dir(home))
+        self.assertEqual(accounts._link(moved, home), "conflict")
+        self.assertEqual(os.listdir(outside), [])
+
+    def test_a_path_outside_the_accounts_root_is_not_plain(self):
+        home = _home(self)
+        self.assertFalse(accounts._plain(home / ".claude", home))
+
+
 if __name__ == "__main__":
     unittest.main()
