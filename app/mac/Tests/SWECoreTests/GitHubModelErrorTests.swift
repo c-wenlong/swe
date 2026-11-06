@@ -450,33 +450,58 @@ enum GhFault: CaseIterable, Sendable, CustomTestStringConvertible {
 
     @Test(arguments: GhFault.allCases)
     func aFailedSyncSetsTheWarningAndKeepsTheCatalog(_ fault: GhFault) async {
-        let (swe, runner) = failing(fault)
+        let syncReply = good("\"repos\":3,\"synced_at\":1700000000,\"owners\":[\"o\"],\"failed\":[]")
+        let runner = GhScriptedRunner([("gh sync --json", syncReply)])
+        let swe = SweClient(runner: runner)
         let model = GitHubModel()
         await model.syncGitHub(swe: swe)
+        #expect(model.catalog?.repos == 3)
+        #expect(model.syncError == nil)
+
+        // A failed resync warns but must not wipe the catalog search reads.
+        runner.script([], fallback: fault.reply)
+        await model.syncGitHub(swe: swe)
         #expect(model.syncError?.contains(fault.fragment) == true)
-        #expect(model.catalog == nil)
+        #expect(model.catalog?.repos == 3)
+        #expect(model.catalog?.owners == ["o"])
         #expect(!model.syncing)
 
-        runner.script([("gh sync --json", good("\"repos\":3,\"synced_at\":1700000000,\"owners\":[\"o\"],\"failed\":[]"))])
+        runner.script([("gh sync --json", syncReply)])
         await model.syncGitHub(swe: swe)
         #expect(model.syncError == nil)
         #expect(model.catalog?.repos == 3)
+    }
+
+    /// The first sync failing leaves no catalog, and the warning says why.
+    @Test func aFirstSyncThatFailsLeavesNoCatalog() async {
+        let (swe, _) = failing(.timeout)
+        let model = GitHubModel()
+        await model.syncGitHub(swe: swe)
+        #expect(model.syncError?.contains("took too long") == true)
+        #expect(model.catalog == nil)
+        #expect(!model.syncing)
     }
 
     private let hit = "{\"name\":\"o/a\",\"description\":null,\"stars\":1,"
         + "\"updated_at\":\"2026-10-20T00:00:00Z\",\"url\":\"https://github.com/o/a\"}"
 
     @Test(arguments: GhFault.allCases)
-    func aFailedSearchSetsTheErrorAndAGoodOneClearsIt(_ fault: GhFault) async {
-        let (swe, runner) = failing(fault)
+    func aFailedSearchSetsTheErrorKeepsTheHitsAndAGoodOneClearsIt(_ fault: GhFault) async {
+        let hits = good("\"query\":\"swe\",\"results\":[\(hit)]")
+        let runner = GhScriptedRunner([("gh repo search swe --limit=10 --json", hits)])
+        let swe = SweClient(runner: runner)
         let model = GitHubModel()
         await model.search("swe", swe: swe)
+        #expect(model.searchResults.map(\.name) == ["o/a"])
+
+        // The list on screen stays while the error shows beside it.
+        runner.script([], fallback: fault.reply)
+        await model.search("swe", swe: swe)
         #expect(model.searchError?.contains(fault.fragment) == true)
-        #expect(model.searchResults.isEmpty)
+        #expect(model.searchResults.map(\.name) == ["o/a"])
         #expect(!model.searching)
 
-        runner.script([("gh repo search swe --limit=10 --json",
-                        good("\"query\":\"swe\",\"results\":[\(hit)]"))])
+        runner.script([("gh repo search swe --limit=10 --json", hits)])
         await model.search("swe", swe: swe)
         #expect(model.searchError == nil)
         #expect(model.searchResults.map(\.name) == ["o/a"])
