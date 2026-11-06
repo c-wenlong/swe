@@ -212,7 +212,13 @@ final class LedgerStore {
     private func upsertRow(_ record: LedgerRecord) throws -> Bool {
         let key = StableHash.of(record.key)
         let total = Int64(record.event.totalTokens)
+        // A cached statement left on a row holds a read transaction open
+        // past this call's COMMIT or ROLLBACK: the next BEGIN IMMEDIATE
+        // then fails "database is locked" once another connection has
+        // written, and the WAL can't be checkpointed. Reset on the way out,
+        // as relabelModel does.
         selectByKey.bind([.int(key)])
+        defer { selectByKey.bind([]) }
         if try selectByKey.step() {
             let existingSidechain = selectByKey.int(0) != 0
             let existingDim = selectByKey.int(10)
@@ -237,6 +243,7 @@ final class LedgerStore {
         }
         if let messageId = record.messageId {
             selectByMessage.bind([.int(StableHash.of(messageId)), .int(record.isSidechain ? 1 : 0)])
+            defer { selectByMessage.bind([]) }
             if try selectByMessage.step() {
                 let otherKey = selectByMessage.int(0)
                 let otherSidechain = selectByMessage.int(1) != 0
@@ -394,6 +401,7 @@ final class LedgerStore {
         let id: Int64
         if try selectDim.step() {
             id = selectDim.int(0)
+            selectDim.bind([])
         } else {
             try insertDim.bind(values).run()
             id = db.lastInsertRowID
