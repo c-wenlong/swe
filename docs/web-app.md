@@ -21,6 +21,7 @@ client sees it.
 | Piece | Where | What |
 |---|---|---|
 | Pages | `src/swe/webapp/static/` | Plain HTML, CSS and JS. No build step, no framework, no CDN. Same Devin-derived look as the Mac app (`Theme.swift`); the CSS variables in `styles.css` carry the same names. |
+| Install | `static/manifest.webmanifest`, `index.html`, `styles.css` | The manifest makes it installable (`display: standalone`, `id`, `start_url`; its colours are the light default's `--wash`, with `color_scheme_dark` for dark). `index.html` has one `theme-color` meta per scheme, which `syncThemeColor` in `app.js` overrides when Settings forces Light or Dark. `viewport-fit=cover` draws under the notch, so layout pads by `--safe-top/right/bottom/left` (`env(safe-area-inset-*)`). `tests/test_webapp_pwa.py` keeps the colours in step with `styles.css`. |
 | Page data | `src/swe/webapp/api.py`, `src/swe/webapp/pages/` | Builds each page's JSON from the domain services, in process, the way `/v1/usage` does. |
 | Ledger | `src/swe/ledger/` | The Python port of `SWECore/Ledger`: scans harness logs into its own SQLite store and prices tokens. |
 | Routes | `src/swe/remote/hub.py` | `/` serves the app and its assets as flat names beside it (`_serve_static`, names checked by `webapp/static.py`); `/v1/app/*` serves their data. Old `/app/…` paths redirect to the same name at the root. |
@@ -35,7 +36,7 @@ The hub owner's own devices need no pairing: open the hub's URL and the
 app loads. The hub identifies the caller with `tailscale whois` (behind
 `tailscale serve`, on the client serve forwards for) and lets in a node
 whose login is the hub owner's, as long as the request carries
-`X-Quiver-Pair: 1`, names a Host the hub answers to, and has no foreign
+`X-Swe-Pair: 1`, names a Host the hub answers to, and has no foreign
 `Origin`. That is the gate the app's tailnet-identity calls use: a page
 on another site can't send the header, so it can't borrow the owner's
 network identity. The hub machine's own node doesn't count (any local

@@ -159,6 +159,21 @@ the Tasks rows still find the PR such a branch opened, so no work in
 flight is orphaned. The Mac, iPhone and web sheets' fallback label
 says <code>swe/issue-&lt;n&gt;</code> too.</p>
 </li>
+<li><p><strong>The web app installs as an app and respects the notch.</strong> Its
+manifest now says <code>display: &quot;standalone&quot;</code> and carries an <code>id</code>, and its
+background and theme colours follow the light default and the dark
+scheme (<code>color_scheme_dark</code>). The page declares one <code>theme-color</code> per
+scheme, and a Light or Dark picked in Settings overrides both, so the
+status bar matches the page. The sidebar, pages and chat composer pad
+themselves by <code>env(safe-area-inset-*)</code>, since the viewport covers the
+whole screen.</p>
+</li>
+<li><p><strong>Phone SSH keys carry the <code>swe-remote:</code> tag.</strong> The hub still tagged
+the <code>~/.ssh/authorized_keys</code> lines it manages <code>quiver-remote:&lt;device id&gt;</code>. New lines say <code>swe-remote:&lt;device id&gt;</code>; a line under the old
+tag still counts as the hub's (and as installed), and the next
+rewrite swaps it for the new one, so a revoke after the upgrade
+still removes it.</p>
+</li>
 <li><p><strong><code>swe harness discover --json --apply NAME</code> answers in JSON when NAME
 is not a new match.</strong> It printed red text, which the app could not
 decode. It now prints the usual document with <code>applied.refused</code> and the
@@ -312,6 +327,12 @@ Safe Storage item.</p>
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The web app marks its own requests with <code>X-Swe-Pair</code>.</strong> The header
+that lets the hub owner's tailnet identity in without a bearer was
+still called <code>X-Quiver-Pair</code>. The web app now sends <code>X-Swe-Pair: 1</code>;
+the hub accepts either, so a browser tab still holding an older page
+keeps working until it reloads.</p>
+</li>
 <li><p><strong>A stored Linear task's refresh no longer downloads its
 description.</strong> The hub asked Linear for each issue's full body on
 every task read and never used it. The unused Notion page-body

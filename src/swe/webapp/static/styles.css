@@ -20,6 +20,10 @@
   --warning-text: #a16207; --danger-text: #dc2626; --usage-track: rgba(13,13,13,.06);
   --heat-0: #ebedf0; --heat-1: #a7f3d0; --heat-2: #6ee7b7; --heat-3: #34d399; --heat-4: #10b981;
   --logo-filter: none;
+  /* viewport-fit=cover draws under the notch, the home indicator and a
+   * landscape phone's rounded sides; layout pads itself by these. */
+  --safe-top: env(safe-area-inset-top, 0px); --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px); --safe-left: env(safe-area-inset-left, 0px);
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
   /* Corner radii, Theme.swift's *Radius tokens by the same names. */
   --card-radius: 10px; --control-radius: 6px; --field-radius: 6px; --select-radius: 5px;
@@ -75,7 +79,8 @@ button { font: inherit; color: inherit; }
  * split from the sidebar by a hairline. */
 .window { display: flex; min-height: 100vh; }
 .sidebar {
-  width: 196px; flex: none; padding: 8px 4px 16px 8px;
+  width: calc(196px + var(--safe-left)); flex: none;
+  padding: calc(8px + var(--safe-top)) 4px calc(16px + var(--safe-bottom)) calc(8px + var(--safe-left));
   position: sticky; top: 0; height: 100vh; overflow-y: auto;
 }
 .brand { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 8px; margin-bottom: 8px; font-weight: 600; }
@@ -98,7 +103,7 @@ button { font: inherit; color: inherit; }
 .nav-item .badge { margin-left: auto; font-size: 10px; padding: 0 6px; white-space: nowrap; }
 .nav-item svg { width: 15px; height: 15px; flex: none; }
 .panel { flex: 1; min-width: 0; background: var(--panel); border-left: 1px solid var(--border); }
-.page { max-width: 1280px; margin: 0 auto; padding: 36px 40px; }
+.page { max-width: 1280px; margin: 0 auto; padding: 36px calc(40px + var(--safe-right)) calc(36px + var(--safe-bottom)) 40px; }
 .page-header { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 24px; }
 .page-header .titles { flex: 1; min-width: 0; }
 .page-title { font-size: 28px; font-weight: 600; letter-spacing: -0.6px; margin: 0; }
@@ -314,13 +319,14 @@ code { background: var(--subtle); border-radius: 4px; padding: 1px 4px; font-siz
 
 @media (max-width: 720px) {
   .window { flex-direction: column; }
-  .sidebar { width: auto; height: auto; position: static; padding: 12px 8px 0; display: flex; gap: 4px; overflow-x: auto; }
+  .sidebar { width: auto; height: auto; position: static; display: flex; gap: 4px; overflow-x: auto;
+    padding: calc(12px + var(--safe-top)) calc(8px + var(--safe-right)) 0 calc(8px + var(--safe-left)); }
   .brand, .nav-heading { display: none; }
   .nav-group { display: flex; gap: 2px; margin: 0; }
   .nav-item { white-space: nowrap; }
   .nav-item.soon { display: none; }
   .panel { border-left: 0; border-top: 1px solid var(--border); }
-  .page { padding: 24px 16px; }
+  .page { padding: 24px calc(16px + var(--safe-right)) calc(24px + var(--safe-bottom)) calc(16px + var(--safe-left)); }
   /* The titles keep at least 240px: actions that don't fit beside them
    * wrap onto their own row instead of squeezing the subtitle to a word
    * a line or running over the title. */

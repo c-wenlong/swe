@@ -835,7 +835,7 @@ class TestOwnerTailnetCaller(_Settings):
                                   if ip == self.OWNER_IP else None)
 
     def headers(self, post=False):
-        h = {"X-Forwarded-For": self.OWNER_IP, "X-Forwarded-Proto": "https", "X-Quiver-Pair": "1"}
+        h = {"X-Forwarded-For": self.OWNER_IP, "X-Forwarded-Proto": "https", "X-Swe-Pair": "1"}
         if post:
             h.update({"Origin": f"https://127.0.0.1:{self.srv.port}", "Content-Type": "application/json"})
         return h
@@ -1304,7 +1304,7 @@ class TestRevokeThisBrowserScript(unittest.TestCase):
             "const routeGen = 0;\n"
             "function registerPage() {}\n"
             "function renderGate(msg) { gates.push(msg); }\n"
-            "function renderSettings() {}\n" + app_js_function("currentRoute") +
+            "function renderSettings() {}\n" + app_js_function("currentRoute") + app_js_function("syncThemeColor") +
             "let api = async () => ({ status: " + str(api_status) + ", data: null });\n"
             "const apiPost = async () => ({ status: 200, data: " + post_data + " });\n"
             + forget + "\n")
@@ -1379,7 +1379,7 @@ class TestRevealedKeysScript(unittest.TestCase):
             "  getElementById: (id) => (id === 'panel' ? panel : null), querySelector: () => null,\n"
             "  createElement: () => ({}), querySelectorAll: () => [] };\n"
             "const routeGen = 0;\n"
-            "function registerPage() {}\n" + app_js_function("currentRoute"))
+            "function registerPage() {}\n" + app_js_function("currentRoute") + app_js_function("syncThemeColor"))
         body = (
             "let paints = 0; paintSettings = () => { paints++; };\n"
             "const out = [];\n"
