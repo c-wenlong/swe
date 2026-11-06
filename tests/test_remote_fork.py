@@ -635,6 +635,104 @@ class TestSatelliteForkRoute(unittest.TestCase):
             "POST", "/v1/sessions/claude%3Ar1%40sat-m1/fork", {})
         self.assertEqual(status, 202, body)
 
+    def test_pick_the_harness_cannot_take_is_refused_before_queueing(self):
+        # The hub's launch-option table answers for the satellite: a
+        # codex fork with an effort never reaches the journal.
+        self.srv.request("POST", "/v1/agent/catalog", {
+            "machine_id": "sat-m1", "rows": [{
+                "key": f"codex:{CODEX_ID}", "harness": "codex", "cwd": "/r",
+                "ownership": "observed", "can_fork": True}]},
+            auth=self.sat)
+        self.srv.state.catalog.refresh()
+        catalog_mod.upsert_machine(self.srv.home, {
+            "id": "sat-m1", "model_at_launch": ["claude"],
+            "effort_at_launch": ["claude"]})
+        status, body = self.srv.request(
+            "POST", f"/v1/sessions/codex%3A{CODEX_ID}%40sat-m1/fork",
+            {"effort": "high"})
+        self.assertEqual(status, 409, body)
+        self.assertEqual(body["error"]["code"], "unsupported_launch_option")
+        self.assertEqual(self.srv.state.launches, {})
+
+    def test_a_full_backlog_settles_the_launch_as_failed(self):
+        self._push(True)
+        with patch.object(self.srv.state, "queue_command",
+                          return_value=None):
+            status, body = self.srv.request(
+                "POST", "/v1/sessions/claude%3Ar1%40sat-m1/fork", {})
+        self.assertEqual(status, 429, body)
+        self.assertEqual(body["error"]["code"], "backlog_full")
+        (launch,) = self.srv.state.launches.values()
+        self.assertEqual(launch["state"], "failed")
+        self.assertEqual(launch["note"], "machine is too far behind")
+
+
+class TestForkRequestEdges(unittest.TestCase):
+    """fork.request / start answers that the hub routes rarely reach."""
+
+    def _state(self, session=None):
+        state = MagicMock()
+        state.machine_id = "hub-m"
+        state.catalog.session_for.return_value = session
+        return state
+
+    def test_unreadable_body_is_400(self):
+        status, body = fork_mod.request(
+            self._state(), "claude:abc", {"harness": "claude"}, None)
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "bad_body")
+
+    def test_non_object_body_is_refused(self):
+        with self.assertRaises(ValueError):
+            fork_mod.parse_fork_body(["prompt"])
+        status, body = fork_mod.request(
+            self._state(), "claude:abc", {"harness": "claude"}, ["x"])
+        self.assertEqual(status, 422)
+        self.assertEqual(body["error"]["code"], "bad_command")
+
+    def test_a_row_whose_session_left_the_catalog_is_404(self):
+        state = self._state(session=None)
+        status, body = fork_mod.request(
+            state, "claude:abc", {"harness": "claude",
+                                  "machine_id": "hub-m"}, {})
+        self.assertEqual(status, 404)
+        self.assertEqual(body["error"]["code"], "unknown_session")
+        state.new_launch.assert_not_called()
+
+    def test_start_refuses_a_harness_with_no_fork_command(self):
+        with patch.object(supervise, "launch_fork") as launch:
+            ok, note = fork_mod.start(
+                temp_dir(self), _session("o1", "opencode"), [], "", "lid")
+        self.assertFalse(ok)
+        self.assertEqual(note, "opencode sessions can't be forked")
+        launch.assert_not_called()
+
+
+class TestForkRouteMissingTools(unittest.TestCase):
+    def setUp(self):
+        self.proj = str(temp_dir(self))
+        self.srv = _Hub([_session("abc", path=self.proj)])
+        self.addCleanup(self.srv.stop)
+
+    def test_missing_binary_or_tmux_is_422(self):
+        cases = [
+            (None, "/x/tmux", "not_installed", "is not installed"),
+            ("/x/claude", None, "launch_failed", "tmux is not installed"),
+        ]
+        for which, tmux, code, text in cases:
+            with self.subTest(code=code), \
+                    patch.object(fork_mod, "start") as start, \
+                    patch.object(supervise, "tmux_bin", return_value=tmux), \
+                    patch("swe.remote.fork.shutil.which",
+                          return_value=which):
+                status, body = self.srv.request(
+                    "POST", "/v1/sessions/claude:abc/fork", {})
+                self.assertEqual(status, 422, body)
+                self.assertEqual(body["error"]["code"], code)
+                self.assertIn(text, body["error"]["message"])
+                start.assert_not_called()
+        self.assertEqual(self.srv.state.launches, {})
+
 
 if __name__ == "__main__":
     unittest.main()

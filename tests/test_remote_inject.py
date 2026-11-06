@@ -958,6 +958,83 @@ class TestAttachments(unittest.TestCase):
             self.assertEqual(attachments.sweep(self.home), 0)
 
 
+class TestAttachmentEdges(unittest.TestCase):
+    """place() refusals and the sweep's per-entry failure paths."""
+
+    def setUp(self):
+        self.home = temp_dir(self)
+        self.key = "claude:s1"
+
+    def test_place_refuses_empty_and_oversized_payloads(self):
+        self.assertEqual(attachments.place(self.home, self.key, "r.png", b""),
+                         (None, "empty payload"))
+        payload, err = attachments.place(
+            self.home, self.key, "r.png", b"0" * (attachments.MAX_BYTES + 1))
+        self.assertIsNone(payload)
+        self.assertIn("20 MB", err)
+        self.assertFalse(attachments.inbox_dir(self.home, self.key).exists())
+
+    def test_place_refuses_dot_refs(self):
+        # "." and ".." survive _safe_name as themselves; writing to them
+        # would target the inbox folder or its parent.
+        for ref in (".", ".."):
+            self.assertEqual(
+                attachments.place(self.home, self.key, ref, b"x"),
+                (None, "bad ref"), ref)
+
+    def test_place_reports_a_write_failure(self):
+        with patch("swe.remote.attachments.os.open",
+                   side_effect=OSError("read-only file system")):
+            payload, err = attachments.place(
+                self.home, self.key, "r.png", b"x")
+        self.assertIsNone(payload)
+        self.assertIn("could not stage file", err)
+        self.assertIn("read-only", err)
+
+    def test_place_keeps_the_hub_ref(self):
+        payload, err = attachments.place(
+            self.home, self.key, "1700000000-abc123-shot.png", b"x")
+        self.assertIsNone(err)
+        self.assertEqual(payload["ref"], "1700000000-abc123-shot.png")
+        self.assertEqual(
+            attachments.resolve(self.home, self.key, payload["ref"]),
+            os.path.realpath(payload["path"]))
+
+    def test_resolve_treats_an_unreadable_target_as_not_ours(self):
+        attachments.stage(self.home, self.key, "a.txt", b"x")
+        with patch("pathlib.Path.is_file", side_effect=OSError("denied")):
+            self.assertIsNone(
+                attachments.resolve(self.home, self.key, "a.txt"))
+
+    def test_sweep_keeps_fresh_files_and_their_folder(self):
+        payload, _ = attachments.stage(self.home, self.key, "new.txt", b"x")
+        self.assertEqual(attachments.sweep(self.home), 0)
+        self.assertTrue(Path(payload["path"]).exists())
+
+    def test_sweep_skips_stray_files_and_broken_entries(self):
+        inbox = attachments.inbox_dir(self.home, self.key)
+        payload, _ = attachments.stage(self.home, self.key, "old.txt", b"x")
+        old = time.time() - attachments.MAX_AGE_S - 10
+        os.utime(payload["path"], (old, old))
+        # A loose file where a session folder should be, and a dangling
+        # link whose stat fails: neither stops the sweep.
+        (inbox.parent / "stray.txt").write_text("not a folder")
+        (inbox / "dangling").symlink_to(inbox / "gone")
+        self.assertEqual(attachments.sweep(self.home), 1)
+        self.assertFalse(Path(payload["path"]).exists())
+        self.assertTrue((inbox.parent / "stray.txt").exists())
+        # The dangling link keeps the folder non-empty, so it stays.
+        self.assertTrue(inbox.is_dir())
+
+    def test_sweep_survives_a_folder_it_cannot_remove(self):
+        payload, _ = attachments.stage(self.home, self.key, "old.txt", b"x")
+        old = time.time() - attachments.MAX_AGE_S - 10
+        os.utime(payload["path"], (old, old))
+        with patch("pathlib.Path.rmdir", side_effect=OSError("busy")):
+            self.assertEqual(attachments.sweep(self.home), 1)
+        self.assertTrue(attachments.inbox_dir(self.home, self.key).is_dir())
+
+
 class TestHubWrites(unittest.TestCase):
     def setUp(self):
         self.srv = _Server(sessions=[_session()], statuses=lambda ss: ["done"])
