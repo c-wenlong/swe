@@ -116,7 +116,9 @@ struct RepoDetailPage: View {
                 }
                 // The callout's row treatment without the callout: the
                 // surface bleeds to the card's edges like a dashboard
-                // section minus its header.
+                // section minus its header. The top bleeds too: with no
+                // header there, the card's padding read as a blank band
+                // above the first row.
                 Card {
                     RepoSurfaces(repo: repo,
                                  board: model.focusBoard(for: repo),
@@ -130,7 +132,7 @@ struct RepoDetailPage: View {
                                  openPr: { detail = PrSelection(repo: repo, number: $0) },
                                  openIssue: { issue = $0 })
                     .padding(.horizontal, -Theme.cardPadding)
-                    .padding(.bottom, -Theme.cardPadding)
+                    .padding(.vertical, -Theme.cardPadding)
                 }
                 .clipShape(.rect(cornerRadius: Theme.cardRadius))
             }
