@@ -648,10 +648,8 @@ private struct CleanupSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if items.isEmpty {
-                Text("Nothing to clean up: no orphaned processes or leftovers right now.")
-                    .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 12)
+                EmptyCard(text: "Nothing to clean up: no orphaned processes or leftovers right now.",
+                          icon: "checkmark.circle")
             } else {
                 ScrollView {
                     VStack(spacing: 8) {
