@@ -38,6 +38,7 @@ struct SessionChatPage: View {
     var body: some View {
         Page(title: title,
              subtitle: subtitle,
+             subtitleTail: model?.row?.modelLabel,
              back: ("Back to all sessions", onBack), maxWidth: 960, scrolls: false) {
             if let model { ChatBadges(model: model) }
             if let meta {
@@ -65,11 +66,13 @@ struct SessionChatPage: View {
     }
 
     /// harness · folder · model, as the web app's chat bar has it. The
-    /// model is the hub's row for the newest reply, left out while unknown.
+    /// model is the hub's row for the newest reply, left out while unknown;
+    /// it rides as the subtitle's tail, so it never breaks at a hyphen.
     private var subtitle: String {
         let folder = (model?.row?.cwd ?? row.session.cwd).map { displayPath($0) }
-        return [HarnessMark(row.session.harness).name, folder, model?.row?.modelLabel]
+        let lead = [HarnessMark(row.session.harness).name, folder]
             .compactMap { $0 }.joined(separator: " · ")
+        return model?.row?.modelLabel == nil ? lead : lead + " ·"
     }
 }
 
