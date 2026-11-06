@@ -1371,4 +1371,47 @@ import Testing
         #expect(try dir.read("index.txt")
                 == "# in order\na.md\nharnesses/devin/x.md\n# harnesses/devin/sub/y.md\nb.md\n")
     }
+
+    @Test func moveFolderRefusesAnOffSlotAlreadyUnderTheDestination() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(dir, runner: runner)
+        try dir.write("index.txt", "a.md\ndevin/x.md\n# harnesses/devin/old.md\n")
+        await model.checkDisk()
+        let problem = await model.move(folder: "devin", toFolder: "harnesses",
+                                       swe: SweClient(runner: runner))
+        #expect(problem?.contains("harnesses/devin/old.md") == true, "\(problem ?? "nil")")
+        #expect(exists(dir, "devin/x.md"))
+        #expect(try dir.read("index.txt") == "a.md\ndevin/x.md\n# harnesses/devin/old.md\n")
+    }
+
+    @Test func moveFolderRefusesASlotThatClimbsOutWithDotDot() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(dir, runner: runner)
+        try dir.write("index.txt", "a.md\ndevin/x.md\ndevin/../b.md\n")
+        await model.checkDisk()
+        let problem = await model.move(folder: "devin", toFolder: "harnesses",
+                                       swe: SweClient(runner: runner))
+        #expect(problem?.contains("devin/../b.md") == true, "\(problem ?? "nil")")
+        #expect(exists(dir, "devin/x.md"))
+        #expect(try dir.read("index.txt") == "a.md\ndevin/x.md\ndevin/../b.md\n")
+    }
+
+    @Test func moveFolderRefusesARelativeLinkOutOfTheFolder() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(dir, runner: runner)
+        try dir.link("devin/shared.md", to: "../a.md")
+        // A link that stays inside the folder moves with it and is fine.
+        try dir.link("devin/sub/same.md", to: "y.md")
+        let problem = await model.move(folder: "devin", toFolder: "harnesses",
+                                       swe: SweClient(runner: runner))
+        #expect(problem?.contains("devin/shared.md") == true, "\(problem ?? "nil")")
+        #expect(exists(dir, "devin/x.md"))
+        try FileManager.default.removeItem(at: dir.path("devin/shared.md"))
+        #expect(await model.move(folder: "devin", toFolder: "harnesses",
+                                 swe: SweClient(runner: runner)) == nil)
+        #expect(try dir.read("harnesses/devin/sub/same.md") == "# Y\n")
+    }
 }

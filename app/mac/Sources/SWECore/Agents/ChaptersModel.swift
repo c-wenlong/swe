@@ -181,6 +181,25 @@ public enum ChapterIndex {
         return lines.joined(separator: "\n")
     }
 
+    /// Every chapter slot's name in file order: active entries, then
+    /// `# path.md` off-comments that are valid chapter names — what a
+    /// folder move rewrites, so also what its checks must look at.
+    public static func slots(_ text: String) -> [String] {
+        lines(text).compactMap { line in
+            let stripped = line.trimmingCharacters(in: .whitespaces)
+            if isEntry(stripped) { return stripped }
+            guard stripped.hasPrefix("#") else { return nil }
+            let rest = stripped.dropFirst().trimmingCharacters(in: .whitespaces)
+            return nameProblem(rest) == nil ? rest : nil
+        }
+    }
+
+    /// Whether `name` climbs with a `..` component: its text prefix then
+    /// says nothing about which folder the file is really in.
+    public static func climbs(_ name: String) -> Bool {
+        normalize(name).split(separator: "/").contains("..")
+    }
+
     /// Whether `name` sits somewhere under `folder` (not the folder
     /// itself), compared through normalize.
     public static func isUnder(_ name: String, folder: String) -> Bool {
@@ -1302,6 +1321,26 @@ public final class ChaptersModel {
         }
     }
 
+    /// The first relative symlink under `folder` (its path below the
+    /// folder) whose target lies outside `folder`, or nil. Absolute links
+    /// and links within the folder survive the folder moving.
+    nonisolated static func escapingLink(in folder: URL) -> String? {
+        let root = folder.standardizedFileURL.path
+        guard let walker = FileManager.default.enumerator(
+            at: folder, includingPropertiesForKeys: [.isSymbolicLinkKey]) else { return nil }
+        for case let entry as URL in walker {
+            guard let destination = try? FileManager.default
+                .destinationOfSymbolicLink(atPath: entry.path) else { continue }
+            if destination.hasPrefix("/") { continue }
+            let target = entry.deletingLastPathComponent()
+                .appending(path: destination).standardizedFileURL.path
+            if target == root || target.hasPrefix(root + "/") { continue }
+            let below = entry.standardizedFileURL.path.dropFirst(root.count + 1)
+            return String(below)
+        }
+        return nil
+    }
+
     /// The folder move itself, in the same order as a file move: the
     /// directory, then the rules, then the index, each step walked back if
     /// a later one is refused. `onMoved` gets the new path and the old
@@ -1354,9 +1393,17 @@ public final class ChaptersModel {
             }
             // An index line or rule already under the destination would
             // silently claim a moved chapter; which one wins is a hand edit.
-            if let taken = ChapterIndex.entries(index.text)
-                .first(where: { ChapterIndex.isUnder($0, folder: newPath) }) {
+            // Off slots count too: the undo would rewrite them as well.
+            let slots = ChapterIndex.slots(index.text)
+            if let taken = slots.first(where: { ChapterIndex.isUnder($0, folder: newPath) }) {
                 return "\(taken) is already in the index."
+            }
+            // "devin/../shared.md" names a file outside devin/ that does
+            // not move; rewriting its prefix would point it somewhere else.
+            if let climbing = (slots + rules.keys.sorted()).first(where: {
+                ChapterIndex.isUnder($0, folder: path) && ChapterIndex.climbs($0)
+            }) {
+                return "\(climbing) climbs out with ..; list it by its own path first."
             }
             if let ruled = rules.keys.sorted()
                 .first(where: { ChapterIndex.isUnder($0, folder: newPath) }) {
@@ -1371,6 +1418,12 @@ public final class ChaptersModel {
             // inside() resolves links: moving what it returns relocates the
             // link's target out from under the link.
             if linked { return "\(path) is a link; move the folder it points at." }
+            // A relative link inside that reaches outside the folder would
+            // point somewhere else once the folder moves.
+            if let link = await offMain({ Self.escapingLink(in: from) }) {
+                let shown = path + "/" + link
+                return "\(shown) is a relative link out of \(path); moving it would change what it points at."
+            }
             if clash { return "\(newPath) already exists." }
             let moved = await offMain {
                 (try? FileManager.default.moveItem(at: from, to: to)) != nil
