@@ -211,6 +211,12 @@ def is_free(model: str) -> bool:
     return bare == "free" or bare.endswith(":free") or bare.endswith("-free")
 
 
+def normalize_source(source: str | None) -> str | None:
+    """A price source as it travels on the wire. ``"quiver"`` is what files
+    and rows written before the rename hold; it reads as ``"swe"``."""
+    return "swe" if source == "quiver" else source
+
+
 class PricingCatalog:
     def __init__(self, entries: dict[str, ModelRates], supplement: dict | None = None,
                  overrides: set[str] | None = None, swe: set[str] | None = None):
@@ -304,11 +310,11 @@ class PricingCatalog:
 
     def source(self, key: str) -> str:
         """Where an entry's price came from: ``"yours"`` (the user's
-        ``config/pricing.json``), ``"quiver"`` (the bundled supplement)
+        ``config/pricing.json``), ``"swe"`` (the bundled supplement)
         or ``"litellm"``."""
         if key in self.overrides:
             return "yours"
-        return "quiver" if key in self.quiver else "litellm"
+        return "swe" if key in self.quiver else "litellm"
 
 
 # ---------------------------------------------------------------- loading
