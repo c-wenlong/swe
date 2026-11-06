@@ -1,7 +1,7 @@
 """Write path: the phone's commands into a supervised session.
 
 Registry keyed by harness, same shape as the parser/reader registries.
-Two channels ship in R2:
+The channels:
 
 - ``ClaudeHeadlessInjector`` (tier A): one ``claude -p --resume <id>
   --output-format stream-json --include-partial-messages`` invocation
@@ -23,6 +23,12 @@ Two channels ship in R2:
   per message, ``turn/interrupt`` for interrupt; server-initiated
   approval requests become ``approval.requested`` and decisions are
   written back as JSON-RPC responses.
+- ``AcpInjector``: any harness with an Agent Client Protocol mode
+  (``devin acp``, ``cursor-agent acp``, ``claude-agent-acp``, ...), one
+  agent process per session over ``acp.Connection`` — ``session/load``
+  once, ``session/prompt`` per message, ``session/cancel`` for
+  interrupt; ``session/request_permission`` becomes
+  ``approval.requested`` with the agent's options as menu rows.
 
 ``queue|steer``: queue refuses while a turn looks active; steer writes
 immediately where the channel accepts mid-turn input (tmux buffers
@@ -31,9 +37,11 @@ atomic — steer degrades to queue and one run is in flight per session
 at a time; a degraded send reports ``degraded=True`` so the client can
 say so.
 
-Live text: the three tier-A channels push each text chunk they read
-into a ``stream.DeltaStream`` (``deltas``), which coalesces them into
-``message.delta`` events that are never journaled. The transcript's
+Live text: the API channels push each text chunk they read into a
+``stream.DeltaStream`` (``deltas``), which coalesces them into
+``message.delta`` events that are never journaled. ACP also streams
+thought chunks (``thinking``) and tool-call titles (``tool_use``),
+which clients keep for matching but do not draw. The transcript's
 ``message.appended`` stays the record; tmux panes never stream.
 """
 
@@ -1419,6 +1427,230 @@ class CodexAppServerInjector:
         )
 
 
+# ---------------------------------------------------------------------
+# Agent Client Protocol (any harness that speaks it)
+#
+# One ACP agent process per attached session (``acp.Connection``):
+# session/load (or session/new) once, session/prompt per message,
+# session/cancel for interrupt. Permission requests become the same
+# approval events the other channels raise, their options the menu rows.
+
+# How long send() waits for session/prompt's answer before reporting the
+# turn as started: an agent that refuses the prompt answers at once.
+_ACP_EARLY_S = 1.0
+
+
+def acp_session_ref(session: Session) -> str:
+    """The id an ACP agent knows ``session`` by: the value its resume
+    flags carry (``devin --resume <id>``), else the session id."""
+    from swe.sessions.resume import resume_flags
+
+    tokens = [t for t in resume_flags(session)
+              if t and not t.startswith("-") and t != "resume"]
+    return tokens[-1] if tokens else session.session_id
+
+
+class AcpInjector:
+    """Over an ACP agent process per session (``remote/acp.py``)."""
+
+    _conns: "dict[str, object]" = {}
+    _conns_lock = threading.Lock()
+    # One spawn+handshake per key at a time.
+    _opening: dict[str, threading.Lock] = {}
+
+    def __init__(
+        self,
+        home: Path | None,
+        session_key: str,
+        emit=None,
+        machine: str = "",
+        deltas=None,
+    ) -> None:
+        self.home = home
+        self.key = session_key
+        self.emit = emit
+        self.machine = machine
+        self.deltas = deltas
+
+    # -- connection ------------------------------------------------------
+
+    @classmethod
+    def _gate(cls, session_key: str) -> threading.Lock:
+        with cls._conns_lock:
+            return cls._opening.setdefault(session_key, threading.Lock())
+
+    @classmethod
+    def open(cls, home: Path | None, session_key: str, session: Session,
+             meta: dict, *, emit=None, machine: str = "",
+             deltas=None, allow_new: bool = True,
+             budget: float | None = None, attaching: bool = False):
+        """The live connection for ``session_key``, starting the agent
+        and loading (or, with ``allow_new``, creating) its session when
+        none runs. ``budget`` caps the handshake. Returns ``(conn,
+        note)``; conn is None when the agent can't serve, and note says
+        why. A new session's id is recorded on the row. Outside an
+        attach (``attaching``) the row must still exist once the
+        handshake ends, or the agent is closed: a detach that landed
+        meanwhile wins."""
+        from swe.remote import acp
+
+        with cls._gate(session_key):
+            with cls._conns_lock:
+                conn = cls._conns.get(session_key)
+            if conn is not None and conn.alive():
+                conn.bind(session_key, machine, emit, deltas)
+                return conn, ""
+            restarted = conn is not None
+            if conn is not None:
+                cls._drop(session_key, conn)
+            tool = str(meta.get("tool_name") or session.tool_name or "")
+            argv = acp.command_for(tool)
+            if argv is None:
+                return None, f"{tool} has no ACP mode installed"
+            try:
+                conn = acp.Connection(
+                    argv, session.path or str(meta.get("cwd") or ""),
+                    account_env(session) or None)
+            except OSError as exc:
+                return None, f"{argv[0]} failed to launch: {exc}"
+            conn.bind(session_key, machine, emit, deltas)
+            ref = str(meta.get("acp_session_id") or "") \
+                or acp_session_ref(session)
+            try:
+                note = conn.handshake(ref, allow_new=allow_new,
+                                      budget=budget)
+            except acp.AcpError as exc:
+                conn.close()
+                return None, f"ACP handshake failed: {exc}"
+            if not attaching and \
+                    supervise.meta_for(home, session_key) is None:
+                conn.close()
+                return None, "session detached; refusing the write"
+            with cls._conns_lock:
+                cls._conns[session_key] = conn
+            if conn.session_id != ref:
+                # Recorded so a restart loads this session, not the one
+                # the agent could not load.
+                supervise.set_meta(home, session_key, "acp_session_id",
+                                   conn.session_id)
+            if restarted:
+                note = f"{conn.label} had exited and was restarted" + (
+                    f"; {note}" if note else ", same session")
+            return conn, note
+
+    @classmethod
+    def _drop(cls, session_key: str, conn) -> None:
+        with cls._conns_lock:
+            if cls._conns.get(session_key) is conn:
+                cls._conns.pop(session_key, None)
+        conn.close()
+
+    @classmethod
+    def close(cls, session_key: str) -> None:
+        """Stop the key's agent. Waits out an open() in flight (the same
+        per-key gate), so a handshake finishing after a detach cannot
+        register an agent nobody owns."""
+        with cls._gate(session_key):
+            with cls._conns_lock:
+                conn = cls._conns.pop(session_key, None)
+            if conn is not None:
+                conn.close()
+
+    def _conn(self, session: Session, meta: dict):
+        return self.open(self.home, self.key, session, meta,
+                         emit=self.emit, machine=self.machine,
+                         deltas=self.deltas)
+
+    def _live(self):
+        conn = self._conns.get(self.key)
+        if conn is None or not conn.alive():
+            return None
+        conn.bind(self.key, self.machine, self.emit, self.deltas)
+        return conn
+
+    # -- injector interface ----------------------------------------------
+
+    def send(self, session: Session, cmd: dict, status: str) -> InjectResult:
+        from swe.remote import acp
+
+        text = _prompt(session, cmd)
+        if not text.strip():
+            return InjectResult(False, "empty message")
+        meta = supervise.meta_for(self.home, self.key)
+        if meta is None:
+            return InjectResult(False, "session detached; refusing the write")
+        conn, note = self._conn(session, meta)
+        if conn is None:
+            return InjectResult(False, note)
+        degraded = False
+        if not conn.idle.is_set():
+            # One prompt per session at a time. The hub's queue may not
+            # see the turn (a harness with no status probe reads ""), so
+            # queue waits for the turn here too; steer waits and says it
+            # was queued.
+            if not conn.idle.wait(timeout=_QUEUE_WAIT_S):
+                return InjectResult(False, "the running turn did not end")
+            degraded = cmd.get("mode") == "steer"
+        # A detach may have landed while the agent started or the turn
+        # ran: the row is the last word before the prompt goes out.
+        if supervise.meta_for(self.home, self.key) is None:
+            return InjectResult(False, "session detached; refusing the write")
+        try:
+            q = conn.prompt(text)
+        except acp.AcpError as exc:
+            return InjectResult(False, str(exc))
+        import queue as queue_mod
+
+        try:
+            reply = q.get(timeout=_ACP_EARLY_S)
+        except queue_mod.Empty:
+            # Past this, a late error answer arrives as a notify event.
+            reply = conn.stop_waiting(q)
+            if reply is acp.PENDING:
+                reply = False
+        if reply is None:
+            return InjectResult(False, f"{conn.label} exited mid-turn")
+        if reply and "error" in reply:
+            return InjectResult(False, f"{conn.label} refused the prompt: "
+                                       f"{conn.last_error or 'error'}")
+        done = "turn complete" if reply else "turn started"
+        if note:
+            done = f"{done}; {note}"
+        if degraded:
+            done += " (steer queued: ACP takes one prompt at a time)"
+        return InjectResult(True, done, degraded=degraded)
+
+    def approval(
+        self, session: Session, request_id: str, decision: str
+    ) -> InjectResult:
+        if decision not in ("allow", "always", "deny") and not (
+                decision.isdigit() and len(decision) <= 2):
+            return InjectResult(False, f"unknown decision {decision}")
+        conn = self._live()
+        if conn is None:
+            return InjectResult(False, "the ACP agent is not running")
+        ok, note = conn.answer(request_id, decision)
+        return InjectResult(ok, note)
+
+    def control(
+        self, session: Session, op: str, value: str
+    ) -> InjectResult:
+        if op == "interrupt":
+            conn = self._live()
+            if conn is None:
+                return InjectResult(False, "the ACP agent is not running")
+            if not conn.cancel():
+                return InjectResult(False, "no turn is running")
+            return InjectResult(True, "cancel sent")
+        if op in {"kill", "detach"}:
+            self.close(self.key)
+            supervise.unmark(self.home, self.key)
+            return InjectResult(True, "detached; session is observed again")
+        return InjectResult(
+            False, f"unsupported_control: {op} needs a live TUI"
+        )
+
+
 def injector_for(
     home: Path | str | None,
     session_key: str,
@@ -1426,9 +1658,10 @@ def injector_for(
     emit=None,
     machine: str = "",
     deltas=None,
-) -> TmuxInjector | ClaudeHeadlessInjector | OpencodeServeInjector | CodexAppServerInjector:
+) -> (TmuxInjector | ClaudeHeadlessInjector | OpencodeServeInjector
+      | CodexAppServerInjector | AcpInjector):
     """Pick the channel from the supervised registry row. ``deltas`` (a
-    ``stream.DeltaStream``) takes the tier-A channels' live text; tmux
+    ``stream.DeltaStream``) takes the API channels' live text; tmux
     has none."""
     meta = meta or {}
     home_path = Path(home) if home is not None else None
@@ -1445,6 +1678,11 @@ def injector_for(
         )
     if mode == "appserver" and tool == "codex":
         return CodexAppServerInjector(
+            home_path, session_key, emit=emit, machine=machine,
+            deltas=deltas,
+        )
+    if mode == "acp":
+        return AcpInjector(
             home_path, session_key, emit=emit, machine=machine,
             deltas=deltas,
         )
