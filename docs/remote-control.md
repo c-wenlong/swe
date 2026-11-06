@@ -487,7 +487,9 @@ after that arrives as a `notify` event of kind `error`, as does the
 agent exiting mid-turn. Interrupt
 is `session/cancel`. `session/request_permission` becomes
 `approval.requested` with `toolCall.title` (plus its command or path)
-as the prompt and the agent's options as the menu rows (`n` from 1,
+as the prompt (the title and input an earlier `tool_call` update gave
+the same id when the request carries only the id, as devin's does, and
+a `_meta` field ending in `command` as the last resort) and the agent's options as the menu rows (`n` from 1,
 `label` the option name, `kind` the option's kind, and `standing: true`
 for `allow_always`/`reject_always`, which an ntfy button never offers
 whatever the label says); `allow`, `always` and `deny` pick the first

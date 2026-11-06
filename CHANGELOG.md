@@ -53,6 +53,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Devin's ACP approvals say what they run.** `devin acp` sends a
+  permission request with only the tool call's id, so the card read
+  "permission requested". It now shows the title and command from the
+  tool call Devin announced earlier, such as "Ran rm" with
+  `rm hello.txt`.
+
 - **A skills root that links to itself no longer crashes the skills
   commands on Python 3.11 and 3.12.** Before Python 3.13, `resolve()`
   raises `RuntimeError` on a symlink loop, and the skills root scan
