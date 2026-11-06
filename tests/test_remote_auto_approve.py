@@ -298,7 +298,7 @@ class TestHubRoute(unittest.TestCase):
         status, data = self.srv.request(
             "POST", "/v1/pair/requests/approve",
             body={"code": r["code"], "request_id": r["request_id"]},
-            headers={**self._JSON, "X-Quiver-Pair": "1"})
+            headers={**self._JSON, "X-Swe-Pair": "1"})
         self.assertEqual(status, 200, data)
         self.assertIn("pair: approved with code phone", self.err.getvalue())
 
