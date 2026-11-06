@@ -94,10 +94,10 @@ struct TemperatureChart: View {
                             .frame(width: 8, height: 8)
                         Text(component.title)
                             .foregroundStyle(on ? Theme.textPrimary : Theme.textSecondary)
-                        if let value = latest?[component] {
-                            Text(Self.formatted(value)).monospacedDigit()
-                                .foregroundStyle(Theme.textSecondary)
-                        }
+                        // No reading yet (the GPU sensor can be quiet for a
+                        // while): a dash, so the chip isn't missing its figure.
+                        Text(latest?[component].map(Self.formatted) ?? "–").monospacedDigit()
+                            .foregroundStyle(Theme.textSecondary)
                     }
                     .font(Theme.caption)
                     .padding(.horizontal, 8)
@@ -114,8 +114,10 @@ struct TemperatureChart: View {
             // A key, not a switch: the shading explains itself here.
             if fansShown {
                 HStack(spacing: 6) {
-                    RoundedRectangle(cornerRadius: 2).fill(Self.fanShade).frame(width: 12, height: 10)
-                    Text("Fans up").foregroundStyle(Theme.textSecondary)
+                    // A wide strip, not a square: a square box read as an
+                    // unticked checkbox.
+                    Rectangle().fill(Self.fanShade).frame(width: 18, height: 8)
+                    Text("Shaded: fans up").foregroundStyle(Theme.textSecondary)
                 }
                 .font(Theme.caption)
                 .padding(.horizontal, 8)
