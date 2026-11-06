@@ -230,7 +230,7 @@
           ${r.alias ? `<span class="caption muted qp-raw">${esc(r.model)}</span>` : ""}
           <span class="qp-harnesses">${r.harnesses.slice(0, 3).map((h) => Fmt.logo(h, "logo logo-sm")).join("")}</span>
           ${note ? `<span class="caption muted qp-tier">${esc(note)}</span>` : ""}</div>
-          <div class="caption qp-src-caption${r.spend_source === "unpriced" ? " warn" : ""}" title="${esc(help)}">${esc(sourceName(r))}</div>
+          <div class="caption qp-src-caption${spendSource(r) === "unpriced" ? " warn" : ""}" title="${esc(help)}">${esc(sourceName(r))}</div>
         </div></div>
       ${rate(rates.input)}${rate(rates.output)}${rate(rates.cache_read, " qp-cache")}${rate(rates.cache_write, " qp-cache")}
       <span class="qp-src" title="${esc(help)}" aria-label="${esc(sourceName(r))}">${sourceMark(r)}</span>
@@ -242,14 +242,19 @@
     return [...new Set(r.billed_by.map((b) => Fmt.harnessName(b)))].join(" and ");
   }
 
+  /* "quiver" is the old wire name for "swe", still found in files saved before the rename. */
+  function spendSource(r) {
+    return r.spend_source === "quiver" ? "swe" : r.spend_source;
+  }
+
   function sourceName(r) {
-    return { billed: `${billers(r)} bills`, free: "Free", yours: "Your price", quiver: "SWE",
-      litellm: "LiteLLM", unpriced: "No price" }[r.spend_source];
+    return { billed: `${billers(r)} bills`, free: "Free", yours: "Your price", swe: "SWE",
+      litellm: "LiteLLM", unpriced: "No price" }[spendSource(r)];
   }
 
   /* The Source mark's hover text: whose price the spend uses. */
   function sourceHelp(r) {
-    if (r.spend_source === "billed") {
+    if (spendSource(r) === "billed") {
       const billed = `Billed by ${billers(r)}: spend uses the charge ${billers(r)} logs for each request.`;
       if (r.source === "yours") return `${billed} Your saved price is kept but not used.`;
       if (r.source) return `${billed} The rates shown are the API list price, for comparison.`;
@@ -263,11 +268,11 @@
     let text = {
       free: mixed ? "Free model: usage without a logged charge is priced at $0." : "Free model: priced at $0.",
       yours: `Your price: ${rest} uses the rates you saved.`,
-      quiver: `API pricing from SWE's own list, which fills in or corrects LiteLLM's${mixed ? ", for usage without a logged charge." : "."}`,
+      swe: `API pricing from SWE's own list, which fills in or corrects LiteLLM's${mixed ? ", for usage without a logged charge." : "."}`,
       litellm: `API pricing from LiteLLM's price list${mixed ? ", for usage without a logged charge." : "."}`,
       unpriced: mixed ? `No price: usage without a logged charge isn't in your spend. ${set}`
         : `No price: these tokens aren't in your spend. ${set}`,
-    }[r.spend_source];
+    }[spendSource(r)];
     if (mixed) text += ` Usage billed by ${billers(r)} uses the charge ${billers(r)} logs.`;
     return text;
   }
@@ -279,10 +284,10 @@
   /* The biller's logo, LiteLLM's, SWE's icon, or a symbol for your own
    * price, a free model and a missing price. */
   function sourceMark(r) {
-    switch (r.spend_source) {
+    switch (spendSource(r)) {
       case "billed": return r.billed_by.slice(0, 2).map((h) => Fmt.logo(h)).join("");
       case "litellm": return '<img class="logo mono" src="/source-litellm.svg" alt="LiteLLM">';
-      case "quiver": return '<img class="logo qp-swe" src="/icon-192.png" alt="SWE">';
+      case "swe": return '<img class="logo qp-swe" src="/icon-192.png" alt="SWE">';
       case "yours": return `<span class="qp-symbol">${PERSON}</span>`;
       case "free": return `<span class="qp-symbol">${GIFT}</span>`;
       default: return `<span class="qp-symbol warn">${WARN}</span>`;

@@ -70,7 +70,7 @@ The page says this in a card above the table.
 }
 ```
 
-`list_price`, when present: `{"key", "source": "litellm"|"quiver"|"yours",
+`list_price`, when present: `{"key", "source": "litellm"|"swe"|"yours",
 "input", "output", "cache_read", "cache_write"}` in USD per 1M tokens.
 
 `GET /v1/app/models?q=<query>&exclude=<names, one per line>` searches the

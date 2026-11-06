@@ -208,7 +208,7 @@
 
   function priceCell(p) {
     if (!p) return '<span class="muted" title="No LiteLLM price for this model">—</span>';
-    const source = { litellm: "LiteLLM", quiver: "SWE's price list", yours: "your price" }[p.source];
+    const source = { litellm: "LiteLLM", swe: "SWE's price list", quiver: "SWE's price list", yours: "your price" }[p.source];
     const help = `${p.key}, from ${source}\nCache write ${price(p.cache_write)} / 1M`;
     return `<span title="${esc(help)}">${[p.input, p.output, p.cache_read].map(price).join(" · ")}</span>`;
   }
