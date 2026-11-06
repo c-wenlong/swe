@@ -38,13 +38,24 @@ public struct AdministratorInstaller: FanHelperInstalling {
     /// Whether a helper is installed already, which makes this an update
     /// and changes what the password prompt says.
     private let replacing: @Sendable () -> Bool
+    /// Runs one AppleScript and answers its exit status and stderr:
+    /// `osascript` in the app, a capture in tests, which must never raise
+    /// a real administrator prompt.
+    private let runScript: @Sendable (String) async -> (status: Int32, stderr: String)
 
     public init(owner: @escaping @Sendable () throws -> FanOwnerPin = FanOwnerPin.current,
                 replacing: @escaping @Sendable () -> Bool = {
                     FileManager.default.fileExists(atPath: FanHelper.installedPlist)
                 }) {
+        self.init(owner: owner, replacing: replacing, runScript: Self.osascript)
+    }
+
+    init(owner: @escaping @Sendable () throws -> FanOwnerPin = FanOwnerPin.current,
+         replacing: @escaping @Sendable () -> Bool = { false },
+         runScript: @escaping @Sendable (String) async -> (status: Int32, stderr: String)) {
         self.owner = owner
         self.replacing = replacing
+        self.runScript = runScript
     }
 
     static let installPrompt = "SWE wants to install a helper that sets the fan speed. You'll only be asked once."
@@ -161,8 +172,10 @@ public struct AdministratorInstaller: FanHelperInstalling {
         try await run(Self.script(Self.uninstallCommand, prompt: "SWE wants to remove its fan helper."))
     }
 
-    private func run(_ script: String) async throws {
-        let (status, error) = await offMain { () -> (Int32, String) in
+    /// `osascript -e script`, off the main actor: its exit status and
+    /// stderr, or -1 and the reason when it can't be started.
+    static func osascript(_ script: String) async -> (status: Int32, stderr: String) {
+        await offMain { () -> (status: Int32, stderr: String) in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
             process.arguments = ["-e", script]
@@ -174,6 +187,10 @@ public struct AdministratorInstaller: FanHelperInstalling {
             process.waitUntilExit()
             return (process.terminationStatus, String(decoding: data, as: UTF8.self))
         }
+    }
+
+    private func run(_ script: String) async throws {
+        let (status, error) = await runScript(script)
         // -128 is AppleScript's "User canceled".
         if error.contains("-128") { throw FanHelperInstallError.cancelled }
         guard status == 0 else {
@@ -388,22 +405,23 @@ public final class FanControl {
     /// still watches the old control path, so it counts as outdated —
     /// the next install replaces it — rather than absent.
     public nonisolated static func helperState(control: URL) -> FanHelperState {
-        var installed: [String]?
-        var legacy: [String]?
-        if FileManager.default.isExecutableFile(atPath: FanHelper.installedExecutable),
-           let data = FileManager.default.contents(atPath: FanHelper.installedPlist),
-           let job = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
-            installed = job["ProgramArguments"] as? [String]
-        }
-        if FileManager.default.isExecutableFile(atPath: FanHelper.legacyInstalledExecutable),
-           let data = FileManager.default.contents(atPath: FanHelper.legacyInstalledPlist),
-           let job = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
-            legacy = job["ProgramArguments"] as? [String]
-        }
-        return helperState(installed: installed, legacy: legacy, control: control,
-                           owner: try? FanOwnerPin.current()) {
+        helperState(installed: jobArguments(executable: FanHelper.installedExecutable,
+                                            plist: FanHelper.installedPlist),
+                    legacy: jobArguments(executable: FanHelper.legacyInstalledExecutable,
+                                         plist: FanHelper.legacyInstalledPlist),
+                    control: control, owner: try? FanOwnerPin.current()) {
             exitStatus(of: "/bin/launchctl", ["print", "system/\(FanHelper.label)"], within: launchctlTimeout) == 0
         }
+    }
+
+    /// A job's ProgramArguments, when its executable is there and its
+    /// plist reads as a dictionary; nil for anything half-installed.
+    nonisolated static func jobArguments(executable: String, plist: String) -> [String]? {
+        guard FileManager.default.isExecutableFile(atPath: executable),
+              let data = FileManager.default.contents(atPath: plist),
+              let job = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { return nil }
+        return job["ProgramArguments"] as? [String]
     }
 
     /// The verdict once both jobs' argument lists are read. The new

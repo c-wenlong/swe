@@ -45,8 +45,9 @@ public enum JSONTextEdit {
             let empty = start ..< replaced.index(start, offsetBy: 2)
             return try setIn(replaced, object: empty, path: path.dropFirst(), value: value)
         }
-        let inserted = try insert(text, into: object, entries: entries,
-                                  key: key, rendered: path.count == 1 ? render(value, indent: "") : "{}")
+        let inserted = try insert(text, into: object, entries: entries, key: key) { indent in
+            path.count == 1 ? try render(value, indent: indent) : "{}"
+        }
         if path.count == 1 { return inserted }
         // The new entry landed inside THIS object, which grew by the
         // inserted text: shift its end by the delta and search it again,
@@ -62,19 +63,25 @@ public enum JSONTextEdit {
         return try setIn(inserted, object: inner, path: path.dropFirst(), value: value)
     }
 
-    /// Insert `"key": rendered` as the object's last entry.
+    /// Insert `"key": value` as the object's last entry, the value
+    /// rendered for the indent of the line its key lands on, so a new
+    /// object or array closes under its key, not at the margin.
     private static func insert(_ text: String, into object: Range<String.Index>,
-                               entries: [Entry], key: String, rendered: String) throws -> String {
+                               entries: [Entry], key: String,
+                               rendered: (_ indent: String) throws -> String) throws -> String {
         let renderedKey = try render(key)
         let closingBrace = text.index(before: object.upperBound)
         guard let last = entries.last else {
-            // An empty object is written compactly.
+            // An empty object is written compactly: the key shares the
+            // brace's line.
             let inner = text[object].trimmingCharacters(in: .whitespacesAndNewlines) == "{}" ? "" : " "
-            return text.replacingCharacters(in: object, with: "{\(inner)\(renderedKey): \(rendered)\(inner)}")
+            let value = try rendered(lineIndent(text, at: object.lowerBound))
+            return text.replacingCharacters(in: object, with: "{\(inner)\(renderedKey): \(value)\(inner)}")
         }
         // Swap the gap between the last value and `}` for the comma, the
         // new entry on its own line, and the closing line's indent.
         let indent = lineIndent(text, at: last.keyRange.lowerBound)
+        let rendered = try rendered(indent)
         let braceIndent = lineIndent(text, at: closingBrace)
         let replacement = ",\n\(indent)\(renderedKey): \(rendered)\n\(braceIndent)"
         return text.replacingCharacters(in: last.valueRange.upperBound..<closingBrace,

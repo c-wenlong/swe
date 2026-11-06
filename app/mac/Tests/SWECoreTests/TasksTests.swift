@@ -1176,3 +1176,86 @@ private actor WaitLog {
     var count: Int { all.count }
     func add(_ wait: Duration) { all.append(wait) }
 }
+
+/// The page payload's per-row joins when the hub sends little, and the
+/// filter chips' words. Plain data: made-up keys and titles.
+@Suite struct TaskJoinsAndFilterTitlesTests {
+    private func rows(_ json: String) throws -> [HubTaskRow] {
+        try HubWire.decoder.decode([HubTaskRow].self, from: Data(json.utf8))
+    }
+
+    @Test func aRowWithOnlyAnIdDecodesAndReadsAsAnEmptyOpenTask() throws {
+        let row = try #require(try rows(#"[{"id": "x:1"}]"#).first)
+        #expect(row.scope == "" && row.refLabel == "" && row.number == nil)
+        #expect(row.sessionRows == nil && row.launchRows == nil && row.pr == nil)
+        #expect(!row.isDone && !row.canLaunch)
+        #expect(row.stateLabel == "Open")
+        #expect(row.updatedDate == nil && row.lastActiveDate == nil)
+    }
+
+    @Test func aSessionRowTheCatalogDroppedCarriesOnlyItsKey() throws {
+        let row = try #require(try rows(#"""
+        [{"id": "x:2", "session_rows": [{"key": "claude@/w:gone", "gone": true}]}]
+        """#).first)
+        let session = try #require(row.sessionRows?.first)
+        #expect(session.key == "claude@/w:gone")
+        #expect(session.gone == true)
+        #expect(session.harness == nil && session.title == nil && session.status == nil)
+        #expect(session.machine == nil && session.remote == nil && session.lastActiveAt == nil)
+    }
+
+    @Test func aFullSessionRowKeepsItsSnakeCaseFieldsAndIgnoresUnknownOnes() throws {
+        let row = try #require(try rows(#"""
+        [{"id": "x:3", "session_rows": [
+          {"key": "codex@/w:7", "harness": "codex", "agent": "builder", "title": "wire it up",
+           "status": "active", "cwd": "/w", "machine": "studio", "machine_id": "m-9",
+           "remote": true, "ownership": "hub", "attachable": false,
+           "last_active_at": 1767323000.5, "field_from_the_future": [1, 2]}]}]
+        """#).first)
+        let session = try #require(row.sessionRows?.first)
+        #expect(session.gone == nil)
+        #expect(session.agent == "builder" && session.title == "wire it up")
+        #expect(session.machine == "studio" && session.machineId == "m-9")
+        #expect(session.remote == true && session.attachable == false)
+        #expect(session.ownership == "hub")
+        #expect(session.lastActiveAt == 1767323000.5)
+    }
+
+    @Test func launchRowsKeepTheirStateAndTheReasonWhenFailed() throws {
+        let row = try #require(try rows(#"""
+        [{"id": "x:4", "launch_rows": [
+          {"id": "l-1"},
+          {"id": "l-2", "state": "failed", "harness": "claude", "note": "no worktree space",
+           "key": "claude@/w:2", "cwd": "/w", "machine": "studio"}]}]
+        """#).first)
+        let launches = try #require(row.launchRows)
+        #expect(launches.map(\.id) == ["l-1", "l-2"])
+        #expect(launches[0].state == nil && launches[0].note == nil && launches[0].key == nil)
+        #expect(launches[1].state == "failed")
+        #expect(launches[1].note == "no worktree space")
+        #expect(launches[1].key == "claude@/w:2" && launches[1].machine == "studio")
+    }
+
+    @Test func anEmptyJoinStaysEmptyRatherThanNil() throws {
+        let row = try #require(try rows(#"[{"id": "x:5", "session_rows": [], "launch_rows": []}]"#).first)
+        #expect(row.sessionRows == [] && row.launchRows == [])
+    }
+
+    @Test func aPullRequestBlockLabelsItsStateAndDefaultsToOpen() {
+        #expect(HubTaskPr(state: "merged").stateLabel == "Merged")
+        #expect(HubTaskPr(state: "closed").stateLabel == "Closed")
+        #expect(HubTaskPr(state: "open").stateLabel == "Open")
+        #expect(HubTaskPr().stateLabel == "Open")
+        #expect(HubTaskPr(state: "something-new").stateLabel == "Open")
+    }
+
+    @Test func eachFilterNamesItselfAndSaysWhatAnEmptyListMeans() {
+        #expect(TaskFilter.allCases == [.all, .running, .prOpen, .done])
+        #expect(TaskFilter.allCases.map(\.id) == ["all", "running", "prOpen", "done"])
+        #expect(TaskFilter.allCases.map(\.title) == ["All", "Running", "PR open", "Done"])
+        #expect(TaskFilter.all.emptyText == "No tasks yet.")
+        #expect(TaskFilter.running.emptyText == "Nothing is running right now.")
+        #expect(TaskFilter.prOpen.emptyText == "No task has a pull request open.")
+        #expect(TaskFilter.done.emptyText == "Nothing is merged or closed yet.")
+    }
+}

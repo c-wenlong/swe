@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 // The bounded waits this target's tests share. Test targets can't share
 // sources, so `gateTimeout` and `CountGate` repeat
@@ -62,4 +63,26 @@ func spinMainRunLoop(until done: () -> Bool) -> Bool {
         RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
     }
     return done()
+}
+
+/// True once `condition` holds, false after `gateTimeout`. Waits on the
+/// observation tracking of what `condition` reads, so nothing spins:
+/// each change wakes one re-check, and a change landing between a check
+/// and the next tracking is caught because tracking starts with a check.
+/// A condition over state that isn't observed never wakes, and fails at
+/// the timeout even if it came true unseen: the point is the signal.
+@MainActor
+func observed(_ condition: @escaping @MainActor () -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + gateTimeout
+    while !condition() {
+        let changed = CountGate()
+        let holds = withObservationTracking {
+            condition()
+        } onChange: {
+            Task { await changed.bump() }
+        }
+        if holds { return true }
+        guard await changed.reach(1), ContinuousClock.now < deadline else { return false }
+    }
+    return true
 }

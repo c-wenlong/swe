@@ -363,6 +363,10 @@ public final class DoctorModel {
     /// The `running` id Fix all holds while it runs.
     public static let fixAllID = "fix-all"
     private let swe: SweClient
+    /// The gate every harness.json write waits at: the one app-wide
+    /// gate unless a test hands the model its own, so tests holding a
+    /// gate never share one.
+    @ObservationIgnored var registryGate: SerialGate = HarnessesModel.registryWrites
     /// Bumped by each load; a reply from an older load is dropped, so a slow
     /// earlier refresh cannot overwrite a newer one.
     private var generation = 0
@@ -425,8 +429,8 @@ public final class DoctorModel {
             case .setup:
                 // setup and discover rewrite harness.json: they wait behind
                 // the Harnesses page's gate so no edit there is lost.
-                await HarnessesModel.registryWrites.acquire()
-                defer { HarnessesModel.registryWrites.release() }
+                await registryGate.acquire()
+                defer { registryGate.release() }
                 let outcome = try await swe.applySetup(starred: nil, adopt: nil)
                 // A linking pass that stops early still counts as a
                 // repair for the report, but its reason shows on the row.
@@ -436,8 +440,8 @@ public final class DoctorModel {
             case .`init`:
                 try await swe.runInit()
             case .discover:
-                await HarnessesModel.registryWrites.acquire()
-                defer { HarnessesModel.registryWrites.release() }
+                await registryGate.acquire()
+                defer { registryGate.release() }
                 _ = try await swe.applyDiscovery()
             case .undeclare, .marketplaceDrop, .pluginFix, .pluginReinstall,
                  .danglingLink, .mcpSync:
@@ -488,8 +492,8 @@ public final class DoctorModel {
                 return
             }
             defer { work.end() }
-            await HarnessesModel.registryWrites.acquire()
-            defer { HarnessesModel.registryWrites.release() }
+            await registryGate.acquire()
+            defer { registryGate.release() }
             fixAllResult = try await swe.fixAll()
         } catch {
             fixAllError = error.localizedDescription
