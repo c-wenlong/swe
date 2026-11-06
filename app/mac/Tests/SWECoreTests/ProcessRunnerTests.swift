@@ -423,3 +423,20 @@ extension DeadlineTimer {
         }
     }
 }
+
+@Suite struct ProcessRunnerSpawnFailureTests {
+    /// An environment past the kernel's argument limit makes the spawn of
+    /// `/usr/bin/env` itself fail (E2BIG), through the runner's own
+    /// `environment` parameter.
+    @Test func envItselfFailingToStartIsASystemFailureNotAMissingSwe() async throws {
+        let oversized = ["PATH": "/usr/bin:/bin", "PADDING": String(repeating: "x", count: 8_000_000)]
+        let runner = ProcessRunner(executable: "swe", environment: oversized)
+        do {
+            let result = try await runner.run(["--json"])
+            Issue.record("expected the spawn to fail, got exit \(result.status)")
+        } catch let SweError.commandFailed(status, message) {
+            #expect(status == E2BIG)
+            #expect(message.hasPrefix("Couldn't start swe: "))
+        }
+    }
+}
