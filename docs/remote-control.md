@@ -1742,9 +1742,11 @@ usage/limits dashboard (`swe list` data); transcript FTS across machines
   key is a Secure Enclave P-256 key; the hub only stores the public
   half on the device's row and, once `swe remote ssh --on` is set,
   writes it into `~/.ssh/authorized_keys` as
-  `no-agent-forwarding,no-X11-forwarding <key> quiver-remote:<device id>`
+  `no-agent-forwarding,no-X11-forwarding <key> swe-remote:<device id>`
   (`sshkeys.py`). Those lines are rebuilt from `devices.json` on every
   change, so a revoke removes the device's login with its credential.
+  A line a pre-rename hub tagged `quiver-remote:` is still managed: the
+  next rewrite swaps it for the `swe-remote:` one.
   The phone pins the host keys `GET /v1/ssh` returned over the paired
   channel instead of trusting sshd's first answer. Tailscale SSH is not
   used: its server side needs the open-source `tailscaled` on macOS,

@@ -160,6 +160,12 @@ removes both names, <code>--status</code> and <code>swe remote setup</code> stil
 unit that is all a machine has, and <code>scripts/install.sh</code> restarts
 whichever is active.</p>
 </li>
+<li><p><strong>Phone SSH keys carry the <code>swe-remote:</code> tag.</strong> The hub still tagged
+the <code>~/.ssh/authorized_keys</code> lines it manages <code>quiver-remote:&lt;device id&gt;</code>. New lines say <code>swe-remote:&lt;device id&gt;</code>; a line under the old
+tag still counts as the hub's (and as installed), and the next
+rewrite swaps it for the new one, so a revoke after the upgrade
+still removes it.</p>
+</li>
 <li><p><strong><code>swe harness discover --json --apply NAME</code> answers in JSON when NAME
 is not a new match.</strong> It printed red text, which the app could not
 decode. It now prints the usual document with <code>applied.refused</code> and the
