@@ -19,7 +19,9 @@ pending; adoption — the ``session.launched`` event that names the
 session — then links the session key and launch id through
 ``origin_adopted``, called beside ``title_adopted`` in
 ``HubState.emit``. ``POST /v1/sessions/{key}/task`` links a running
-session by hand and ``DELETE`` unlinks it.
+session by hand and ``DELETE`` unlinks it; a GitHub task the store
+doesn't hold yet must be in a repo the hub has pinned, since every
+stored task is read with ``gh``.
 
 ``GET /v1/tasks`` aggregates what a client draws: every task the
 sources list (GitHub: the pinned repos' open issues and PRs, behind the
@@ -458,6 +460,18 @@ def link_request(state, key: str, body) -> tuple[int, dict]:
         task = parse_ref(ref)
     except ValueError as exc:
         return 422, protocol.error("bad_command", str(exc))
+    if task["source"] == "github" and task_id(task) not in _load(state.home):
+        # Every stored GitHub task is read with ``gh`` on each
+        # ``/v1/tasks``, so a client may only start tracking a repo the
+        # hub owner pinned. A task already stored (its repo unpinned
+        # since) keeps taking links and keeps refreshing.
+        try:
+            task["repo"] = G.pinned_name(state.home, task["repo"])
+        except G.PinError:
+            return 422, protocol.error(
+                "not_pinned",
+                f"{task['repo']} is not pinned on the hub; pin it "
+                "(swe gh repo add) to link its issues and PRs")
     try:
         entry = link(state.home, task, session_key=key)
     except OSError:

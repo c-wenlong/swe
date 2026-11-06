@@ -113,6 +113,13 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a><a href="https://github.com/c-wenlong/swe/compare/v1.2.2...HEAD">Unreleased</a></h2>
 <h3 id="security"><a class="anchor" href="#security"></a>Security</h3>
 <ul>
+<li><p><strong>A task link can no longer point the hub's <code>gh</code> at any repo.</strong>
+<code>POST /v1/sessions/{key}/task</code> stored a GitHub task for whatever repo
+the client named, and every <code>GET /v1/tasks</code> then ran <code>gh</code> against it
+as the hub owner. A new link to a repo the hub hasn't pinned now
+answers <code>422 not_pinned</code>. Tasks already stored keep their links and
+keep refreshing after their repo is unpinned.</p>
+</li>
 <li><p><strong>The hub's session journals are private to your account.</strong> Every
 prompt, reply and tool call a remote session sees is journaled under
 <code>~/.swe/data/remote/journal/</code>, which was created 0755 with 0644 files,

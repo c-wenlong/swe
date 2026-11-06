@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A task link can no longer point the hub's `gh` at any repo.**
+  `POST /v1/sessions/{key}/task` stored a GitHub task for whatever repo
+  the client named, and every `GET /v1/tasks` then ran `gh` against it
+  as the hub owner. A new link to a repo the hub hasn't pinned now
+  answers `422 not_pinned`. Tasks already stored keep their links and
+  keep refreshing after their repo is unpinned.
+
 - **The hub's session journals are private to your account.** Every
   prompt, reply and tool call a remote session sees is journaled under
   `~/.swe/data/remote/journal/`, which was created 0755 with 0644 files,
