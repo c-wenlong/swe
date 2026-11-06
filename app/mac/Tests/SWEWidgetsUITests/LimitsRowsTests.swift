@@ -45,3 +45,26 @@ import Testing
         #expect(LimitsView.spreadSpacing(for: 340, count: 1) == 0)
     }
 }
+
+@Suite struct LimitLabelTests {
+    @Test func theSmallWidgetDropsTheHarnessBeforeAnAccount() {
+        #expect(LimitLine.label(title: "Claude Code: Personal", harness: "claude", window: "session", compact: true)
+                == "Personal · session")
+        #expect(LimitLine.label(title: "Codex", harness: "codex", window: "weekly", compact: true) == "Codex · weekly")
+    }
+
+    @Test func anAccountNameWithItsOwnColonKeepsItsWords() {
+        // Only the harness's own name goes: these two would both read
+        // "Shared" if everything before the first colon were dropped.
+        #expect(LimitLine.label(title: "Cursor Work: Shared", harness: "cursor", window: nil, compact: true)
+                == "Cursor Work: Shared")
+        #expect(LimitLine.label(title: "Cursor: Cursor Home: Shared", harness: "cursor", window: nil, compact: true)
+                == "Cursor Home: Shared")
+    }
+
+    @Test func largerWidgetsKeepTheWholeTitle() {
+        #expect(LimitLine.label(title: "Claude Code: Personal", harness: "claude", window: "session", compact: false)
+                == "Claude Code: Personal · session")
+        #expect(LimitLine.label(title: "Cursor", harness: "cursor", window: nil, compact: false) == "Cursor")
+    }
+}
