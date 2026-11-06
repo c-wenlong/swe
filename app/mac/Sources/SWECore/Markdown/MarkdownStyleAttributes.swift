@@ -90,7 +90,16 @@ extension MarkdownStyleSpans {
                 .font: palette.headingFont(level),
                 .paragraphStyle: paragraph,
             ], range: span.range)
-        case .headingMarker, .marker, .fence, .linkURL, .comment:
+        case .headingMarker:
+            // Muted but at the heading's own size: at body size the "#"
+            // sat in front of a 28pt title like a stray mark.
+            let hashes = (storage.string as NSString).substring(with: span.range)
+                .prefix { $0 == "#" }.count
+            storage.addAttributes([
+                .foregroundColor: palette.textMuted,
+                .font: palette.headingFont(max(1, min(6, hashes))),
+            ], range: span.range)
+        case .marker, .fence, .linkURL, .comment:
             storage.addAttribute(.foregroundColor, value: palette.textMuted, range: span.range)
         case .bold:
             addTrait(.boldFontMask, at: span.range, in: storage)
@@ -104,6 +113,14 @@ extension MarkdownStyleSpans {
                 .font: palette.codeFont,
                 .backgroundColor: palette.codeBackground,
             ], range: span.range)
+            // An inline span's backticks are syntax, muted like every
+            // other marker, so the code reads as code, not "`code`".
+            if span.kind == .inlineCode, span.range.length >= 2 {
+                for edge in [span.range.location, NSMaxRange(span.range) - 1] {
+                    storage.addAttribute(.foregroundColor, value: palette.textMuted,
+                                         range: NSRange(location: edge, length: 1))
+                }
+            }
         case .link:
             storage.addAttribute(.foregroundColor, value: palette.accent, range: span.range)
         case .quote:

@@ -17,6 +17,11 @@ struct NeedsYouCards: View {
     private static let foldLimit = 5
 
     var body: some View {
+        // The first read only: after it, a hub that isn't running still
+        // shows nothing, as before.
+        if !model.hasLoaded {
+            LoadingCard(text: "Reading the sessions waiting on you…")
+        }
         ForEach(model.groups, id: \.section) { group in
             let clearable = group.items.filter { !$0.isApproval }
             Card(title: group.section.title) {

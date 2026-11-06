@@ -165,6 +165,9 @@ public final class NeedsYouModel {
     public private(set) var items: [HubInboxItem] = []
     /// The last fetch answered. A page polls less often while it doesn't.
     public private(set) var reachable = false
+    /// A load has answered, either way. Until then the Inbox shows a
+    /// loading line, so its sections don't pop in over the GitHub list.
+    public private(set) var hasLoaded = false
     private var dismissals = InboxDismissals()
     /// Bumped by every load and dismiss, so a slow fetch that left
     /// before a newer change can't land over it.
@@ -184,12 +187,14 @@ public final class NeedsYouModel {
             guard mine == generation else { return }
             items = dismissals.overlay(fetched.filter { !$0.isGitHub })
             reachable = true
+            hasLoaded = true
         } catch is CancellationError {
             return
         } catch {
             guard mine == generation else { return }
             items = []
             reachable = false
+            hasLoaded = true
         }
     }
 

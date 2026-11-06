@@ -180,6 +180,21 @@ import Testing
         #expect(CTLineGetGlyphCount(line) == (text as NSString).length)
     }
 
+    @Test func theHeadingMarkIsMutedAtTheHeadingsSize() {
+        let styled = MarkdownStyleSpans.styled("## Title", palette: .test)
+        let font = styled.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        #expect(font?.pointSize == 18)
+        #expect(styled.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == .gray)
+    }
+
+    @Test func inlineCodesBackticksAreMuted() {
+        let styled = MarkdownStyleSpans.styled("a `xy` b", palette: .test)
+        for index in [2, 5] {
+            #expect(styled.attribute(.foregroundColor, at: index, effectiveRange: nil) as? NSColor == .gray)
+        }
+        #expect(styled.attribute(.foregroundColor, at: 3, effectiveRange: nil) as? NSColor == .black)
+    }
+
     @Test func aLongDocumentStylesQuickly() {
         let text = String(repeating: "a **b** and *i* and ~~s~~\n", count: 5_000)
         let start = Date()
