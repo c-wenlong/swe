@@ -1414,4 +1414,36 @@ import Testing
                                  swe: SweClient(runner: runner)) == nil)
         #expect(try dir.read("harnesses/devin/sub/same.md") == "# Y\n")
     }
+
+    @Test func moveFolderCarriesOpenAndClosedStateAndUndoBringsItBack() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(dir, runner: runner)
+        let suite = "swe-tests-folder-state-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.folderStateDefaults = defaults
+        let rail = ChapterFolderState.outlinePrefix, compile = ChapterFolderState.compilePrefix
+        defaults.set(false, forKey: rail + "devin/sub")
+        defaults.set(false, forKey: compile + "devin")
+        // A stale key under the destination must not reach the moved folder.
+        defaults.set(false, forKey: rail + "harnesses/devin")
+        // A sibling whose name only starts the same keeps its state.
+        defaults.set(false, forKey: rail + "devinish")
+        let undo = UndoManager()
+        model.undoManager = undo
+        #expect(await model.move(folder: "devin", toFolder: "harnesses",
+                                 swe: SweClient(runner: runner)) == nil)
+        #expect(defaults.object(forKey: rail + "devin/sub") == nil)
+        #expect(defaults.object(forKey: rail + "harnesses/devin/sub") as? Bool == false)
+        #expect(defaults.object(forKey: compile + "harnesses/devin") as? Bool == false)
+        #expect(defaults.object(forKey: rail + "harnesses/devin") == nil)
+        #expect(defaults.object(forKey: rail + "devinish") as? Bool == false)
+        undo.undo()
+        try #require(await runner.built.reach(2), "the undo never rebuilt")
+        #expect(defaults.object(forKey: rail + "devin/sub") as? Bool == false)
+        #expect(defaults.object(forKey: compile + "devin") as? Bool == false)
+        #expect(defaults.object(forKey: rail + "harnesses/devin/sub") == nil)
+        #expect(defaults.object(forKey: rail + "devinish") as? Bool == false)
+    }
 }
