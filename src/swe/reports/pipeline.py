@@ -670,11 +670,11 @@ class ReportPipeline:
                     project_path = str(suggestion.get("project_path", ""))
                     if not text:
                         raise ValueError("follow-up text must not be empty")
-                    ids.append(stable_follow_up_id(text, project_path))
-                    item = dict(suggestion)
                     evidence = suggestion.get("evidence", [])
                     if not isinstance(evidence, list):
                         raise ValueError("follow-up evidence must be a list")
+                    ids.append(stable_follow_up_id(text, project_path))
+                    item = dict(suggestion)
                     item["_source_session_ids"] = list(
                         dict.fromkeys(
                             str(reference)
