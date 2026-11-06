@@ -432,12 +432,11 @@ a tmux fallback room inside the apps' 15 s attach timeout. Under
 `auto`, an agent that fails any step (not signed in, a load error, too
 slow, a crash) or can't load sessions at all falls back to the tmux
 launch, and the note carries the reason. An explicit `--mode=acp`
-reports a failure instead, and on an agent without `loadSession` it
-runs `session/new`: the note says so and the row stores the new id as
-`acp_session_id`, so a restart loads that one. The chat keeps tailing
-the attached session's transcript, which the new session never
-writes, so its replies show only as live text there; its own
-transcript appears as its own session.
+reports a failure instead, except on an agent without `loadSession`:
+that one falls back to tmux under either mode, with the reason in the
+note. Attach never runs `session/new`, since the chat keeps tailing
+the attached session's transcript, which a new ACP session never
+writes.
 
 `POST /v1/sessions` (and a satellite's `launch` command) for a harness
 `auto` would attach over ACP starts it over ACP too, when the launch

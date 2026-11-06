@@ -16,7 +16,8 @@ runs under swe's supervisor and the phone can write to it. Modes:
   agent (``devin acp``, ``claude-agent-acp``, ...) per session and
   writes over ``session/prompt`` (``remote/acp.py``). Attach starts it
   and loads the session first, so a harness whose ACP mode fails to
-  come up falls back to tmux under ``auto``.
+  come up falls back to tmux under ``auto``, and one whose agent can't
+  load sessions falls back to tmux under ``--mode=acp`` too.
 
 ``auto`` resolves to the tier-A mode when the harness has one, else to
 ACP when the harness's CLI has an ACP mode installed, else tmux;
@@ -976,18 +977,19 @@ def attach(
             return ready
         meta, writers = ready
         if meta["mode"] == "acp":
-            done = _attach_acp(home, session_key, session, meta, writers,
-                               model=model, effort=effort,
-                               explicit=mode == "acp")
-            if done[0] or mode != "auto":
-                return done
-            # auto picked ACP and it did not come up: the tmux channel
+            ok, why, no_load = _attach_acp(
+                home, session_key, session, meta, writers,
+                model=model, effort=effort)
+            if ok or (mode != "auto" and not no_load):
+                return ok, why
+            # ACP did not come up (auto), or the agent can't load the
+            # session (auto or an explicit --mode=acp): the tmux channel
             # every harness has, with the reason in the note.
             meta["mode"] = "tmux"
             ok, note = _attach_tmux(home, session_key, session, flags,
                                     meta, writers, model=model,
                                     effort=effort)
-            return ok, f"{note} ({done[1]}; fell back to tmux)"
+            return ok, f"{note} ({why}; {ACP_FALLBACK_NOTE})"
         return _attach_tmux(home, session_key, session, flags, meta,
                             writers, model=model, effort=effort)
 
@@ -1123,38 +1125,42 @@ def _attach_acp(
     *,
     model: str | None,
     effort: str | None,
-    explicit: bool,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, bool]:
     """``attach``'s ACP start, outside the registry lock (the caller
     holds the key's attach lock): spawn the agent, initialize, load the
     session, then write the entry. The live connection stays registered
     with the injector, so the first send in this process reuses it;
-    elsewhere (a CLI attach) the first send starts its own.
+    elsewhere (a CLI attach) the first send starts its own. Returns
+    ``(ok, note, no_load)``.
 
-    An agent that can't load sessions starts a new one only on an
-    explicit ``--mode=acp``: the chat keeps tailing the attached
-    session's transcript, which the new session never writes, so
-    ``auto`` takes tmux instead. The handshake gets ``ATTACH_ACP_S``,
+    An agent that can't load sessions never gets a new one here, not
+    even on an explicit ``--mode=acp``: the chat keeps tailing the
+    attached session's transcript, which a new ACP session never
+    writes. ``no_load`` says that was the failure, so ``attach`` takes
+    tmux under either mode. The handshake gets ``ATTACH_ACP_S``,
     leaving a tmux fallback room inside the apps' attach timeout.
     """
-    from swe.remote import inject
+    from swe.remote import acp, inject
 
-    conn, note = inject.AcpInjector.open(
-        home, session_key, session, meta, allow_new=explicit,
-        budget=ATTACH_ACP_S, attaching=True)
+    try:
+        conn, note = inject.AcpInjector.open(
+            home, session_key, session, meta, allow_new=False,
+            budget=ATTACH_ACP_S, attaching=True, raise_no_load=True)
+    except acp.NoLoadSession as exc:
+        return False, str(exc), True
     if conn is None:
-        return False, note
+        return False, note, False
     if conn.session_id != inject.acp_session_ref(session):
         meta["acp_session_id"] = conn.session_id
     with _registry_lock(home):
         current = _load_registry(home).get(session_key)
         if current is not None:
             inject.AcpInjector.close(session_key)
-            return _already_attached(current, model, effort)
+            return (*_already_attached(current, model, effort), False)
         _stop_local_writers(session, writers)
         _mark_locked(home, session_key, meta)
     return True, f"attached (acp: {conn.label})" + (
-        f"; {note}" if note and not conn.resumed else "")
+        f"; {note}" if note and not conn.resumed else ""), False
 
 
 def _attach_tmux(

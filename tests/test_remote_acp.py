@@ -653,16 +653,39 @@ class TestAttachNoLoad(_AcpCase):
         self.assertFalse(any(m.get("method") == "session/new"
                              for m in self._sent()))
 
-    def test_new_session_recorded_and_noted(self):
-        with patch.object(supervise, "_local_writer_pids", return_value=[]):
+    def test_explicit_acp_takes_tmux_too_and_says_why(self):
+        # A forced --mode=acp used to run session/new here: the chat
+        # kept tailing the attached transcript, which that new session
+        # never wrote, so replies went nowhere the chat could follow.
+        with patch.object(supervise, "_local_writer_pids", return_value=[]), \
+             patch.object(supervise, "_attach_tmux",
+                          return_value=(True, "attached under tmux swe-x")) \
+                as tmux:
             ok, note = supervise.attach(
                 self.home, self.key, self.session, mode="acp",
                 last_append_at=None, status="done")
         self.assertTrue(ok, note)
-        self.assertIn("new session", note)
         self.assertEqual(
-            supervise.meta_for(self.home, self.key)["acp_session_id"],
-            "fresh-1")
+            note, "attached under tmux swe-x (fake-agent can't load "
+                  "sessions over ACP, and a new ACP session would not "
+                  "write to this chat; fell back to tmux)")
+        self.assertEqual(tmux.call_args[0][4]["mode"], "tmux")
+        self.assertNotIn("acp_session_id", tmux.call_args[0][4])
+        self.assertFalse(any(m.get("method") == "session/new"
+                             for m in self._sent()))
+        self.assertNotIn(self.key, inject.AcpInjector._conns)
+
+    def test_explicit_acp_fallback_failure_keeps_both_reasons(self):
+        with patch.object(supervise, "_local_writer_pids", return_value=[]), \
+             patch.object(supervise, "_attach_tmux",
+                          return_value=(False, "tmux is not available")):
+            ok, note = supervise.attach(
+                self.home, self.key, self.session, mode="acp",
+                last_append_at=None, status="done")
+        self.assertFalse(ok)
+        self.assertIn("tmux is not available", note)
+        self.assertIn("can't load sessions", note)
+        self.assertIsNone(supervise.meta_for(self.home, self.key))
 
 
 class TestAttachFallback(_AcpCase):

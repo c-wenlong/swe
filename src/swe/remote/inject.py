@@ -1483,7 +1483,8 @@ class AcpInjector:
     def open(cls, home: Path | None, session_key: str, session: Session,
              meta: dict, *, emit=None, machine: str = "",
              deltas=None, allow_new: bool = True,
-             budget: float | None = None, attaching: bool = False):
+             budget: float | None = None, attaching: bool = False,
+             raise_no_load: bool = False):
         """The live connection for ``session_key``, starting the agent
         and loading (or, with ``allow_new``, creating) its session when
         none runs. ``budget`` caps the handshake. Returns ``(conn,
@@ -1491,7 +1492,10 @@ class AcpInjector:
         why. A new session's id is recorded on the row. Outside an
         attach (``attaching``) the row must still exist once the
         handshake ends, or the agent is closed: a detach that landed
-        meanwhile wins."""
+        meanwhile wins. With ``raise_no_load``, an agent that can't load
+        the session (and ``allow_new`` is off) raises
+        ``acp.NoLoadSession`` instead, so an attach can tell that case
+        from a failure."""
         from swe.remote import acp
 
         with cls._gate(session_key):
@@ -1520,6 +1524,11 @@ class AcpInjector:
             try:
                 note = conn.handshake(ref, allow_new=allow_new,
                                       budget=budget)
+            except acp.NoLoadSession as exc:
+                conn.close()
+                if raise_no_load:
+                    raise
+                return None, str(exc)
             except acp.AcpError as exc:
                 conn.close()
                 return None, f"ACP handshake failed: {exc}"
