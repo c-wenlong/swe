@@ -1419,9 +1419,7 @@ import Testing
         let dir = try TempDir()
         let runner = Runner([check(dir.url)])
         let model = try await nestModel(dir, runner: runner)
-        let suite = "swe-tests-folder-state-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = TestDefaults("folder-state")
         model.folderStateDefaults = defaults
         let rail = ChapterFolderState.outlinePrefix, compile = ChapterFolderState.compilePrefix
         defaults.set(false, forKey: rail + "devin/sub")
