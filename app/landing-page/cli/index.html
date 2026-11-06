@@ -596,8 +596,13 @@ Flags
                                             --mode=auto picks the
                                             harness's API channel (opencode
                                             serve, codex app-server) when the
-                                            binary exists, else relaunches in
+                                            binary exists, then its Agent
+                                            Client Protocol mode (devin acp,
+                                            cursor-agent acp, ...) when the
+                                            CLI has one, else relaunches in
                                             tmux with resume flags.
+                                            --mode=acp forces ACP
+                                            (claude via claude-agent-acp).
                                             --mode=headless sends
                                             each prompt via claude -p instead.
                                             --model=&lt;m&gt; and

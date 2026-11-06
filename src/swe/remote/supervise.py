@@ -12,9 +12,15 @@ runs under swe's supervisor and the phone can write to it. Modes:
   ``opencode serve`` for the project and writes over REST/SSE.
 - ``appserver`` (codex): ``inject.py`` keeps a ``codex app-server``
   JSON-RPC proc per session and writes over ``turn/start``.
+- ``acp``: ``inject.py`` keeps the harness's Agent Client Protocol
+  agent (``devin acp``, ``claude-agent-acp``, ...) per session and
+  writes over ``session/prompt`` (``remote/acp.py``). Attach starts it
+  and loads the session first, so a harness whose ACP mode fails to
+  come up falls back to tmux under ``auto``.
 
-``auto`` resolves to the tier-A mode when the harness has one, else
-tmux; ``--mode=tmux`` stays the explicit escape hatch.
+``auto`` resolves to the tier-A mode when the harness has one, else to
+ACP when the harness's CLI has an ACP mode installed, else tmux;
+``--mode=tmux`` stays the explicit escape hatch.
 
 The registry is ``data/remote/supervised.json``: ``{key: {mode, tmux,
 tool_name, session_id, cwd, attached_at}}``. Catalog reads the same file
@@ -81,7 +87,8 @@ _MODE_BINARY = {"serve": "opencode", "appserver": "codex",
                 "headless": "claude"}
 
 # ``attach`` accepts exactly these; anything else is a 422 at the route.
-ATTACH_MODES = frozenset({"auto", "tmux", "headless", "serve", "appserver"})
+ATTACH_MODES = frozenset(
+    {"auto", "tmux", "headless", "serve", "appserver", "acp"})
 
 # A kept tmux session with no tmux client attached and no transcript
 # activity for this long is closed by the hub's (or satellite's)
@@ -93,11 +100,16 @@ KEPT_IDLE_REAP_S = 12 * 3600
 _TMUX_SOCKET: str | None = None
 
 
-def resolve_mode(session: Session, mode: str) -> str:
+def resolve_mode(session: Session, mode: str, *,
+                 model: str | None = None,
+                 effort: str | None = None) -> str:
     """The concrete channel for ``mode`` on this session.
 
     ``auto`` picks the tier-A channel when the harness has one *and* its
-    binary is on PATH; otherwise tmux. Explicit modes pass through.
+    binary is on PATH; then ACP when the harness's CLI has an ACP mode
+    installed (``acp.auto_eligible``) and no ``model``/``effort`` pick
+    rides the attach (ACP has no verified control for either, a tmux
+    pane may); otherwise tmux. Explicit modes pass through.
     """
     if mode != "auto":
         return mode
@@ -112,6 +124,11 @@ def resolve_mode(session: Session, mode: str) -> str:
     want = _AUTO_MODE.get(session.tool_name)
     if want and shutil.which(_MODE_BINARY[want]):
         return want
+    if not want and not model and not effort:
+        from swe.remote import acp
+
+        if acp.auto_eligible(session.tool_name):
+            return "acp"
     return "tmux"
 
 # The supervised registry is read-change-save; the hub, satellite agents
@@ -953,6 +970,18 @@ def attach(
         if isinstance(ready[0], bool):
             return ready
         meta, writers = ready
+        if meta["mode"] == "acp":
+            done = _attach_acp(home, session_key, session, meta, writers,
+                               model=model, effort=effort)
+            if done[0] or mode != "auto":
+                return done
+            # auto picked ACP and it did not come up: the tmux channel
+            # every harness has, with the reason in the note.
+            meta["mode"] = "tmux"
+            ok, note = _attach_tmux(home, session_key, session, flags,
+                                    meta, writers, model=model,
+                                    effort=effort)
+            return ok, f"{note} ({done[1]}; fell back to tmux)"
         return _attach_tmux(home, session_key, session, flags, meta,
                             writers, model=model, effort=effort)
 
@@ -1029,7 +1058,13 @@ def _attach_checks_locked(
     # Tier-A only when the harness binary is actually here —
     # an opencode session on a box without `opencode` still
     # gets the tmux channel.
-    mode = resolve_mode(session, mode)
+    mode = resolve_mode(session, mode, model=model, effort=effort)
+    if mode == "acp":
+        from swe.remote import acp
+
+        if acp.command_for(session.tool_name) is None:
+            return False, (f"{session.tool_name} has no Agent Client "
+                           "Protocol mode installed")
     if mode == "headless" and session.tool_name != "claude":
         return False, "headless attach only supports claude"
     if mode == "serve" and session.tool_name != "opencode":
@@ -1065,12 +1100,47 @@ def _attach_checks_locked(
         _mark_locked(home, session_key, meta)
         return True, f"attached ({mode})"
 
-    # tmux mode: stand the replacement up BEFORE killing the original,
+    # tmux and acp: stand the replacement up BEFORE killing the original,
     # so a failed handoff leaves the human's session running rather
     # than stopped with nothing to show for it. List the original's
     # pids first: the replacement carries the same binary and resume
     # flags, so a scan after launch would SIGTERM it too.
     return meta, _local_writer_pids(session)
+
+
+def _attach_acp(
+    home: Path | None,
+    session_key: str,
+    session: Session,
+    meta: dict,
+    writers: list[int],
+    *,
+    model: str | None,
+    effort: str | None,
+) -> tuple[bool, str]:
+    """``attach``'s ACP start, outside the registry lock (the caller
+    holds the key's attach lock): spawn the agent, initialize, load the
+    session (or start a new one when the agent can't load), then write
+    the entry. The live connection stays registered with the injector,
+    so the first send in this process reuses it; elsewhere (a CLI
+    attach) the first send starts its own.
+    """
+    from swe.remote import inject
+
+    conn, note = inject.AcpInjector.open(home, session_key, session, meta)
+    if conn is None:
+        return False, note
+    if conn.session_id != inject.acp_session_ref(session):
+        meta["acp_session_id"] = conn.session_id
+    with _registry_lock(home):
+        current = _load_registry(home).get(session_key)
+        if current is not None:
+            inject.AcpInjector.close(session_key)
+            return _already_attached(current, model, effort)
+        _stop_local_writers(session, writers)
+        _mark_locked(home, session_key, meta)
+    return True, f"attached (acp: {conn.label})" + (
+        f"; {note}" if note and not conn.resumed else "")
 
 
 def _attach_tmux(
