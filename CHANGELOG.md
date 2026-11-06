@@ -257,7 +257,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the new path. A folder can't move into itself or its own subfolder,
   and a name already taken on disk, in index.txt or in targets.json is
   refused with a message under the rail's header. ⌘Z puts the folder
-  back. A drag resting on a collapsed folder springs it open.
+  back. A drag resting on a collapsed folder springs it open. A moved
+  folder and its subfolders keep their open or closed state, on the
+  Edit rail and the Compile tab, after the move and after undo.
 
 - **Chapters drag between folders in the AGENTS.md rail.** A file row
   drops onto a folder row to move the chapter on disk; its index.txt
