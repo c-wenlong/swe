@@ -1189,4 +1189,186 @@ import Testing
             chapters: chapters, error: "duplicated", stale: false)
         #expect(state.uniqueChapters.map(\.name) == ["a.md", "b.md"])
     }
+
+    // MARK: - folder moves (#1633)
+
+    @Test func renamingFolderRetargetsEntriesAndOffComments() {
+        let text = "# devin/ notes stay\na.md\ndevin/x.md\n# devin/sub/y.md\n./devin/z.md\ndevinish/q.md\n"
+        #expect(ChapterIndex.renamingFolder(text, from: "devin", to: "harnesses/devin")
+                == "# devin/ notes stay\na.md\nharnesses/devin/x.md\n# harnesses/devin/sub/y.md\nharnesses/devin/z.md\ndevinish/q.md\n")
+    }
+
+    @Test func folderMoveProblemRefusesItselfAndItsSubfolders() {
+        #expect(ChapterIndex.folderMoveProblem("devin", into: "devin") != nil)
+        #expect(ChapterIndex.folderMoveProblem("devin", into: "devin/sub") != nil)
+        #expect(ChapterIndex.folderMoveProblem("devin", into: "devin/sub/deep") != nil)
+        #expect(ChapterIndex.folderMoveProblem("", into: "eng") != nil)
+        // A sibling whose name only starts the same is a fine parent.
+        #expect(ChapterIndex.folderMoveProblem("devin", into: "devinish") == nil)
+        #expect(ChapterIndex.folderMoveProblem("eng/devin", into: "") == nil)
+    }
+
+    /// `devin/` with a listed file, an off file one level deeper and a
+    /// ruled file, beside an empty `harnesses/`, between a.md and b.md.
+    private func nestModel(_ dir: TempDir, runner: Runner,
+                           targets: String? = nil) async throws -> ChaptersModel {
+        try dir.write("a.md", "# A\n")
+        try dir.write("b.md", "# B\n")
+        for folder in ["devin/sub", "harnesses"] {
+            try FileManager.default.createDirectory(
+                at: dir.path(folder), withIntermediateDirectories: true)
+        }
+        try dir.write("devin/x.md", "# X\n")
+        try dir.write("devin/sub/y.md", "# Y\n")
+        try dir.write("index.txt", "# in order\na.md\ndevin/x.md\n# devin/sub/y.md\nb.md\n")
+        if let targets { try dir.write("targets.json", targets) }
+        let model = ChaptersModel()
+        await model.load(swe: SweClient(runner: runner))
+        return model
+    }
+
+    private func exists(_ dir: TempDir, _ path: String) -> Bool {
+        FileManager.default.fileExists(atPath: dir.path(path).path)
+    }
+
+    @Test func moveFolderNestsItAndRetargetsEveryChapter() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(
+            dir, runner: runner,
+            targets: #"{"version":1,"chapters":{"a.md":{"except":["codex"]},"devin/x.md":{"only":["devin"]}}}"#)
+        model.selected = "devin/sub/y.md"
+        let problem = await model.move(folder: "devin", toFolder: "harnesses",
+                                       swe: SweClient(runner: runner))
+        #expect(problem == nil)
+        #expect(!exists(dir, "devin"))
+        #expect(try dir.read("harnesses/devin/x.md") == "# X\n")
+        #expect(try dir.read("harnesses/devin/sub/y.md") == "# Y\n")
+        // Every slot keeps its place and its on/off state.
+        #expect(try dir.read("index.txt")
+                == "# in order\na.md\nharnesses/devin/x.md\n# harnesses/devin/sub/y.md\nb.md\n")
+        let rules = try ChapterTargets.parse(dir.read("targets.json")).rules
+        #expect(rules == ["a.md": ["except": ["codex"]],
+                          "harnesses/devin/x.md": ["only": ["devin"]]])
+        #expect(model.selected == "harnesses/devin/sub/y.md")
+        #expect(model.folders.contains("harnesses/devin/sub"))
+        #expect(!model.folders.contains("devin"))
+        #expect(runner.builds == 1)
+    }
+
+    @Test func moveFolderToTheTopLevel() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(dir, runner: runner)
+        let problem = await model.move(folder: "devin/sub", toFolder: "",
+                                       swe: SweClient(runner: runner))
+        #expect(problem == nil)
+        #expect(exists(dir, "sub/y.md"))
+        #expect(try dir.read("index.txt") == "# in order\na.md\ndevin/x.md\n# sub/y.md\nb.md\n")
+    }
+
+    @Test func moveFolderRefusesItselfAndItsSubfolderLeavingDiskAlone() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(dir, runner: runner)
+        let before = try dir.read("index.txt")
+        for parent in ["devin", "devin/sub"] {
+            let problem = await model.move(folder: "devin", toFolder: parent,
+                                           swe: SweClient(runner: runner))
+            #expect(problem != nil, "moved into \(parent)")
+        }
+        #expect(exists(dir, "devin/sub/y.md"))
+        #expect(!exists(dir, "devin/sub/devin"))
+        #expect(try dir.read("index.txt") == before)
+        #expect(runner.builds == 0)
+    }
+
+    @Test func moveFolderRefusesANameTakenOnDiskInTheIndexOrInTargets() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        // On disk: harnesses/devin already exists.
+        let model = try await nestModel(dir, runner: runner)
+        try FileManager.default.createDirectory(
+            at: dir.path("harnesses/devin"), withIntermediateDirectories: true)
+        let onDisk = await model.move(folder: "devin", toFolder: "harnesses",
+                                      swe: SweClient(runner: runner))
+        #expect(onDisk?.contains("already exists") == true)
+        #expect(exists(dir, "devin/x.md"))
+        try FileManager.default.removeItem(at: dir.path("harnesses/devin"))
+
+        // In the index: a (missing) chapter already listed under the new path.
+        try dir.write("index.txt", "a.md\ndevin/x.md\nharnesses/devin/old.md\n")
+        await model.checkDisk()
+        let inIndex = await model.move(folder: "devin", toFolder: "harnesses",
+                                       swe: SweClient(runner: runner))
+        #expect(inIndex?.contains("already in the index") == true, "\(inIndex ?? "nil")")
+        #expect(exists(dir, "devin/x.md"))
+
+        // In targets.json: a stale rule under the new path.
+        try dir.write("index.txt", "a.md\ndevin/x.md\n")
+        try dir.write("targets.json",
+                      #"{"version":1,"chapters":{"harnesses/devin/x.md":{"only":["claude"]}}}"#)
+        await model.checkDisk()
+        let inTargets = await model.move(folder: "devin", toFolder: "harnesses",
+                                         swe: SweClient(runner: runner))
+        #expect(inTargets?.contains("harness rule") == true, "\(inTargets ?? "nil")")
+        #expect(exists(dir, "devin/x.md"))
+        #expect(try dir.read("index.txt") == "a.md\ndevin/x.md\n")
+        #expect(runner.builds == 0)
+    }
+
+    @Test func moveFolderRefusesUnsavedTextInside() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(dir, runner: runner)
+        let chapter = InstructionsCheck.Chapter(
+            name: "devin/sub/y.md", path: dir.path("devin/sub/y.md").path, exists: true)
+        let document = try #require(model.document(for: chapter))
+        await document.load()
+        document.text = "# Draft\n"
+        let problem = await model.move(folder: "devin", toFolder: "harnesses",
+                                       swe: SweClient(runner: runner))
+        #expect(problem?.contains("devin/sub/y.md") == true)
+        #expect(exists(dir, "devin/sub/y.md"))
+        #expect(model.document(for: chapter)?.isDirty == true)
+    }
+
+    @Test func moveFolderRefusesALinkedFolder() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(dir, runner: runner)
+        try dir.link("alias", to: dir.path("devin").path)
+        #expect(await model.move(folder: "alias", toFolder: "harnesses",
+                                 swe: SweClient(runner: runner)) != nil)
+        #expect(dir.isLink("alias"))
+        #expect(exists(dir, "devin/x.md"))
+    }
+
+    @Test func undoPutsTheFolderAndEveryChapterBack() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(
+            dir, runner: runner,
+            targets: #"{"version":1,"chapters":{"devin/x.md":{"only":["devin"]}}}"#)
+        let undo = UndoManager()
+        model.undoManager = undo
+        let original = try dir.read("index.txt")
+        #expect(await model.move(folder: "devin", toFolder: "harnesses",
+                                 swe: SweClient(runner: runner)) == nil)
+        #expect(runner.builds == 1)
+        #expect(undo.undoMenuItemTitle == "Undo Move Folder")
+        undo.undo()
+        try #require(await runner.built.reach(2), "the undo never rebuilt")
+        #expect(exists(dir, "devin/sub/y.md"))
+        #expect(!exists(dir, "harnesses/devin"))
+        #expect(try dir.read("index.txt") == original)
+        #expect(try ChapterTargets.parse(dir.read("targets.json")).rules
+                == ["devin/x.md": ["only": ["devin"]]])
+        #expect(undo.redoMenuItemTitle == "Redo Move Folder")
+        undo.redo()
+        try #require(await runner.built.reach(3), "the redo never rebuilt")
+        #expect(exists(dir, "harnesses/devin/sub/y.md"))
+        #expect(try dir.read("index.txt")
+                == "# in order\na.md\nharnesses/devin/x.md\n# harnesses/devin/sub/y.md\nb.md\n")
+    }
 }

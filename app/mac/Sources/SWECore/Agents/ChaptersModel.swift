@@ -181,6 +181,57 @@ public enum ChapterIndex {
         return lines.joined(separator: "\n")
     }
 
+    /// Whether `name` sits somewhere under `folder` (not the folder
+    /// itself), compared through normalize.
+    public static func isUnder(_ name: String, folder: String) -> Bool {
+        normalize(name).hasPrefix(normalize(folder) + "/")
+    }
+
+    /// `name` with its leading `from` folder swapped for `to`. Only for a
+    /// name `isUnder(name, folder: from)`.
+    public static func rehome(_ name: String, from: String, to: String) -> String {
+        normalize(to) + "/" + normalize(name).dropFirst(normalize(from).count + 1)
+    }
+
+    /// `text` with every slot under folder `from` retargeted under `to` —
+    /// the folder-move form of `renaming`. An active entry is rewritten,
+    /// and so is a `# path.md` off-comment that is a valid chapter name,
+    /// so each chapter keeps its slot and its on/off state. Other comments
+    /// that happen to start with the folder's name stay untouched.
+    public static func renamingFolder(_ text: String, from: String, to: String) -> String {
+        var lines = lines(text)
+        for (index, line) in lines.enumerated() {
+            let stripped = line.trimmingCharacters(in: .whitespaces)
+            if isEntry(line) {
+                if isUnder(stripped, folder: from) {
+                    lines[index] = rehome(stripped, from: from, to: to)
+                }
+            } else if stripped.hasPrefix("#") {
+                let rest = stripped.dropFirst().trimmingCharacters(in: .whitespaces)
+                guard nameProblem(rest) == nil, isUnder(rest, folder: from) else { continue }
+                lines[index] = "# " + rehome(rest, from: from, to: to)
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Why folder `folder` cannot move into `parent` ("" is the top level):
+    /// not into itself or one of its own subfolders, and both the parent
+    /// and the folder's new path must pass `folderProblem`. nil means the
+    /// move can go ahead (or is a no-op, when `parent` already holds it).
+    public static func folderMoveProblem(_ folder: String, into parent: String) -> String? {
+        let folder = folder.isEmpty ? "" : normalize(folder)
+        let parent = parent.isEmpty ? "" : normalize(parent)
+        if folder.isEmpty { return "Pick a folder to move." }
+        if parent == folder { return "A folder can't move into itself." }
+        if parent.hasPrefix(folder + "/") {
+            return "\(folder) can't move into its own subfolder \(parent)."
+        }
+        let base = (folder as NSString).lastPathComponent
+        return folderProblem(folder) ?? folderProblem(parent)
+            ?? folderProblem(parent.isEmpty ? base : parent + "/" + base)
+    }
+
     /// The full check createChapter runs: the folder must pass
     /// `folderProblem`, then the file's name must pass `nameProblem`, be
     /// a name rather than a path, and not start with "." — the two file
@@ -927,6 +978,7 @@ public final class ChaptersModel {
     /// land on the undo stack again, so ⌘Z would ping-pong instead of
     /// walking back. The work closures run the raw op and never register.
     private func registerMoveUndo(
+        _ actionName: String = "Move Chapter",
         forward: @escaping @MainActor () async -> String?,
         backward: @escaping @MainActor () async -> String?
     ) {
@@ -936,14 +988,14 @@ public final class ChaptersModel {
         manager.registerUndo(withTarget: self) { _ in
             if let manager = self.movesUndoManager {
                 manager.registerUndo(withTarget: self) { _ in
-                    self.registerMoveUndo(forward: forward, backward: backward)
+                    self.registerMoveUndo(actionName, forward: forward, backward: backward)
                     Task { await self.reportMove(forward) }
                 }
-                manager.setActionName("Move Chapter")
+                manager.setActionName(actionName)
             }
             Task { await self.reportMove(backward) }
         }
-        manager.setActionName("Move Chapter")
+        manager.setActionName(actionName)
     }
 
     /// An undo or redo move: a refusal goes to `moveError` rather than
@@ -1225,6 +1277,168 @@ public final class ChaptersModel {
             return nil
         }
         return problem
+    }
+
+    /// Drop folder `path` into `parent` ("" is the top level): the
+    /// directory moves on disk and every chapter under it follows — each
+    /// index.txt slot (active or off) and each targets.json rule is
+    /// retargeted in place, so order and harness scope are kept. Refuses a
+    /// move into itself or its own subfolder, a name already taken on disk,
+    /// in the index or in targets.json, a linked folder, and unsaved drafts
+    /// inside. Registers undo so ⌘Z puts the folder back. Returns why it
+    /// was refused.
+    @discardableResult
+    public func move(folder path: String, toFolder parent: String,
+                     swe: SweClient) async -> String? {
+        await applyFolderMove(path: path, toFolder: parent, swe: swe) { newPath, oldParent in
+            self.registerMoveUndo(
+                "Move Folder",
+                forward: {
+                    await self.applyFolderMove(path: path, toFolder: parent, swe: swe)
+                },
+                backward: {
+                    await self.applyFolderMove(path: newPath, toFolder: oldParent, swe: swe)
+                })
+        }
+    }
+
+    /// The folder move itself, in the same order as a file move: the
+    /// directory, then the rules, then the index, each step walked back if
+    /// a later one is refused. `onMoved` gets the new path and the old
+    /// parent — the undo — inside the compile queue, like applyFileMove.
+    private func applyFolderMove(path: String, toFolder parent: String, swe: SweClient,
+                                 onMoved: (@MainActor (String, String) -> Void)? = nil)
+        async -> String?
+    {
+        guard case .loaded(let check) = status else {
+            return "The chapters aren't loaded yet."
+        }
+        if let problem = ChapterIndex.folderMoveProblem(path, into: parent) { return problem }
+        let path = ChapterIndex.normalize(path)
+        let parent = parent.isEmpty ? "" : ChapterIndex.normalize(parent)
+        let oldParent = path.contains("/") ? (path as NSString).deletingLastPathComponent : ""
+        // Already there: a drop back onto its own parent is silent.
+        guard parent != oldParent else { return nil }
+        let base = (path as NSString).lastPathComponent
+        let newPath = parent.isEmpty ? base : parent + "/" + base
+        func dirtyDraft() -> String? {
+            self.documents.first {
+                ChapterIndex.isUnder($0.key, folder: path) && $0.value.isDirty
+            }?.key
+        }
+        if let draft = dirtyDraft() {
+            return "Save or revert \(draft) before moving its folder."
+        }
+        guard let from = Self.inside(path, under: check.directory),
+              let to = Self.inside(newPath, under: check.directory) else {
+            return "The path cannot leave AGENTS_MD."
+        }
+        return await queuedCompile { () -> String? in
+            // Checked again inside the queue: a draft may have gone dirty
+            // while earlier work ran, and moving its file loses the edit.
+            if let draft = dirtyDraft() {
+                return "Save or revert \(draft) before moving its folder."
+            }
+            guard let index = await self.readyIndex(),
+                  let targetsDocument = await self.readyTargets() else {
+                return "The chapter files haven't been read."
+            }
+            let rules: [String: [String: [String]]]
+            if targetsDocument.existsOnDisk {
+                guard let parsed = try? ChapterTargets.parse(targetsDocument.text) else {
+                    return self.targetsParseProblem ?? "targets.json can't be edited."
+                }
+                rules = parsed.rules
+            } else {
+                rules = [:]
+            }
+            // An index line or rule already under the destination would
+            // silently claim a moved chapter; which one wins is a hand edit.
+            if let taken = ChapterIndex.entries(index.text)
+                .first(where: { ChapterIndex.isUnder($0, folder: newPath) }) {
+                return "\(taken) is already in the index."
+            }
+            if let ruled = rules.keys.sorted()
+                .first(where: { ChapterIndex.isUnder($0, folder: newPath) }) {
+                return "\(ruled) already has a harness rule; fix targets.json first."
+            }
+            let root = URL(fileURLWithPath: check.directory)
+            let (linked, clash) = await offMain {
+                ((try? FileManager.default.destinationOfSymbolicLink(
+                    atPath: root.appending(path: path).path)) != nil,
+                 FileManager.default.fileExists(atPath: to.path))
+            }
+            // inside() resolves links: moving what it returns relocates the
+            // link's target out from under the link.
+            if linked { return "\(path) is a link; move the folder it points at." }
+            if clash { return "\(newPath) already exists." }
+            let moved = await offMain {
+                (try? FileManager.default.moveItem(at: from, to: to)) != nil
+            }
+            guard moved else { return "Couldn't move \(path) to \(newPath)." }
+            let undo = { await offMain {
+                try? FileManager.default.moveItem(at: to, to: from)
+            } }
+            // Rules ahead of the index, as for a file: while index.txt
+            // still names the old paths those chapters are missing to a
+            // build, never compiled without their rule.
+            var targetsUndo: String?
+            if rules.keys.contains(where: { ChapterIndex.isUnder($0, folder: path) }) {
+                var renamed: [String: [String: [String]]] = [:]
+                for (key, rule) in rules {
+                    let target = ChapterIndex.isUnder(key, folder: path)
+                        ? ChapterIndex.rehome(key, from: path, to: newPath) : key
+                    renamed[target] = rule
+                }
+                targetsUndo = targetsDocument.text
+                targetsDocument.text = ChapterTargets(rules: renamed).encoded()
+                if await targetsDocument.save() != .saved {
+                    await targetsDocument.load()
+                    _ = await undo()
+                    return "targets.json changed on disk; try again."
+                }
+            }
+            let renamed = ChapterIndex.renamingFolder(index.text, from: path, to: newPath)
+            let indexChanged = renamed != index.text
+            if indexChanged {
+                index.text = renamed
+                if await index.save() != .saved {
+                    await index.load()
+                    var restored = targetsUndo == nil
+                    if let targetsUndo {
+                        targetsDocument.text = targetsUndo
+                        restored = await targetsDocument.save() == .saved
+                        if !restored { await targetsDocument.load() }
+                    }
+                    guard restored else {
+                        return "index.txt changed on disk and the move couldn't be undone: \(path) is at \(newPath) with its rules under the new names; fix index.txt and targets.json by hand."
+                    }
+                    _ = await undo()
+                    return "index.txt changed on disk; try again."
+                }
+            }
+            // Open editors point at the old paths: clean ones are dropped
+            // and reopen at the new path; one that went dirty mid-move
+            // keeps its draft on a fresh document there.
+            for (name, document) in self.documents where ChapterIndex.isUnder(name, folder: path) {
+                self.documents[name] = nil
+                guard document.isDirty else { continue }
+                let newName = ChapterIndex.rehome(name, from: path, to: newPath)
+                let rehomed = InstructionDocument(url: to.appending(
+                    path: String(newName.dropFirst(newPath.count + 1))))
+                self.documents[newName] = rehomed
+                await rehomed.load()
+                rehomed.text = document.text
+            }
+            if let selected = self.selected, ChapterIndex.isUnder(selected, folder: path) {
+                self.selected = ChapterIndex.rehome(selected, from: path, to: newPath)
+            }
+            await self.refreshTree(under: check.directory,
+                                   order: ChapterIndex.entries(index.text))
+            if indexChanged { await self.build(swe: swe) }
+            onMoved?(newPath, oldParent)
+            return nil
+        }
     }
 
     /// A new chapter named for `raw` (with `.md` added when missing):
