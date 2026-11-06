@@ -21,6 +21,18 @@
 # SWE_PYTHON_CACHE (default ~/.swe/cache/build/python), so rebuilds
 # don't fetch it again. It matches the host architecture, as the swift build
 # does. build-app.sh signs the binaries afterwards.
+#
+# Licences: the app/mac/Licenses/python-*.txt texts that build-app.sh copies
+# into Contents/Resources/Licenses come from the python/licenses/ folder of
+# the pinned release's full archive (cpython-*-pgo+lto-full.tar.zst; the
+# install_only archive used here carries only CPython's). They cover what
+# the interpreter links statically (libffi, expat, sqlite, xz, bzip2,
+# mpdecimal, libuuid, OpenSSL) and what macOS provides and the interpreter
+# loads from /usr/lib (zlib, libedit, ncurses). Tcl/Tk, Tix and the X11
+# libraries are trimmed below, so their texts stay out. When `release` or
+# `python_version` changes, check that archive's python/licenses/ and
+# PYTHON.json (build_info.extensions[*].license_paths) for new libraries,
+# `otool -L` the interpreter, and update Licenses/ and THIRD_PARTY_NOTICES.md.
 set -euo pipefail
 
 bundle="${1:?usage: bundle-swe.sh <path/to/SWE.app>}"

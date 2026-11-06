@@ -141,6 +141,31 @@ for notice in "$here/../../LICENSE" "$here/THIRD_PARTY_NOTICES.md"; do
   cp "$notice" "$bundle/Contents/Resources/"
 done
 
+# Licence texts for what the app links or embeds. Licenses/python-*.txt are
+# the texts python-build-standalone ships with the pinned CPython build
+# (its python/licenses/ folder), one per library the interpreter links
+# statically or the macOS system provides; bundle-swe.sh's header says
+# which. Sparkle's LICENSE comes from its SwiftPM artifact, which also
+# covers the components it bundles. THIRD_PARTY_NOTICES.md lists each file.
+licenses="$bundle/Contents/Resources/Licenses"
+mkdir -p "$licenses"
+cp "$here"/Licenses/python-*.txt "$licenses/"
+sparkle_license="$here/.build/artifacts/sparkle/Sparkle/LICENSE"
+if [ ! -f "$sparkle_license" ]; then
+  echo "build-app: $sparkle_license missing; run swift build first" >&2
+  exit 1
+fi
+cp "$sparkle_license" "$licenses/sparkle.txt"
+# Stops the build when a text that THIRD_PARTY_NOTICES.md promises is
+# missing or empty in the bundle.
+for notice in "$here"/Licenses/python-*.txt "$licenses/sparkle.txt"; do
+  notice="$licenses/$(basename "$notice")"
+  if [ ! -s "$notice" ]; then
+    echo "build-app: $notice missing or empty" >&2
+    exit 1
+  fi
+done
+
 # swe and its Python, so the app works on a Mac that has neither.
 "$here/script/bundle-swe.sh" "$bundle"
 

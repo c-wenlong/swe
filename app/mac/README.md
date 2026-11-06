@@ -114,7 +114,8 @@ see `.github/workflows/release.yml` and [RELEASE_CHECKLIST.md](../../RELEASE_CHE
 | `script/make-dmg-background.swift` | Draws the window's background at 1x or 2x; `make-dmg.sh` joins both into one HiDPI TIFF |
 | `script/SWEWidgets.entitlements` | The extension's sandbox: read access to `~/.swe/cache/widgets/` only |
 | `script/trim-litellm-pricing.py` | Regenerates `Resources/pricing.json` from LiteLLM's price list |
-| `THIRD_PARTY_NOTICES.md` | Licences for the LiteLLM snapshot and ported OpenUsage rules |
+| `THIRD_PARTY_NOTICES.md` | Licences for the LiteLLM snapshot, ported code, logos, Sparkle and the bundled Python |
+| `Licenses/` | Licence texts for the bundled Python's libraries; `build-app.sh` copies them, with Sparkle's, into `Contents/Resources/Licenses/` |
 
 Behaviour lives in SWECore behind seams the tests replace: `CommandRunning`
 stands in for the `swe` process, `PricingTransport` for the network. The app
