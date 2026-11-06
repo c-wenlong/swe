@@ -945,12 +945,12 @@ private struct ChaptersEditor: View {
                 // The count is the compiled chapters, the same M as the
                 // editor's "Chapter N of M"; files index.txt leaves out
                 // (the folder's README.md, say) are counted apart.
-                let total = fileCount(chapters.tree)
-                let compiledCount = compiledFileCount(chapters.tree)
+                let compiledCount = check.chapters.count
+                let uncompiled = uncompiledFileCount(chapters.tree)
                 Text("\(compiledCount)").font(Theme.caption).foregroundStyle(Theme.textMuted)
                     .hoverTip("\(compiledCount) chapters compiled into AGENTS.md", replacesLabel: false)
-                if total > compiledCount {
-                    Text("+\(total - compiledCount) not compiled")
+                if uncompiled > 0 {
+                    Text("+\(uncompiled) not compiled")
                         .font(Theme.caption).foregroundStyle(Theme.textMuted)
                         .lineLimit(1)
                 }
@@ -1117,14 +1117,13 @@ private struct ChaptersEditor: View {
         }
     }
 
-    private func fileCount(_ nodes: [ChapterNode]) -> Int {
-        nodes.reduce(0) { $0 + ($1.isFolder ? fileCount($1.children) : 1) }
-    }
-
-    private func compiledFileCount(_ nodes: [ChapterNode]) -> Int {
+    /// Files in the outline index.txt leaves out. The compiled total is
+    /// the check's own list (the editor's M), since the outline hides some
+    /// files the index can still name.
+    private func uncompiledFileCount(_ nodes: [ChapterNode]) -> Int {
         let compiled = check.compiledNames
         return nodes.reduce(0) {
-            $0 + ($1.isFolder ? compiledFileCount($1.children) : (compiled.contains($1.path) ? 1 : 0))
+            $0 + ($1.isFolder ? uncompiledFileCount($1.children) : (compiled.contains($1.path) ? 0 : 1))
         }
     }
 
