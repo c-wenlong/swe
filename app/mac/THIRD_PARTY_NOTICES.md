@@ -199,17 +199,40 @@ Sparkle's own LICENSE also covers bundled components: bsdiff/bsdiff.c
 (Copyright 2003-2005 Colin Percival, BSD), sais-lite (Copyright 2008-2010
 Yuta Mori, MIT), a portable Ed25519 implementation (Copyright 2015 Orson
 Peters, zlib-style) and SUSignatureVerifier.m (Copyright 2011 Mark Hamlin,
-BSD). The full text is in Sparkle's `LICENSE` file.
+BSD). The full text is Sparkle's `LICENSE` file, which ships in the bundle as
+`Contents/Resources/Licenses/sparkle.txt`.
 
-## Bundled Python and OpenSSL
+## Bundled Python and its libraries
 
 The app embeds a stripped CPython built by
 [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
-(MIT build tooling). CPython itself is distributed under the PSF License
-Agreement, whose full text ships inside the bundle at
-`Contents/Resources/swe/python/lib/python3.13/LICENSE.txt`. The OpenSSL
-libraries CPython links ship under the Apache License 2.0; their license
-ships beside it as `Contents/Resources/swe/python/lib/OPENSSL-LICENSE.txt`.
+(release 20261003, CPython 3.13.16; the project is MPL-2.0 and none of its
+tooling ships in the app). The build links several libraries statically, and
+`bundle-swe.sh` leaves Tcl/Tk, Tix and the X11 libraries out, so their
+licences do not ship. Each licence text below ships in the bundle under
+`Contents/Resources/Licenses/`, copied from `app/mac/Licenses/` (the texts
+python-build-standalone publishes in the `python/licenses/` folder of its
+release archive):
+
+| Component | Licence | Bundled file |
+|---|---|---|
+| CPython 3.13 | PSF License Agreement | `python-cpython.txt` (also `swe/python/lib/python3.13/LICENSE.txt`) |
+| libffi (`_ctypes`) | MIT | `python-libffi.txt` |
+| Expat (`pyexpat`) | MIT | `python-expat.txt` |
+| SQLite (`_sqlite3`) | public domain | `python-sqlite.txt` |
+| xz / liblzma (`_lzma`) | 0BSD | `python-liblzma.txt` |
+| bzip2 (`_bz2`) | bzip2 licence (BSD-style) | `python-bzip2.txt` |
+| mpdecimal (`_decimal`) | BSD-2-Clause | `python-mpdecimal.txt` |
+| libuuid (`_uuid`) | BSD-3-Clause | `python-libuuid.txt` |
+| OpenSSL 3 (`_ssl`, `_hashlib`) | Apache-2.0 | `python-openssl-3.txt` |
+| OpenSSL, python-build-standalone's second notice for the same link | OpenSSL and SSLeay licences | `python-openssl-1.1.txt` |
+| zlib (`zlib`, `binascii`), loaded from macOS's `/usr/lib` | Zlib | `python-zlib.txt` |
+| libedit (`readline`), loaded from macOS's `/usr/lib` | BSD-3-Clause | `python-libedit.txt` |
+| ncurses (`_curses`), loaded from macOS's `/usr/lib` | X11 (MIT-style) | `python-ncurses.txt` |
+
+The `libcrypto.3.dylib` that `bundle-swe.sh` adds for the Droid auth
+decryptor is Homebrew's OpenSSL 3 (Apache-2.0); its licence ships beside it
+as `Contents/Resources/swe/python/lib/OPENSSL-LICENSE.txt`.
 
 ## References without copied code
 
@@ -222,9 +245,15 @@ the design. No code was copied from either.
 
 `Sources/SWECore/Resources/harness-*.svg` are the logos of the coding
 harnesses and providers SWE lists, imported by
-`script/import-harness-icons.py`: Claude, Codex, Gemini, OpenCode, Qwen,
-Mistral, Antigravity, Command Code, Qoder CN and Ark keep their brand colours
-(`harness-<id>-color.svg`), the rest are single-colour marks. Every logo is a trademark of its owner
+`script/import-harness-icons.py`: Ant Group, Antigravity, Arcade, Ark,
+Baidu Cloud, Browserbase, Cartesia, CheapestInference, Claude, Cloudflare, Codex, Cohere, Command Code, Crush,
+State Cloud (Ctyun), DeepSeek, Featherless, Fireworks AI, Gemini, Honeycomb,
+Huawei Cloud, Hugging Face, iFlytek, JD Cloud, Meta, MiniMax, Mistral Vibe,
+Moore Threads, NVIDIA, OpenCode, OpenRouter, Perplexity, Qoder CN, Qwen Code,
+SenseNova, Sourcegraph, Standard Compute, Statsig, StepFun, Tencent Cloud,
+Together AI, UCloud, China Unicom, Upstage, WorkOS and Zapier (46 logos)
+keep their brand colours (`harness-<id>-color.svg`), the rest are
+single-colour marks. Every logo is a trademark of its owner
 and is used only to name that harness; none of them implies endorsement.
 Where each came from is in `Resources/harness-icons.tsv`:
 
