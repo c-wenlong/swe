@@ -361,19 +361,21 @@ import Testing
         let reads = Reads([["PATH": "/login/bin"]])
         // Holds the first read open on a gate, not a wall-clock sleep.
         let held = HoldGate()
+        let joined = CountGate()
         let cache = ShellEnvironmentCache(retryAfter: .zero) {
             try? await held.pass()
             return reads.next()
         } fallback: {
             ["PATH": "/usr/bin"]
+        } onJoin: {
+            Task { await joined.bump() }
         }
         let a = Task { await cache.environment() }
         #expect(await held.arrived(1))
         let b = Task { await cache.environment() }
-        // A second caller that started its own read would park beside the
-        // first. The cache has no hook saying a caller is waiting on the
-        // read in flight, so b being inside before the gate opens is not
-        // proven; a read b started itself is.
+        // b is waiting on a's read before the gate opens: it joined the
+        // read in flight instead of starting its own.
+        #expect(await joined.reach(1), "the second caller never joined the read in flight")
         held.open()
         let results = [await a.value, await b.value]
         #expect(results == [["PATH": "/login/bin"], ["PATH": "/login/bin"]])
