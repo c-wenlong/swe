@@ -318,9 +318,12 @@ import Testing
                          swe: SweClient(runner: runner))
         #expect(try dir.read("index.txt") == "# in order\nb.md\na.md\n")
         #expect(runner.builds == 1)
+        // The Edit menu shows the system prefix once, not "Undo Undo ...".
+        #expect(undo.undoMenuItemTitle == "Undo Move Chapter")
         undo.undo()
         try #require(await runner.built.reach(2), "the undo never rebuilt")
         #expect(try dir.read("index.txt") == "# in order\na.md\nb.md\n")
+        #expect(undo.redoMenuItemTitle == "Redo Move Chapter")
     }
 
     @Test func removeUnlistsButKeepsTheFileOnDisk() async throws {
