@@ -280,12 +280,14 @@ def _run(state, launch_id: str, repo: str, number: int, cmd: dict,
     issues_mod.run_launch(
         state, launch_id, cmd["harness"], tracked,
         lambda: _prepare_and_launch(
-            state, launch_id, repo, number, cmd, binary, rows),
+            state, launch_id, repo, number, cmd, binary, rows,
+            tracked=tracked),
         "Open", release)
 
 
 def _prepare_and_launch(state, launch_id: str, repo: str, number: int,
-                        cmd: dict, binary: str, rows) -> str:
+                        cmd: dict, binary: str, rows,
+                        tracked: bool = True) -> str:
     """PR, worktree, prompt, ``launch_new``; the failure note, or ""."""
     def note(text: str) -> None:
         state.settle_launch(launch_id, note=text)
@@ -328,6 +330,6 @@ def _prepare_and_launch(state, launch_id: str, repo: str, number: int,
     ok, msg, _name = supervise.launch_new(
         state.home, cmd["harness"], cwd, prompt,
         known_ids=known, launch_id=launch_id, binary=binary,
-        model=cmd["model"], effort=cmd["effort"],
+        model=cmd["model"], effort=cmd["effort"], exclusive=tracked,
     )
     return "" if ok else (msg or "the harness did not start")

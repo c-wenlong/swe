@@ -387,22 +387,61 @@ def launch_tmux(
     return name
 
 
+# C0 control characters other than tab and newline. A phone's message
+# goes to the pane as keystrokes, so an ESC, a ^C or a stray CR in it
+# would drive the TUI (cancel a turn, pick a menu row, submit half a
+# message) instead of being read as text.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f]")
+
+
+def clean_text(text: str) -> str:
+    """``text`` as it may reach a pane: line ends as ``\n`` (a CRLF or
+    a lone CR from a pasted Windows text is one line break, not an
+    Enter), then every other C0 control character but tab dropped."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return _CONTROL_CHARS.sub("", text)
+
+
 def send_text(name: str, text: str) -> bool:
     """Type ``text`` into tmux session ``name`` and press Enter.
 
-    Serialized per pane: the literal-text and Enter send-keys are two
-    tmux calls, and an interleaved second writer would merge prompts.
-    ``--`` ends tmux's flags, so text that starts with "-" (a pasted
-    list, "-v") is typed as text instead of refused as an unknown flag.
+    ``text`` goes through ``clean_text`` first. One line is typed with
+    ``send-keys -l``; ``--`` ends tmux's flags, so text that starts with
+    "-" (a pasted list, "-v") is typed as text instead of refused as an
+    unknown flag. Text with line breaks goes in as one bracketed paste
+    (``load-buffer`` + ``paste-buffer -p``): typed, each newline would
+    be an Enter, and a TUI would send the first line as the message.
+    Serialized per pane: the text and the Enter are separate tmux calls,
+    and an interleaved second writer would merge prompts.
     """
+    text = clean_text(text)
     with _pane_lock(name):
         try:
-            if _tmux("send-keys", "-t", name, "-l", "--",
-                     text).returncode != 0:
+            if "\n" in text:
+                if not _paste(name, text):
+                    return False
+            elif _tmux("send-keys", "-t", name, "-l", "--",
+                       text).returncode != 0:
                 return False
             return _tmux("send-keys", "-t", name, "Enter").returncode == 0
         except (OSError, subprocess.SubprocessError):
             return False
+
+
+def _paste(name: str, text: str) -> bool:
+    """Paste ``text`` into pane ``name`` as one bracketed paste. The
+    buffer is the pane's own (callers hold its lock) and ``-d`` deletes
+    it after the paste, so nothing is left in tmux's buffer list."""
+    buffer = f"swe-send-{name}"
+    server = ["-L", _TMUX_SOCKET] if _TMUX_SOCKET else []
+    loaded = subprocess.run(
+        [tmux_bin() or "tmux", *server, "load-buffer", "-b", buffer, "-"],
+        input=text, capture_output=True, text=True, timeout=10,
+    )
+    if loaded.returncode != 0:
+        return False
+    return _tmux("paste-buffer", "-p", "-d", "-b", buffer,
+                 "-t", name).returncode == 0
 
 
 def send_key(name: str, key: str) -> bool:
@@ -1714,6 +1753,7 @@ def launch_new(
     effort: str | None = None,
     yolo: bool = False,
     provider: str | None = None,
+    exclusive: bool = True,
 ) -> tuple[bool, str, str | None]:
     """``POST /v1/sessions``: start a fresh harness run under tmux.
 
@@ -1739,6 +1779,15 @@ def launch_new(
     missing here is refused before anything starts.
     ``fresh_launch_error`` names what a harness can't take. All three
     ride the marker into the supervised entry as launch bookkeeping.
+
+    One new session per folder at a time: adoption knows a new session
+    only by its harness, folder and creation time, so two launches of
+    one harness waiting in one folder each see both transcripts and
+    neither is ever adopted. ``exclusive`` (the default) refuses this
+    launch while another is still waiting there (``fork_blocker``),
+    with a note naming its pane. Callers pass False for a harness whose
+    sessions swe can't read: its marker is never adopted, so it guards
+    nothing.
     Returns ``(ok, note, tmux_name)``.
     """
     from swe.remote import launch_model, launch_provider, launch_yolo
@@ -1763,6 +1812,7 @@ def launch_new(
     # The nonce matters: pid+second collide for two same-harness launches
     # inside one second, and the tmux name derives from the key.
     key = f"new:{tool_name}:{int(time.time())}-{os.getpid()}-{secrets.token_hex(3)}"
+    name = tmux_name(key)
     argv = [binary]
     if model:
         try:
@@ -1782,34 +1832,46 @@ def launch_new(
                 tool_name, provider, argv, keys_file=keys_file)
         except ValueError as exc:
             return False, f"can't start {tool_name} on {provider}: {exc}", None
-    name = launch_tmux(key, argv, cwd or None)
-    if name is None:
+    marker = _pending_dir(home) / f"{name}.json"
+    # The marker is the reservation, as launch_fork's is: written before
+    # the pane exists and under the lock, so a second launch in this
+    # folder sees it at once.
+    with _registry_lock(home):
+        if exclusive:
+            busy = fork_blocker(home, tool_name, cwd)
+            if busy:
+                return False, launch_busy_note(tool_name, busy), None
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(marker, json.dumps({
+                "tmux": name,
+                "tool_name": tool_name,
+                "cwd": cwd or "",
+                "exclude": list(known_ids or []),
+                "launched_at": time.time(),
+                "launch_id": launch_id,
+                "model": model or "",
+                "effort": effort or "",
+                "yolo": bool(yolo),
+                "provider": provider or "",
+            }))
+        except OSError:
+            pass
+    if launch_tmux(key, argv, cwd or None) is None:
+        marker.unlink(missing_ok=True)
         return False, (
             f"tmux is not available, or {binary} exited right after launch"
         ), None
-    try:
-        folder = _pending_dir(home)
-        folder.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(folder / f"{name}.json", json.dumps({
-            "tmux": name,
-            "tool_name": tool_name,
-            "cwd": cwd or "",
-            "exclude": list(known_ids or []),
-            "launched_at": time.time(),
-            "launch_id": launch_id,
-            "model": model or "",
-            "effort": effort or "",
-            "yolo": bool(yolo),
-            "provider": provider or "",
-        }))
-    except OSError:
-        pass
     # The model is already on the command line; only effort is typed.
     if not _prime_launch(name, prompt, None, effort):
         what = "the launch controls or prompt" if effort else "the prompt"
         # Nothing was delivered, so no turn will ever start: the record
         # says failed rather than leaving the phone polling a pending
-        # launch. The pane itself stays up for a terminal attach.
+        # launch. The pane itself stays up for a terminal attach, but
+        # its marker goes: a failed launch is no longer waiting to be
+        # adopted, and left in place it would refuse every retry in
+        # this folder for as long as the pane lives.
+        marker.unlink(missing_ok=True)
         return False, (
             f"launched under tmux but {what} could not be "
             "delivered — the pane is still up; attach from a "
@@ -1912,6 +1974,13 @@ def fork_busy_note(tool: str) -> str:
             f"waiting to show up; fork again once it has")
 
 
+def launch_busy_note(tool: str, pane: str) -> str:
+    """Why a second launch in a folder is refused, naming the first."""
+    return (f"a {tool} session launched in this folder is still starting "
+            f"(tmux {pane}); swe starts one new session per folder at a "
+            f"time, so launch again once it shows up")
+
+
 def fork_blocker(home: Path | None, tool: str, cwd: str) -> str | None:
     """The pending launch a new id-less fork would race, if any.
 
@@ -1998,6 +2067,9 @@ def boot_pane(name: str, *, timeout: float = 30.0) -> str | None:
 
 def _deliver(name: str, prompt: str, *, before: str) -> bool:
     """Type ``prompt`` into a settled pane and make sure it was sent."""
+    # The pane gets the cleaned text, so the checks below must look for
+    # that, not for control characters that never reached it.
+    prompt = clean_text(prompt)
     if not send_text(name, prompt):
         return False
     retyped = False

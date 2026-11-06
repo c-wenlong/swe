@@ -226,7 +226,8 @@ class TestLaunchNew(unittest.TestCase):
     def _launch(self, **kw):
         with patch.object(supervise.shutil, "which", return_value="/x/bin"), \
              patch.object(supervise, "launch_tmux",
-                          return_value="qv-p") as lt, \
+                          side_effect=lambda key, *a, **k:
+                          supervise.tmux_name(key)) as lt, \
              patch.object(supervise, "prime_pane", return_value=True), \
              patch("swe.harness.registry.load_registry_readonly",
                    return_value={}):
@@ -250,7 +251,8 @@ class TestLaunchNew(unittest.TestCase):
         # no env of its own, and nothing it passes carries a key.
         self.assertIsNone(launch.get("env"))
         _assert_no_secret(self, launch)
-        marker = (supervise._pending_dir(self.home) / "qv-p.json").read_text()
+        marker = (supervise._pending_dir(self.home)
+                  / f"{_name}.json").read_text()
         self.assertEqual(json.loads(marker)["provider"], "groq")
         _assert_no_secret(self, marker)
 

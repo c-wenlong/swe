@@ -5,6 +5,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -20,6 +21,18 @@ from tests._tempdir import temp_dir
 def _session(tool="claude", sid="s1", path="/private/tmp/proj"):
     return Session(timestamp=0, agent="Claude Code", path=path,
                    session_id=sid, tool_name=tool)
+
+
+def _started(key, *_a, **_k):
+    """A ``launch_tmux`` stand-in: the pane comes up under the name
+    ``launch_new`` reserved for it."""
+    return supervise.tmux_name(key)
+
+
+def _marker(home):
+    """The one pending marker a launch left, as a dict."""
+    (path,) = supervise._pending_dir(home).glob("*.json")
+    return json.loads(path.read_text())
 
 
 class TestTmuxHelpers(unittest.TestCase):
@@ -65,6 +78,93 @@ class TestTmuxHelpers(unittest.TestCase):
                 time.sleep(0.05)
         self.assertIn("- item one", pane)
         self.assertIn("-x", pane)
+
+    def test_send_text_drops_control_characters(self):
+        with patch.object(supervise, "_tmux", return_value=self._cp()) as t:
+            self.assertTrue(supervise.send_text(
+                "swe-x", "go\x1b[2J\x03 now\x7f\tok\x00"))
+        calls = [list(c[0]) for c in t.call_args_list]
+        # ESC, ^C and NUL go; tab and DEL (not C0) stay.
+        self.assertEqual(calls[0],
+                         ["send-keys", "-t", "swe-x", "-l", "--",
+                          "go[2J now\x7f\tok"])
+        self.assertEqual(calls[1], ["send-keys", "-t", "swe-x", "Enter"])
+        self.assertEqual(supervise.clean_text("a\r\nb\rc"), "a\nb\nc")
+
+    def test_send_text_pastes_multiline_text_bracketed(self):
+        loaded = self._cp()
+        with patch.object(supervise, "_tmux", return_value=self._cp()) as t, \
+             patch.object(supervise, "tmux_bin", return_value="/x/tmux"), \
+             patch.object(supervise.subprocess, "run",
+                          return_value=loaded) as run:
+            self.assertTrue(supervise.send_text("swe-x", "one\r\ntwo\x1b"))
+        load = run.call_args
+        self.assertEqual(load[0][0][-4:], ["load-buffer", "-b",
+                                            "swe-send-swe-x", "-"])
+        self.assertEqual(load[1]["input"], "one\ntwo")
+        calls = [list(c[0]) for c in t.call_args_list]
+        self.assertEqual(calls, [
+            ["paste-buffer", "-p", "-d", "-b", "swe-send-swe-x",
+             "-t", "swe-x"],
+            ["send-keys", "-t", "swe-x", "Enter"],
+        ])
+        # A buffer that won't load sends nothing, not even the Enter.
+        loaded.returncode = 1
+        with patch.object(supervise, "_tmux", return_value=self._cp()) as t, \
+             patch.object(supervise.subprocess, "run", return_value=loaded):
+            self.assertFalse(supervise.send_text("swe-x", "one\ntwo"))
+        t.assert_not_called()
+
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_multiline_text_lands_as_one_paste_in_a_real_pane(self):
+        # A reader that turns bracketed paste on, as a TUI does, and
+        # records the raw bytes it gets: one paste arrives wrapped in
+        # ESC[200~ ... ESC[201~ with both lines inside.
+        tmp = temp_dir(self)
+        got, ready = tmp / "got", tmp / "ready"
+        reader = tmp / "reader.py"
+        reader.write_text(
+            "import os, sys, tty\n"
+            "sys.stdout.write('\\x1b[?2004h'); sys.stdout.flush()\n"
+            "tty.setraw(0)\n"
+            f"open({str(ready)!r}, 'w').close()\n"
+            "buf = b''\n"
+            "while b'\\r' not in buf.split(b'\\x1b[201~')[-1] "
+            "or b'\\x1b[201~' not in buf:\n"
+            "    buf += os.read(0, 1024)\n"
+            f"open({str(got)!r}, 'wb').write(buf)\n")
+        socket = f"swe-test-{secrets.token_hex(4)}"
+        sockets = tempfile.mkdtemp(prefix="swt", dir="/tmp")
+        self.addCleanup(shutil.rmtree, sockets, True)
+        self.addCleanup(subprocess.run, ["tmux", "-L", socket, "kill-server"],
+                        capture_output=True,
+                        env={**os.environ, "TMUX_TMPDIR": sockets})
+        with patch.object(supervise, "_TMUX_SOCKET", socket), \
+             patch.dict(os.environ, {"TMUX_TMPDIR": sockets}):
+            out = subprocess.run(
+                ["tmux", "-L", socket, "new-session", "-d", "-s", "swe-p",
+                 sys.executable, str(reader)], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            for _ in range(200):
+                if ready.exists():
+                    break
+                time.sleep(0.05)
+            self.assertTrue(supervise.send_text("swe-p", "first\nsecond"))
+            for _ in range(200):
+                if got.exists():
+                    break
+                time.sleep(0.05)
+            buffers = subprocess.run(
+                ["tmux", "-L", socket, "list-buffers"],
+                capture_output=True, text=True).stdout
+        data = got.read_bytes()
+        start, end = data.index(b"\x1b[200~"), data.index(b"\x1b[201~")
+        inside = data[start + 6:end]
+        self.assertIn(b"first", inside)
+        self.assertIn(b"second", inside)
+        # Only the Enter after the paste submits.
+        self.assertEqual(data[end + 6:], b"\r")
+        self.assertNotIn("swe-send-", buffers)
 
     def test_send_text_failure(self):
         with patch.object(supervise, "_tmux", return_value=self._cp(rc=1)):
@@ -621,6 +721,22 @@ class TestPrimePane(unittest.TestCase):
             self.assertTrue(supervise.prime_pane("qv-x", "hello there"))
         sk.assert_called_once_with("qv-x", "Enter")
 
+    def test_a_prompt_with_control_characters_is_checked_as_sent(self):
+        # The pane shows the cleaned text; looking for the raw prompt
+        # would miss it in the box and call a swallowed Enter sent.
+        rule = "─" * 20
+        unsent = f"Claude Code\n{rule}\n❯ helloworld\n{rule}\n  auto mode"
+        sent = f"❯ helloworld\n⏺ hi\n{rule}\n❯ \n{rule}\n  auto mode"
+        panes = iter(["❯", "❯", unsent, sent])
+        with patch.object(supervise, "capture_pane",
+                          side_effect=lambda *_a: next(panes)), \
+             patch.object(supervise, "send_key") as sk, \
+             patch.object(supervise, "send_text", return_value=True) as st, \
+             patch.object(time, "sleep"):
+            self.assertTrue(supervise.prime_pane("swe-x", "hello\x00world"))
+        sk.assert_called_once_with("swe-x", "Enter")
+        st.assert_called_once_with("swe-x", "helloworld")
+
     def test_prompt_stuck_in_box_reports_false(self):
         rule = "─" * 20
         unsent = f"{rule}\n❯ hello there\n{rule}"
@@ -892,13 +1008,14 @@ class TestRegistryEdges(unittest.TestCase):
 class TestLaunchNew(unittest.TestCase):
     def test_launch_writes_pending_and_primes(self):
         home = temp_dir(self)
-        with patch.object(supervise, "launch_tmux", return_value="qv-n"), \
+        with patch.object(supervise, "launch_tmux", side_effect=_started), \
              patch.object(supervise.shutil, "which", return_value="/usr/bin/claude"), \
              patch.object(supervise, "prime_pane") as prime:
             ok, note, name = supervise.launch_new(home, "claude", "/tmp", "hi", binary="claude")
         self.assertTrue(ok)
-        prime.assert_called_once_with("qv-n", "hi")
-        marker = supervise._pending_dir(home) / "qv-n.json"
+        self.assertEqual(name, _marker(home)["tmux"])
+        prime.assert_called_once_with(name, "hi")
+        marker = supervise._pending_dir(home) / f"{name}.json"
         self.assertTrue(marker.exists())
         self.assertEqual(
             json.loads(marker.read_text())["tool_name"], "claude"
@@ -913,9 +1030,77 @@ class TestLaunchNew(unittest.TestCase):
                               supervise.tmux_name(key)) or
                               supervise.tmux_name(key)), \
              patch.object(supervise, "prime_pane"):
-            supervise.launch_new(home, "claude", "/tmp", "one", binary="claude")
-            supervise.launch_new(home, "claude", "/tmp", "two", binary="claude")
+            supervise.launch_new(home, "claude", str(temp_dir(self)), "one",
+                                 binary="claude")
+            supervise.launch_new(home, "claude", str(temp_dir(self)), "two",
+                                 binary="claude")
         self.assertEqual(len(set(seen)), 2)
+
+    def test_a_second_launch_in_the_folder_is_refused_and_the_first_adopted(self):
+        # Adoption knows a new session only by harness, folder and
+        # creation time: with two launches waiting in one folder, each
+        # saw both transcripts and neither was ever adopted.
+        home = temp_dir(self)
+        proj = os.path.realpath(str(temp_dir(self)))
+        with patch.object(supervise.shutil, "which", return_value="/x/claude"), \
+             patch.object(supervise, "launch_tmux", side_effect=_started) as lt, \
+             patch.object(supervise, "prime_pane", return_value=True):
+            ok, _note, first = supervise.launch_new(
+                home, "claude", proj, "one", binary="claude", launch_id="l1")
+            self.assertTrue(ok)
+            ok, note, name = supervise.launch_new(
+                home, "claude", proj, "two", binary="claude", launch_id="l2")
+        self.assertFalse(ok)
+        self.assertIsNone(name)
+        self.assertIn(first, note)
+        self.assertIn("one new session per folder", note)
+        self.assertEqual(lt.call_count, 1, "the second pane never started")
+        self.assertEqual(_marker(home)["launch_id"], "l1")
+        # Another harness in the same folder is a different adoption.
+        with patch.object(supervise.shutil, "which", return_value="/x/codex"), \
+             patch.object(supervise, "launch_tmux", side_effect=_started), \
+             patch.object(supervise, "prime_pane", return_value=True):
+            self.assertTrue(supervise.launch_new(
+                home, "codex", proj, "hi", binary="codex")[0])
+        # The first launch's transcript shows: it alone is adopted.
+        transcript = temp_dir(self) / "new.jsonl"
+        transcript.write_text("{}\n")
+        row = ("claude:new", _session(sid="new", path=proj), "idle")
+        with patch("swe.remote.tail.resolve_jsonl_path",
+                   return_value=transcript):
+            self.assertEqual(supervise.adopt_pending(home, [row]),
+                             ["claude:new"])
+        meta = supervise.meta_for(home, "claude:new")
+        self.assertEqual((meta["tmux"], meta["launch_id"]), (first, "l1"))
+        # Once it is adopted the folder is free again.
+        with patch.object(supervise.shutil, "which", return_value="/x/claude"), \
+             patch.object(supervise, "launch_tmux", side_effect=_started), \
+             patch.object(supervise, "prime_pane", return_value=True):
+            self.assertTrue(supervise.launch_new(
+                home, "claude", proj, "three", binary="claude")[0])
+
+    def test_a_launch_that_never_started_frees_the_folder(self):
+        home = temp_dir(self)
+        proj = str(temp_dir(self))
+        with patch.object(supervise.shutil, "which", return_value="/x/claude"), \
+             patch.object(supervise, "launch_tmux", return_value=None):
+            ok, note, _ = supervise.launch_new(
+                home, "claude", proj, "one", binary="claude")
+        self.assertFalse(ok)
+        self.assertIn("tmux is not available", note)
+        self.assertEqual(list(supervise._pending_dir(home).glob("*.json")), [])
+
+    def test_a_non_exclusive_launch_skips_the_folder_check(self):
+        # A harness swe can't read never gets adopted, so its waiting
+        # marker guards nothing: callers pass exclusive=False for it.
+        home = temp_dir(self)
+        proj = str(temp_dir(self))
+        with patch.object(supervise.shutil, "which", return_value="/x/pi"), \
+             patch.object(supervise, "launch_tmux", side_effect=_started), \
+             patch.object(supervise, "prime_pane", return_value=True):
+            for _ in range(2):
+                self.assertTrue(supervise.launch_new(
+                    home, "pi", proj, "hi", binary="pi", exclusive=False)[0])
 
     def test_missing_folder_fails_before_tmux(self):
         with patch.object(supervise, "launch_tmux") as tmux, \
@@ -929,13 +1114,12 @@ class TestLaunchNew(unittest.TestCase):
 
     def test_launch_id_rides_marker_into_adoption(self):
         home = temp_dir(self)
-        with patch.object(supervise, "launch_tmux", return_value="qv-n"), \
+        with patch.object(supervise, "launch_tmux", side_effect=_started), \
              patch.object(supervise.shutil, "which",
                           return_value="/usr/bin/claude"), \
              patch.object(supervise, "prime_pane", return_value=True):
             supervise.launch_new(home, "claude", "/tmp", "hi", launch_id="l9", binary="claude")
-        marker = supervise._pending_dir(home) / "qv-n.json"
-        self.assertEqual(json.loads(marker.read_text())["launch_id"], "l9")
+        self.assertEqual(_marker(home)["launch_id"], "l9")
         with patch.object(supervise, "_pending_match",
                           return_value="claude:new"):
             adopted = supervise.adopt_pending(home, [])
@@ -973,29 +1157,36 @@ class TestLaunchNew(unittest.TestCase):
         # must not sit pending while the phone polls it. The pane itself
         # stays up for a terminal attach.
         home = temp_dir(self)
-        with patch.object(supervise, "launch_tmux", return_value="qv-n"), \
+        with patch.object(supervise, "launch_tmux", side_effect=_started), \
              patch.object(supervise.shutil, "which",
                           return_value="/usr/bin/claude"), \
              patch.object(supervise, "prime_pane", return_value=False):
             ok, note, name = supervise.launch_new(home, "claude", "/tmp", "hi", binary="claude")
         self.assertFalse(ok)
-        self.assertEqual(name, "qv-n")
         self.assertIn("could not be delivered", note)
         self.assertIn("pane is still up", note)
+        # A failed launch waits for no adoption: the retry may start.
+        self.assertEqual(list(supervise._pending_dir(home).glob("*.json")), [])
+        with patch.object(supervise, "launch_tmux", side_effect=_started), \
+             patch.object(supervise.shutil, "which",
+                          return_value="/usr/bin/claude"), \
+             patch.object(supervise, "tmux_alive", return_value=True), \
+             patch.object(supervise, "prime_pane", return_value=True):
+            ok, _note, again = supervise.launch_new(
+                home, "claude", "/tmp", "hi", binary="claude")
+        self.assertTrue(ok)
+        self.assertNotEqual(again, name)
 
     def test_known_ids_land_in_marker(self):
         home = temp_dir(self)
-        with patch.object(supervise, "launch_tmux", return_value="qv-n"), \
+        with patch.object(supervise, "launch_tmux", side_effect=_started), \
              patch.object(supervise.shutil, "which",
                           return_value="/usr/bin/claude"), \
              patch.object(supervise, "prime_pane", return_value=True):
             supervise.launch_new(
                 home, "claude", "/tmp", "hi", known_ids=["old-1", "old-2"],
                 binary="claude")
-        marker = supervise._pending_dir(home) / "qv-n.json"
-        self.assertEqual(
-            json.loads(marker.read_text())["exclude"], ["old-1", "old-2"]
-        )
+        self.assertEqual(_marker(home)["exclude"], ["old-1", "old-2"])
 
     def test_detach_kills_tmux(self):
         home = temp_dir(self)
@@ -1052,10 +1243,13 @@ class TestLaunchTuning(unittest.TestCase):
             "serve", "opencode", None, None), "")
 
     def _launch(self, tool="claude", **kw):
+        # Each launch in its own folder, so the one-per-folder rule
+        # never refuses a later case; self.marker is this launch's.
+        self.proj = str(temp_dir(self))
         with patch.object(supervise.shutil, "which",
                           return_value="/x/bin"), \
              patch.object(supervise, "launch_tmux",
-                          return_value="qv-n") as lt, \
+                          side_effect=_started) as lt, \
              patch.object(supervise, "prime_pane", return_value=True) as pp, \
              patch.object(supervise, "boot_pane", return_value="❯"), \
              patch.object(supervise, "capture_pane",
@@ -1065,22 +1259,24 @@ class TestLaunchTuning(unittest.TestCase):
             kw.setdefault("binary", tool)
             out = supervise.launch_new(self.home, tool, self.proj, "hi", **kw)
         self.argv = lt.call_args[0][1] if lt.call_args else None
+        name = out[2]
+        path = supervise._pending_dir(self.home) / f"{name}.json"
+        self.marker = (json.loads(path.read_text())
+                       if name and path.exists() else None)
         return out, pp, st
 
     def test_launch_puts_the_model_on_argv_and_types_effort(self):
         (ok, _n, name), pp, st = self._launch(model="opus", effort="high")
         self.assertTrue(ok)
-        self.assertEqual(name, "qv-n")
+        self.assertEqual(name, self.marker["tmux"])
         # The model rides the command line; only /effort is typed, before
         # the first prompt.
         self.assertEqual(self.argv, ["claude", "--model", "opus"])
         self.assertEqual([c[0][1] for c in st.call_args_list],
                          ["/effort high"])
-        pp.assert_called_once_with("qv-n", "hi")
-        marker = json.loads(
-            (supervise._pending_dir(self.home) / "qv-n.json").read_text())
+        pp.assert_called_once_with(name, "hi")
         self.assertEqual(
-            (marker["model"], marker["effort"]), ("opus", "high"))
+            (self.marker["model"], self.marker["effort"]), ("opus", "high"))
 
     def test_launch_model_argv_per_harness(self):
         cases = {
@@ -1136,10 +1332,8 @@ class TestLaunchTuning(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(self.argv, ["claude", "--model", "opus",
                                      "--dangerously-skip-permissions"])
-        marker = json.loads(
-            (supervise._pending_dir(self.home) / "qv-n.json").read_text())
-        self.assertTrue(marker["yolo"])
-        self.assertEqual(marker["model"], "opus")
+        self.assertTrue(self.marker["yolo"])
+        self.assertEqual(self.marker["model"], "opus")
 
     def test_launch_refuses_yolo_the_harness_cannot_take(self):
         with patch.object(supervise, "launch_tmux") as lt:
@@ -1216,13 +1410,13 @@ class TestLaunchTuning(unittest.TestCase):
         # went out. The pane stays up for a manual attach.
         with patch.object(supervise.shutil, "which",
                           return_value="/x/bin"), \
-             patch.object(supervise, "launch_tmux", return_value="qv-n"), \
+             patch.object(supervise, "launch_tmux", side_effect=_started), \
              patch.object(supervise, "boot_pane", return_value="❯"), \
              patch.object(supervise, "send_text", return_value=False):
             ok, note, name = supervise.launch_new(
                 self.home, "claude", self.proj, "hi", effort="high", binary="claude")
         self.assertFalse(ok)
-        self.assertEqual(name, "qv-n")
+        self.assertTrue(name)
         self.assertIn("could not be delivered", note)
 
     def test_a_control_swallowed_enter_is_pressed_again(self):
@@ -1235,7 +1429,7 @@ class TestLaunchTuning(unittest.TestCase):
         panes = iter(["❯", "❯", unsent, sent])
         with patch.object(supervise.shutil, "which",
                           return_value="/x/bin"), \
-             patch.object(supervise, "launch_tmux", return_value="qv-n"), \
+             patch.object(supervise, "launch_tmux", side_effect=_started), \
              patch.object(supervise, "prime_pane", return_value=True), \
              patch.object(supervise, "boot_pane", return_value="❯"), \
              patch.object(supervise, "capture_pane",
@@ -1243,10 +1437,10 @@ class TestLaunchTuning(unittest.TestCase):
              patch.object(supervise, "send_key") as sk, \
              patch.object(supervise.time, "sleep"), \
              patch.object(supervise, "send_text", return_value=True):
-            ok, _note, _ = supervise.launch_new(
+            ok, _note, name = supervise.launch_new(
                 self.home, "claude", self.proj, "hi", effort="high", binary="claude")
         self.assertTrue(ok)
-        self.assertEqual(sk.call_args_list[0][0], ("qv-n", "Enter"))
+        self.assertEqual(sk.call_args_list[0][0], (name, "Enter"))
 
     def test_fork_records_and_applies_tuning(self):
         src = _session(sid="abc", path=self.proj)
