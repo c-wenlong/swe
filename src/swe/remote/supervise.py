@@ -1839,7 +1839,11 @@ def launch_new(
         what = "the launch controls or prompt" if effort else "the prompt"
         # Nothing was delivered, so no turn will ever start: the record
         # says failed rather than leaving the phone polling a pending
-        # launch. The pane itself stays up for a terminal attach.
+        # launch. The pane itself stays up for a terminal attach, but
+        # its marker goes: a failed launch is no longer waiting to be
+        # adopted, and left in place it would refuse every retry in
+        # this folder for as long as the pane lives.
+        marker.unlink(missing_ok=True)
         return False, (
             f"launched under tmux but {what} could not be "
             "delivered — the pane is still up; attach from a "
@@ -2035,6 +2039,9 @@ def boot_pane(name: str, *, timeout: float = 30.0) -> str | None:
 
 def _deliver(name: str, prompt: str, *, before: str) -> bool:
     """Type ``prompt`` into a settled pane and make sure it was sent."""
+    # The pane gets the cleaned text, so the checks below must look for
+    # that, not for control characters that never reached it.
+    prompt = clean_text(prompt)
     if not send_text(name, prompt):
         return False
     retyped = False

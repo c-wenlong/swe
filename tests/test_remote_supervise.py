@@ -5,6 +5,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -116,6 +117,22 @@ class TestTmuxHelpers(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
     def test_multiline_text_lands_as_one_paste_in_a_real_pane(self):
+        # A reader that turns bracketed paste on, as a TUI does, and
+        # records the raw bytes it gets: one paste arrives wrapped in
+        # ESC[200~ ... ESC[201~ with both lines inside.
+        tmp = temp_dir(self)
+        got, ready = tmp / "got", tmp / "ready"
+        reader = tmp / "reader.py"
+        reader.write_text(
+            "import os, sys, tty\n"
+            "sys.stdout.write('\\x1b[?2004h'); sys.stdout.flush()\n"
+            "tty.setraw(0)\n"
+            f"open({str(ready)!r}, 'w').close()\n"
+            "buf = b''\n"
+            "while b'\\r' not in buf.split(b'\\x1b[201~')[-1] "
+            "or b'\\x1b[201~' not in buf:\n"
+            "    buf += os.read(0, 1024)\n"
+            f"open({str(got)!r}, 'wb').write(buf)\n")
         socket = f"swe-test-{secrets.token_hex(4)}"
         sockets = tempfile.mkdtemp(prefix="swt", dir="/tmp")
         self.addCleanup(shutil.rmtree, sockets, True)
@@ -126,20 +143,27 @@ class TestTmuxHelpers(unittest.TestCase):
              patch.dict(os.environ, {"TMUX_TMPDIR": sockets}):
             out = subprocess.run(
                 ["tmux", "-L", socket, "new-session", "-d", "-s", "swe-p",
-                 "cat"], capture_output=True, text=True)
+                 sys.executable, str(reader)], capture_output=True, text=True)
             self.assertEqual(out.returncode, 0, out.stderr)
+            for _ in range(200):
+                if ready.exists():
+                    break
+                time.sleep(0.05)
             self.assertTrue(supervise.send_text("swe-p", "first\nsecond"))
-            for _ in range(50):
-                pane = supervise.capture_pane("swe-p")
-                if pane.count("second") >= 2:
+            for _ in range(200):
+                if got.exists():
                     break
                 time.sleep(0.05)
             buffers = subprocess.run(
                 ["tmux", "-L", socket, "list-buffers"],
                 capture_output=True, text=True).stdout
-        # cat echoes each line back: both arrived, and no buffer is left.
-        self.assertIn("first", pane)
-        self.assertGreaterEqual(pane.count("second"), 2)
+        data = got.read_bytes()
+        start, end = data.index(b"\x1b[200~"), data.index(b"\x1b[201~")
+        inside = data[start + 6:end]
+        self.assertIn(b"first", inside)
+        self.assertIn(b"second", inside)
+        # Only the Enter after the paste submits.
+        self.assertEqual(data[end + 6:], b"\r")
         self.assertNotIn("swe-send-", buffers)
 
     def test_send_text_failure(self):
@@ -650,6 +674,22 @@ class TestPrimePane(unittest.TestCase):
             self.assertTrue(supervise.prime_pane("qv-x", "hello there"))
         sk.assert_called_once_with("qv-x", "Enter")
 
+    def test_a_prompt_with_control_characters_is_checked_as_sent(self):
+        # The pane shows the cleaned text; looking for the raw prompt
+        # would miss it in the box and call a swallowed Enter sent.
+        rule = "─" * 20
+        unsent = f"Claude Code\n{rule}\n❯ helloworld\n{rule}\n  auto mode"
+        sent = f"❯ helloworld\n⏺ hi\n{rule}\n❯ \n{rule}\n  auto mode"
+        panes = iter(["❯", "❯", unsent, sent])
+        with patch.object(supervise, "capture_pane",
+                          side_effect=lambda *_a: next(panes)), \
+             patch.object(supervise, "send_key") as sk, \
+             patch.object(supervise, "send_text", return_value=True) as st, \
+             patch.object(time, "sleep"):
+            self.assertTrue(supervise.prime_pane("swe-x", "hello\x00world"))
+        sk.assert_called_once_with("swe-x", "Enter")
+        st.assert_called_once_with("swe-x", "helloworld")
+
     def test_prompt_stuck_in_box_reports_false(self):
         rule = "─" * 20
         unsent = f"{rule}\n❯ hello there\n{rule}"
@@ -1076,9 +1116,19 @@ class TestLaunchNew(unittest.TestCase):
              patch.object(supervise, "prime_pane", return_value=False):
             ok, note, name = supervise.launch_new(home, "claude", "/tmp", "hi", binary="claude")
         self.assertFalse(ok)
-        self.assertEqual(name, _marker(home)["tmux"])
         self.assertIn("could not be delivered", note)
         self.assertIn("pane is still up", note)
+        # A failed launch waits for no adoption: the retry may start.
+        self.assertEqual(list(supervise._pending_dir(home).glob("*.json")), [])
+        with patch.object(supervise, "launch_tmux", side_effect=_started), \
+             patch.object(supervise.shutil, "which",
+                          return_value="/usr/bin/claude"), \
+             patch.object(supervise, "tmux_alive", return_value=True), \
+             patch.object(supervise, "prime_pane", return_value=True):
+            ok, _note, again = supervise.launch_new(
+                home, "claude", "/tmp", "hi", binary="claude")
+        self.assertTrue(ok)
+        self.assertNotEqual(again, name)
 
     def test_known_ids_land_in_marker(self):
         home = temp_dir(self)
@@ -1319,7 +1369,7 @@ class TestLaunchTuning(unittest.TestCase):
             ok, note, name = supervise.launch_new(
                 self.home, "claude", self.proj, "hi", effort="high", binary="claude")
         self.assertFalse(ok)
-        self.assertEqual(name, _marker(self.home)["tmux"])
+        self.assertTrue(name)
         self.assertIn("could not be delivered", note)
 
     def test_a_control_swallowed_enter_is_pressed_again(self):
