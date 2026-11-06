@@ -9,7 +9,7 @@
 body.chat-open .window { height: 100vh; height: 100dvh; }
 body.chat-open .panel { display: flex; min-height: 0; overflow: hidden; }
 .chat-page {
-  max-width: 1264px; padding-top: 0; padding-bottom: 12px;
+  max-width: 1264px; padding-top: var(--safe-top); padding-bottom: calc(12px + var(--safe-bottom));
   flex: 1; min-height: 0; display: flex; flex-direction: column;
 }
 .chat-dash {
@@ -536,6 +536,8 @@ dialog.sheet.preview-sheet[open] { display: flex; flex-direction: column; }
 }
 
 @media (max-width: 720px) {
+  /* The sidebar strip above the chat already clears the top inset. */
+  .chat-page { padding-top: 0; }
   .chat-bar { flex-wrap: wrap; padding-top: 12px; }
   .chat-titles { flex-basis: calc(100% - 90px); }
   .chat-conn .caption { display: none; }
