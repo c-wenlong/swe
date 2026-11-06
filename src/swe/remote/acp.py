@@ -192,6 +192,12 @@ _CHUNK_KINDS = {
 
 # Events kept for a connection nobody listens to yet.
 _HELD_MAX = 64
+_HELD_HARD_MAX = 1024
+
+
+def _informational(data: dict) -> bool:
+    """An event only recording what Autonomy answered by itself."""
+    return bool(data.get("auto")) or data.get("source") == "autonomy"
 
 # JSON-RPC "method not found".
 _NO_METHOD = -32601
@@ -255,6 +261,8 @@ class Connection:
         self._stream_no = 0
         self._tools: set[str] = set()
         self._turn_no = 0
+        # The turn session/cancel was sent for (-1: none yet).
+        self._cancelled_turn = -1
         # Stream ids carry this, so a restarted agent's ids never repeat
         # ones the clients already closed.
         self._nonce = secrets.token_hex(4)
@@ -297,8 +305,14 @@ class Connection:
                 # stay empty until its tailer starts (a journal with no
                 # cursor makes the tailer skip the first turn), so the
                 # event waits for bind().
-                if len(self._held) < _HELD_MAX:
-                    self._held.append((etype, data))
+                # Past the soft cap only the record of auto-answered
+                # requests is shed: a request someone must answer is
+                # always kept (open requests bound it), up to a hard cap.
+                full = len(self._held) >= _HELD_MAX
+                if full and (_informational(data)
+                             or len(self._held) >= _HELD_HARD_MAX):
+                    return
+                self._held.append((etype, data))
                 return
         self._send_event(emit, etype, data)
 
@@ -486,6 +500,10 @@ class Connection:
         ``cancelled`` (the spec's rule for a cancelled turn)."""
         if self.turn_rpc is None and not self.approvals:
             return False
+        # A permission request still in flight from this turn is answered
+        # ``cancelled`` too, never auto-allowed after the Stop.
+        with self.lock:
+            self._cancelled_turn = self._turn_no
         ok = self.notify("session/cancel", {"sessionId": self.session_id})
         self._retire_approvals("cancelled", answer=True)
         return ok
@@ -653,6 +671,12 @@ class Connection:
             if isinstance(raw, list) else []
         if not options or (params.get("sessionId") not in
                            (None, self.session_id)):
+            self._respond(rpc_id, {"outcome": {"outcome": "cancelled"}})
+            return
+        with self.lock:
+            stopped = self._cancelled_turn == self._turn_no
+        if stopped:
+            # The turn was cancelled: nothing more is granted in it.
             self._respond(rpc_id, {"outcome": {"outcome": "cancelled"}})
             return
         request_id = f"acp-{secrets.token_hex(6)}"

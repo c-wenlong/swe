@@ -466,7 +466,11 @@ of kind `allow_once`, never an `allow_always` one, and journals the pair
 so the apps show what was allowed: `approval.requested` with `auto:
 true` (no ntfy push) and `approval.resolved` with `decision: "allow"`,
 `source: "autonomy"`. A request offering no `allow_once` option gets the
-usual approval card. `yolo` rides onto the row at adoption, so a
+usual approval card. After Stop, any request still arriving in that
+turn is answered `cancelled`, never allowed. While a launch's events are
+held for its tailer, the record of auto-answers is what gets shed past
+64 events; a request that needs an answer is always kept. `yolo` rides
+onto the row at adoption, so a
 restarted agent keeps answering this way. The launch wire is unchanged: the 202's note
 reads "starting over ACP", and an ACP launch needs no tmux.
 

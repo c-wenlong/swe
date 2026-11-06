@@ -982,6 +982,44 @@ class TestLaunchAutonomy(_LaunchCase):
         self.assertTrue(inject.AcpInjector._conns[self.new_key].auto_allow)
 
 
+class TestAutonomyEdges(_LaunchCase):
+    mode = "slow"
+
+    def test_a_full_hold_queue_still_keeps_a_card(self):
+        self.assertTrue(self._launch(yolo=True)[0])
+        conn = inject.AcpInjector._conns[self.new_key]
+        for i in range(40):
+            conn._emit("approval.requested",
+                       {"request_id": f"a{i}", "auto": True})
+            conn._emit("approval.resolved",
+                       {"request_id": f"a{i}", "source": "autonomy"})
+        conn._emit("approval.requested", {"request_id": "card"})
+        seen = []
+        conn.bind(self.new_key, "m1",
+                  lambda key, ev: seen.append(ev["data"]["request_id"]),
+                  None)
+        self.assertIn("card", seen)
+        self.assertEqual(seen[-1], "card")
+
+    def test_no_grant_after_stop(self):
+        self.assertTrue(self._launch(yolo=True)[0])
+        conn = inject.AcpInjector._conns[self.new_key]
+        self.assertTrue(conn.cancel())
+        answers = []
+        with patch.object(conn, "_respond",
+                          lambda rpc_id, result=None, error=None:
+                          answers.append((rpc_id, result)) or True):
+            # A request the reader had in hand when Stop landed.
+            conn._permission("late", {
+                "sessionId": conn.session_id,
+                "toolCall": {"title": "rm -rf build"},
+                "options": [{"optionId": "once", "name": "Allow",
+                             "kind": "allow_once"}]})
+        self.assertEqual(answers,
+                         [("late", {"outcome": {"outcome": "cancelled"}})])
+        self.assertEqual(conn.approvals, {})
+
+
 class TestLaunchCancel(_LaunchCase):
     mode = "slow"
 
