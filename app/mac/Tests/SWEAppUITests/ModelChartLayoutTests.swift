@@ -129,7 +129,7 @@ struct ModelChartLayoutTests {
     @Test func theSearchFloorFitsItsPrompt() {
         let prompt = (ModelsContent.searchPrompt as NSString)
             .size(withAttributes: [.font: Theme.nsFont(size: 14)]).width
-        #expect(ModelsContent.searchMinWidth >= prompt + 2 * 12 + 8 + 14)
+        #expect(ModelsContent.searchMinWidth >= prompt + 2 * 12 + 8 + Theme.scaled(14))
     }
 
     @Test func theToolbarCountsEveryGap() {
