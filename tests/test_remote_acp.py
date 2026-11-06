@@ -1194,6 +1194,27 @@ class TestPermissionPrompt(unittest.TestCase):
             "sessionUpdate": "tool_call", "toolCallId": "t2",
             "title": "Run ls", "rawInput": {"command": "ls"}}})
         self.assertEqual(conn._tool_info["t2"]["title"], "Run ls")
+        # A partial update keeps what the first said, and adds to it.
+        conn._update({"sessionId": "s", "update": {
+            "sessionUpdate": "tool_call_update", "toolCallId": "t2",
+            "status": "in_progress", "title": None}})
+        conn._update({"sessionId": "s", "update": {
+            "sessionUpdate": "tool_call_update", "toolCallId": "t2",
+            "rawInput": {"command": "ls -la"}}})
+        self.assertEqual(conn._tool_info["t2"],
+                         {"title": "Run ls", "rawInput": {"command": "ls -la"}})
+        self.assertEqual(
+            acp._permission_prompt({"toolCallId": "t2"}, conn._tool_info),
+            "Run ls\n\n`ls -la`")
+
+    def test_the_tool_table_stays_bounded_oldest_first(self):
+        conn = acp.Connection.__new__(acp.Connection)
+        conn._tool_info = {}
+        for i in range(acp._TOOL_INFO_MAX + 10):
+            conn._remember_tool({"toolCallId": f"t{i}", "title": f"n{i}"})
+        self.assertEqual(len(conn._tool_info), acp._TOOL_INFO_MAX)
+        self.assertNotIn("t0", conn._tool_info)
+        self.assertIn(f"t{acp._TOOL_INFO_MAX + 9}", conn._tool_info)
 
 
 class TestDetection(unittest.TestCase):
