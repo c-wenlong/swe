@@ -56,6 +56,15 @@ class _Store(unittest.TestCase):
 
 
 class TestCatalogSources(unittest.TestCase):
+    def test_old_quiver_source_reads_as_swe(self):
+        from swe.ledger.pricing import normalize_source
+        self.assertEqual(normalize_source("quiver"), "swe")
+        self.assertEqual(normalize_source("swe"), "swe")
+        self.assertEqual(normalize_source("yours"), "yours")
+        self.assertIsNone(normalize_source(None))
+        row = {"harness_billed": False, "is_free": False, "source": "quiver"}
+        self.assertEqual(pricing._spend_source(row), "swe")
+
     def test_resolve_entry_names_the_key_and_its_source(self):
         cat = catalog()
         self.assertEqual(cat.resolve_entry("claude-opus-5-20261001", None), ("priced", "claude-opus-5", None))
@@ -63,7 +72,7 @@ class TestCatalogSources(unittest.TestCase):
         self.assertEqual(cat.resolve_entry("openrouter/free", None), ("free", None, None))
         self.assertEqual(cat.resolve_entry("mystery", None), ("unpriced", None, None))
         self.assertEqual([cat.source(k) for k in ("gpt-x", "grok-mine", "claude-opus-5")],
-                         ["yours", "quiver", "litellm"])
+                         ["yours", "swe", "litellm"])
         status, rates, tier = cat.resolve("claude-opus-5-fast", None)
         self.assertEqual((status, rates.input, tier), ("priced", 5e-06, "fast"))
 
@@ -170,7 +179,7 @@ class TestRows(_Store):
         self.add("mystery-2", 40)
         rows = {r["model"]: r for g in self.build()["groups"] for r in g["models"]}
         self.assertEqual(rows["gpt-x"]["spend_source"], "yours")
-        self.assertEqual(rows["grok-mine"]["spend_source"], "quiver")
+        self.assertEqual(rows["grok-mine"]["spend_source"], "swe")
         self.assertEqual(rows["opencode/big-pickle-free"]["spend_source"], "free")
         self.assertIsNone(rows["opencode/big-pickle-free"]["rates"])
         self.assertEqual(rows["mystery-1"]["spend_source"], "unpriced")

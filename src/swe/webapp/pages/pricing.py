@@ -15,7 +15,7 @@ import time
 import math
 
 from swe.ledger import overview
-from swe.ledger.pricing import PricingCatalog, base_name
+from swe.ledger.pricing import PricingCatalog, base_name, normalize_source
 from swe.ledger.store import LedgerStore
 from swe.webapp.pages._brands import brand_for, resolved_name
 
@@ -75,7 +75,7 @@ def _spend_source(row: dict) -> str:
         return "billed"
     if row["is_free"]:
         return "free"
-    return row["source"] or "unpriced"
+    return normalize_source(row["source"]) or "unpriced"
 
 
 def harness_options(all_slices: list[dict]) -> list[str]:
