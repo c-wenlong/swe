@@ -740,7 +740,7 @@ to use their own login state and environment."""
                                             prompt an agent resolving it gets
   {c('cyan', 'swe gh issue comment <N> --body=TEXT')}
                                             Comment on an issue as you
-  {c('cyan', 'swe gh issue worktree <N>')}       Branch quiver/issue-N off the default
+  {c('cyan', 'swe gh issue worktree <N>')}       Branch swe/issue-N off the default
                                             branch, checked out under
                                             ~/.swe/worktrees
   {c('cyan', 'swe gh run [--repo=R]')}            Workflow runs (alias: actions)

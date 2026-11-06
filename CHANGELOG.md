@@ -46,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Issue resolves work on `swe/issue-<n>`.** `swe gh issue worktree`
+  and the hub's Resolve with agent still cut `quiver/issue-<n>`. New
+  resolves branch `swe/issue-<n>`; a checkout or branch a resolve left
+  under the old name is resumed on it (and the prompt names it), and
+  the Tasks rows still find the PR such a branch opened, so no work in
+  flight is orphaned. The Mac, iPhone and web sheets' fallback label
+  says `swe/issue-<n>` too.
+
 - **`swe harness discover --json --apply NAME` answers in JSON when NAME
   is not a new match.** It printed red text, which the app could not
   decode. It now prints the usual document with `applied.refused` and the

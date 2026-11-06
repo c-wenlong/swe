@@ -26,7 +26,7 @@ public struct HubSourceEnv: Decodable, Sendable, Equatable {
     }
 }
 
-/// The PR a task row carries: for an issue the PR its `quiver/issue-<n>`
+/// The PR a task row carries: for an issue the PR its `swe/issue-<n>`
 /// branch produced (open or merged), for a pull the PR itself.
 public struct HubTaskPr: Codable, Sendable, Equatable, Hashable {
     public var number: Int?

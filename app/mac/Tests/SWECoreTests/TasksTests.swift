@@ -28,7 +28,7 @@ import Testing
             "last_active_at": 1767323000.0}],
          "launch_rows": [
            {"id": "l-1", "state": "pending", "harness": "claude",
-            "note": "Creating worktree quiver/issue-5…"}]},
+            "note": "Creating worktree swe/issue-5…"}]},
         {"id": "github:pull:o/r:9", "source": "github", "kind": "pull",
          "repo": "o/r", "ref": "9", "title": "fix",
          "url": "https://github.com/o/r/pull/9",
@@ -101,7 +101,7 @@ import Testing
         let launch = try #require(issue.launchRows?.first)
         #expect(launch.id == "l-1")
         #expect(launch.state == "pending")
-        #expect(launch.note == "Creating worktree quiver/issue-5…")
+        #expect(launch.note == "Creating worktree swe/issue-5…")
 
         // A linked key the catalog dropped stays listed, marked gone.
         let stale = try #require(body.tasks[3].sessionRows?.first)

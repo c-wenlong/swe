@@ -412,7 +412,7 @@ const ISSUE = { number: 5, title: "Fix the bug", state: "open", author: "amy", l
   created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-02T00:00:00Z",
   comments: [{ author: "cat", body: "Same here", created_at: "2026-10-02T00:00:00Z",
     url: "https://github.com/o/r/issues/5#issuecomment-1" }],
-  branch: "quiver/issue-5", worktree: "/w/o-r-5", suggested_prompt: "Resolve issue #5 in o/r." };
+  branch: "swe/issue-5", worktree: "/w/o-r-5", suggested_prompt: "Resolve issue #5 in o/r." };
 apiAnswers.push(
   ["/v1/app/repositories?harnesses=1", { status: 200, data: { machine: "hub", harnesses } }],
   ["/v1/issues/o/r/5", { status: 200, data: { machine: "hub", github: { status: "ok", login: "octocat" },

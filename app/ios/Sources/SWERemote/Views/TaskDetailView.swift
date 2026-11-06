@@ -207,7 +207,7 @@ struct TaskDetailView: View {
 
     /// The GitHub card: the issue or pull the task is, pushed onto the
     /// same detail pages the Issues and Pull requests tabs use — plus
-    /// the PR an issue's `quiver/issue-<n>` branch produced.
+    /// the PR an issue's `swe/issue-<n>` branch produced.
     @ViewBuilder private func githubSection(_ task: TaskRow) -> some View {
         if task.source == "github", let repo = task.repo, let number = task.number {
             GroupLabel(text: "GitHub")

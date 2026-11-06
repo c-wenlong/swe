@@ -36,7 +36,7 @@ Everything except the two joins is `GET /v1/tasks`'s answer verbatim
 (`"github:issue:o/r:5"`), the derived `state`, `sessions` (session
 keys), `launches` (launch ids), `linked`, `agent_running`,
 `last_active_at`, `created_at`, `updated_at`, and `pr` — an issue's
-`quiver/issue-<n>` PR (open or merged) or a pull's own. `?refresh=1`
+`swe/issue-<n>` PR (open or merged) or a pull's own. `?refresh=1`
 bypasses the cache, exactly as on `/v1/tasks`.
 
 The joins, always present:

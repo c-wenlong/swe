@@ -23,8 +23,8 @@
        "created_at": "2026-10-26T11:02:05Z",
        "url": "https://github.com/c-wenlong/swe/issues/816#issuecomment-2"}
     ],
-    "branch": "quiver/issue-816",
+    "branch": "swe/issue-816",
     "worktree": "/Users/k/.swe/worktrees/c-wenlong__swe-issue816",
-    "suggested_prompt": "Resolve c-wenlong/swe#816: Remote app — launch an agent to resolve a GitHub issue from the issues page.\n\nWork on branch quiver/issue-816, run the tests, push, and open a PR that says Closes #816."
+    "suggested_prompt": "Resolve c-wenlong/swe#816: Remote app — launch an agent to resolve a GitHub issue from the issues page.\n\nWork on branch swe/issue-816, run the tests, push, and open a PR that says Closes #816."
   }
 }}

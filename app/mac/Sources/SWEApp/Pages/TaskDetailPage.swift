@@ -453,7 +453,7 @@ struct TaskDetailPage: View {
 
     // MARK: - PR card
 
-    /// The linked PR: an issue's `quiver/issue-<n>` PR, or a pull task
+    /// The linked PR: an issue's `swe/issue-<n>` PR, or a pull task
     /// itself.
     private func prCard(task: HubTaskRow, pr: HubTaskPr) -> some View {
         Card(title: task.kind == "pull" ? "Pull request" : "Linked pull request") {

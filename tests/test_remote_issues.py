@@ -198,7 +198,7 @@ class TestDetail(_Base):
         self.assertEqual(issue["labels"], ["bug", "ui"])
         self.assertEqual(issue["assignees"], ["bob"])
         self.assertEqual(issue["comments"][0]["author"], "carol")
-        self.assertEqual(issue["branch"], "quiver/issue-5")
+        self.assertEqual(issue["branch"], "swe/issue-5")
         self.assertTrue(issue["worktree"].endswith("o__r-issue5"))
         self.assertTrue(issue["suggested_prompt"].startswith(
             "Resolve o/r#5.\n"))
@@ -255,7 +255,7 @@ class TestDetail(_Base):
             status, body = self._get("/v1/issues/o/r/5")
         self.assertEqual(status, 200, body)
         issue = body["issue"]
-        self.assertEqual(issue["branch"], "quiver/issue-5")
+        self.assertEqual(issue["branch"], "swe/issue-5")
         self.assertTrue(issue["worktree"].endswith("o__r-issue5"))
         self.assertTrue(issue["suggested_prompt"].startswith(
             "Resolve o/r#5"))
@@ -447,9 +447,9 @@ class TestResolveRoute(unittest.TestCase):
         self.issue = gh_issues.shape(RAW_ISSUE, "o/r", self.srv.home)
 
     def _worktree_ok(self, repo, number, home=None, progress=None):
-        progress("Creating worktree quiver/issue-5…")
+        progress("Creating worktree swe/issue-5…")
         return gh.GhResult("ok", data={
-            "path": self.tree, "branch": "quiver/issue-5",
+            "path": self.tree, "branch": "swe/issue-5",
             "base": "origin/main", "created": True})
 
     @contextlib.contextmanager
@@ -521,6 +521,20 @@ class TestResolveRoute(unittest.TestCase):
         self.assertEqual(view["cwd"], self.tree)
         self.assertEqual(view["note"], "Starting claude…")
         self.assertEqual(view["title"], "o/r#5 Fix the thing")
+
+    def test_a_pre_rename_checkout_gets_a_prompt_naming_its_branch(self):
+        def old_tree(repo, number, home=None, progress=None):
+            return gh.GhResult("ok", data={
+                "path": self.tree, "branch": "quiver/issue-5",
+                "base": "origin/main", "created": False})
+
+        with self._stubs(worktree=old_tree) as (_wt, ln):
+            status, body = self._post(
+                {"repo": "o/r", "number": 5, "harness": "claude"})
+        self.assertEqual(status, 202, body)
+        prompt = ln.call_args[0][3]
+        self.assertIn("You are on branch quiver/issue-5 in a worktree", prompt)
+        self.assertNotIn("swe/issue-5", prompt)
 
     def test_resolve_carries_the_pick(self):
         with self._stubs() as (_wt, ln):

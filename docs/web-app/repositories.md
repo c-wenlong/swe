@@ -124,7 +124,7 @@ the new comment. A refusal shows under the box and keeps the draft.
 The box hides while the Resolve panel is open.
 
 Resolve with agent opens the Mac's ResolveIssueSheet as a panel in the
-sheet: where it starts (`quiver/issue-<n>`, a worktree off the default
+sheet: where it starts (`swe/issue-<n>`, a worktree off the default
 branch on the hub), the harness, the shared Model menu
 (`static/model-menu.js`), Your context (optional) and the first prompt,
 prefilled with the hub's `suggested_prompt` (emptied, the hub writes

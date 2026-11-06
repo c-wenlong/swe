@@ -460,7 +460,7 @@ public struct GhIssueComment: Decodable, Equatable, Sendable {
 
 /// `swe gh issue view`'s detail row: the list row's fields plus the
 /// body, every comment, and where a resolve run would start — the
-/// `quiver/issue-<n>` branch, its worktree path on the hub machine, and
+/// `swe/issue-<n>` branch, its worktree path on the hub machine, and
 /// the first prompt the hub would send (the body and comments folded in).
 public struct GhIssueDetail: Decodable, Equatable, Sendable, Identifiable {
     public var id: Int { number }
@@ -475,7 +475,7 @@ public struct GhIssueDetail: Decodable, Equatable, Sendable, Identifiable {
     public let createdAt: GhTime?
     public let updatedAt: GhTime?
     public let comments: [GhIssueComment]
-    /// `quiver/issue-<n>`, off the repo's default branch.
+    /// `swe/issue-<n>`, off the repo's default branch.
     public let branch: String?
     /// The checkout's absolute path under ~/.swe/worktrees.
     public let worktree: String?

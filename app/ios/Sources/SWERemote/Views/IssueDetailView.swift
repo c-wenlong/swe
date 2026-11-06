@@ -337,9 +337,9 @@ struct ResolveIssueSheet: View {
         app.machines.first { $0.id == machineId } ?? app.machines.first
     }
 
-    /// `quiver/issue-<n>` — known before the detail lands, since the
+    /// `swe/issue-<n>` — known before the detail lands, since the
     /// branch name is the hub's own scheme.
-    private var branch: String { detail?.branch ?? "quiver/issue-\(number)" }
+    private var branch: String { detail?.branch ?? "swe/issue-\(number)" }
 
     var body: some View {
         NavigationStack {
