@@ -294,7 +294,7 @@ class AgentServiceTest(unittest.TestCase):
         ctl = FakeCtl(linger="no", can_linger=False)
         rc, out, err = self._with(self._linux(ctl), ["agent", "--install"])
         self.assertEqual(rc, 0, err)
-        path = self.home / ".config/systemd/user/quiver-remote-agent.service"
+        path = self.home / ".config/systemd/user/swe-remote-agent.service"
         text = path.read_text()
         self.assertIn("Description=SWE remote agent (swe remote agent)", text)
         self.assertIn("ExecStart=/home/dev/.local/bin/swe remote agent", text)
@@ -327,6 +327,43 @@ class AgentServiceTest(unittest.TestCase):
         self.assertFalse(systemd.unit_path(self.home, systemd.AGENT_UNIT).exists())
         disabled = [a for a in ctl.calls if a[0] == "systemctl" and a[2] == "disable"]
         self.assertEqual(disabled[-1][-1], systemd.AGENT_UNIT)
+
+    def test_linux_install_retires_the_pre_rename_agent_unit(self):
+        self._pair()
+        old = systemd.unit_path(self.home, systemd.OLD_AGENT_UNIT)
+        old.parent.mkdir(parents=True)
+        old.write_text("[Service]\nExecStart=/bin/swe remote agent\n")
+        ctl = FakeCtl()
+        rc, _, err = self._with(self._linux(ctl), ["agent", "--install"])
+        self.assertEqual(rc, 0, err)
+        self.assertFalse(old.exists())
+        self.assertTrue(systemd.unit_path(self.home, systemd.AGENT_UNIT).exists())
+
+    def test_linux_install_warns_when_the_old_unit_will_not_stop(self):
+        self._pair()
+        old = systemd.unit_path(self.home, systemd.OLD_AGENT_UNIT)
+        old.parent.mkdir(parents=True)
+        old.write_text("[Service]\nExecStart=/bin/swe remote agent\n")
+        ctl = FakeCtl(units={systemd.OLD_AGENT_UNIT: "active"})
+        real = ctl.__call__
+
+        def refuse_old(argv, **kw):
+            if argv[:3] == ["systemctl", "--user", "disable"] \
+                    and argv[-1] == systemd.OLD_AGENT_UNIT:
+                return subprocess.CompletedProcess(argv, 1, stdout="", stderr="denied")
+            return real(argv, **kw)
+
+        rc, _, err = self._with(self._linux(refuse_old), ["agent", "--install"])
+        self.assertEqual(rc, 0, err)
+        self.assertTrue(old.exists())
+        self.assertIn(f"systemctl --user disable --now {systemd.OLD_AGENT_UNIT}", err)
+
+    def test_linux_hub_install_is_refused_next_to_a_pre_rename_agent_unit(self):
+        old = systemd.unit_path(self.home, systemd.OLD_AGENT_UNIT)
+        old.parent.mkdir(parents=True)
+        old.write_text("[Service]\nExecStart=/bin/swe remote agent\n")
+        with patch.object(commands.sys, "platform", "linux"):
+            self.assertIn(str(old), commands.service_conflict(commands.HUB, self.home))
 
     def test_linux_without_systemd_names_the_agent_command(self):
         with patch.object(commands.sys, "platform", "linux"), \

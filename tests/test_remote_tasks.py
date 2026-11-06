@@ -680,6 +680,46 @@ class TestLinkRoutes(_Base):
         self.assertNotIn("github:issue:o/r:5",
                          tasks_mod._load(self.srv.home))
 
+    def test_a_new_link_to_an_unpinned_repo_is_refused(self):
+        stranger = {**ISSUE_REF, "repo": "else/where", "url": ""}
+        status, body = self._post("/v1/sessions/claude:s1/task",
+                                  {"task_ref": stranger})
+        self.assertEqual((status, body["error"]["code"]),
+                         (422, "not_pinned"), body)
+        self.assertIn("else/where", body["error"]["message"])
+        self.assertEqual(tasks_mod._load(self.srv.home), {})
+        # Trackers other than GitHub have no pins to check.
+        status, body = self._post("/v1/sessions/claude:s1/task", {
+            "task_ref": {"source": "linear", "kind": "card", "ref": "ENG-1"}})
+        self.assertEqual(status, 200, body)
+
+    def test_a_pinned_repo_links_under_its_pinned_spelling(self):
+        status, body = self._post("/v1/sessions/claude:s1/task",
+                                  {"task_ref": {**ISSUE_REF, "repo": "O/R"}})
+        self.assertEqual(status, 200, body)
+        stored = tasks_mod._load(self.srv.home)["github:issue:o/r:5"]
+        self.assertEqual(stored["task"]["repo"], "o/r")
+
+    def test_a_repo_unpinned_later_keeps_its_links_and_refreshing(self):
+        tasks_mod.link(self.srv.home, ISSUE_REF, session_key="claude:gone")
+        repos.remove_pinned("o/r", manage.pins_file(self.srv.home))
+        status, body = self._post("/v1/sessions/claude:s1/task",
+                                  {"task_ref": ISSUE_REF})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["sessions"], ["claude:gone", "claude:s1"])
+        asked = []
+
+        def run_json(args, **_kw):
+            asked.append(args)
+            return gh.GhResult("not-found")
+
+        with patch("swe.github.gh.probe_env", return_value=OK_ENV), \
+             patch("swe.github.gh.run_json", side_effect=run_json):
+            row = self._task("github:issue:o/r:5")
+        self.assertIsNotNone(row)
+        self.assertTrue(any(a[:2] == ["issue", "view"] and "o/r" in a
+                            for a in asked), asked)
+
     def test_delete_without_a_ref_unlinks_everything(self):
         tasks_mod.link(self.srv.home, ISSUE_REF, session_key="claude:s1")
         tasks_mod.link(self.srv.home, PULL_REF, session_key="claude:s1")
