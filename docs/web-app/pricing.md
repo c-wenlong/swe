@@ -59,9 +59,9 @@ Files: `src/swe/webapp/pages/pricing.py`, `src/swe/webapp/pages/_brands.py`
 }
 ```
 
-`source` is the catalog entry's origin (`yours`, `quiver`, `litellm`, or null
-when unpriced); `spend_source` is what the Source column shows (`billed`,
-`free`, `yours`, `quiver`, `litellm`, `unpriced`). Rates are USD per 1M tokens.
+`source` is the catalog entry's origin (`yours`, `swe`, `litellm`, or null
+when unpriced; readers still accept the old `quiver` for `swe`); `spend_source` is what the Source column shows (`billed`,
+`free`, `yours`, `swe`, `litellm`, `unpriced`). Rates are USD per 1M tokens.
 `ledger/pricing.py` gained `PricingCatalog.resolve_entry` (the resolution with
 the entry key) and `source(key)` for this, so the page and the ledger resolve
 a name the same way.
