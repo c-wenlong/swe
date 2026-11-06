@@ -357,7 +357,7 @@ private struct FindingRow: View {
                     Text(detail).font(Theme.caption).foregroundStyle(Theme.textSecondary)
                 }
                 ForEach(remedy.steps ?? [], id: \.self) { step in
-                    Text(step).font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                    Text(MarkdownBody.inline(step)).font(Theme.caption).foregroundStyle(Theme.textSecondary)
                 }
             }
             Spacer(minLength: 0)
