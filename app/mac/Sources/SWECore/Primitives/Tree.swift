@@ -92,6 +92,28 @@ public struct PrimitiveTree: Sendable, Equatable {
             .map { Section(kind: $0.0, entries: $0.1) }
     }
 
+    /// The SKILL.md files a skill stands on: the folder's own main file,
+    /// and each skill folder's top-level one. A skill can't work without
+    /// it, so the detail page never offers to trash one by itself;
+    /// removing the whole skill is its own action (the skill page's, or
+    /// the skill folder's row).
+    public var skillFilePaths: Set<String> {
+        var paths = Set<String>()
+        for section in sections {
+            switch section.kind {
+            case .main:
+                paths.formUnion(section.entries.map(\.path))
+            case .skills:
+                for entry in section.entries where entry.isFolder {
+                    paths.formUnion(entry.children.filter { $0.name == "SKILL.md" }.map(\.path))
+                }
+            default:
+                break
+            }
+        }
+        return paths
+    }
+
     /// Every file under `dir`, names relative to it (`SKILL.md`,
     /// `scripts/run.sh`), dotfiles skipped at every level. A skill folder
     /// is more than its SKILL.md, and the detail view expands the folder

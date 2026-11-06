@@ -84,4 +84,12 @@ extension PrimitiveTree {
         let paths = Set(entries.flatMap { [$0.path, $0.previewPath] })
         return paths.filter { PrimitiveOwnership.isInside($0, root: root.path, resolve: resolve) }
     }
+
+    /// The rows a detail page offers a trash button: the ones
+    /// `pathsInside` keeps, less every `skillFilePaths` SKILL.md. Resolves
+    /// each path on disk, so call it off the main actor.
+    public func trashablePaths(_ root: URL,
+                               resolve: (String) -> String = FolderOwners.realPath) -> Set<String> {
+        pathsInside(root, resolve: resolve).subtracting(skillFilePaths)
+    }
 }

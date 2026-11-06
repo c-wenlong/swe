@@ -53,6 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Mac app no longer offers to trash a skill's SKILL.md by
+  itself.** A skill's Contents card put a trash button on its main
+  SKILL.md (and on each skill folder's SKILL.md in a plugin), though a
+  skill can't work without it. Those rows now have none; every other
+  file keeps its button, and removing the whole skill stays its own
+  action.
+
 - **Devin's ACP approvals say what they run.** `devin acp` sends a
   permission request with only the tool call's id, so the card read
   "permission requested". It now shows the title and command from the
