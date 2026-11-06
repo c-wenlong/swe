@@ -737,9 +737,14 @@ public final class ChaptersModel {
         await withDiscardingTaskGroup { group in
             for document in opened { group.addTask { await document.load() } }
         }
+        // A newer load may have started and finished during the reads or
+        // the walk: this one's chapter order is then stale and must not
+        // be published over the newer tree.
+        guard mine == generation else { return }
         await refreshTree(under: check.directory,
                           order: check.entries?.map(\.name)
-                              ?? check.uniqueChapters.map(\.name))
+                              ?? check.uniqueChapters.map(\.name),
+                          current: { mine == self.generation })
         // The walk above is awaited: a newer load may have finished while
         // it ran. If so, this result is stale and must not move selection.
         guard mine == generation else { return }
@@ -783,7 +788,10 @@ public final class ChaptersModel {
     /// skipped, and nothing followed outside the folder. Runs off the
     /// main actor; a folder that vanished between load and walk just
     /// empties the rail.
-    private func refreshTree(under directory: String, order: [String]) async {
+    /// `current` is asked once the walk is back: false drops the result,
+    /// for a caller a newer one may have overtaken.
+    private func refreshTree(under directory: String, order: [String],
+                             current: () -> Bool = { true }) async {
         let root = directory
         let found: (files: [String], folders: [String]) = await offMain {
             var files: [String] = []
@@ -816,6 +824,7 @@ public final class ChaptersModel {
             }
             return (files, folders)
         }
+        guard current() else { return }
         let confined = found.files.filter { Self.inside($0, under: root) != nil }
         tree = ChapterTree.build(files: confined, folders: found.folders,
                                  order: order)
