@@ -2435,7 +2435,20 @@ const SessionChat = (() => {
         else applyMeta(d);
       }
     } else if (ev.type === "approval.requested") {
-      appendMessage({ kind: "approval", text: d.prompt || "Approval requested", request_id: d.request_id || "", options: d.options || [] }, live, ev.seq);
+      // Asked again under the same id (a satellite resends a refused batch
+      // whole): an open card moves to the newest ask rather than showing
+      // twice with the older copy waiting mid-transcript, and an answered
+      // one stands (the Mac and iPhone chats do the same).
+      const rid = d.request_id || "";
+      let answered = false;
+      if (rid) {
+        for (const card of $("chat-log").querySelectorAll(".msg.approval")) {
+          if (card.dataset.req !== rid) continue;
+          if (card.classList.contains("resolved")) answered = true;
+          else card.remove();
+        }
+      }
+      if (!answered) appendMessage({ kind: "approval", text: d.prompt || "Approval requested", request_id: rid, options: d.options || [] }, live, ev.seq);
     } else if (ev.type === "command.result") {
       commandResult(d);
     } else if (ev.type === "approval.resolved") {
