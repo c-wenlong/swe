@@ -15,9 +15,9 @@ from pathlib import Path
 
 from swe.webapp.pages import PageError
 
-# tmux session names are ``qv-`` + hex by construction; the match is a
-# belt for whatever a registry file may hold, so the AppleScript line
-# can't smuggle a quote.
+# tmux session names are ``swe-`` (``qv-`` before the rename) + hex by
+# construction; the match is a belt for whatever a registry file may
+# hold, so the AppleScript line can't smuggle a quote.
 _TMUX_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 
 

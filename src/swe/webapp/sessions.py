@@ -242,7 +242,7 @@ def build(rows: list[dict], usage: dict[tuple[str, str], dict], hub_machine_id: 
             "ownership": row.get("ownership") or "observed",
             "attachable": bool(row.get("attachable")),
             # Supervision detail for the chat chip and the details sheet:
-            # the attach mode, the qv-… pane name, and whether an observed
+            # the attach mode, the swe-… pane name, and whether an observed
             # row's pane was kept running.
             "mode": row.get("mode") or "",
             "tmux": row.get("tmux") or "",

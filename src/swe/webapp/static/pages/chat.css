@@ -51,7 +51,7 @@ body.chat-open .panel { display: flex; min-height: 0; overflow: hidden; }
 .chat-banner-actions { display: flex; gap: 6px; flex: none; }
 
 /* The tmux pane name as a chip in the bar's badges; click copies
- * `tmux attach -t qv-…` (Fmt.copyTick swaps the icon for a tick). */
+ * `tmux attach -t swe-…` (Fmt.copyTick swaps the icon for a tick). */
 .tmux-chip {
   display: inline-flex; align-items: center; gap: 5px;
   font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;

@@ -3902,12 +3902,13 @@ const SessionChat = (() => {
     if (status === 200) {
       // The hub also emits session.ownership; its answer is enough to
       // open the composer now. A kept pane is adopted under its old tmux
-      // name, and the note names a fresh one ("attached under tmux qv-…"),
-      // so the chip can show before the ownership event lands.
+      // name, and the note names a fresh one ("attached under tmux swe-…",
+      // "qv-…" from a hub before the rename), so the chip can show before
+      // the ownership event lands.
       chat.detaching = false;
       chat.row.ownership = "attached";
       if (chat.row.kept) delete chat.row.kept;
-      const m = data && String(data.note || "").match(/\bqv-[a-z0-9]+\b/i);
+      const m = data && String(data.note || "").match(/\b(?:swe|qv)-[a-z0-9]+\b/i);
       if (m) chat.row.tmux = m[0];
     } else if (status === 202) {
       // The attach went to a satellite's command journal: ownership
