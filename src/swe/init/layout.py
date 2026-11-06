@@ -255,8 +255,8 @@ def discover_skill_roots(
                 if path.resolve() == shared.resolve():
                     if not path.is_symlink():
                         continue  # the shared tree itself
-            except OSError:
-                pass
+            except (OSError, RuntimeError):
+                pass  # RuntimeError: a symlink loop, before Python 3.13
             if path not in found:
                 found.append(path)
 
@@ -268,7 +268,7 @@ def discover_skill_roots(
             # it through would let init replace ~/.swe/skills itself.
             if path.resolve() == shared.resolve() and not path.is_symlink():
                 continue
-        except OSError:
+        except (OSError, RuntimeError):
             pass
         if path not in found:
             found.append(path)
