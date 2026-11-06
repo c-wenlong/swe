@@ -36,8 +36,12 @@ public final class UpdatesModel {
     /// Finds the checkout on disk. Runs off the main actor: AppModel builds
     /// this model before the first window, and a stalled Desktop folder
     /// once held that window back for minutes.
-    private let resolveCheckout: @Sendable (_ stored: String, _ stamped: String?) -> ResolvedCheckout
-    private let resolving = LatestBuild<ResolvedCheckout>()
+    private let resolveCheckout: @Sendable (_ stored: String, _ stamped: String?) -> String?
+    /// Internal for tests, which watch an older answer being dropped.
+    let resolving = LatestBuild<String?>()
+    /// The stamped folder's hint, resolved apart from the checkout so a
+    /// stalled stamped folder never holds back a valid saved one.
+    private let hinting = LatestBuild<String?>()
     private let localCheck: LocalBuildCheck
     private let releaseCheck: ReleaseCheck
     private let swe: @Sendable () -> SweClient
@@ -61,7 +65,8 @@ public final class UpdatesModel {
                 rebuildDir: URL = FileManager.default.homeDirectoryForCurrentUser
                     .appending(path: ".swe/cache/rebuild"),
                 resolveCheckout: @escaping @Sendable (_ stored: String, _ stamped: String?)
-                    -> ResolvedCheckout = { UpdatePreferences.resolve(stored: $0, stamped: $1) }) {
+                    -> String? = { UpdatePreferences.resolve(stored: $0, stamped: $1) },
+                stampedExists: @escaping @Sendable (String?) -> String? = { UpdatePreferences.existing($0) }) {
         self.build = build
         self.preferences = preferences
         self.localCheck = localCheck
@@ -72,6 +77,8 @@ public final class UpdatesModel {
         self.resolveCheckout = resolveCheckout
         channel = preferences.channel(build: build)
         startResolvingCheckout()
+        let stamped = build.sourcePath
+        hinting.start({ stampedExists(stamped) }) { [weak self] in self?.stampedCheckout = $0 }
     }
 
     /// Resolve the saved checkout off the main actor; a newer start (a
@@ -80,10 +87,7 @@ public final class UpdatesModel {
         let stored = preferences.checkoutOverride
         let stamped = build.sourcePath
         let resolve = resolveCheckout
-        resolving.start({ resolve(stored, stamped) }) { [weak self] answer in
-            self?.checkout = answer.checkout
-            self?.stampedCheckout = answer.stamped
-        }
+        resolving.start({ resolve(stored, stamped) }) { [weak self] in self?.checkout = $0 }
     }
 
     /// Returns once the latest checkout resolution has landed.

@@ -13,23 +13,27 @@ struct UpdatesCheckoutResolutionTests {
     let scratch: TempDir
     init() throws { scratch = try TempDir() }
 
-    /// A resolver that blocks its thread until released, the way a stalled
-    /// file provider blocks getxattr, and records which thread it ran on.
+    /// A disk that blocks each path's lookup until the test releases that
+    /// path, the way a stalled file provider blocks getxattr. Records
+    /// which thread each lookup ran on and counts arrivals.
     private final class StalledDisk: Sendable {
-        let release = DispatchSemaphore(value: 0)
+        let arrivals = CountGate()
         let ranOnMain = Mutex<Bool?>(nil)
-        let calls = Mutex<[String]>([])
-        let answers: [String: String?]
+        private let gates: [String: DispatchSemaphore]
 
-        init(answers: [String: String?]) { self.answers = answers }
+        init(paths: [String]) {
+            gates = Dictionary(uniqueKeysWithValues: paths.map { ($0, DispatchSemaphore(value: 0)) })
+        }
 
-        func resolve(stored: String, stamped: String?) -> ResolvedCheckout {
+        func release(_ path: String) { gates[path]?.signal() }
+
+        func resolve(stored: String) -> String? {
             ranOnMain.withLock { $0 = Thread.isMainThread }
-            calls.withLock { $0.append(stored) }
-            // Bounded so a resolver wrongly run on the main actor fails the
-            // test below instead of hanging the suite.
-            _ = release.wait(timeout: .now() + 5)
-            return ResolvedCheckout(checkout: answers[stored] ?? nil, stamped: nil)
+            Task { await arrivals.bump() }
+            // Bounded so a lookup wrongly run on the main actor fails the
+            // test instead of hanging the suite.
+            _ = gates[stored]?.wait(timeout: .now() + 5)
+            return stored
         }
     }
 
@@ -39,56 +43,79 @@ struct UpdatesCheckoutResolutionTests {
         }
     }
 
-    private func model(stored: String, disk: StalledDisk) -> UpdatesModel {
+    private func model(stored: String, disk: StalledDisk,
+                       stampedExists: @escaping @Sendable (String?) -> String? = { _ in nil })
+        -> UpdatesModel {
         let prefs = UpdatePreferences(defaults: TestDefaults("UpdatesCheckoutResolution"))
         prefs.checkoutOverride = stored
         return UpdatesModel(
-            build: BuildInfo(channel: .dev, commit: "abc"),
+            build: BuildInfo(channel: .dev, commit: "abc", sourcePath: "/stamped"),
             preferences: prefs,
             releaseCheck: ReleaseCheck(
                 transport: NoNetwork(),
                 cacheURL: scratch.url.appending(path: "latest-release.json")),
             rebuildDir: scratch.url.appending(path: "rebuild"),
-            resolveCheckout: { disk.resolve(stored: $0, stamped: $1) })
+            resolveCheckout: { stored, _ in disk.resolve(stored: stored) },
+            stampedExists: stampedExists)
     }
 
     @Test func buildingTheModelDoesNotWaitOnTheDisk() async {
-        let disk = StalledDisk(answers: ["~/code/swe": "/Users/me/code/swe"])
+        let disk = StalledDisk(paths: ["/Users/me/code/swe"])
         let clock = ContinuousClock()
         let started = clock.now
-        let updates = model(stored: "~/code/swe", disk: disk)
+        let updates = model(stored: "/Users/me/code/swe", disk: disk)
         // Init returned while the disk is still stalled: no answer yet.
         #expect(clock.now - started < .seconds(2))
         #expect(updates.checkout == nil)
 
-        disk.release.signal()
+        disk.release("/Users/me/code/swe")
         await updates.checkoutResolved()
         #expect(updates.checkout == "/Users/me/code/swe")
         #expect(disk.ranOnMain.withLock { $0 } == false)
     }
 
     @Test func aChangedCheckoutDropsTheOlderAnswer() async {
-        let disk = StalledDisk(answers: ["/old": "/old", "/new": "/new"])
+        let disk = StalledDisk(paths: ["/old", "/new"])
         let updates = model(stored: "/old", disk: disk)
+        let dropped = CountGate()
+        updates.resolving.onDrop = { Task { await dropped.bump() } }
         updates.setCheckout("/new")
         #expect(updates.checkout == nil)
-        // Both resolutions are parked on the stalled disk; let them go in
-        // either order and only the newer path may land.
-        disk.release.signal()
-        disk.release.signal()
+        // Both lookups are parked on the stalled disk.
+        #expect(await disk.arrivals.reach(2))
+        // The newer answer lands first; the older one, finishing later,
+        // is dropped instead of overwriting it.
+        disk.release("/new")
         await updates.checkoutResolved()
         #expect(updates.checkout == "/new")
-        #expect(disk.calls.withLock { Set($0) } == ["/old", "/new"])
+        disk.release("/old")
+        #expect(await dropped.reach(1))
+        #expect(updates.checkout == "/new")
     }
 
-    @Test func resolveKeepsTheStampedFolderAsAHint() throws {
+    /// The stamped folder's hint is looked up apart from the checkout: a
+    /// stalled stamped folder must not hold back a valid saved checkout.
+    @Test func aStalledStampedFolderDoesNotHoldBackTheCheckout() async {
+        let disk = StalledDisk(paths: ["/saved"])
+        let stampedGate = DispatchSemaphore(value: 0)
+        let updates = model(stored: "/saved", disk: disk, stampedExists: { path in
+            _ = stampedGate.wait(timeout: .now() + 5)
+            return path
+        })
+        disk.release("/saved")
+        await updates.checkoutResolved()
+        #expect(updates.checkout == "/saved")
+        #expect(updates.stampedCheckout == nil)
+        stampedGate.signal()
+    }
+
+    @Test func resolveSkipsTheStampedFolderWhenASavedPathIsValid() {
         let stamped = scratch.url.path
-        let both = UpdatePreferences.resolve(stored: "~/elsewhere", stamped: stamped)
-        #expect(both.checkout == NSHomeDirectory() + "/elsewhere")
-        #expect(both.stamped == stamped)
-        let fallback = UpdatePreferences.resolve(stored: "  ", stamped: stamped)
-        #expect(fallback == ResolvedCheckout(checkout: stamped, stamped: stamped))
-        let gone = UpdatePreferences.resolve(stored: "", stamped: "/definitely/not/here")
-        #expect(gone == ResolvedCheckout(checkout: nil, stamped: nil))
+        #expect(UpdatePreferences.resolve(stored: "~/elsewhere", stamped: "/definitely/not/here")
+            == NSHomeDirectory() + "/elsewhere")
+        #expect(UpdatePreferences.resolve(stored: "  ", stamped: stamped) == stamped)
+        #expect(UpdatePreferences.resolve(stored: "", stamped: "/definitely/not/here") == nil)
+        #expect(UpdatePreferences.existing(stamped) == stamped)
+        #expect(UpdatePreferences.existing("/definitely/not/here") == nil)
     }
 }

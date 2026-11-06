@@ -97,33 +97,26 @@ public struct UpdatePreferences {
     public func checkout(build: BuildInfo,
                          fileManager: FileManager = .default) -> String? {
         Self.resolve(stored: checkoutOverride, stamped: build.sourcePath,
-                     fileManager: fileManager).checkout
+                     fileManager: fileManager)
     }
 
     /// `checkout(build:)` from plain values, so it can run off the main
-    /// actor: the effective checkout, and the stamped folder when it
-    /// still exists (the Source checkout row's hint).
+    /// actor. A valid saved path wins without touching the stamped
+    /// folder: that folder may sit on the stalled provider the saved
+    /// path was chosen to get away from.
     public static func resolve(stored: String, stamped: String?,
-                               fileManager: FileManager = .default) -> ResolvedCheckout {
-        let existingStamp = stamped.flatMap { fileManager.fileExists(atPath: $0) ? $0 : nil }
+                               fileManager: FileManager = .default) -> String? {
         let trimmed = stored.trimmingCharacters(in: .whitespaces)
         if !trimmed.isEmpty, PathSafety.rejection(of: trimmed, fileManager: fileManager) == nil {
-            return ResolvedCheckout(checkout: (trimmed as NSString).expandingTildeInPath,
-                                    stamped: existingStamp)
+            return (trimmed as NSString).expandingTildeInPath
         }
-        return ResolvedCheckout(checkout: existingStamp, stamped: existingStamp)
+        return existing(stamped, fileManager: fileManager)
     }
-}
 
-/// What `UpdatePreferences.resolve` found on disk.
-public struct ResolvedCheckout: Sendable, Equatable {
-    /// The checkout updates compare against, nil when there is none.
-    public var checkout: String?
-    /// The folder the build was stamped with, when it still exists.
-    public var stamped: String?
-
-    public init(checkout: String?, stamped: String?) {
-        self.checkout = checkout
-        self.stamped = stamped
+    /// The stamped folder when it still exists: the Source checkout
+    /// row's hint. Disk work too, so off the main actor.
+    public static func existing(_ stamped: String?,
+                                fileManager: FileManager = .default) -> String? {
+        stamped.flatMap { fileManager.fileExists(atPath: $0) ? $0 : nil }
     }
 }
