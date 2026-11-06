@@ -857,13 +857,10 @@ struct PluginDetailView: View {
         .onAppear {
             name = app.primitiveNames.name(forPlugin: plugin.ref) ?? plugin.displayName ?? plugin.name
         }
+        // The page header's back chevron (and its ⌘[), reselecting the
+        // Explore tab or the Plugins sidebar item all come through here.
         .onChange(of: app.navReselects) { leave() }
-        // Invisible, but its shortcut goes back: reselecting the Explore
-        // tab or the Plugins sidebar item does it by pointer.
-        .background(Button("Back", action: leave)
-            .keyboardShortcut("[", modifiers: .command)
-            .opacity(0)
-            .accessibilityHidden(true))
+        .preference(key: DetailOpenKey.self, value: true)
         .alert("Unsaved changes", isPresented: $leaving) {
             Button("Save all") { saveAllAndLeave() }
             Button("Discard", role: .destructive) { onBack() }
@@ -1098,13 +1095,10 @@ struct SkillDetailView: View {
             guard !Task.isCancelled else { return }
             found = (path, worked)
         }
+        // The page header's back chevron (and its ⌘[) and reselecting the
+        // Skills sidebar item both come through here.
         .onChange(of: app.navReselects) { leave() }
-        // Invisible, but its shortcut goes back: reselecting the Skills
-        // sidebar item does it by pointer.
-        .background(Button("Back", action: leave)
-            .keyboardShortcut("[", modifiers: .command)
-            .opacity(0)
-            .accessibilityHidden(true))
+        .preference(key: DetailOpenKey.self, value: true)
         .alert("Unsaved changes", isPresented: $leaving) {
             Button("Save all") { saveAllAndLeave() }
             Button("Discard", role: .destructive) { onBack() }
@@ -1141,4 +1135,13 @@ struct SkillDetailView: View {
         refresh += 1
         Task { await app.skills.load(for: app.swePath) }
     }
+}
+
+/// Set by a plugin or skill detail while it is on screen, so its page can
+/// show the header's back chevron like every other detail page. The
+/// chevron bumps `navReselects`, which the detail answers through its
+/// unsaved-changes ask.
+struct DetailOpenKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
 }
