@@ -465,7 +465,7 @@ function openSheet(r) {
     : `<p class="caption">${r.remote ? "Usage is read on the hub machine only; this session ran on " + esc(r.machine) + "."
       : "No token usage recorded for this session in the ledger."}</p>`;
   const line = resumeLine(r);
-  // The supervised channel: the attach mode, and the qv-… pane name for
+  // The supervised channel: the attach mode, and the swe-… pane name for
   // tmux runs (a kept one stays alive detached until adopted or reaped).
   const supervised = (r.ownership === "attached" || r.kept) && (r.mode || r.tmux);
   const tmuxLine = r.tmux ? `tmux attach -t ${Fmt.shellWord(r.tmux)}` : "";

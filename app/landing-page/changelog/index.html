@@ -158,6 +158,13 @@ comments in <code>--json</code> gain <code>association</code>.</p>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>swe's tmux panes are named <code>swe-…</code>.</strong> Sessions the hub runs under
+tmux were still named <code>qv-&lt;slug&gt;</code>. New panes are <code>swe-&lt;slug&gt;</code>, so
+<code>tmux attach -t swe-…</code> is what the web chip, the Run in terminal
+button and the docs give. Panes a hub started before the upgrade keep
+their <code>qv-</code> name: the hub still writes to them, a satellite's rows
+still carry them, and a launch never starts a second pane beside one.</p>
+</li>
 <li><p><strong>Linux hubs and satellites run as <code>swe-remote-*.service</code>.</strong> <code>swe remote serve --install</code> and <code>swe remote agent --install</code> still wrote
 <code>quiver-remote-hub.service</code> and <code>quiver-remote-agent.service</code>. They
 now write <code>swe-remote-hub.service</code> and <code>swe-remote-agent.service</code>, and
