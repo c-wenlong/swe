@@ -66,6 +66,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   menu rows), and text with line breaks goes in as one bracketed paste
   instead of one Enter per line.
 
+- **swe's tmux panes are named `swe-…`.** Sessions the hub runs under
+  tmux were still named `qv-<slug>`. New panes are `swe-<slug>`, so
+  `tmux attach -t swe-…` is what the web chip, the Run in terminal
+  button and the docs give. Panes a hub started before the upgrade keep
+  their `qv-` name: the hub still writes to them, a satellite's rows
+  still carry them, and a launch never starts a second pane beside one.
+
 - **Linux hubs and satellites run as `swe-remote-*.service`.** `swe
   remote serve --install` and `swe remote agent --install` still wrote
   `quiver-remote-hub.service` and `quiver-remote-agent.service`. They

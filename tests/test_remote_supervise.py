@@ -540,7 +540,7 @@ class TestTmuxHelpers(unittest.TestCase):
         # The harness is exec'd by absolute path with our PATH — no shell
         # in between to rebuild PATH from zsh startup files.
         with patch.object(supervise, "tmux_bin", return_value="/usr/bin/tmux"), \
-             patch.object(supervise, "tmux_alive", side_effect=[False, True]), \
+             patch.object(supervise, "tmux_alive", side_effect=[False, False, True]), \
              patch.object(supervise.shutil, "which", return_value="/opt/bin/claude"), \
              patch.object(supervise.time, "sleep"), \
              patch.dict(supervise.os.environ, {"PATH": "/opt/bin:/usr/bin"}), \
@@ -558,7 +558,7 @@ class TestTmuxHelpers(unittest.TestCase):
         # -c (zsh rebuilds PATH; a space in the path splits it). A
         # launch with no extra args must still reach tmux as an argv.
         with patch.object(supervise, "tmux_bin", return_value="/usr/bin/tmux"), \
-             patch.object(supervise, "tmux_alive", side_effect=[False, True]), \
+             patch.object(supervise, "tmux_alive", side_effect=[False, False, True]), \
              patch.object(supervise.shutil, "which",
                           side_effect={"claude": "/Users/a b/bin/claude",
                                        "env": "/usr/bin/env"}.get), \
@@ -603,6 +603,53 @@ class TestTmuxHelpers(unittest.TestCase):
             self.assertIsNone(
                 supervise.launch_tmux("claude:s1", ["claude"], "/tmp")
             )
+
+
+class TestPaneNames(unittest.TestCase):
+    """Panes are ``swe-<slug>``; a pre-rename hub's ``qv-<slug>`` panes
+    stay findable until they close."""
+
+    def test_names(self):
+        slug = protocol.key_slug("claude:s1")[:16]
+        self.assertEqual(supervise.tmux_name("claude:s1"), f"swe-{slug}")
+        self.assertEqual(supervise.legacy_tmux_name("claude:s1"), f"qv-{slug}")
+
+    def test_derived_pane_prefers_the_new_name(self):
+        new = supervise.tmux_name("claude:s1")
+        old = supervise.legacy_tmux_name("claude:s1")
+        for live, want in (({new, old}, new), ({old}, old), (set(), new)):
+            with patch.object(supervise, "tmux_alive", side_effect=live.__contains__):
+                self.assertEqual(supervise.derived_pane("claude:s1"), want, live)
+
+    def test_channel_name_reaches_a_legacy_pane_without_a_recorded_name(self):
+        home = temp_dir(self)
+        old = supervise.legacy_tmux_name("claude:s1")
+        supervise.mark(home, "claude:s1", {"mode": "tmux"})
+        with patch.object(supervise, "tmux_alive", side_effect={old}.__contains__):
+            self.assertEqual(supervise.channel_name(home, "claude:s1"), old)
+        # A recorded name always wins, whichever prefix it has.
+        supervise.mark(home, "claude:s2", {"mode": "tmux", "tmux": "qv-recorded"})
+        self.assertEqual(supervise.channel_name(home, "claude:s2"), "qv-recorded")
+
+    def test_launch_tmux_never_starts_beside_a_legacy_pane(self):
+        old = supervise.legacy_tmux_name("claude:s1")
+        with patch.object(supervise, "tmux_bin", return_value="/x/tmux"), \
+             patch.object(supervise, "tmux_alive", side_effect={old}.__contains__), \
+             patch.object(supervise, "_tmux") as tmux:
+            self.assertIsNone(
+                supervise.launch_tmux("claude:s1", ["claude"], "/tmp"))
+            tmux.assert_not_called()
+
+    def test_attach_names_the_legacy_pane_in_the_way(self):
+        home = temp_dir(self)
+        old = supervise.legacy_tmux_name("claude:s1")
+        with patch.object(supervise, "launch_tmux", return_value=None), \
+             patch.object(supervise, "tmux_alive", side_effect={old}.__contains__):
+            ok, note = supervise._attach_tmux(
+                home, "claude:s1", _session(), ["--resume", "s1"], {}, [],
+                model=None, effort=None)
+        self.assertFalse(ok)
+        self.assertIn(f"tmux kill-session -t {old}", note)
 
 
 def _typing_pane(pane):
