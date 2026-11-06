@@ -690,6 +690,26 @@ class TestWindowLabel(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestAuthHeaders(unittest.TestCase):
+    """authHeaders marks every request as the page's own with X-Swe-Pair,
+    the header's name since the rename (the hub still reads the old one)."""
+
+    def headers(self, cred):
+        src = "const credential = () => %s;\n" % json.dumps(cred) + app_js_function("authHeaders") + """
+process.stdout.write(JSON.stringify(authHeaders({ "Content-Type": "application/json" })));
+"""
+        done = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def test_sends_the_renamed_pair_header(self):
+        self.assertEqual(self.headers(""), {"X-Swe-Pair": "1", "Content-Type": "application/json"})
+        got = self.headers("tok")
+        self.assertEqual(got["Authorization"], "Bearer tok")
+        self.assertNotIn("X-Quiver-Pair", got)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
 class TestRevealActiveTab(unittest.TestCase):
     """revealActiveTab: on a phone the sidebar scrolls sideways, and the
     current page's tab must be scrolled into view."""

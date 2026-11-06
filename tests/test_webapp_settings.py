@@ -835,7 +835,7 @@ class TestOwnerTailnetCaller(_Settings):
                                   if ip == self.OWNER_IP else None)
 
     def headers(self, post=False):
-        h = {"X-Forwarded-For": self.OWNER_IP, "X-Forwarded-Proto": "https", "X-Quiver-Pair": "1"}
+        h = {"X-Forwarded-For": self.OWNER_IP, "X-Forwarded-Proto": "https", "X-Swe-Pair": "1"}
         if post:
             h.update({"Origin": f"https://127.0.0.1:{self.srv.port}", "Content-Type": "application/json"})
         return h
