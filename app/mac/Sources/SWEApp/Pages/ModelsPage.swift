@@ -151,7 +151,7 @@ struct ModelsContent: View {
     }
 
     private var search: some View {
-        SearchField(prompt: "Search the whole catalog", text: $model.query)
+        SearchField(prompt: Self.searchPrompt, text: $model.query)
             .frame(minWidth: Self.searchMinWidth)
     }
 
@@ -174,8 +174,18 @@ struct ModelsContent: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { trailingWidth = $0 }
     }
 
-    /// The search field's floor: below it the stamp gives up its room.
-    static let searchMinWidth: CGFloat = 140
+    /// Short enough to read whole at the field's floor.
+    static let searchPrompt = "Search all models"
+
+    /// The search field's floor, wide enough for its whole prompt (a fixed
+    /// 140 cut "Search the whole catalog" to "Search the whole cata"):
+    /// the prompt at the field's font, plus the magnifier, the gap and the
+    /// side padding. Below it the stamp gives up its room.
+    /// Measured at the current text zoom, like the stamp.
+    @MainActor static var searchMinWidth: CGFloat {
+        let prompt = (searchPrompt as NSString).size(withAttributes: [.font: Theme.nsFont(size: 14)]).width
+        return ceil(prompt) + Theme.scaled(14) + 8 + 2 * 12
+    }
 
     private var stampWidth: CGFloat {
         guard let updatedAt = model.updatedAt else { return 0 }
@@ -206,7 +216,7 @@ struct ModelsContent: View {
     /// The one-row toolbar's narrowest width: controls, search floor,
     /// spacer floor, the stamp if any and the buttons, with the HStack's
     /// gap between every pair (the spacer is an item too).
-    static func oneRowWidth(controls: CGFloat, stamp: CGFloat?, trailing: CGFloat) -> CGFloat {
+    @MainActor static func oneRowWidth(controls: CGFloat, stamp: CGFloat?, trailing: CGFloat) -> CGFloat {
         let items = [controls, searchMinWidth, gap /* Spacer(minLength:) */, stamp, trailing].compactMap { $0 }
         return items.reduce(0, +) + gap * CGFloat(items.count - 1)
     }

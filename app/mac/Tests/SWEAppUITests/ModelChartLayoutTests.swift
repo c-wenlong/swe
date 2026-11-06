@@ -124,6 +124,14 @@ struct ModelChartLayoutTests {
     /// name gets about a quarter of the extra width, not all of it.
     /// The one-row toolbar counts every HStack gap, the spacer's included:
     /// 4 items need 3 gaps plus the spacer's floor, 5 need 4.
+    /// The search field's floor holds its whole prompt beside the
+    /// magnifier: a fixed 140 once cut it to "Search the whole cata".
+    @Test func theSearchFloorFitsItsPrompt() {
+        let prompt = (ModelsContent.searchPrompt as NSString)
+            .size(withAttributes: [.font: Theme.nsFont(size: 14)]).width
+        #expect(ModelsContent.searchMinWidth >= prompt + 2 * 12 + 8 + 14)
+    }
+
     @Test func theToolbarCountsEveryGap() {
         let floor = ModelsContent.searchMinWidth
         #expect(ModelsContent.oneRowWidth(controls: 700, stamp: nil, trailing: 36)
