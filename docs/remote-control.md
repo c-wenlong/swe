@@ -137,7 +137,7 @@ with that URL instead of `--tailnet`.
 | ChatGPT Remote (Codex) | desktop app as host, account relay | app-server internally | Queue vs Steer follow-ups; "phone as control plane" framing; approvals + diffs + notify |
 | `codex app-server` | JSON-RPC 2.0 over stdio | `thread/resume` + `turn/start`, server-initiated approval requests, `command/exec` pty | our tier-A Codex inject channel |
 | `opencode serve` | HTTP + one SSE `/event` | `POST /session/{id}/prompt_async`, `permission.asked`/`replied` over HTTP | our tier-A opencode channel; API-driven-seat model |
-| Agent Client Protocol | JSON-RPC 2.0 over stdio | `session/load`/`new`, `session/prompt`, `session/update` chunks, `session/request_permission`, `session/cancel` | our ACP channel (`remote/acp.py`) for devin, qwen and any CLI with an ACP mode; claude via `claude-agent-acp` on `--mode=acp` (#1637) |
+| Agent Client Protocol | JSON-RPC 2.0 over stdio | `session/load`/`new`, `session/prompt`, `session/update` chunks, `session/request_permission`, `session/cancel` | our ACP channel (`remote/acp.py`) for devin, cursor-agent and copilot builds with an ACP mode (gemini, qwen and kimi are detected but have no resume flags to attach with); claude via `claude-agent-acp` on `--mode=acp` (#1637) |
 | Happy Coder | encrypted blob relay, QR key exchange, offline queue | pty wrapper | pairing + offline-first queue shape (no E2E needed — relay is ours) |
 | VibeTunnel | pty → WebSocket, server-side VT emulation | pty write | pty is an *input* fallback, never the display format |
 
@@ -398,7 +398,7 @@ Registry keyed by `tool_name`, same shape as `PARSER_REGISTRY` /
 | A | opencode | `opencode serve` REST + SSE (`prompt_async`, permission replies) | structured msgs, approvals, interrupt, multi-client |
 | A | codex | `codex app-server` JSON-RPC (`thread/resume`+`turn/start`, approval reqs) | structured items, approvals, deltas |
 | A | claude | headless `claude -p --resume <id> --output-format stream-json` per message | one appended turn per call, deltas; permissions preset via `--permission-mode`/`--allowedTools` (no mid-turn prompt in print mode — flagged limitation) |
-| A | any harness whose CLI has an Agent Client Protocol mode (devin `acp`, qwen `--acp`, cursor-agent, copilot, gemini, kimi; claude through the `claude-agent-acp` adapter, opt-in) | `acp.py` JSON-RPC over stdio (`initialize`, `session/load` or `session/new`, `session/prompt`, `session/cancel`) | streamed text, thought and tool deltas, approvals with the agent's own options, interrupt |
+| A | any harness whose CLI has an Agent Client Protocol mode (devin `acp`, cursor-agent, copilot; gemini, qwen and kimi are detected but not attachable without resume flags; claude through the `claude-agent-acp` adapter, opt-in) | `acp.py` JSON-RPC over stdio (`initialize`, `session/load` or `session/new`, `session/prompt`, `session/cancel`) | streamed text, thought and tool deltas, approvals with the agent's own options, interrupt |
 | B | resumable TUIs (gemini, cursor, crush, cline, droid, pi…) | `supervise.py` tmux: send = `send-keys` (C0 control characters other than tab and newline dropped first; multi-line text as one bracketed `paste-buffer -p`), prompt/approval = `capture-pane` parse, display still transcript tail | universal write; approvals are buttons that send menu keys — best effort |
 | C | neither resumable nor headless | tail only | read + notify |
 
@@ -425,25 +425,37 @@ for. Attach starts the agent and does the handshake before writing the
 registry row: `initialize` (protocol version 1, no `fs` or `terminal`
 client capabilities, so the agent uses its own tools), then
 `session/load` with the id the harness's resume flags carry when the
-agent advertises `loadSession`, else `session/new`. A new session is
-said in the attach note and its id stored on the row as
-`acp_session_id`, so a restart loads that one; its transcript is the
-agent's new session, not the one attached. Under `auto`, an agent that
-fails any handshake step (not signed in, a load error, a crash) falls
-back to the tmux launch, and the note carries the reason. An explicit
-`--mode=acp` reports the failure instead.
+agent advertises `loadSession`. Attach still needs those resume flags,
+so a harness without them (gemini, qwen, kimi today) is not attachable
+on any channel. The handshake gets `ATTACH_ACP_S` (5 s), which leaves
+a tmux fallback room inside the apps' 15 s attach timeout. Under
+`auto`, an agent that fails any step (not signed in, a load error, too
+slow, a crash) or can't load sessions at all falls back to the tmux
+launch, and the note carries the reason. An explicit `--mode=acp`
+reports a failure instead, and on an agent without `loadSession` it
+runs `session/new`: the note says so and the row stores the new id as
+`acp_session_id`, so a restart loads that one. The chat keeps tailing
+the attached session's transcript, which the new session never
+writes, so its replies show only as live text there; its own
+transcript appears as its own session.
 
 The attach's live agent stays registered with the injector, so the
 first send in the hub process reuses it; an agent that has exited is
 restarted on the next send and loads the same session. Each send is one
 `session/prompt`; its answer ends the turn. ACP takes one prompt per
-session at a time, so `queue` refuses while a turn runs and `steer`
-waits for it to end, then sends (`degraded: true`). An answer within a
-second (a refused prompt) is reported as the send's result. Interrupt
+session at a time, so a send that arrives mid-turn waits for the turn
+to end, then goes (`steer` reports `degraded: true`). A queued send
+waits too: a harness with no status probe reads `""` mid-turn, so the
+hub's queue may let it through early. An answer within a second (a
+refused prompt) is reported as the send's result; an error answer
+after that arrives as a `notify` event of kind `error`, as does the
+agent exiting mid-turn. Interrupt
 is `session/cancel`. `session/request_permission` becomes
 `approval.requested` with `toolCall.title` (plus its command or path)
 as the prompt and the agent's options as the menu rows (`n` from 1,
-`label` the option name); `allow`, `always` and `deny` pick the first
+`label` the option name, `kind` the option's kind, and `standing: true`
+for `allow_always`/`reject_always`, which an ntfy button never offers
+whatever the label says); `allow`, `always` and `deny` pick the first
 option of kind `allow_once`/`allow_always`, `allow_always`, and
 `reject_once`/`reject_always`. A cancel, the turn ending or the agent
 dying retires open requests with `approval.resolved` (`source`

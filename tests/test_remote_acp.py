@@ -117,7 +117,7 @@ for raw in sys.stdin:
                          {"optionId": "no", "name": "Reject", "kind": "reject_once"},
                      ]}})
             continue
-        if mode == "slow":
+        if mode in ("slow", "late-error"):
             chunk(sid, "agent_message_chunk", "working on it ")
             continue  # waits for session/cancel
         chunk(sid, "agent_thought_chunk", "pondering")
@@ -131,7 +131,11 @@ for raw in sys.stdin:
         chunk(sid, "agent_message_chunk", "done ", "m2")
         out({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
     elif method == "session/cancel":
-        if prompt_id is not None:
+        if prompt_id is not None and mode == "late-error":
+            out({"jsonrpc": "2.0", "id": prompt_id,
+                 "error": {"code": -32000, "message": "provider overloaded"}})
+            prompt_id = None
+        elif prompt_id is not None:
             out({"jsonrpc": "2.0", "id": prompt_id,
                  "result": {"stopReason": "cancelled"}})
             prompt_id = None
@@ -254,7 +258,8 @@ class TestPromptStreaming(_AcpCase):
         # m1 and m2 are two messages, split by the tool call.
         ids = {i for i, k, _t in self.rec.pushes if k == "assistant"}
         self.assertEqual(len(ids), 2)
-        self.assertIn("acp:tool:t9", self.rec.finished)
+        self.assertTrue(any(i.endswith(":tool:t9")
+                            for i in self.rec.finished))
         sent = self._sent()
         init = next(m for m in sent if m.get("method") == "initialize")
         self.assertEqual(init["params"]["protocolVersion"], 1)
@@ -281,7 +286,7 @@ class TestPromptStreaming(_AcpCase):
         kinds = {e["data"]["kind"] for e in events
                  if e["type"] == "message.delta"}
         self.assertEqual(kinds, {"assistant", "thinking", "tool_use"})
-        self.assertTrue(any(e["data"]["id"] == "acp:tool:t9"
+        self.assertTrue(any(e["data"]["id"].endswith(":tool:t9")
                             and e["data"].get("done") for e in events))
 
     def test_second_send_reuses_the_agent(self):
@@ -289,9 +294,16 @@ class TestPromptStreaming(_AcpCase):
         inj = self._injector()
         self.assertTrue(inj.send(self.session, {"text": "a"}, "done").ok)
         inject.AcpInjector._conns[self.key].idle.wait(10)
+        first = {i for i, _k, _t in self.rec.pushes}
+        self.rec.pushes.clear()
         self.assertTrue(self._injector().send(
             self.session, {"text": "b"}, "done").ok)
+        inject.AcpInjector._conns[self.key].idle.wait(10)
         self.assertEqual(self._starts(), 1)
+        # The fake reuses messageIds m1/m2 every turn; stream ids don't.
+        second = {i for i, _k, _t in self.rec.pushes}
+        self.assertTrue(second)
+        self.assertFalse(first & second)
         loads = [m for m in self._sent() if m.get("method") == "session/load"]
         self.assertEqual(len(loads), 1)
 
@@ -351,9 +363,10 @@ class TestPermission(_AcpCase):
         self.assertIn("Run ls", data["prompt"])
         self.assertIn("ls -la", data["prompt"])
         self.assertEqual(data["options"], [
-            {"n": "1", "label": "Allow"},
-            {"n": "2", "label": "Always allow"},
-            {"n": "3", "label": "Reject"},
+            {"n": "1", "label": "Allow", "kind": "allow_once"},
+            {"n": "2", "label": "Always allow", "kind": "allow_always",
+             "standing": True},
+            {"n": "3", "label": "Reject", "kind": "reject_once"},
         ])
 
     def test_semantic_decision_round_trip(self):
@@ -410,16 +423,38 @@ class TestCancel(_AcpCase):
                          "turn started")
         conn = inject.AcpInjector._conns[self.key]
         self.assertFalse(conn.idle.is_set())
-        # queue refuses mid-turn
-        res = inj.send(self.session, {"text": "more", "mode": "queue"},
-                       "done")
-        self.assertFalse(res.ok)
         self.assertTrue(inj.control(self.session, "interrupt", "").ok)
         self.assertTrue(conn.idle.wait(10))
         self.assertEqual(conn.last_stop, "cancelled")
         self.rec.wait(lambda: self.rec.finish_alls >= 1)
         # Nothing running: a second interrupt says so.
         self.assertFalse(inj.control(self.session, "interrupt", "").ok)
+
+    def test_queue_waits_for_the_turn_too(self):
+        # A harness with no status probe reads "" mid-turn, so the hub
+        # lets a queued send through: it must wait here, not fail.
+        self._mark()
+        inj = self._injector()
+        self.assertTrue(inj.send(self.session, {"text": "go"}, "done").ok)
+        conn = inject.AcpInjector._conns[self.key]
+        real_wait = conn.idle.wait
+        waiting = threading.Event()
+
+        def spy(timeout=None):
+            waiting.set()
+            return real_wait(timeout)
+
+        conn.idle.wait = spy
+        out = {}
+        t = threading.Thread(target=lambda: out.setdefault(
+            "r", inj.send(self.session, {"text": "more", "mode": "queue"},
+                          "")))
+        t.start()
+        self.assertTrue(waiting.wait(10))
+        inj.control(self.session, "interrupt", "")
+        t.join(15)
+        self.assertTrue(out["r"].ok, out["r"].note)
+        self.assertFalse(out["r"].degraded)
 
     def test_steer_waits_for_the_turn_then_sends(self):
         self._mark()
@@ -464,6 +499,40 @@ class TestMalformed(_AcpCase):
         err = next(m for m in self._sent() if m.get("id") == 900)
         self.assertEqual(err["error"]["code"], -32601)
         self.assertEqual(self.rec.pushes, [])
+
+
+class TestLateError(_AcpCase):
+    mode = "late-error"
+
+    def test_error_after_the_early_window_is_a_notify_event(self):
+        self.enterContext(patch.object(inject, "_ACP_EARLY_S", 0.05))
+        self._mark()
+        inj = self._injector()
+        res = inj.send(self.session, {"text": "go"}, "done")
+        self.assertEqual(res.note, "turn started")
+        inject.AcpInjector._conns[self.key].cancel()
+        self.rec.wait(lambda: self.rec.of("notify"))
+        data = self.rec.of("notify")[0]["data"]
+        self.assertEqual(data["kind"], "error")
+        self.assertIn("provider overloaded", data["message"])
+
+
+class TestDetachRace(_AcpCase):
+    def test_detach_during_the_handshake_wins(self):
+        self._mark()
+        real = acp.Connection.handshake
+
+        def detach_midway(conn, ref, **kw):
+            supervise.unmark(self.home, self.key)
+            return real(conn, ref, **kw)
+
+        with patch.object(acp.Connection, "handshake", detach_midway):
+            res = self._injector().send(self.session, {"text": "x"}, "done")
+        self.assertFalse(res.ok)
+        self.assertIn("detached", res.note)
+        self.assertNotIn(self.key, inject.AcpInjector._conns)
+        self.assertFalse(any(m.get("method") == "session/prompt"
+                             for m in self._sent()))
 
 
 class TestRefusedPrompt(_AcpCase):
@@ -565,6 +634,22 @@ class TestAttach(_AcpCase):
 
 class TestAttachNoLoad(_AcpCase):
     mode = "no-load"
+
+    def test_auto_takes_tmux_when_the_agent_cannot_load(self):
+        # The chat tails the attached transcript; a new ACP session
+        # would never write to it.
+        with patch.object(supervise, "_local_writer_pids", return_value=[]), \
+             patch.object(acp, "auto_eligible", return_value=True), \
+             patch.object(supervise, "_attach_tmux",
+                          return_value=(True, "attached under tmux swe-x")):
+            ok, note = supervise.attach(
+                self.home, self.key, self.session, mode="auto",
+                last_append_at=None, status="done")
+        self.assertTrue(ok)
+        self.assertIn("can't load sessions", note)
+        self.assertIn("fell back to tmux", note)
+        self.assertFalse(any(m.get("method") == "session/new"
+                             for m in self._sent()))
 
     def test_new_session_recorded_and_noted(self):
         with patch.object(supervise, "_local_writer_pids", return_value=[]):

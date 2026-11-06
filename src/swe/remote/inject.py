@@ -1475,18 +1475,26 @@ class AcpInjector:
     # -- connection ------------------------------------------------------
 
     @classmethod
+    def _gate(cls, session_key: str) -> threading.Lock:
+        with cls._conns_lock:
+            return cls._opening.setdefault(session_key, threading.Lock())
+
+    @classmethod
     def open(cls, home: Path | None, session_key: str, session: Session,
              meta: dict, *, emit=None, machine: str = "",
-             deltas=None):
+             deltas=None, allow_new: bool = True,
+             budget: float | None = None, attaching: bool = False):
         """The live connection for ``session_key``, starting the agent
-        and loading (or creating) its session when none runs. Returns
-        ``(conn, note)``; conn is None when the agent can't serve, and
-        note says why. A new session's id is recorded on the row."""
+        and loading (or, with ``allow_new``, creating) its session when
+        none runs. ``budget`` caps the handshake. Returns ``(conn,
+        note)``; conn is None when the agent can't serve, and note says
+        why. A new session's id is recorded on the row. Outside an
+        attach (``attaching``) the row must still exist once the
+        handshake ends, or the agent is closed: a detach that landed
+        meanwhile wins."""
         from swe.remote import acp
 
-        with cls._conns_lock:
-            gate = cls._opening.setdefault(session_key, threading.Lock())
-        with gate:
+        with cls._gate(session_key):
             with cls._conns_lock:
                 conn = cls._conns.get(session_key)
             if conn is not None and conn.alive():
@@ -1509,10 +1517,15 @@ class AcpInjector:
             ref = str(meta.get("acp_session_id") or "") \
                 or acp_session_ref(session)
             try:
-                note = conn.handshake(ref)
+                note = conn.handshake(ref, allow_new=allow_new,
+                                      budget=budget)
             except acp.AcpError as exc:
                 conn.close()
                 return None, f"ACP handshake failed: {exc}"
+            if not attaching and \
+                    supervise.meta_for(home, session_key) is None:
+                conn.close()
+                return None, "session detached; refusing the write"
             with cls._conns_lock:
                 cls._conns[session_key] = conn
             if conn.session_id != ref:
@@ -1534,10 +1547,14 @@ class AcpInjector:
 
     @classmethod
     def close(cls, session_key: str) -> None:
-        with cls._conns_lock:
-            conn = cls._conns.pop(session_key, None)
-        if conn is not None:
-            conn.close()
+        """Stop the key's agent. Waits out an open() in flight (the same
+        per-key gate), so a handshake finishing after a detach cannot
+        register an agent nobody owns."""
+        with cls._gate(session_key):
+            with cls._conns_lock:
+                conn = cls._conns.pop(session_key, None)
+            if conn is not None:
+                conn.close()
 
     def _conn(self, session: Session, meta: dict):
         return self.open(self.home, self.key, session, meta,
@@ -1567,14 +1584,17 @@ class AcpInjector:
             return InjectResult(False, note)
         degraded = False
         if not conn.idle.is_set():
-            # One prompt per session at a time: queue refuses, steer
-            # waits for the running turn, then sends.
-            if cmd.get("mode") != "steer":
-                return InjectResult(
-                    False, "session is mid-turn; steer to write anyway")
+            # One prompt per session at a time. The hub's queue may not
+            # see the turn (a harness with no status probe reads ""), so
+            # queue waits for the turn here too; steer waits and says it
+            # was queued.
             if not conn.idle.wait(timeout=_QUEUE_WAIT_S):
                 return InjectResult(False, "the running turn did not end")
-            degraded = True
+            degraded = cmd.get("mode") == "steer"
+        # A detach may have landed while the agent started or the turn
+        # ran: the row is the last word before the prompt goes out.
+        if supervise.meta_for(self.home, self.key) is None:
+            return InjectResult(False, "session detached; refusing the write")
         try:
             q = conn.prompt(text)
         except acp.AcpError as exc:
@@ -1584,7 +1604,10 @@ class AcpInjector:
         try:
             reply = q.get(timeout=_ACP_EARLY_S)
         except queue_mod.Empty:
-            reply = False
+            # Past this, a late error answer arrives as a notify event.
+            reply = conn.stop_waiting(q)
+            if reply is acp.PENDING:
+                reply = False
         if reply is None:
             return InjectResult(False, f"{conn.label} exited mid-turn")
         if reply and "error" in reply:

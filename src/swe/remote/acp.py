@@ -171,6 +171,10 @@ class AcpError(Exception):
     pass
 
 
+# ``Connection.stop_waiting``: the turn is still running.
+PENDING = object()
+
+
 # PermissionOptionKind per hub decision, in preference order.
 _DECISION_KINDS = {
     "allow": ("allow_once", "allow_always"),
@@ -224,6 +228,9 @@ class Connection:
         self.idle.set()
         self.last_stop = ""
         self.last_error = ""
+        # Set once send() stopped waiting on the running turn: an error
+        # answer after that has nobody to report it but an event.
+        self._report_late = False
         # request_id -> (rpc id, options) for open permission requests.
         self.approvals: dict[str, tuple[object, list]] = {}
         # Live sinks, bound by the injector (the hub's emit and
@@ -235,8 +242,13 @@ class Connection:
         # The stream id currently growing per kind, and tool calls whose
         # title streams until they finish.
         self._streams: dict[str, str] = {}
+        self._stream_mids: dict[str, str] = {}
+        self._stream_no = 0
         self._tools: set[str] = set()
         self._turn_no = 0
+        # Stream ids carry this, so a restarted agent's ids never repeat
+        # ones the clients already closed.
+        self._nonce = secrets.token_hex(4)
         threading.Thread(target=self._read_loop, daemon=True,
                          name=f"acp-{os.path.basename(self.argv[0])}").start()
 
@@ -335,11 +347,23 @@ class Connection:
 
     # -- handshake -------------------------------------------------------
 
-    def handshake(self, session_ref: str) -> str:
-        """initialize, then load ``session_ref`` or start a new session.
+    def handshake(self, session_ref: str, *, allow_new: bool = True,
+                  budget: float | None = None) -> str:
+        """initialize, then load ``session_ref`` or (``allow_new``) start
+        a new session. ``budget`` caps the whole handshake in seconds.
         Returns "" after a load, else a note saying the session is new;
         raises AcpError when the agent can't serve."""
         from swe import __version__
+
+        deadline = None if budget is None else time.monotonic() + budget
+
+        def within(limit: float) -> float:
+            if deadline is None:
+                return limit
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise AcpError("the agent took too long to start")
+            return min(limit, left)
 
         hello = self.call("initialize", {
             "protocolVersion": PROTOCOL_VERSION,
@@ -350,7 +374,7 @@ class Connection:
                 "terminal": False,
             },
             "clientInfo": {"name": "swe", "version": __version__},
-        }, timeout=INIT_TIMEOUT_S)
+        }, timeout=within(INIT_TIMEOUT_S))
         caps = hello.get("agentCapabilities")
         self.agent_caps = caps if isinstance(caps, dict) else {}
         info = hello.get("agentInfo")
@@ -363,23 +387,27 @@ class Connection:
                 self.call("session/load", {
                     "sessionId": session_ref, "cwd": cwd,
                     "mcpServers": [],
-                }, timeout=LOAD_TIMEOUT_S)
+                }, timeout=within(LOAD_TIMEOUT_S))
             finally:
                 self.replaying = False
                 self._streams.clear()
+                self._stream_mids.clear()
             self.session_id = session_ref
             self.resumed = True
             return ""
+        if not allow_new:
+            raise AcpError(f"{self.label} can't load sessions over ACP")
         made = self.call("session/new", {"cwd": cwd, "mcpServers": []},
-                         timeout=INIT_TIMEOUT_S)
+                         timeout=within(INIT_TIMEOUT_S))
         sid = made.get("sessionId")
         if not isinstance(sid, str) or not sid:
             raise AcpError("session/new returned no sessionId")
         self.session_id = sid
         self.resumed = False
         return (f"{self.label} can't load sessions over ACP, so this is "
-                f"a new session ({sid}); the earlier conversation is not "
-                "in its context")
+                f"a new session ({sid}): the earlier conversation is not "
+                "in its context, and its transcript is that session's, "
+                "not this chat's")
 
     # -- turns -----------------------------------------------------------
 
@@ -400,6 +428,20 @@ class Connection:
             self.idle.set()
             raise
         return q
+
+    def stop_waiting(self, q: queue.Queue):
+        """send() is done waiting on the turn behind ``q``: the answer if
+        it arrived meanwhile (None when the agent died), else
+        ``PENDING``, and a later error answer is reported as a
+        ``notify`` error event instead."""
+        with self.lock:
+            if self.turn_rpc is not None:
+                self._report_late = True
+                return PENDING
+        try:
+            return q.get_nowait()
+        except queue.Empty:
+            return PENDING
 
     def cancel(self) -> bool:
         """session/cancel, and every open permission request answered
@@ -448,6 +490,9 @@ class Connection:
         """End the agent: EOF on its stdin first, so it can finish what it
         read and exit on its own; terminate, then kill, if it lingers."""
         self.dead = True
+        with self.lock:
+            # Closed on purpose: not an exit worth a notification.
+            self._report_late = False
         with self.wlock:
             try:
                 if self.proc.stdin is not None:
@@ -506,7 +551,12 @@ class Connection:
         with self.lock:
             waiting = list(self.replies.values())
             self.replies.clear()
+            late, self._report_late = self._report_late, False
             self.turn_rpc = None
+        if late:
+            self._emit("notify", {
+                "kind": "error", "status": "error",
+                "message": f"{self.label} exited mid-turn"})
         for q in waiting:
             q.put(None)
         self._finish_turn()
@@ -529,8 +579,10 @@ class Connection:
             with self.lock:
                 q = self.replies.pop(rpc_id, None)
                 ended = rpc_id == self.turn_rpc
+                late = False
                 if ended:
                     self.turn_rpc = None
+                    late, self._report_late = self._report_late, False
         except TypeError:  # an unhashable id
             return
         if ended:
@@ -539,6 +591,10 @@ class Connection:
                 self.last_stop = str(result.get("stopReason") or "")
             self.last_error = (_error_text(msg["error"])
                                if "error" in msg else "")
+            if late and self.last_error:
+                self._emit("notify", {
+                    "kind": "error", "status": "error",
+                    "message": f"{self.label}: {self.last_error}"[:280]})
             self._finish_turn()
             self._retire_approvals("turn_ended", answer=True)
         if q is not None:
@@ -578,11 +634,7 @@ class Connection:
         self._emit("approval.requested", {
             "request_id": request_id,
             "prompt": _tr._redact_secrets(prompt),
-            "options": [
-                {"n": str(i), "label": _tr._redact_secrets(
-                    str(o.get("name") or o["optionId"]))[:140]}
-                for i, o in enumerate(options, 1)
-            ],
+            "options": [_menu_row(i, o) for i, o in enumerate(options, 1)],
         })
 
     def _retire_approvals(self, source: str, *, answer: bool) -> None:
@@ -618,8 +670,7 @@ class Connection:
                 return
             kind = _CHUNK_KINDS[what]
             mid = update.get("messageId")
-            stream = f"acp:{mid}:{kind}" if isinstance(mid, str) and mid \
-                else ""
+            mid = mid if isinstance(mid, str) and mid else ""
             current = self._streams.get(kind)
             # A chunk of another kind (or a tool call) in between starts
             # the next message: the transcript writes them apart too.
@@ -627,23 +678,30 @@ class Connection:
                 if other != kind:
                     deltas.finish(self.key, sid)
                     self._streams.pop(other, None)
-            if current is None or (stream and stream != current):
+                    self._stream_mids.pop(other, None)
+            if current is None or (mid and mid != self._stream_mids.get(kind)):
                 if current is not None:
                     deltas.finish(self.key, current)
-                current = stream or (
-                    f"acp:{self.session_id}:{self._turn_no}:"
-                    f"{kind}:{time.time_ns()}")
+                # Never the agent's messageId alone: an agent may reuse
+                # one across turns or after a tool call, and an id that
+                # was finished never streams again on the clients.
+                self._stream_no += 1
+                current = (f"acp:{self._nonce}:{self._turn_no}:"
+                           f"{self._stream_no}:{kind}")
                 self._streams[kind] = current
+                self._stream_mids[kind] = mid
             deltas.push(self.key, self.machine, current, kind, text)
         elif what in ("tool_call", "tool_call_update"):
             call_id = update.get("toolCallId")
             if not isinstance(call_id, str) or not call_id:
                 return
-            stream = f"acp:tool:{call_id}"
+            stream = (f"acp:{self._nonce}:{self._turn_no}:"
+                      f"tool:{call_id}")
             if what == "tool_call":
                 for sid in self._streams.values():
                     deltas.finish(self.key, sid)
                 self._streams.clear()
+                self._stream_mids.clear()
                 title = update.get("title")
                 if isinstance(title, str) and title:
                     self._tools.add(stream)
@@ -656,11 +714,31 @@ class Connection:
 
     def _finish_turn(self) -> None:
         self._streams.clear()
+        self._stream_mids.clear()
         self._tools.clear()
         self.idle.set()
         deltas = self.deltas
         if deltas is not None and self.key:
             deltas.finish_all(self.key)
+
+
+# Option kinds whose answer outlives this one request.
+_STANDING_KINDS = frozenset({"allow_always", "reject_always"})
+
+
+def _menu_row(n: int, option: dict) -> dict:
+    """One approval menu row for an ACP permission option. ``standing``
+    marks a grant (or refusal) that outlives the request, by the
+    option's kind rather than its label, so a notification never puts
+    it behind a button whatever language the agent names it in."""
+    row = {"n": str(n), "label": _tr._redact_secrets(
+        str(option.get("name") or option["optionId"]))[:140]}
+    kind = option.get("kind")
+    if isinstance(kind, str) and kind:
+        row["kind"] = kind[:32]
+        if kind in _STANDING_KINDS:
+            row["standing"] = True
+    return row
 
 
 def _error_text(err) -> str:

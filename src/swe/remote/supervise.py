@@ -77,6 +77,11 @@ PENDING_MAX_AGE_S = 86400.0
 # comes first, so this stays well under it (a real resume boots in ~2 s).
 ATTACH_BOOT_S = 8.0
 
+# How long attach gives an ACP agent to initialize and load the session.
+# The apps' attach request times out at 15 s; a slower agent falls back
+# to tmux under auto, whose launch settle and boot need the rest.
+ATTACH_ACP_S = 5.0
+
 # Harness -> tier-A channel mode for ``attach(mode="auto")``. Harnesses
 # not listed keep the tmux channel.
 _AUTO_MODE = {"opencode": "serve", "codex": "appserver"}
@@ -972,7 +977,8 @@ def attach(
         meta, writers = ready
         if meta["mode"] == "acp":
             done = _attach_acp(home, session_key, session, meta, writers,
-                               model=model, effort=effort)
+                               model=model, effort=effort,
+                               explicit=mode == "acp")
             if done[0] or mode != "auto":
                 return done
             # auto picked ACP and it did not come up: the tmux channel
@@ -1117,17 +1123,25 @@ def _attach_acp(
     *,
     model: str | None,
     effort: str | None,
+    explicit: bool,
 ) -> tuple[bool, str]:
     """``attach``'s ACP start, outside the registry lock (the caller
     holds the key's attach lock): spawn the agent, initialize, load the
-    session (or start a new one when the agent can't load), then write
-    the entry. The live connection stays registered with the injector,
-    so the first send in this process reuses it; elsewhere (a CLI
-    attach) the first send starts its own.
+    session, then write the entry. The live connection stays registered
+    with the injector, so the first send in this process reuses it;
+    elsewhere (a CLI attach) the first send starts its own.
+
+    An agent that can't load sessions starts a new one only on an
+    explicit ``--mode=acp``: the chat keeps tailing the attached
+    session's transcript, which the new session never writes, so
+    ``auto`` takes tmux instead. The handshake gets ``ATTACH_ACP_S``,
+    leaving a tmux fallback room inside the apps' attach timeout.
     """
     from swe.remote import inject
 
-    conn, note = inject.AcpInjector.open(home, session_key, session, meta)
+    conn, note = inject.AcpInjector.open(
+        home, session_key, session, meta, allow_new=explicit,
+        budget=ATTACH_ACP_S, attaching=True)
     if conn is None:
         return False, note
     if conn.session_id != inject.acp_session_ref(session):
