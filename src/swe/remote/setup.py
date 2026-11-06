@@ -464,7 +464,8 @@ def gather(home: Path | None = None, port: int | None = None, run: Runner = subp
 
         f.service_available = systemd.available(run)
         if f.service_available:
-            f.agent_args, f.agent_running = systemd.status(home, run)
+            f.agent_args, f.agent_running = systemd.status(
+                home, run, old_unit=systemd.OLD_UNIT)
             f.linger = systemd.lingering(run)
     f.loopback_ok = get(f"http://127.0.0.1:{f.port}/v1/status", 2)[0]
     if f.public_url:

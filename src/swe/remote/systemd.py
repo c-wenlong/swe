@@ -1,9 +1,12 @@
 """Run the hub as a systemd user service on Linux, so it outlives a reboot.
 
 The Linux twin of ``launchd.py``: ``swe remote serve --install`` writes
-``~/.config/systemd/user/quiver-remote-hub.service``, enables it and
+``~/.config/systemd/user/swe-remote-hub.service``, enables it and
 (re)starts it; ``swe remote agent --install`` does the same for the
-satellite under ``quiver-remote-agent.service``. ``Restart=always`` brings the hub back when it exits,
+satellite under ``swe-remote-agent.service``. Hubs before the
+quiver -> swe rename installed ``quiver-remote-*.service``: install and
+uninstall stop, disable and remove that unit too (``old_unit``), the
+way ``launchd.py`` clears ``OLD_LABEL``. ``Restart=always`` brings the hub back when it exits,
 which is also how a ``--tailnet`` hub waits for Tailscale at boot: it
 exits until the tailnet address exists.
 
@@ -25,10 +28,15 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-UNIT = "quiver-remote-hub.service"
+UNIT = "swe-remote-hub.service"
 # The satellite (``swe remote agent --install``) gets its own unit, so
 # installing one never rewrites or stops the other.
-AGENT_UNIT = "quiver-remote-agent.service"
+AGENT_UNIT = "swe-remote-agent.service"
+# The units installed before the rename: install clears them so an old
+# unit cannot keep a second hub (or satellite) running beside the new
+# one, and status still reports one that is all a machine has.
+OLD_UNIT = "quiver-remote-hub.service"
+OLD_AGENT_UNIT = "quiver-remote-agent.service"
 HUB_DESCRIPTION = "SWE remote hub (swe remote serve)"
 # Seconds systemd waits before restarting a hub that exited (launchd's
 # ThrottleInterval twin).
@@ -101,11 +109,33 @@ def _message(res: subprocess.CompletedProcess, what: str) -> str:
     return (res.stderr or res.stdout or "").strip() or f"systemctl {what} exited {res.returncode}"
 
 
+def _other(unit: str, old_unit: str | None) -> str | None:
+    return old_unit if old_unit and old_unit != unit else None
+
+
+def _names(unit: str, old_unit: str | None) -> tuple[str, ...]:
+    """``unit``, then ``old_unit`` when it names a different unit."""
+    old = _other(unit, old_unit)
+    return (unit, old) if old else (unit,)
+
+
+def _stopped(run: Runner, unit: str) -> bool:
+    return (_ctl(run, "is-active", unit).stdout or "").strip() in {"inactive", "failed"}
+
+
 def install(program: list[str], log_path: Path, path_env: str,
             home: Path | None = None, run: Runner = subprocess.run,
-            unit: str = UNIT, description: str = HUB_DESCRIPTION) -> tuple[Path, str]:
+            unit: str = UNIT, description: str = HUB_DESCRIPTION,
+            old_unit: str | None = None) -> tuple[Path, str]:
     """Write the unit, enable it and (re)start it. Returns the unit path
     and a note on lingering ("" when it is on).
+
+    ``old_unit``, the name a pre-rename hub installed under, is stopped,
+    disabled and removed once the new unit has started, as launchd's
+    ``old_label`` is: left enabled it would start a second copy at
+    every boot. Its file goes only once it is really stopped, so a unit
+    systemctl could not stop stays where it can be inspected and
+    stopped by hand.
 
     Raises RuntimeError with systemctl's message when a step fails.
     """
@@ -117,30 +147,44 @@ def install(program: list[str], log_path: Path, path_env: str,
         res = _ctl(run, *args)
         if res.returncode != 0:
             raise RuntimeError(_message(res, args[0]))
+    old = _other(unit, old_unit)
+    if old and unit_path(home, old).exists():
+        # A new hub that found the port still held by the old one exits
+        # and is restarted RESTART_S later, by when this has freed it.
+        _ctl(run, "disable", "--now", old)
+        if _stopped(run, old):
+            unit_path(home, old).unlink()
+            _ctl(run, "daemon-reload")
     return path, ensure_linger(run)
 
 
 def uninstall(home: Path | None = None, run: Runner = subprocess.run,
-              unit: str = UNIT) -> bool:
+              unit: str = UNIT, old_unit: str | None = None) -> bool:
     """Stop and disable the hub and remove the unit. False when none was
     installed.
+
+    ``old_unit`` clears the pre-rename unit too, so an uninstall really
+    leaves nothing behind.
 
     Raises RuntimeError, keeping the unit, when systemctl fails to stop a
     hub that is still active; a failed disable of an absent unit is the
     normal "nothing to stop" case.
     """
-    path = unit_path(home, unit)
-    existed = path.exists()
-    res = _ctl(run, "disable", "--now", unit)
-    if res.returncode != 0 and existed:
-        active = (_ctl(run, "is-active", unit).stdout or "").strip()
-        if active not in {"inactive", "failed"}:
+    existed = False
+    for name in _names(unit, old_unit):
+        path = unit_path(home, name)
+        if name != unit and not path.exists():
+            continue
+        here = path.exists()
+        res = _ctl(run, "disable", "--now", name)
+        if res.returncode != 0 and here and not _stopped(run, name):
             # "active", "activating", or no answer from the manager at
             # all: the hub may still be serving, so keep its unit.
             raise RuntimeError(_message(res, "disable"))
-    if existed:
-        path.unlink()
-        _ctl(run, "daemon-reload")
+        if here:
+            path.unlink()
+            _ctl(run, "daemon-reload")
+            existed = True
     return existed
 
 
@@ -173,14 +217,7 @@ def ensure_linger(run: Runner = subprocess.run) -> str:
     return "" if lingering(run) else LINGER_FIX
 
 
-def status(home: Path | None = None, run: Runner = subprocess.run,
-           unit: str = UNIT) -> tuple[list[str] | None, bool]:
-    """(ExecStart words, active): the installed unit's command line, or
-    None without a unit, and whether systemd runs it now."""
-    try:
-        text = unit_path(home, unit).read_text(encoding="utf-8")
-    except OSError:
-        return None, False
+def _exec_start(text: str) -> list[str] | None:
     args = None
     for line in text.splitlines():
         if line.startswith("ExecStart="):
@@ -188,8 +225,33 @@ def status(home: Path | None = None, run: Runner = subprocess.run,
                 args = [a.replace("%%", "%") for a in shlex.split(line[len("ExecStart="):])]
             except ValueError:
                 args = None
-    try:
-        active = (_ctl(run, "is-active", unit).stdout or "").strip() == "active"
-    except OSError:
-        active = False
-    return args, active
+    return args
+
+
+def status(home: Path | None = None, run: Runner = subprocess.run,
+           unit: str = UNIT, old_unit: str | None = None
+           ) -> tuple[list[str] | None, bool]:
+    """(ExecStart words, active): the installed unit's command line, or
+    None without a unit, and whether systemd runs it now.
+
+    A machine the rename never reached reports its ``old_unit``, so
+    status does not call a still-running pre-rename hub absent. An
+    active unit wins over a stopped one whichever name carries it.
+    """
+    found = False
+    args: list[str] | None = None
+    for name in _names(unit, old_unit):
+        try:
+            text = unit_path(home, name).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        read = _exec_start(text)
+        try:
+            active = (_ctl(run, "is-active", name).stdout or "").strip() == "active"
+        except OSError:
+            active = False
+        if active:
+            return read, True
+        if not found:
+            found, args = True, read
+    return args, False
