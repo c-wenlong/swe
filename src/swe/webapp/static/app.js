@@ -11,17 +11,31 @@ const credential = () => {
   catch { return ""; }
 };
 
-/* X-Quiver-Pair marks the request as this page's own: a page on another
+/* X-Swe-Pair marks the request as this page's own: a page on another
  * site can't send a custom header without the hub's CORS consent, so the
  * hub only honours the owner's tailnet identity with it. */
 function authHeaders(extra = {}) {
   const cred = credential();
-  return { "X-Quiver-Pair": "1", ...(cred ? { Authorization: `Bearer ${cred}` } : {}), ...extra };
+  return { "X-Swe-Pair": "1", ...(cred ? { Authorization: `Bearer ${cred}` } : {}), ...extra };
 }
 
 const esc = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+/* The two theme-color metas follow the system scheme by media query. A
+ * Light or Dark chosen in Settings sets data-theme on <html> and beats the
+ * system, so the browser chrome takes the page's own --wash then; System
+ * puts each meta's own colour back. */
+function syncThemeColor() {
+  const root = document.documentElement;
+  const forced = root.dataset.theme === "light" || root.dataset.theme === "dark";
+  const wash = forced ? getComputedStyle(root).getPropertyValue("--wash").trim() : "";
+  document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => {
+    if (!meta.dataset.system) meta.dataset.system = meta.content;
+    meta.content = wash || meta.dataset.system;
+  });
+}
 
 /* An href for a URL the hub passed on from somewhere else (GitHub, a
  * tracker, a status feed, a plugin's manifest), escaped for an attribute.

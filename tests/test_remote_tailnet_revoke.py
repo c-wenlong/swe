@@ -41,7 +41,7 @@ class _Owner(unittest.TestCase):
         self.home = self.srv.home
 
     def owner(self, ip, method="GET", path="/v1/devices", body=None):
-        headers = {"X-Forwarded-For": ip, "X-Quiver-Pair": "1"}
+        headers = {"X-Forwarded-For": ip, "X-Swe-Pair": "1"}
         if method == "POST":
             headers["Content-Type"] = "application/json"
         status, data = self.srv.request(method, path, body, headers=headers)

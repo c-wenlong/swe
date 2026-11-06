@@ -40,6 +40,7 @@ function settingsApplyAppearance(mode) {
   const root = document.documentElement;
   if (mode === "light" || mode === "dark") root.dataset.theme = mode;
   else delete root.dataset.theme;
+  syncThemeColor();
 }
 
 // SidebarSection.isCore: Settings must stay reachable, and Overview and
@@ -1588,7 +1589,7 @@ function settingsDismissTicket() {
 
 /* Approve or deny a pending pair request, on the protocol's own routes
  * (the same ones a paired phone or the owner's tailnet identity may
- * call): the web app's bearer or X-Quiver-Pair header satisfies both. */
+ * call): the web app's bearer or X-Swe-Pair header satisfies both. */
 async function settingsDecide(rid, act, code) {
   const p = settingsPage;
   if (p.deciding) return;
