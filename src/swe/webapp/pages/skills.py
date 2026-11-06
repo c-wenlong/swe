@@ -205,8 +205,9 @@ def _entries(folder: Path, root: Path, prefix: str = "", depth: int = 0, limit: 
 
 
 def tree(root: Path) -> list[dict]:
-    """PrimitiveTree: files under Skills, Commands, Agents, Hooks, then
-    Other files, each name relative to ``root``. A ``skills/<name>`` folder
+    """PrimitiveTree: a skill's own SKILL.md first as its Main file, then
+    files under Skills, Commands, Agents, Hooks and Other files, each name
+    relative to ``root``. A ``skills/<name>`` folder
     is one entry that opens its SKILL.md, with its files as children."""
     sections = []
     for kind, title in _KINDS:
@@ -246,6 +247,11 @@ def tree(root: Path) -> list[dict]:
             sections.append({"kind": kind, "title": title, "entries": entries})
     other = [{"name": e["name"], "folder": False, "path": e["name"]}
              for e in _entries(root, root, limit=4, skip={k for k, _ in _KINDS})]
+    # A skill folder's own SKILL.md is the skill, not a stray file.
+    main = [e for e in other if e["name"] == "SKILL.md"]
+    if main:
+        other.remove(main[0])
+        sections.insert(0, {"kind": "main", "title": "Main file", "entries": main})
     if other:
         sections.append({"kind": "other", "title": "Other files", "entries": other})
     return sections
