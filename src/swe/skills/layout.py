@@ -325,7 +325,9 @@ def resolve_root_ref(ref: str, home: Path | None = None, cwd: Path | None = None
         try:
             if candidate.resolve() == path.resolve():
                 return label, candidate
-        except OSError:
+        except (OSError, RuntimeError):
+            # RuntimeError: a candidate root that is a symlink loop, before
+            # Python 3.13. It cannot be the root named, so skip it.
             continue
     if path.name == "skills":
         # ~/.hermes/skills is hermes's root, not a root called "skills":
@@ -364,7 +366,7 @@ def shared_scopes_for_skill(skill_path: Path, home: Path | None = None,
     home = home or Path.home()
     try:
         skill_resolved = skill_path.resolve()
-    except OSError:
+    except (OSError, RuntimeError):
         return []
     scopes: list[str] = []
     for entry in (enumerate_skill_roots(home=home) if roots is None else roots):
