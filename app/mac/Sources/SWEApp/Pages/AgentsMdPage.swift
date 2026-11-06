@@ -734,8 +734,16 @@ private struct FlatInstructions: View {
 /// a folder row is a move-into, the "Top level" strip is the root, and
 /// anything else — drifted sideways or over a ghost row — snaps back, so
 /// only the pointer's height ever changes where the chapter goes.
+///
+/// A folder drag nests: a folder row takes it in, a file row means that
+/// file's folder, and the strip is the root. Its own parent, itself and
+/// its own subfolders are never targets, so a drop there snaps back.
+/// A collapsed folder the drag rests on springs open after `springDelay`.
 @Observable
 final class ChapterRailDrag {
+    /// How long a drag rests on a collapsed folder before it opens.
+    static let springDelay: Duration = .milliseconds(650)
+
     enum Target: Equatable {
         case none
         /// The gap before the file at `index` in `level` (display order,
@@ -746,6 +754,9 @@ final class ChapterRailDrag {
     }
 
     var dragging: String?
+    /// The dragged row is a folder: drops nest it rather than reorder.
+    var draggingFolder = false
+    /// The dragged row's folder ("" for the top level).
     var sourceLevel = ""
     var translation: CGFloat = 0
     var target: Target = .none
@@ -786,13 +797,20 @@ final class ChapterRailDrag {
         levelFiles = files
         fileLevel = level
         self.folders = folders
-        sourceLevel = level[path] ?? ""
+        draggingFolder = folders.contains(path)
+        sourceLevel = draggingFolder
+            ? (path.contains("/") ? (path as NSString).deletingLastPathComponent : "")
+            : level[path] ?? ""
     }
 
     /// Reads `target` from the pointer's rail-space position: a file row
     /// opens a gap in its level, a folder row glows, the strip is root,
     /// and rows without a drop meaning (ghosts, missing) refuse.
     func update(point: CGPoint) {
+        if draggingFolder {
+            target = folderTarget(point: point)
+            return
+        }
         if let hit = frames.first(where: { $0.value.contains(point) })?.key {
             if folders.contains(hit) {
                 target = .folder(hit)
@@ -815,6 +833,33 @@ final class ChapterRailDrag {
         } else {
             target = rootZone.contains(point) ? .root : .none
         }
+    }
+
+    /// A folder drag's target: the folder the pointer means — a folder
+    /// row itself, a file row's folder, or the strip's top level — unless
+    /// that is where the folder already sits or inside the folder itself.
+    private func folderTarget(point: CGPoint) -> Target {
+        guard let dragging else { return .none }
+        let destination: String
+        if let hit = frames.first(where: {
+            $0.value.contains(point) && $0.key != dragging
+                && !ChapterIndex.isUnder($0.key, folder: dragging)
+        })?.key {
+            if folders.contains(hit) {
+                destination = hit
+            } else if let level = fileLevel[hit] {
+                destination = level
+            } else {
+                return .none
+            }
+        } else if rootZone.contains(point) {
+            destination = ""
+        } else {
+            return .none
+        }
+        if destination == sourceLevel || destination == dragging
+            || ChapterIndex.isUnder(destination, folder: dragging) { return .none }
+        return destination.isEmpty ? .root : .folder(destination)
     }
 
     /// The row's slide: the dragged row tracks the pointer (clamped to
@@ -843,10 +888,11 @@ final class ChapterRailDrag {
     }
 
     /// The drop's answer, if a drag is live; clears the session either way.
-    func finish() -> (path: String, target: Target)? {
+    func finish() -> (path: String, target: Target, isFolder: Bool)? {
         guard let dragging else { return nil }
-        let done = (dragging, target)
+        let done = (dragging, target, draggingFolder)
         self.dragging = nil
+        draggingFolder = false
         target = .none
         translation = 0
         return done
@@ -1037,6 +1083,15 @@ private struct ChaptersEditor: View {
         }
     }
 
+    /// A folder row dropped on another folder or the top-level strip: the
+    /// model nests the directory and retargets every chapter under it.
+    private func move(folder: String, toFolder parent: String) {
+        Task {
+            moveError = await app.chapters.move(folder: folder, toFolder: parent,
+                                                swe: app.swe)
+        }
+    }
+
     /// The drag ends: a folder row or the strip is a plain move, a gap in
     /// the dragged file's own level is an index reorder, and a gap in a
     /// different level moves the file there at that index position.
@@ -1044,7 +1099,15 @@ private struct ChaptersEditor: View {
         let dropped = withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
             railDrag.finish()
         }
-        guard let (path, target) = dropped else { return }
+        guard let (path, target, isFolder) = dropped else { return }
+        if isFolder {
+            switch target {
+            case .root: move(folder: path, toFolder: "")
+            case .folder(let folder): move(folder: path, toFolder: folder)
+            case .none, .insert: break
+            }
+            return
+        }
         switch target {
         case .none:
             break
@@ -1160,7 +1223,9 @@ private struct ChaptersEditor: View {
         var body: some View {
             VStack(alignment: .leading, spacing: 2) {
                 if node.isFolder { folderRow } else { fileRow }
-                if node.isFolder && expanded {
+                // A dragged folder travels as its row alone: its children
+                // fold away so they can't be aimed at or drawn over.
+                if node.isFolder && expanded && rail.dragging != node.path {
                     ForEach(node.children) { child in
                         OutlineNode(node: child, depth: depth + 1,
                                     compiled: compiled, rail: rail,
@@ -1169,12 +1234,31 @@ private struct ChaptersEditor: View {
                     }
                 }
             }
+            // Above its later siblings, which would otherwise draw over
+            // the dragged row as it travels down.
+            .zIndex(rail.dragging == node.path ? 1 : 0)
+        }
+
+        /// The row's drag: a file reorders or moves, a folder nests.
+        private var railGesture: some Gesture {
+            DragGesture(minimumDistance: 3, coordinateSpace: .named("railOutline"))
+                .onChanged { value in
+                    rail.begin(path: node.path, tree: app.chapters.tree,
+                               indexed: compiled)
+                    rail.translation = value.translation.height
+                    rail.update(point: value.location)
+                }
+                .onEnded { value in
+                    rail.update(point: value.location)
+                    onDrop()
+                }
         }
 
         private var folderRow: some View {
             /// The pointer is over this folder mid-drag: it glows and
             /// grows a little so the row shift marks the drop target.
             let dropTargeted = rail.target == .folder(node.path)
+            let isDragged = rail.dragging == node.path
             return HStack(spacing: 5) {
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
                     .font(Theme.font(size: 9, weight: .semibold))
@@ -1201,12 +1285,30 @@ private struct ChaptersEditor: View {
             .padding(.leading, CGFloat(depth) * 14 + 8)
             .padding(.trailing, 8)
             .padding(.vertical, dropTargeted ? 6 : 4)
-            .background(dropTargeted ? Theme.dropTarget : hovering ? Theme.hover : .clear,
-                        in: .rect(cornerRadius: Theme.controlRadius))
+            .background {
+                if isDragged {
+                    RoundedRectangle(cornerRadius: Theme.controlRadius)
+                        .fill(Theme.card)
+                        .shadow(color: .black.opacity(0.25), radius: 8, y: 2)
+                } else {
+                    RoundedRectangle(cornerRadius: Theme.controlRadius)
+                        .fill(dropTargeted ? Theme.dropTarget : hovering ? Theme.hover : .clear)
+                }
+            }
             .contentShape(.rect)
             .onTapGesture { expanded.toggle() }
-            .onHover { hovering = $0 }
+            .onHover { hovering = rail.dragging == nil && $0 }
+            .gesture(railGesture)
+            .offset(y: rail.yOffset(for: node.path))
             .animation(.easeInOut(duration: Theme.fadeDuration), value: dropTargeted)
+            // Spring loading: a drag resting on this collapsed folder
+            // opens it, so a drop can reach the rows inside.
+            .task(id: dropTargeted && !expanded) {
+                guard dropTargeted && !expanded else { return }
+                try? await Task.sleep(for: ChapterRailDrag.springDelay)
+                guard !Task.isCancelled, rail.target == .folder(node.path) else { return }
+                withAnimation(.easeInOut(duration: Theme.fadeDuration)) { expanded = true }
+            }
             .onGeometryChange(for: CGRect.self) {
                 $0.frame(in: .named("railOutline"))
             } action: { rail.frames[node.path] = $0 }
@@ -1258,19 +1360,7 @@ private struct ChaptersEditor: View {
             .contentShape(.rect)
             .onTapGesture { chapters.selected = node.path }
             .onHover { hovering = rail.dragging == nil && $0 }
-            .gesture(
-                DragGesture(minimumDistance: 3, coordinateSpace: .named("railOutline"))
-                    .onChanged { value in
-                        rail.begin(path: node.path, tree: app.chapters.tree,
-                                   indexed: compiled)
-                        rail.translation = value.translation.height
-                        rail.update(point: value.location)
-                    }
-                    .onEnded { value in
-                        rail.update(point: value.location)
-                        onDrop()
-                    }
-            )
+            .gesture(railGesture)
             .offset(y: rail.yOffset(for: node.path))
             .zIndex(isDragged ? 1 : 0)
             .animation(isDragged ? nil : .spring(response: 0.28, dampingFraction: 0.86),

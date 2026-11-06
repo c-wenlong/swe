@@ -250,6 +250,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Folders nest in the AGENTS.md rail.** Dragging a folder row onto
+  another folder (or onto a file row inside it, or the "Top level"
+  strip) moves the directory on disk, and every chapter under it keeps
+  its index.txt slot, its on/off state and its targets.json rule under
+  the new path. A folder can't move into itself or its own subfolder,
+  and a name already taken on disk, in index.txt or in targets.json is
+  refused with a message under the rail's header. ⌘Z puts the folder
+  back. A drag resting on a collapsed folder springs it open.
+
 - **Chapters drag between folders in the AGENTS.md rail.** A file row
   drops onto a folder row to move the chapter on disk; its index.txt
   entry keeps its slot (an off comment follows it) and any targets.json
