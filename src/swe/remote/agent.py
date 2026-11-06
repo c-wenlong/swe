@@ -935,6 +935,10 @@ class RemoteAgent:
                     effort=str(data.get("effort") or "") or None,
                     yolo=bool(data.get("yolo")),
                     provider=str(data.get("provider") or "") or None,
+                    # As on the hub: a harness swe can't read is never
+                    # adopted, so its waiting launch guards no folder.
+                    exclusive=harness not in catalog_mod.untracked(
+                        catalog_mod.launchable_harnesses()),
                 )
                 return ok, note, False
             if op == "attachment":

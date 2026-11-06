@@ -151,6 +151,19 @@ comments in <code>--json</code> gain <code>association</code>.</p>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>A second launch in a folder no longer strands both.</strong> Adoption tells
+a new session apart only by harness, folder and start time, so two
+launches of one harness waiting in one folder each saw both
+transcripts and neither was ever adopted. A launch while another is
+still starting in that folder is now refused (<code>409 launch_pending</code>,
+naming the waiting tmux pane), so the first is adopted as before.</p>
+</li>
+<li><p><strong>Messages typed into a tmux session can't drive the TUI.</strong> Text the
+hub sends to a tmux pane now loses C0 control characters other than
+tab and newline (an ESC or ^C in a message cancelled turns or picked
+menu rows), and text with line breaks goes in as one bracketed paste
+instead of one Enter per line.</p>
+</li>
 <li><p><strong><code>swe harness discover --json --apply NAME</code> answers in JSON when NAME
 is not a new match.</strong> It printed red text, which the app could not
 decode. It now prints the usual document with <code>applied.refused</code> and the

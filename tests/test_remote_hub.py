@@ -990,6 +990,27 @@ class TestHubWriteRoutes(unittest.TestCase):
         _, view = self._launch_view(launch_id)
         self.assertEqual((view["state"], view["key"]), ("started", "claude:s1"))
 
+    def test_a_second_launch_in_a_waiting_folder_is_refused(self):
+        # One new session per folder: a launch still waiting to be
+        # adopted in /tmp turns the next one away, naming its pane.
+        with patch("swe.remote.supervise.fork_blocker",
+                   return_value="swe-0123abcd") as blocker, \
+             patch("swe.remote.supervise.launch_new") as launch:
+            status, body = self._launch(
+                {"harness": "claude", "cwd": "/tmp", "prompt": "hi"})
+        self.assertEqual(status, 409, body)
+        self.assertEqual(body["error"]["code"], "launch_pending")
+        self.assertIn("swe-0123abcd", body["error"]["message"])
+        self.assertEqual(blocker.call_args[0][1:], ("claude", "/tmp"))
+        launch.assert_not_called()
+        # The launch itself re-checks (exclusive) under the lock.
+        with patch("swe.remote.supervise.launch_new",
+                   return_value=(True, "launched", "swe-t")) as launch:
+            status, body = self._launch(
+                {"harness": "claude", "cwd": "/tmp", "prompt": "hi"})
+        self.assertEqual(status, 202, body)
+        self.assertTrue(launch.call_args[1]["exclusive"])
+
     def test_successful_launch_wakes_the_catalog_loop(self):
         # launch_new's prime can end while the catalog loop sleeps out
         # its 10 s tick; the wake makes adoption look for the transcript

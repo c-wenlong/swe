@@ -46,6 +46,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A second launch in a folder no longer strands both.** Adoption tells
+  a new session apart only by harness, folder and start time, so two
+  launches of one harness waiting in one folder each saw both
+  transcripts and neither was ever adopted. A launch while another is
+  still starting in that folder is now refused (`409 launch_pending`,
+  naming the waiting tmux pane), so the first is adopted as before.
+
+- **Messages typed into a tmux session can't drive the TUI.** Text the
+  hub sends to a tmux pane now loses C0 control characters other than
+  tab and newline (an ESC or ^C in a message cancelled turns or picked
+  menu rows), and text with line breaks goes in as one bracketed paste
+  instead of one Enter per line.
+
 - **`swe harness discover --json --apply NAME` answers in JSON when NAME
   is not a new match.** It printed red text, which the app could not
   decode. It now prints the usual document with `applied.refused` and the

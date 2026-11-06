@@ -2951,6 +2951,15 @@ class _Handler(BaseHTTPRequestHandler):
             return
         tracked = harness not in catalog_mod.untracked(
             catalog_mod.launchable_harnesses())
+        # One new session per folder: adoption tells launches apart only
+        # by harness, folder and time, so a second one waiting here
+        # would leave both unadopted. launch_new re-checks under the
+        # registry lock; this is the answer the phone can show now.
+        busy = tracked and supervise.fork_blocker(state.home, harness, cwd)
+        if busy:
+            self._send_error(409, "launch_pending",
+                             supervise.launch_busy_note(harness, busy))
+            return
         launch_id = state.new_launch(
             machine, harness, cwd,
             model=cmd["model"] or "", effort=cmd["effort"] or "",
@@ -2965,7 +2974,7 @@ class _Handler(BaseHTTPRequestHandler):
                 state.home, harness, cwd, cmd["prompt"],
                 known_ids=known, launch_id=launch_id, binary=binary,
                 model=cmd["model"], effort=cmd["effort"], yolo=cmd["yolo"],
-                provider=cmd["provider"],
+                provider=cmd["provider"], exclusive=tracked,
             )
             if not ok:
                 state.settle_launch(launch_id, state="failed", note=note)

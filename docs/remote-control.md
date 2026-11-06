@@ -397,7 +397,7 @@ Registry keyed by `tool_name`, same shape as `PARSER_REGISTRY` /
 | A | opencode | `opencode serve` REST + SSE (`prompt_async`, permission replies) | structured msgs, approvals, interrupt, multi-client |
 | A | codex | `codex app-server` JSON-RPC (`thread/resume`+`turn/start`, approval reqs) | structured items, approvals, deltas |
 | A | claude | headless `claude -p --resume <id> --output-format stream-json` per message | one appended turn per call, deltas; permissions preset via `--permission-mode`/`--allowedTools` (no mid-turn prompt in print mode — flagged limitation) |
-| B | resumable TUIs (gemini, cursor, crush, cline, droid, pi…) | `supervise.py` tmux: send = `send-keys`, prompt/approval = `capture-pane` parse, display still transcript tail | universal write; approvals are buttons that send menu keys — best effort |
+| B | resumable TUIs (gemini, cursor, crush, cline, droid, pi…) | `supervise.py` tmux: send = `send-keys` (C0 control characters other than tab and newline dropped first; multi-line text as one bracketed `paste-buffer -p`), prompt/approval = `capture-pane` parse, display still transcript tail | universal write; approvals are buttons that send menu keys — best effort |
 | C | neither resumable nor headless | tail only | read + notify |
 
 ### Live text — `stream.py`
@@ -983,6 +983,17 @@ skip the transcript as history already sent). `GET /v1/launches/{launch_id}` the
 phone can open the chat straight away; a satellite's failed `launch`
 command (`command.result` echoing `launch_id`) turns it `failed` with the
 note. The hub keeps launches in memory for a day.
+
+Adoption knows a new session only by its harness, folder and creation
+time, so two launches of one harness waiting in one folder would each
+see both transcripts and neither would be adopted. One new session per
+folder starts at a time: while a launch there is still waiting (its
+marker is under a minute old or its pane is alive), the next launch of
+that harness answers `409 launch_pending`, naming the waiting pane. The
+marker is written under the registry lock before the pane starts, as a
+fork's is, so two requests at once can't both pass; a satellite runs the
+same check and fails the launch with the same note. A harness swe can't
+read is never adopted, so its launches skip the check.
 
 `POST /v1/sessions/{id}/fork {prompt?, model?, effort?}` (`fork.py`)
 starts a new run of
