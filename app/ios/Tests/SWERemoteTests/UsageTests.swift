@@ -286,6 +286,7 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.usd(0.42), "$0.42")
         XCTAssertEqual(UsageFormat.usd(12.3), "$12.30")
         XCTAssertEqual(UsageFormat.usd(99.5), "$99.50")
+        XCTAssertEqual(UsageFormat.usd(99.996), "$100")  // rounds to a whole $100
         // Whole dollars from $100, as the Mac and the web print a spend.
         XCTAssertEqual(UsageFormat.usd(123.45), "$123")
         XCTAssertEqual(UsageFormat.usd(5432.1), "$5,432")
