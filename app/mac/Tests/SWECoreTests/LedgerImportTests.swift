@@ -168,6 +168,53 @@ import Testing
         #expect(events.first?.outputTokens == 400)
     }
 
+    /// A store failure while a session-total file is written rolls the
+    /// file back whole: the old totals stay, no cursor moves, the ledger
+    /// is left with no transaction open, and the next scan reads the
+    /// file again and lands the new totals. The rewrite hits an existing
+    /// row, so its key lookup must not keep a read open past the
+    /// rollback: with the trigger dropped from another connection in
+    /// between, that stale read failed the retry "database is locked".
+    @Test func aStoreFailureOnASessionTotalFileKeepsTheOldTotals() async throws {
+        let temp = try TempDir()
+        defer { withExtendedLifetime(temp) {} }
+        let home = try droidHome(temp, usage:
+            """
+            "inputTokens":1000,"outputTokens":200,"cacheReadTokens":0,
+            "cacheCreationTokens":0,"thinkingTokens":0,"factoryCredits":1
+            """)
+        let ledger = try Ledger(directory: temp.path("cache"))
+        try await ledger.scan(roots: LedgerRoots(droidHomes: [home]))
+        #expect(await ledger.events(in: allTime).map(\.outputTokens) == [200])
+
+        // The store refuses the rewrite's totals, the way a full disk
+        // fails a write: the same trigger the incremental tests use.
+        let db = try SQLiteDatabase(url: temp.path("cache").appending(path: LedgerLocation.fileName))
+        try db.execute("""
+            CREATE TRIGGER refuse BEFORE INSERT ON events WHEN NEW.output = 666
+            BEGIN SELECT RAISE(ABORT, 'refused by the test'); END
+            """)
+        try Data("""
+            {"model":"glm-5.2",
+             "inclusiveTokenUsage":{"inputTokens":2000,"outputTokens":666,
+             "cacheReadTokens":0,"cacheCreationTokens":0,"thinkingTokens":0,"factoryCredits":2}}
+            """.utf8).write(to: home.appendingPathComponent("sessions/-Users-x-proj/s1.settings.json"))
+        do {
+            try await ledger.scan(roots: LedgerRoots(droidHomes: [home]))
+            Issue.record("a refused write must fail the scan")
+        } catch let failure as SQLiteDatabase.Failure {
+            #expect(failure.message.contains("refused by the test"))
+        }
+        #expect(await ledger.events(in: allTime).map(\.outputTokens) == [200])
+
+        try db.execute("DROP TRIGGER refuse")
+        let report = try await ledger.scan(roots: LedgerRoots(droidHomes: [home]))
+        // Read again, not skipped as unchanged: no cursor was saved.
+        #expect(report.filesRead == 1)
+        #expect(report.filesUnchanged == 0)
+        #expect(await ledger.events(in: allTime).map(\.outputTokens) == [666])
+    }
+
     @Test func droidAllZeroUsageGivesNoEvent() async throws {
         let temp = try TempDir()
         defer { withExtendedLifetime(temp) {} }
