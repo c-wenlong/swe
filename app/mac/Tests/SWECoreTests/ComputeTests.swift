@@ -1102,7 +1102,16 @@ import Testing
     @Test func noMemoryReadsAsZeroKB() {
         #expect(ComputeSummary.bytes(0) == "0 KB")
         #expect(ComputeSummary.bytes(5 << 20) != "0 KB")
-        // Past 1,000 MB the figure switches to GB rather than "1,004.3 MB".
+        // Unit only, so it holds in any locale: past 1,000 MB the figure
+        // switches to GB rather than "1,004.3 MB".
+        #expect(ComputeSummary.bytes(999 << 20).hasSuffix(" MB"))
+        #expect(ComputeSummary.bytes(UInt64(1004.3 * 1_048_576)).hasSuffix(" GB"))
+        #expect(ComputeSummary.bytes(1 << 30).hasSuffix(" GB"))
+    }
+
+    @Test(.enabled(if: Locale.current.language.languageCode == .english
+                   && Locale.current.decimalSeparator == "."))
+    func memoryPastAThousandMegabytesReadsInGigabytes() {
         #expect(ComputeSummary.bytes(999 << 20) == "999 MB")
         #expect(ComputeSummary.bytes(UInt64(1004.3 * 1_048_576)) == "0.98 GB")
         #expect(ComputeSummary.bytes(UInt64(1.5 * 1_073_741_824)) == "1.5 GB")
