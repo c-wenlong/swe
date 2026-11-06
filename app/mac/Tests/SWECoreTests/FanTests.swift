@@ -622,7 +622,7 @@ import Testing
         process.standardOutput = out
         process.standardError = err
         try process.run()
-        process.waitUntilExit()
+        waitForExit(process)
         #expect(process.terminationStatus == 1)
         #expect(String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).isEmpty)
         #expect(String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
@@ -995,13 +995,16 @@ import Testing
         sign.arguments = ["--force", "--sign", "-", impostor.path]
         sign.standardError = FileHandle.nullDevice
         try sign.run()
-        sign.waitUntilExit()
+        waitForExit(sign)
         try #require(sign.terminationStatus == 0, "couldn't sign the impostor ad hoc")
         let process = Process()
         process.executableURL = impostor
         process.arguments = ["30"]
         try process.run()
-        defer { process.terminate(); process.waitUntilExit() }
+        // The impostor has to be the signed copy itself, so it cannot be
+        // run through /bin/sh like the stubs elsewhere; its exit is
+        // bounded instead, and killed if it never comes.
+        defer { process.terminate(); waitForExit(process) }
         let pid = process.processIdentifier
         #expect(!check.isOwner(pid))
         #expect(!(FanOwnerCheck(pin: .team("ABCDE12345", identifier: "com.cwenlong.swe"))?.isOwner(pid) ?? true))

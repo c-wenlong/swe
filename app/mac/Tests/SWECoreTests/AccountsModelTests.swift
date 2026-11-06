@@ -751,13 +751,18 @@ final class FakeRunningInstances: RunningInstances {
         let dir = temp.url
         let executable = dir.appending(path: "claude")
         try script.write(to: executable, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755],
-                                              ofItemAtPath: executable.path)
         let path = dir.path
-        return ClaudeSignInRenewer(
+        // The stub is a plain file run by /bin/sh, never executed itself:
+        // macOS checks a freshly written executable before its first run,
+        // and on a loaded machine that held one for minutes. So it needs
+        // no execute bit, only to exist where the lookup expects it.
+        var renewer = ClaudeSignInRenewer(
             timeout: timeout, sigtermGrace: sigtermGrace,
             command: "claude", workingDirectory: dir,
-            environment: { ["PATH": path] })
+            environment: { ["PATH": path] },
+            isExecutable: { FileManager.default.fileExists(atPath: $0) })
+        renewer.interpreter = "/bin/sh"
+        return renewer
     }
 
     /// Runs `script` to its own exit and returns renew's answer with the

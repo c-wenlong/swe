@@ -155,8 +155,12 @@ Tests use Swift Testing (`@Suite` / `@Test` / `#expect`). Conventions:
   waits for every child, and `await task.value` ignores cancellation.
 - Never execute a stub script the test just wrote. macOS checks a new
   executable before its first run, and on a loaded machine that held a
-  stub in `_dyld_start` for minutes. Run it as `/bin/sh <stub>`, or link
-  the stub name to a system binary.
+  stub in `_dyld_start` for minutes. Run it as `/bin/sh <stub>` (a small
+  internal `interpreter` parameter on the code that launches it, or a test
+  runner that puts the script first in `/bin/sh`'s arguments), or link the
+  stub name to a system binary. A child that has to be a real executable
+  (the signed impostor in `FanTests`) is waited on with `waitForExit`,
+  which kills its tree at `gateTimeout` instead of hanging the suite.
 
 ### Capturing swe contract fixtures
 
