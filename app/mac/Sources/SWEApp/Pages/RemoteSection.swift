@@ -533,11 +533,9 @@ struct PairSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Pair a device").font(Theme.cardTitle).foregroundStyle(Theme.textStrong)
-                Spacer()
-                Button("Done") { model.dismissTicket() }.secondaryButton()
-            }
+            // Titled and closed like every other sheet: a section title
+            // on top, the button at the bottom right.
+            Text("Pair a device").font(Theme.sectionTitle).tracking(-0.5).foregroundStyle(Theme.textStrong)
             if let ticket = model.ticket {
                 HStack(alignment: .top, spacing: 18) {
                     QRCode(payload: payload(ticket))
@@ -558,6 +556,7 @@ struct PairSheet: View {
                             .foregroundStyle(Theme.textPrimary)
                             .textSelection(.enabled)
                             .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
                         HStack(spacing: 8) {
                             CopyButton(title: "Copy link", help: "Copy the pairing link",
                                        iconSize: 12) { copyToPasteboard(payload(ticket)) }
@@ -566,6 +565,10 @@ struct PairSheet: View {
                         }
                     }
                 }
+            }
+            HStack {
+                Spacer()
+                Button("Done") { model.dismissTicket() }.secondaryButton()
             }
         }
         .padding(20)

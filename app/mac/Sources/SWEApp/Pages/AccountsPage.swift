@@ -807,13 +807,14 @@ private struct IssueFixSheet: View {
     var title: String
     var issue: HarnessIssue
     var perform: (@escaping () async throws -> Void) -> Void
+    @Environment(\.dismissSheet) private var dismiss
 
     private static var mono: Font { Theme.font(size: 12, design: .monospaced) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(issue.remedy?.title ?? "Fix \(title)")
-                .font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+                .font(Theme.sectionTitle).tracking(-0.5).foregroundStyle(Theme.textPrimary)
             Text(issue.remedy?.summary ?? "This account needs attention.")
                 .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
             if let steps = issue.remedy?.steps, !steps.isEmpty {
@@ -824,7 +825,8 @@ private struct IssueFixSheet: View {
                                 .font(Theme.bodySmall)
                                 .foregroundStyle(Theme.textMuted)
                                 .frame(width: 14, alignment: .trailing)
-                            Text(step)
+                            // swe writes commands in steps as `code`.
+                            Text(MarkdownBody.inline(step))
                                 .font(Theme.bodySmall)
                                 .foregroundStyle(Theme.textPrimary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -866,6 +868,12 @@ private struct IssueFixSheet: View {
                     }
                     .secondaryButton()
                 }
+            }
+            // The way out every other sheet has; clicking outside or Esc
+            // were the only ones.
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }.secondaryButton()
             }
         }
         .padding(20)
