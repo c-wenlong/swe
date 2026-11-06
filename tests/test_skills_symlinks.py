@@ -155,5 +155,70 @@ class SkillsSymlinksTest(unittest.TestCase):
             self.assertEqual((home / ".claude" / "skills").resolve(), shared.resolve())
 
 
+    def test_a_missing_shared_tree_is_the_only_hint_and_apply_creates_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".claude").mkdir()
+
+            hints = skills_symlink_hints(home=home)
+            self.assertEqual([(h.label, h.action) for h in hints], [("shared", "create_shared")])
+            self.assertEqual(apply_skills_symlink_hints(hints, home=home), ["mkdir shared"])
+            self.assertTrue((home / ".swe" / "skills").is_dir())
+            self.assertFalse((home / ".claude" / "skills").exists())
+
+    def test_existing_roots_are_classified_ok_symlink_or_manual(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            shared = home / ".swe" / "skills"
+            shared.mkdir(parents=True)
+            (home / ".codex").mkdir()
+            (home / ".codex" / "skills").symlink_to(shared)        # linked
+            (home / "old").mkdir()
+            (home / ".cursor").mkdir()
+            (home / ".cursor" / "skills").symlink_to(home / "old")  # linked elsewhere
+            (home / ".forge" / "skills").mkdir(parents=True)        # its own tree
+            # ~/.cline is a link to ~/.swe, so ~/.cline/skills is a real
+            # directory path that still resolves to the shared tree.
+            (home / ".cline").symlink_to(home / ".swe")
+
+            actions = {h.label: h.action for h in skills_symlink_hints(home=home)}
+            self.assertEqual(actions, {"codex": "ok", "cursor": "symlink",
+                                       "forge": "manual", "cline": "ok"})
+
+            # Apply only fills gaps: the link that points elsewhere and the
+            # separate tree are left for the user.
+            hints = skills_symlink_hints(home=home)
+            self.assertEqual(apply_skills_symlink_hints(hints, home=home), [])
+            self.assertEqual((home / ".cursor" / "skills").resolve(), (home / "old").resolve())
+
+    def test_an_unresolvable_shared_tree_gives_no_hints(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".swe" / "skills").mkdir(parents=True)
+            (home / ".claude").mkdir()
+            with patch("swe.skills.symlinks.Path.resolve", side_effect=PermissionError("denied")):
+                self.assertEqual(skills_symlink_hints(home=home), [])
+
+    def test_a_root_that_stops_resolving_is_skipped(self):
+        # Both roots exist, then resolve() fails on each: the hint is
+        # dropped instead of raising, whichever kind of root it is.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            shared = home / ".swe" / "skills"
+            shared.mkdir(parents=True)
+            (home / ".codex").mkdir()
+            (home / ".codex" / "skills").symlink_to(shared)
+            (home / ".forge" / "skills").mkdir(parents=True)
+            real_resolve = Path.resolve
+
+            def resolve(path, *args, **kwargs):
+                if path.parent.name in (".codex", ".forge"):
+                    raise PermissionError("denied")
+                return real_resolve(path, *args, **kwargs)
+
+            with patch("swe.skills.symlinks.Path.resolve", resolve):
+                self.assertEqual(skills_symlink_hints(home=home), [])
+
+
 if __name__ == "__main__":
     unittest.main()

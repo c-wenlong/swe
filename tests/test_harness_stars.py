@@ -10,6 +10,7 @@ from swe.harness.stars import (
     load_stars,
     save_stars,
     star,
+    star_rank,
     toggle_star,
     unstar,
 )
@@ -56,6 +57,33 @@ class HarnessStarsTest(unittest.TestCase):
                 self.assertEqual(raw["droid"]["pin"], 1)
                 self.assertEqual(raw["claude"]["pin"], 2)
                 self.assertEqual(raw["droid"]["state"], "starred")
+
+    def test_unstar_of_an_unstarred_name_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._patch_paths(tmp):
+                self.assertFalse(unstar("ghost"))
+                self.assertFalse((Path(tmp) / ".swe" / "config" / "harness.json").exists())
+
+    def test_star_rank_reads_the_pin_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._patch_paths(tmp):
+                save_stars(["claude", "codex"])
+                self.assertEqual(star_rank("codex"), 1)
+                self.assertIsNone(star_rank("droid"))
+                # A list passed in is used as is, without reading the file.
+                self.assertEqual(star_rank("droid", ["droid"]), 0)
+
+    def test_unstarring_keeps_a_row_with_other_data_and_drops_a_bare_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._patch_paths(tmp):
+                harness = Path(tmp) / ".swe" / "config" / "harness.json"
+                harness.parent.mkdir(parents=True)
+                harness.write_text(json.dumps({"claude": {"command": "claude"}}))
+                save_stars(["claude", "droid"])
+                save_stars([])
+                raw = json.loads(harness.read_text())
+                self.assertEqual(raw.get("claude"), {"command": "claude"})
+                self.assertNotIn("droid", raw)
 
     def test_sort_tools_puts_starred_block_first_each_by_usage(self):
         tools = {
