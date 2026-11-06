@@ -46,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Phone SSH keys carry the `swe-remote:` tag.** The hub still tagged
+  the `~/.ssh/authorized_keys` lines it manages `quiver-remote:<device
+  id>`. New lines say `swe-remote:<device id>`; a line under the old
+  tag still counts as the hub's (and as installed), and the next
+  rewrite swaps it for the new one, so a revoke after the upgrade
+  still removes it.
+
 - **`swe harness discover --json --apply NAME` answers in JSON when NAME
   is not a new match.** It printed red text, which the app could not
   decode. It now prints the usual document with `applied.refused` and the
