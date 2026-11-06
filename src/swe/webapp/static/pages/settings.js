@@ -17,10 +17,10 @@
 "use strict";
 
 const SETTINGS_KEYS = {
-  section: "quiver.settings.section",
-  providersTab: "quiver.settings.providersTab",
-  appearance: "quiver.appearance",
-  hidden: "quiver.sidebar.hidden",
+  section: "swe.settings.section",
+  providersTab: "swe.settings.providersTab",
+  appearance: "swe.appearance",
+  hidden: "swe.sidebar.hidden",
 };
 
 function settingsRead(key) {

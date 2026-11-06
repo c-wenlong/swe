@@ -13,7 +13,7 @@ The same title, subtitle, 176px sub-nav (App, Usage, Advanced), section
 titles and one-line details, cards of rows, and the footer (version,
 Doctor, Service status). Below 720px of page width the sub-nav becomes a
 row of underline tabs, as in the app. The chosen section is kept in
-`localStorage` (`quiver.settings.section`); `#/settings?section=<id>`
+`localStorage` (`swe.settings.section`); `#/settings?section=<id>`
 opens one directly (`github` and `remote` land on Integrations, as the
 app's saved value does).
 
@@ -143,8 +143,8 @@ while a pass holds `index.lock` is a 409 `busy`; it deletes nothing.
 
 ### Kept per browser
 
-Appearance (`quiver.appearance`) sets `data-theme` on `<html>`, which
-`styles.css` already honours. The hidden pages (`quiver.sidebar.hidden`)
+Appearance (`swe.appearance`) sets `data-theme` on `<html>`, which
+`styles.css` already honours. The hidden pages (`swe.sidebar.hidden`)
 are hidden by a stylesheet this script adds, which also hides a group's
 heading once none of its pages show. `settings.js` applies both when the
 app loads, not only when Settings is open, so `app.js` needs no change.

@@ -6,8 +6,27 @@
  */
 "use strict";
 
+/* Every key this web app keeps in localStorage was named quiver.* before
+ * the rename. Each moves to its swe.* name on the first load that finds
+ * it: the old value is copied unless the new key already holds one (a
+ * newer page wrote it), then the old key goes. It runs before any page
+ * script reads storage, so no reader needs to know the old names. */
+function migrateStorageKeys(store) {
+  const old = [];
+  for (let i = 0; i < (store.length || 0); i++) {
+    const key = store.key(i);
+    if (key && key.startsWith("quiver.")) old.push(key);
+  }
+  for (const key of old) {
+    const next = "swe." + key.slice("quiver.".length);
+    if (store.getItem(next) == null) store.setItem(next, store.getItem(key));
+    store.removeItem(key);
+  }
+}
+try { migrateStorageKeys(localStorage); } catch { /* storage off or full: the old keys wait for the next load */ }
+
 const credential = () => {
-  try { return (JSON.parse(localStorage.getItem("quiver.remote") || "null") || {}).credential || ""; }
+  try { return (JSON.parse(localStorage.getItem("swe.remote") || "null") || {}).credential || ""; }
   catch { return ""; }
 };
 
@@ -278,13 +297,13 @@ function pairStillLive(gen, rgen) {
 
 /* Bank a minted credential where every page looks for it. */
 function pairStore(data) {
-  try { localStorage.setItem("quiver.remote", JSON.stringify(data)); } catch { }
+  try { localStorage.setItem("swe.remote", JSON.stringify(data)); } catch { }
 }
 
 /* And drop it once the hub has revoked it, so this browser stops
  * presenting a dead credential. */
 function pairForget() {
-  try { localStorage.removeItem("quiver.remote"); } catch { }
+  try { localStorage.removeItem("swe.remote"); } catch { }
 }
 
 /* ``#pair=<token>[&name=]``: the address `swe remote pair` and Settings'
@@ -501,7 +520,7 @@ const overview = { period: "month", machine: "", data: null, gen: 0, focus: null
  * its setup sheet once at launch, then remembers it was offered. Here a
  * bare / opens #/setup once per browser; after that Overview keeps a
  * card linking it until setup runs. */
-const SETUP_OFFERED_KEY = "quiver.setup.offered";
+const SETUP_OFFERED_KEY = "swe.setup.offered";
 let landedBare = !location.hash.replace(/^#\/?/, "");
 // Leaving before Overview answered spends the offer: only the landing counts.
 window.addEventListener("hashchange", () => { landedBare = false; });

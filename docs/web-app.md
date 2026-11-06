@@ -45,7 +45,10 @@ from the gate itself: "Pair with Tailscale" posts
 `POST /v1/pair/request` and polls for the owner's yes, the token field
 below trades a pair token through the app's own `#pair=` fragment, and
 either mints a device credential (`Authorization: Bearer`, kept in
-`localStorage` under the hub's origin). The app lived under `/app/`
+`localStorage` under the hub's origin, as `swe.remote`; every key the
+app keeps there starts `swe.`, and `app.js` moves a key a browser saved
+under its pre-rename `quiver.` name on the first load that finds it,
+keeping the `swe.` value if both exist). The app lived under `/app/`
 until #944: that path now 301-redirects to the same name at `/`, query
 and fragment intact, so a `/app/#pair=` link or `/app/#approve` bookmark
 minted then still lands. The browser keeps the fragment across the

@@ -198,6 +198,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The web app keeps its browser settings under `swe.` names.** Its
+  `localStorage` keys (the device credential, appearance, hidden pages,
+  the Settings section, Compute and Calendar choices, the Agents folder,
+  hidden MCP harnesses, the setup offer) were still `quiver.*`. Each now
+  lives under `swe.*`; the first load after the update moves a browser's
+  old keys across and deletes them, so nobody is signed out or loses a
+  setting.
+
 - **A stored Linear task's refresh no longer downloads its
   description.** The hub asked Linear for each issue's full body on
   every task read and never used it. The unused Notion page-body

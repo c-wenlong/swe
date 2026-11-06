@@ -225,6 +225,47 @@ class TestSessionUsage(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestStorageKeyMigration(unittest.TestCase):
+    """migrateStorageKeys: the quiver.* keys a browser kept before the
+    rename move to swe.* once, and the old keys go."""
+
+    def migrate(self, stored, throw_on_set=False):
+        src = app_js_function("migrateStorageKeys") + """
+const m = new Map(Object.entries(%s));
+const store = {
+  get length() { return m.size; },
+  key(i) { return [...m.keys()][i] ?? null; },
+  getItem(k) { return m.has(k) ? m.get(k) : null; },
+  setItem(k, v) { if (%s) throw new Error("quota"); m.set(k, String(v)); },
+  removeItem(k) { m.delete(k); },
+};
+try { migrateStorageKeys(store); } catch { }
+process.stdout.write(JSON.stringify(Object.fromEntries(m)));
+""" % (json.dumps(stored), "true" if throw_on_set else "false")
+        done = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def test_old_keys_move_to_the_swe_names(self):
+        got = self.migrate({"quiver.remote": '{"credential":"c"}', "quiver.compute.range": "1h",
+                            "quiver.appearance": "dark", "other": "kept"})
+        self.assertEqual(got, {"swe.remote": '{"credential":"c"}', "swe.compute.range": "1h",
+                               "swe.appearance": "dark", "other": "kept"})
+
+    def test_a_value_already_under_the_new_name_wins(self):
+        got = self.migrate({"quiver.appearance": "dark", "swe.appearance": "light"})
+        self.assertEqual(got, {"swe.appearance": "light"})
+
+    def test_a_second_load_changes_nothing(self):
+        once = self.migrate({"quiver.setup.offered": "1"})
+        self.assertEqual(self.migrate(once), once)
+
+    def test_a_full_store_keeps_the_old_key(self):
+        # setItem throwing (quota) must not lose the value: the old key stays.
+        self.assertEqual(self.migrate({"quiver.remote": "x"}, throw_on_set=True), {"quiver.remote": "x"})
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
 class TestSetupOffer(unittest.TestCase):
     """app.js's first-run offer, run under node with the browser stubbed:
     each case is a fresh page load at ``hash``."""
@@ -254,7 +295,7 @@ class TestSetupOffer(unittest.TestCase):
         return json.loads(done.stdout)
 
     FIRST = "const d = { first_run: true };"
-    RESULT = "({ went, hash: location.hash, offered: localStorage.getItem('quiver.setup.offered') })"
+    RESULT = "({ went, hash: location.hash, offered: localStorage.getItem('swe.setup.offered') })"
 
     def test_a_bare_landing_opens_setup_once(self):
         out = self.offer("", self.FIRST + "const went = offerSetupOnce(d);"
@@ -263,7 +304,7 @@ class TestSetupOffer(unittest.TestCase):
 
     def test_a_saved_offer_stays_on_overview(self):
         out = self.offer("", self.FIRST + "const went = offerSetupOnce(d); return " + self.RESULT + ";",
-                         stored={"quiver.setup.offered": "1"})
+                         stored={"swe.setup.offered": "1"})
         self.assertEqual(out, {"went": False, "hash": "", "offered": "1"})
 
     def test_a_link_to_overview_is_not_redirected(self):

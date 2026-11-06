@@ -13,7 +13,7 @@ Its writes are a server's Sync, with its Preview, and its Remove.
   **Compare** chips. A harness with no servers gets no chip or column; the
   chips that are off are left out of the counts, the conflict letters and
   "Missing from", and are remembered in this browser's `localStorage`
-  (`quiver.mcpHiddenHarnesses`).
+  (`swe.mcpHiddenHarnesses`).
 - The server × harness grid, in two sections by how a server runs.
   **Local: runs on <hub machine>** is every server a harness launches with
   a command (stdio, and an `mcp-remote` wrapper), plus the folders in

@@ -304,6 +304,14 @@ Safe Storage item.</p>
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The web app keeps its browser settings under <code>swe.</code> names.</strong> Its
+<code>localStorage</code> keys (the device credential, appearance, hidden pages,
+the Settings section, Compute and Calendar choices, the Agents folder,
+hidden MCP harnesses, the setup offer) were still <code>quiver.*</code>. Each now
+lives under <code>swe.*</code>; the first load after the update moves a browser's
+old keys across and deletes them, so nobody is signed out or loses a
+setting.</p>
+</li>
 <li><p><strong>A stored Linear task's refresh no longer downloads its
 description.</strong> The hub asked Linear for each issue's full body on
 every task read and never used it. The unused Notion page-body

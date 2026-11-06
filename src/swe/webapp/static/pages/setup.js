@@ -14,7 +14,7 @@
 
 const STEPS = ["agents", "links", "look"];
 // Settings › General's appearance, in this browser: absent means System.
-const APPEARANCE_KEY = "quiver.appearance";
+const APPEARANCE_KEY = "swe.appearance";
 const LOOKS = [
   ["system", "System", "Matches this browser"],
   ["light", "Light", "Bright and clear"],
