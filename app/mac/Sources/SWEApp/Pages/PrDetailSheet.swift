@@ -111,7 +111,7 @@ struct PrDetailSheet: View {
                     (value: "squash", title: "Squash and merge"),
                     (value: "rebase", title: "Rebase and merge"),
                     (value: "merge", title: "Create a merge commit"),
-                ], selection: $method, width: 172)
+                ], selection: $method, width: 216)
                 Button {
                     Task { await merge(auto: false) }
                 } label: {
