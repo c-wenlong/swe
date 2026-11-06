@@ -89,9 +89,15 @@ class TestDecoderEdges(unittest.TestCase):
         self.assertEqual([m["kind"] for m in out], ["user"])
         # Blocks that decode to nothing fall through to the normalizer.
         rec = {"message": {"role": "user", "content": [{"type": "text",
-                                                         "text": ""}]},
-               "text": "fallback"}
-        self.assertIsInstance(tail.decode_record("droid", rec), list)
+                                                         "text": ""}]}}
+        normalized = SimpleNamespace(role="human", text="fallback",
+                                     timestamp=7.0)
+        with patch.object(tail._tr, "_messages_from_record",
+                          return_value=[normalized]) as norm:
+            out = tail.decode_record("droid", rec)
+        norm.assert_called_once_with(rec)
+        self.assertEqual([(m["kind"], m["text"]) for m in out],
+                         [("user", "fallback")])
 
     def test_tool_messages_from_the_normalizer(self):
         msg = SimpleNamespace(role="tool", text="Bash: ls -la", timestamp=5.0)
