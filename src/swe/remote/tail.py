@@ -2340,7 +2340,7 @@ class TailManager:
             # The pane writes go to: the registry's, else the derived name
             # (``supervise.channel_name`` without reading the file again).
             pane = supervise.capture_pane(
-                str(meta.get("tmux") or "") or supervise.tmux_name(key)
+                str(meta.get("tmux") or "") or supervise.derived_pane(key)
             )
             if key not in self.tailers:
                 # sync dropped the session while its pane was read:

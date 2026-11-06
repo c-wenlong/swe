@@ -721,7 +721,7 @@ session back to `observed`. The mode says what happens to the harness:
 |---|---|---|
 | `now` (the default, also when `mode` is missing) | `200` | The tmux session is closed, and the harness with it, even mid-turn. The transcript stays, so a later attach resumes it. Tier-A channels stop their headless run, `opencode serve` or `codex app-server`. |
 | `when_idle` | `202 {queued: true, mode, note}` | The hub polls the session's status every 2 s and detaches (as `now`) once it is no longer `active`. The outcome arrives as a `command.result` with `op: "detach"`, `mode: "when_idle"`, then the usual `session.ownership`. A second `when_idle` while one waits answers `202` with "already waiting". |
-| `keep` | `200` | The hub stops supervising but leaves the tmux session running, so `tmux attach -t qv-…` on the Mac still works. Only tmux-mode sessions can be kept (`409 control_failed` otherwise). Staged attachments stay, since the harness may still read them. |
+| `keep` | `200` | The hub stops supervising but leaves the tmux session running, so `tmux attach -t swe-…` on the Mac still works. Only tmux-mode sessions can be kept (`409 control_failed` otherwise). Staged attachments stay, since the harness may still read them. |
 
 A `when_idle` detach is cancelled by a later attach (which answers
 `200` "already attached; the pending detach is cancelled"), by a `now`

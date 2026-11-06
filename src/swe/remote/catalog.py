@@ -512,8 +512,9 @@ def satellite_files(folder: Path, now: float | None = None) -> list[Path]:
     return out
 
 
-# supervise.tmux_name: "qv-" and a hex slug of the session key.
-_PANE_NAME = re.compile(r"qv-[0-9a-f]{1,32}")
+# supervise.tmux_name: "swe-" and a hex slug of the session key, or the
+# "qv-" a satellite from before the rename (or its older panes) uses.
+_PANE_NAME = re.compile(r"(?:swe|qv)-[0-9a-f]{1,32}")
 
 
 def merge_remote_rows(
@@ -592,7 +593,7 @@ def session_to_row(
     """``Session`` → (key, ``/v1/sessions`` row).
 
     An attached row carries the supervised ``mode`` and, for tmux mode,
-    the ``qv-…`` pane name. An observed row left running by a ``keep``
+    the ``swe-…`` pane name. An observed row left running by a ``keep``
     detach carries ``kept`` and the pane name, so a client can offer the
     pane back: attach adopts it live instead of relaunching.
 

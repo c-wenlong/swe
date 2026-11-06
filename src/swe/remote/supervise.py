@@ -188,8 +188,32 @@ def tmux_bin() -> str | None:
     return found
 
 
+# The prefix of every tmux session swe starts. Hubs before the quiver ->
+# swe rename used ``qv-``: panes they started (attached, kept, or still
+# waiting on adoption) keep that name until they close, so every lookup
+# that derives a name from a key also tries the old one.
+PANE_PREFIX = "swe-"
+LEGACY_PANE_PREFIX = "qv-"
+
+
 def tmux_name(session_key: str) -> str:
-    return f"qv-{key_slug(session_key)[:16]}"
+    """The tmux session name a pane started for ``session_key`` gets."""
+    return f"{PANE_PREFIX}{key_slug(session_key)[:16]}"
+
+
+def legacy_tmux_name(session_key: str) -> str:
+    """The name a pre-rename hub gave ``session_key``'s pane."""
+    return f"{LEGACY_PANE_PREFIX}{key_slug(session_key)[:16]}"
+
+
+def derived_pane(session_key: str) -> str:
+    """The pane a key's writes go to when its registry entry names none:
+    ``tmux_name``, unless only a pre-rename hub's pane is up for it."""
+    name = tmux_name(session_key)
+    legacy = legacy_tmux_name(session_key)
+    if not tmux_alive(name) and tmux_alive(legacy):
+        return legacy
+    return name
 
 
 def _registry_file(home: Path | None) -> Path:
@@ -326,11 +350,13 @@ def launch_tmux(
     if not tmux_bin():
         return None
     name = tmux_name(session_key)
-    if tmux_alive(name):
+    if tmux_alive(name) or tmux_alive(legacy_tmux_name(session_key)):
         # Callers only launch for keys with no supervised or adoptable
-        # kept row, so a live session under this name is not ours (a
-        # kept pane now running something else, a leftover): binding
-        # to it would hand the phone someone else's process.
+        # kept row, so a live session under this name (or the name a
+        # pre-rename hub gave the key) is not ours (a kept pane now
+        # running something else, a leftover): binding to it would hand
+        # the phone someone else's process, and starting beside it would
+        # run the same session twice.
         return None
     binary = shutil.which(argv[0]) or argv[0]
     args = ["new-session", "-d", "-s", name,
@@ -844,7 +870,7 @@ def kill(name: str) -> bool:
 def channel_name(home: Path | None, session_key: str) -> str:
     """The tmux session a key's writes go to (registry first, else derive)."""
     meta = _load_registry(home).get(session_key) or {}
-    return str(meta.get("tmux") or "") or tmux_name(session_key)
+    return str(meta.get("tmux") or "") or derived_pane(session_key)
 
 
 def attach(
@@ -1029,8 +1055,10 @@ def _attach_tmux(
         env=account_env(session),
     )
     if name is None:
-        taken = tmux_name(session_key)
-        if tmux_alive(taken):
+        taken = next((n for n in (tmux_name(session_key),
+                                  legacy_tmux_name(session_key))
+                      if tmux_alive(n)), None)
+        if taken:
             # launch_tmux never binds to a session it did not start.
             return False, (
                 f"tmux session {taken} already exists and is not "

