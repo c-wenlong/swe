@@ -64,6 +64,15 @@ private final class ManualSleep {
         return (ChartHover(sleep: { try await sleep.sleep($0) }), sleep)
     }
 
+    /// A fire that lands before its sleep has parked is kept, so the
+    /// sleep returns instead of waiting for it again.
+    @Test func aFireBeforeTheSleepParksIsKept() async throws {
+        let sleep = ManualSleep()
+        sleep.fire(0)
+        try await sleep.sleep(ChartHover.openDelay)
+        #expect(sleep.waiting == 0)
+    }
+
     @Test func theFirstCardWaitsTheOpenDelay() async {
         let (hover, sleep) = make()
         hover.enter("2")

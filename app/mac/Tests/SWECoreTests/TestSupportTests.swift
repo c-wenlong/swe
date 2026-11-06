@@ -41,4 +41,24 @@ import Testing
         #expect(await withinTimeout { true })
         #expect(await withinTimeout { false } == false)
     }
+
+    /// Cancelling the caller answers false at once, not at the timeout,
+    /// even while its wait ignores cancellation.
+    @MainActor
+    @Test(.timeLimit(.minutes(1))) func withinTimeoutAnswersFalseWhenTheCallerIsCancelled() async {
+        let never = HoldGate()
+        let stuck = Task { try? await never.pass() }
+        let entered = CountGate()
+        let caller = Task { @MainActor in
+            await withinTimeout(.seconds(3600)) {
+                await entered.bump()
+                await stuck.value
+                return true
+            }
+        }
+        #expect(await entered.reach(1))
+        caller.cancel()
+        #expect(await caller.value == false)
+        never.open()
+    }
 }

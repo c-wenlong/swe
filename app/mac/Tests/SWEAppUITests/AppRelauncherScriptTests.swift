@@ -256,17 +256,36 @@ import Testing
 
 /// SIGKILLs `pid` and every process under it, leaves first, so nothing the
 /// script started reparents to launchd and keeps running. Called as soon
-/// as the wait on `pid` runs out, while the script is still running.
+/// as the wait on `pid` runs out, while the script is still running. Each
+/// process is tagged with its start time when listed and signalled only if
+/// the tag still matches, so a number freed and reused in between is left
+/// alone (as `ProcessRunner.stopDescendants` does).
 private func killTree(_ pid: pid_t) {
-    var tree: [pid_t] = []
+    var tree: [(pid: pid_t, started: StartTime)] = []
     var queue = [pid]
     while let parent = queue.popLast() {
-        tree.append(parent)
+        if let started = StartTime(parent) { tree.append((parent, started)) }
         var children = [pid_t](repeating: 0, count: 256)
         let count = proc_listchildpids(parent, &children,
                                        Int32(MemoryLayout<pid_t>.stride * children.count))
         guard count > 0 else { continue }
         queue += children.prefix(min(Int(count), children.count)).filter { $0 > 0 }
     }
-    for member in tree.reversed() { kill(member, SIGKILL) }
+    for member in tree.reversed() where StartTime(member.pid) == member.started {
+        kill(member.pid, SIGKILL)
+    }
+}
+
+/// When a process started, or nil once it is gone.
+private struct StartTime: Equatable {
+    let seconds: UInt64
+    let microseconds: UInt64
+
+    init?(_ pid: pid_t) {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+        seconds = info.pbi_start_tvsec
+        microseconds = info.pbi_start_tvusec
+    }
 }

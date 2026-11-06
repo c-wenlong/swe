@@ -589,6 +589,20 @@ final class FakeRunningInstances: RunningInstances {
         #expect(renewer.calls.count == 1)
     }
 
+    /// A release that lands before the renewal parks is kept, so the
+    /// renewal answers instead of waiting for it again.
+    @Test func aReleaseBeforeTheRenewalParksIsKept() async {
+        let renewer = SuspendingRenewer()
+        renewer.releaseAll()
+        let renewal = Task { await renewer.renew(home: "/early", isDefault: true) }
+        // Bounded: a renewal waiting for the release again never answers,
+        // and a time limit can't end a wait that ignores cancellation.
+        let answered = await withinTimeout { await renewal.value }
+        if !answered { renewer.releaseAll() }
+        #expect(answered)
+        #expect(renewer.calls == ["/early"])
+    }
+
     @Test func plainLoadNeverRenews() async throws {
         let renewer = FakeRenewer()
         let model = renewalModel(renewer: renewer)

@@ -377,6 +377,25 @@ final class GateTransport: HTTPTransport {
                     .noCheck("SWE doesn't know how to check this key."))
     }
 
+    /// A counted release that lands before its request parks is kept for
+    /// that request, and only that one: the next request parks.
+    @Test func aCountedReleaseBeforeTheRequestParksIsKept() async throws {
+        let transport = GateTransport()
+        let request = URLRequest(url: URL(string: "https://example.invalid/early")!)
+        transport.release(1)
+        let first = Task { (try? await transport.send(request)) != nil }
+        // Bounded: a request waiting for the release again never answers,
+        // and a time limit can't end a wait that ignores cancellation.
+        let answered = await withinTimeout { await first.value }
+        #expect(answered)
+        let second = Task { try await transport.send(request) }
+        #expect(await transport.waitForRequests(2))
+        #expect(transport.inFlight == (answered ? 1 : 2))
+        // Lets everything through, so the run ends even if a wait failed.
+        transport.openAll()
+        _ = try await second.value
+    }
+
     @Test(.timeLimit(.minutes(1))) func atMostFourChecksRunAtOnce() async throws {
         let transport = GateTransport()
         let model = try model(text: """
