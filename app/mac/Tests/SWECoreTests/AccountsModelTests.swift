@@ -54,11 +54,14 @@ final class FakeRenewer: ClaudeSignInRenewing, @unchecked Sendable {
 }
 
 /// Answers only once `releaseAll` runs, so a test can press Refresh
-/// while a renewal is mid-flight.
+/// while a renewal is mid-flight. Once released, a renewal that had not
+/// parked yet, or starts later, answers at once rather than waiting for
+/// a release that already happened.
 final class SuspendingRenewer: ClaudeSignInRenewing, @unchecked Sendable {
     private let lock = NSLock()
     private var recorded: [String] = []
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var released = false
     var calls: [String] { lock.withLock { recorded } }
     /// Bumped once each run is suspended, so a test awaits it.
     let started = CountGate()
@@ -68,10 +71,12 @@ final class SuspendingRenewer: ClaudeSignInRenewing, @unchecked Sendable {
         // can never slip between them and leave the run suspended.
         let started = self.started
         await withCheckedContinuation { continuation in
-            lock.withLock {
+            let parked = lock.withLock { () -> Bool in
                 recorded.append(home)
-                waiters.append(continuation)
+                if !released { waiters.append(continuation) }
+                return !released
             }
+            if !parked { continuation.resume() }
             Task { await started.bump() }
         }
         return true
@@ -79,6 +84,7 @@ final class SuspendingRenewer: ClaudeSignInRenewing, @unchecked Sendable {
 
     func releaseAll() {
         let pending = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            released = true
             defer { waiters = [] }
             return waiters
         }
@@ -581,6 +587,20 @@ final class FakeRunningInstances: RunningInstances {
         await first
         #expect(model.renewing.isEmpty)
         #expect(renewer.calls.count == 1)
+    }
+
+    /// A release that lands before the renewal parks is kept, so the
+    /// renewal answers instead of waiting for it again.
+    @Test func aReleaseBeforeTheRenewalParksIsKept() async {
+        let renewer = SuspendingRenewer()
+        renewer.releaseAll()
+        let renewal = Task { await renewer.renew(home: "/early", isDefault: true) }
+        // Bounded: a renewal waiting for the release again never answers,
+        // and a time limit can't end a wait that ignores cancellation.
+        let answered = await withinTimeout { await renewal.value }
+        if !answered { renewer.releaseAll() }
+        #expect(answered)
+        #expect(renewer.calls == ["/early"])
     }
 
     @Test func plainLoadNeverRenews() async throws {

@@ -260,7 +260,8 @@ import Testing
 /// queueing behind the limiter are observable.
 final class GateTransport: HTTPTransport {
     private let state = Mutex<(inFlight: Int, peak: Int, requests: [URLRequest], open: Bool,
-                              waiters: [CheckedContinuation<Void, Never>])>((0, 0, [], false, []))
+                              waiters: [CheckedContinuation<Void, Never>],
+                              credit: Int)>((0, 0, [], false, [], 0))
     private let sendsStarted = CountGate()
 
     var peak: Int { state.withLock { $0.peak } }
@@ -273,12 +274,16 @@ final class GateTransport: HTTPTransport {
         await sendsStarted.reach(n)
     }
 
-    /// Answer `n` parked requests, or all of them.
+    /// Answer `n` requests: parked ones first, then the next ones to
+    /// arrive, so a release that lands before its request has parked is
+    /// kept rather than lost. With no count, answers every request parked
+    /// now and none later.
     func release(_ n: Int = Int.max) {
         let released = state.withLock { s -> [CheckedContinuation<Void, Never>] in
             let count = min(n, s.waiters.count)
             let first = Array(s.waiters.prefix(count))
             s.waiters.removeFirst(count)
+            if n != Int.max { s.credit += n - count }
             return first
         }
         for waiter in released { waiter.resume() }
@@ -304,8 +309,13 @@ final class GateTransport: HTTPTransport {
                 s.inFlight += 1
                 s.peak = max(s.peak, s.inFlight)
                 s.requests.append(request)
-                if !s.open { s.waiters.append(waiter) }
-                return !s.open
+                if s.open { return false }
+                if s.credit > 0 {
+                    s.credit -= 1
+                    return false
+                }
+                s.waiters.append(waiter)
+                return true
             }
             if !parked { waiter.resume() }
             Task { await started.bump() }
@@ -365,6 +375,25 @@ final class GateTransport: HTTPTransport {
                     .noCheck("NVIDIA's API doesn't check the key on a free request."))
         #expect(model.checks["SWEBENCH_API_KEY"]?.result ==
                     .noCheck("SWE doesn't know how to check this key."))
+    }
+
+    /// A counted release that lands before its request parks is kept for
+    /// that request, and only that one: the next request parks.
+    @Test func aCountedReleaseBeforeTheRequestParksIsKept() async throws {
+        let transport = GateTransport()
+        let request = URLRequest(url: URL(string: "https://example.invalid/early")!)
+        transport.release(1)
+        let first = Task { (try? await transport.send(request)) != nil }
+        // Bounded: a request waiting for the release again never answers,
+        // and a time limit can't end a wait that ignores cancellation.
+        let answered = await withinTimeout { await first.value }
+        #expect(answered)
+        let second = Task { try await transport.send(request) }
+        #expect(await transport.waitForRequests(2))
+        #expect(transport.inFlight == (answered ? 1 : 2))
+        // Lets everything through, so the run ends even if a wait failed.
+        transport.openAll()
+        _ = try await second.value
     }
 
     @Test(.timeLimit(.minutes(1))) func atMostFourChecksRunAtOnce() async throws {

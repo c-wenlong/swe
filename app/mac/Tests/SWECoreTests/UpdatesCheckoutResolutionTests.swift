@@ -32,7 +32,7 @@ struct UpdatesCheckoutResolutionTests {
             Task { await arrivals.bump() }
             // Bounded so a lookup wrongly run on the main actor fails the
             // test instead of hanging the suite.
-            _ = gates[stored]?.wait(timeout: .now() + 5)
+            if let gate = gates[stored] { _ = held(gate) }
             return stored
         }
     }
@@ -97,9 +97,12 @@ struct UpdatesCheckoutResolutionTests {
     /// stalled stamped folder must not hold back a valid saved checkout.
     @Test func aStalledStampedFolderDoesNotHoldBackTheCheckout() async {
         let disk = StalledDisk(paths: ["/saved"])
+        // The stamped lookup stays stalled until the checks below are
+        // done. A 5-second stall here ran out on a loaded machine, so the
+        // hint landed early and the test failed.
         let stampedGate = DispatchSemaphore(value: 0)
         let updates = model(stored: "/saved", disk: disk, stampedExists: { path in
-            _ = stampedGate.wait(timeout: .now() + 5)
+            _ = held(stampedGate)
             return path
         })
         disk.release("/saved")
@@ -118,4 +121,12 @@ struct UpdatesCheckoutResolutionTests {
         #expect(UpdatePreferences.existing(stamped) == stamped)
         #expect(UpdatePreferences.existing("/definitely/not/here") == nil)
     }
+}
+
+/// Blocks until `gate` is signalled, false after `gateTimeout`. A passing
+/// test always signals first; the bound only keeps a regression from
+/// hanging the suite.
+private func held(_ gate: DispatchSemaphore) -> Bool {
+    let (seconds, attoseconds) = gateTimeout.components
+    return gate.wait(timeout: .now() + Double(seconds) + Double(attoseconds) / 1e18) == .success
 }

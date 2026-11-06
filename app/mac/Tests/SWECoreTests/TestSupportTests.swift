@@ -20,4 +20,45 @@ import Testing
             .appending(path: "Library/Preferences/\(file.lastPathComponent)")
         #expect(!FileManager.default.fileExists(atPath: preferences.path))
     }
+
+    /// A wait that ignores cancellation still ends at the timeout: a
+    /// task group used to sit on it until it finished, which was never.
+    @MainActor
+    @Test(.timeLimit(.minutes(1))) func withinTimeoutDoesNotWaitForAWaitThatIgnoresCancellation() async {
+        let never = HoldGate()
+        let stuck = Task { try? await never.pass() }
+        // A task's value can't be cancelled from outside the task.
+        let answered = await withinTimeout(.milliseconds(50)) {
+            await stuck.value
+            return true
+        }
+        #expect(!answered)
+        never.open()
+    }
+
+    @MainActor
+    @Test(.timeLimit(.minutes(1))) func withinTimeoutAnswersWithTheWaitWhenItFinishesFirst() async {
+        #expect(await withinTimeout { true })
+        #expect(await withinTimeout { false } == false)
+    }
+
+    /// Cancelling the caller answers false at once, not at the timeout,
+    /// even while its wait ignores cancellation.
+    @MainActor
+    @Test(.timeLimit(.minutes(1))) func withinTimeoutAnswersFalseWhenTheCallerIsCancelled() async {
+        let never = HoldGate()
+        let stuck = Task { try? await never.pass() }
+        let entered = CountGate()
+        let caller = Task { @MainActor in
+            await withinTimeout(.seconds(3600)) {
+                await entered.bump()
+                await stuck.value
+                return true
+            }
+        }
+        #expect(await entered.reach(1))
+        caller.cancel()
+        #expect(await caller.value == false)
+        never.open()
+    }
 }

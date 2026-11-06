@@ -239,18 +239,67 @@ func observe(until condition: @escaping @MainActor @Sendable () -> Bool) async -
     }
 }
 
-/// Races `wait` against `gateTimeout`: the first to finish wins and the
-/// loser is cancelled, so a regression fails instead of hanging.
+/// Races `wait` against `timeout`: the first to finish answers, and the
+/// other is cancelled but never awaited. A task group waits for every
+/// child before it returns, so a `wait` that ignores cancellation (such as
+/// `await task.value` on a task that never ends) used to hold the group,
+/// and the test, past the timeout for good. Cancelling the caller answers
+/// false at once and cancels both racers.
 @MainActor
-func withinTimeout(_ wait: @escaping @MainActor @Sendable () async -> Bool) async -> Bool {
-    await withTaskGroup(of: Bool.self) { group in
-        group.addTask { await wait() }
-        group.addTask {
-            try? await Task.sleep(for: gateTimeout)
-            return false
+func withinTimeout(_ timeout: Duration = gateTimeout,
+                   _ wait: @escaping @MainActor @Sendable () async -> Bool) async -> Bool {
+    let race = FirstAnswer()
+    return await withTaskCancellationHandler {
+        await withCheckedContinuation { continuation in
+            race.start(continuation, racers: [
+                Task { @MainActor in race.answer(await wait()) },
+                Task {
+                    try? await Task.sleep(for: timeout)
+                    race.answer(false)
+                },
+            ])
         }
-        let winner = await group.next() ?? false
-        group.cancelAll()
-        return winner
+    } onCancel: {
+        race.answer(false)
+    }
+}
+
+/// The answer `withinTimeout` gives: whichever comes first of a racer's
+/// `answer` or the caller's cancellation resumes the caller and cancels
+/// both racers; later answers are dropped.
+private final class FirstAnswer: Sendable {
+    private struct State {
+        var continuation: CheckedContinuation<Bool, Never>?
+        var racers: [Task<Void, Never>] = []
+        /// The first answer, once there is one.
+        var answer: Bool?
+    }
+
+    private let state = Mutex(State())
+
+    /// Hands over the caller and the racers. If an answer (a cancellation)
+    /// already came, the caller gets it now and the racers are cancelled.
+    func start(_ continuation: CheckedContinuation<Bool, Never>, racers: [Task<Void, Never>]) {
+        let early = state.withLock { s -> Bool? in
+            if let answer = s.answer { return answer }
+            s.continuation = continuation
+            s.racers = racers
+            return nil
+        }
+        guard let early else { return }
+        racers.forEach { $0.cancel() }
+        continuation.resume(returning: early)
+    }
+
+    func answer(_ value: Bool) {
+        let taken = state.withLock { s -> (CheckedContinuation<Bool, Never>?, [Task<Void, Never>])? in
+            if s.answer != nil { return nil }
+            s.answer = value
+            defer { s.continuation = nil; s.racers = [] }
+            return (s.continuation, s.racers)
+        }
+        guard let (continuation, racers) = taken else { return }
+        racers.forEach { $0.cancel() }
+        continuation?.resume(returning: value)
     }
 }
