@@ -53,6 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A skills root that links to itself no longer crashes the skills
+  commands on Python 3.11 and 3.12.** Before Python 3.13, `resolve()`
+  raises `RuntimeError` on a symlink loop, and the skills root scan
+  and root lookups only caught `OSError`, so a `~/.codex/skills`
+  pointing at itself ended `swe skills <filter>`, `swe skills tree`,
+  `swe skills link` and `swe skills move` in a traceback. A looped root
+  is now handled like a dangling one: `swe skills link` replaces it, a
+  path argument skips it, and `move` names it in an error. Linking a
+  root to a target that loops is refused before the old link is
+  removed, on every Python version.
 - **One unreadable log no longer empties `swe models` for its harness.**
   The model tally read each Claude, Codex and Freebuff log with the
   locale's strict decoder and no error handling, so a single file with a
@@ -240,6 +250,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+<<<<<<< HEAD
 - **Remote sessions can run over the Agent Client Protocol.** `swe
   remote attach` (and the apps' Attach) now picks a harness's ACP mode
   when its CLI has one installed (`devin acp`, and cursor-agent or
@@ -255,6 +266,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `claude-agent-acp` adapter with `--mode=acp` when it is installed;
   harness.json's `capabilities.acp` overrides or turns off detection
   ([#1637](https://github.com/c-wenlong/swe/issues/1637)).
+=======
+- **Folders nest in the AGENTS.md rail.** Dragging a folder row onto
+  another folder (or onto a file row inside it, or the "Top level"
+  strip) moves the directory on disk, and every chapter under it keeps
+  its index.txt slot, its on/off state and its targets.json rule under
+  the new path. A folder can't move into itself or its own subfolder,
+  and a name already taken on disk, in index.txt or in targets.json is
+  refused with a message under the rail's header. ⌘Z puts the folder
+  back. A drag resting on a collapsed folder springs it open.
+>>>>>>> origin/main
 
 - **Chapters drag between folders in the AGENTS.md rail.** A file row
   drops onto a folder row to move the chapter on disk; its index.txt

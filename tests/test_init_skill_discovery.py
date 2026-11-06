@@ -79,6 +79,47 @@ class DiscoveryTest(unittest.TestCase):
             deep.mkdir(parents=True)
             self.assertNotIn(deep, discover_skill_roots(home))
 
+    def test_a_root_that_is_a_symlink_loop_is_still_found(self):
+        # resolve() raised RuntimeError on a loop before Python 3.13, which
+        # crashed swe find skills and every skills link/unlink/move.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            loop = home / ".codex" / "skills"
+            loop.parent.mkdir()
+            loop.symlink_to(loop)
+            declared = home / ".pi" / "agent" / "skills"
+            declared.parent.mkdir(parents=True)
+            declared.symlink_to(declared)
+            registry = {"pi": {"capabilities": {
+                "skills": {"supported": True, "root": "~/.pi/agent/skills"}}}}
+
+            found = discover_skill_roots(home, registry)
+            self.assertIn(loop, found)
+            self.assertIn(declared, found)
+
+    def test_a_root_that_cannot_resolve_is_still_found(self):
+        # The same guard as above, with the pre-3.13 RuntimeError forced so
+        # it is exercised on every interpreter.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            glob_root = home / ".codex" / "skills"
+            glob_root.mkdir(parents=True)
+            declared = home / ".pi" / "agent" / "skills"
+            declared.mkdir(parents=True)
+            registry = {"pi": {"capabilities": {
+                "skills": {"supported": True, "root": "~/.pi/agent/skills"}}}}
+            real = Path.resolve
+
+            def resolve(path, *args, **kwargs):
+                if path in (glob_root, declared):
+                    raise RuntimeError(f"Symlink loop from {path!r}")
+                return real(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "resolve", resolve):
+                found = discover_skill_roots(home, registry)
+            self.assertIn(glob_root, found)
+            self.assertIn(declared, found)
+
     def test_label_strips_the_dot(self):
         self.assertEqual(skill_root_label(Path("/h/.qwen/skills")), "qwen")
         self.assertEqual(skill_root_label(Path("/h/.config/opencode/skills")), "opencode")

@@ -263,5 +263,121 @@ class ByteReaderTest(unittest.TestCase):
                 read_line("")
 
 
+
+class _FdStdin:
+    """A stdin with a real fd (a pipe) whose tty-ness the test decides."""
+
+    encoding = "utf-8"
+
+    def __init__(self, fd: int, tty: bool = False, text: str = ""):
+        self._fd, self._tty = fd, tty
+        self._text = io.StringIO(text)
+
+    def fileno(self):
+        return self._fd
+
+    def isatty(self):
+        return self._tty
+
+    def read(self, n=-1):
+        return self._text.read(n)
+
+
+class ReadLineFdTest(unittest.TestCase):
+    def setUp(self):
+        import os
+
+        from swe import prompt
+
+        self.addCleanup(prompt._pushback.clear)
+        self.addCleanup(prompt._stream_pushback.clear)
+        r, w = os.pipe()
+        self.r, self.w = r, w
+        self.addCleanup(lambda: [os.close(fd) for fd in (r, w) if _is_open(fd)])
+
+    def _feed(self, data: bytes):
+        import os
+
+        os.write(self.w, data)
+        os.close(self.w)
+
+    def test_the_prompt_is_written_and_a_pipe_is_read_by_bytes(self):
+        self._feed(b"yes\n")
+        out = io.StringIO()
+        with patch("sys.stdin", _FdStdin(self.r)), patch("sys.stdout", out):
+            self.assertEqual(read_line("Continue? "), "yes")
+        self.assertEqual(out.getvalue(), "Continue? ")
+
+    def test_a_tty_gets_cooked_mode_back_before_reading(self):
+        import termios
+
+        self._feed(b"ok\n")
+        attrs = [0, 0, 0, 0, 9600, 9600, []]
+        with patch("sys.stdin", _FdStdin(self.r, tty=True)), \
+                patch("sys.stdout", io.StringIO()), \
+                patch.object(termios, "tcgetattr", return_value=list(attrs)), \
+                patch.object(termios, "tcsetattr") as tcsetattr:
+            self.assertEqual(read_line(), "ok")
+        fd, when, new = tcsetattr.call_args.args
+        self.assertEqual((fd, when), (self.r, termios.TCSANOW))
+        self.assertTrue(new[0] & termios.ICRNL)
+        self.assertTrue(new[1] & termios.ONLCR)
+        self.assertTrue(new[3] & termios.ICANON and new[3] & termios.ECHO)
+
+    def test_cooked_mode_failures_never_stop_the_read(self):
+        import sys
+        import termios
+
+        from swe import prompt
+
+        prompt._restore_cooked_tty(self.r)  # a pipe: tcgetattr fails, nothing raises
+        with patch.object(termios, "tcgetattr", return_value=[0] * 6 + [[]]), \
+                patch.object(termios, "tcsetattr", side_effect=termios.error(25, "ENOTTY")):
+            prompt._restore_cooked_tty(self.r)
+        with patch.dict(sys.modules, {"termios": None}):
+            prompt._restore_cooked_tty(self.r)  # no termios at all (Windows)
+
+    def test_a_byte_reader_failure_falls_back_to_the_text_stream(self):
+        from swe import prompt
+
+        self._feed(b"")
+        with patch("sys.stdin", _FdStdin(self.r, text="from text\n")), \
+                patch.object(prompt, "_read_line_bytes", side_effect=OSError(9, "Bad file")):
+            self.assertEqual(read_line(), "from text")
+
+    def test_an_interrupted_read_is_retried(self):
+        from swe import prompt
+
+        reads = iter([InterruptedError(), b"z"])
+
+        def read(_fd, _n):
+            item = next(reads)
+            if isinstance(item, BaseException):
+                raise item
+            return item
+
+        with patch("os.read", read):
+            self.assertEqual(prompt._read_byte(self.r), b"z")
+
+
+def _is_open(fd: int) -> bool:
+    import os
+
+    try:
+        os.fstat(fd)
+    except OSError:
+        return False
+    return True
+
+
+class StreamEofTest(unittest.TestCase):
+    def test_a_last_line_without_a_terminator_is_returned_then_eof(self):
+        fake = io.StringIO("no newline")
+        with patch("sys.stdin", fake):
+            self.assertEqual(read_line(""), "no newline")
+            with self.assertRaises(EOFError):
+                read_line("")
+
+
 if __name__ == "__main__":
     unittest.main()
