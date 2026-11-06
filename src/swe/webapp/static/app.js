@@ -11,12 +11,12 @@ const credential = () => {
   catch { return ""; }
 };
 
-/* X-Quiver-Pair marks the request as this page's own: a page on another
+/* X-Swe-Pair marks the request as this page's own: a page on another
  * site can't send a custom header without the hub's CORS consent, so the
  * hub only honours the owner's tailnet identity with it. */
 function authHeaders(extra = {}) {
   const cred = credential();
-  return { "X-Quiver-Pair": "1", ...(cred ? { Authorization: `Bearer ${cred}` } : {}), ...extra };
+  return { "X-Swe-Pair": "1", ...(cred ? { Authorization: `Bearer ${cred}` } : {}), ...extra };
 }
 
 const esc = (s) => String(s == null ? "" : s)
