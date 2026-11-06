@@ -798,7 +798,7 @@ private struct NewHookSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("New hook").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+            Text("New hook").font(Theme.sectionTitle).tracking(-0.5)
             FormField("Harness") {
                 SelectMenu(options: harnesses.map { ($0, HarnessMark($0).name, $0) },
                            selection: $harness, width: nil)
@@ -853,7 +853,7 @@ private struct NewHookSheet: View {
                     }
                     .secondaryButton()
                 }
-                Button(created == nil ? "Close" : "Done") { dismiss() }
+                Button(created == nil ? "Cancel" : "Done") { dismiss() }
                     .secondaryButton()
                     .disabled(working)
                 if created == nil {
