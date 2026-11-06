@@ -1,5 +1,6 @@
 import Charts
 import SWECore
+import SWEWidgetsUI
 import SwiftUI
 
 extension ThermalComponent {

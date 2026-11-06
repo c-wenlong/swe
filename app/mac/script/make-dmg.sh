@@ -26,7 +26,7 @@
 #      on a Mac that is offline at first launch.
 #
 # Notarization takes one of two credential forms, the same contract
-# build-app.sh and release.yml use (see BOOTSTRAP.md):
+# build-app.sh and release.yml use (release.yml reads the Actions secrets):
 #   SWE_NOTARY_PROFILE                        a `notarytool
 #                                              store-credentials` keychain
 #                                              profile (the local flow)
@@ -101,7 +101,7 @@ if [ "$have_notary" = false ]; then
     echo "make-dmg: $app is Developer-ID-signed but no notarization" >&2
     echo "credentials were given; Gatekeeper rejects the result on every" >&2
     echo "other Mac. Set SWE_NOTARY_PROFILE or NOTARY_KEY, NOTARY_KEY_ID" >&2
-    echo "and NOTARY_ISSUER (see BOOTSTRAP.md)." >&2
+    echo "and NOTARY_ISSUER (see app/mac/README.md, Package a DMG)." >&2
     exit 1
   fi
   echo "make-dmg: no notarization credentials; the DMG cannot be" >&2

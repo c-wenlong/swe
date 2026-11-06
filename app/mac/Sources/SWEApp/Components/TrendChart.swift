@@ -33,24 +33,27 @@ struct TrendChart: View {
         return model.history.window(endingAt: end, interval: model.trendInterval)
     }
 
-    /// The harness's points in the visible window that have a reading.
-    private func series(_ harness: String) -> [TrendPoint] {
-        guard let range = Self.window(model) else { return [] }
-        return model.history.window(for: harness, in: range).filter(metric.reads)
+    /// Each harness's points in the visible window that have a reading,
+    /// filtered once per body: the marks, the y scale and the hover
+    /// bubble all read this one copy.
+    private func plotted() -> [String: [TrendPoint]] {
+        guard let range = Self.window(model) else { return [:] }
+        return Dictionary(harnesses.map { ($0, model.history.window(for: $0, in: range).filter(metric.reads)) },
+                          uniquingKeysWith: { first, _ in first })
     }
 
     /// The y axis's fixed top, from the plotted values only. Nothing the
     /// hover state touches feeds it, so the scale cannot move under the
     /// cursor.
-    private var yTop: Double {
-        metric.top(harnesses.flatMap { series($0).map(metric.value(of:)) },
+    private func yTop(_ plotted: [String: [TrendPoint]]) -> Double {
+        metric.top(plotted.values.flatMap { $0.map(metric.value(of:)) },
                    flagBytes: model.limits.memoryBytes)
     }
 
     static func formatted(_ value: Double, _ metric: TrendMetric) -> String {
         switch metric {
         case .ram: ComputeSummary.bytes(UInt64(max(0, value) * Double(UInt64(1) << 30)))
-        case .cpu, .gpu: "\(ComputePage.cpu(value))%"
+        case .cpu, .gpu: "\(ComputeSummary.percent(value))%"
         case .temperature: TemperatureChart.formatted(value)
         }
     }
@@ -63,9 +66,10 @@ struct TrendChart: View {
         let limitGB = Double(model.limits.memoryBytes) / Double(UInt64(1) << 30)
         // The chart only renders once a point exists, so latest is set.
         let domain = Self.window(model) ?? Date.now.addingTimeInterval(-60)...Date.now
+        let plotted = plotted()
         Chart {
             ForEach(harnesses, id: \.self) { harness in
-                let points = series(harness)
+                let points = plotted[harness] ?? []
                 ForEach(points, id: \.at) { point in
                     LineMark(x: .value("Time", point.at), y: .value("Value", metric.value(of: point)),
                              series: .value("Harness", harness))
@@ -94,7 +98,7 @@ struct TrendChart: View {
             }
         }
         .chartXScale(domain: domain)
-        .chartYScale(domain: 0...yTop)
+        .chartYScale(domain: 0...yTop(plotted))
         .chartXAxis {
             if showsXAxis {
                 AxisMarks(values: .automatic(desiredCount: compact ? 4 : 6)) { value in
@@ -118,7 +122,7 @@ struct TrendChart: View {
         // The rule and the bubble live in the overlay, where no chart
         // mark can grow the scale and a hover never rebuilds the marks.
         .chartOverlay { proxy in
-            ChartHoverLayer(proxy: proxy, hovered: $hovered) { time in bubble(at: time) }
+            ChartHoverLayer(proxy: proxy, hovered: $hovered) { time in bubble(at: time, plotted: plotted) }
         }
     }
 
@@ -131,10 +135,10 @@ struct TrendChart: View {
     }
 
     /// Each harness's value at the point nearest the hovered time.
-    private func bubble(at time: Date) -> some View {
+    private func bubble(at time: Date, plotted: [String: [TrendPoint]]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(harnesses, id: \.self) { harness in
-                if let point = series(harness).min(by: {
+                if let point = (plotted[harness] ?? []).min(by: {
                     abs($0.at.timeIntervalSince(time)) < abs($1.at.timeIntervalSince(time))
                 }) {
                     HStack(spacing: 6) {
