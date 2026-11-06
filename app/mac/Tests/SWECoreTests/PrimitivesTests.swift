@@ -548,6 +548,24 @@ final class PrimitiveHome {
         #expect(tree.sections.flatMap(\.entries).allSatisfy { !$0.name.hasPrefix(".") })
     }
 
+    /// A skill folder's own SKILL.md is its main file, listed first, never
+    /// one of its "Other files" (the web's `pages/skills.py` tree too).
+    @Test func aSkillsOwnSkillFileIsItsMainFile() throws {
+        let t = try PrimitiveHome()
+        let root = t.home.appending(path: "tdd")
+        try t.write("tdd/SKILL.md", "---\nname: tdd\n---\n")
+        try t.write("tdd/references/loop.md", "x")
+        let tree = PrimitiveTree(root: root)
+        #expect(tree.sections.map(\.kind) == [.main, .other])
+        #expect(tree.sections.first?.entries.map(\.name) == ["SKILL.md"])
+        #expect(tree.sections.last?.entries.map(\.name) == ["references/loop.md"])
+
+        // Alone in the folder, it is still the main file, with no Other.
+        let lone = t.home.appending(path: "lone")
+        try t.write("lone/SKILL.md", "x")
+        #expect(PrimitiveTree(root: lone).sections.map(\.kind) == [.main])
+    }
+
     @Test func binaryAndLargeFilesAreNotText() throws {
         let t = try PrimitiveHome()
         let png = try t.write("bin/img.png", "not a png")
