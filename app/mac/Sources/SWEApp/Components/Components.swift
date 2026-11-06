@@ -172,7 +172,10 @@ struct FormField<Content: View>: View {
             Text(label).font(Theme.control).foregroundStyle(Theme.textSecondary)
             content
             if let hint {
+                // Wraps rather than truncating in a narrow column, where
+                // the end of the hint is often the part that matters.
                 Text(hint).font(Theme.caption).foregroundStyle(problem ? Theme.dangerText : Theme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
