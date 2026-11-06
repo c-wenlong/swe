@@ -328,6 +328,15 @@ Safe Storage item.</p>
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>The web app keeps its browser settings under <code>swe.</code> names.</strong> Its
+<code>localStorage</code> keys (the device credential, appearance, hidden pages,
+the Settings section, Compute and Calendar choices, the Agents folder,
+hidden MCP harnesses, the setup offer) were still <code>quiver.*</code>. Each now
+lives under <code>swe.*</code>; the first load after the update moves a browser's
+old keys across and deletes them, so nobody is signed out or loses a
+setting. The old credential key stays until the next sign-in or
+sign-out, so a tab still open on an older page keeps working.</p>
+</li>
 <li><p><strong>The MCP pages name the hub <code>swe</code> when they sync or remove.</strong> The
 Mac and web MCP sheets still sent the hub's pre-rename name, <code>quiver</code>,
 as a sync source and remove place. Both now send <code>swe</code>; the hub's web
