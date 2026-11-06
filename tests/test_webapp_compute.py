@@ -1024,5 +1024,143 @@ class TestAutoCleanAge(unittest.TestCase):
         self.assertEqual(json.loads(done.stdout), [None, None, 86400, 91, 86400])
 
 
+class TestUnreadableSources(unittest.TestCase):
+    """Whatever /proc or /sys hands back half-written or garbled costs
+    that one reading, never the sample."""
+
+    def setUp(self):
+        self.m = FakeMachine(self)
+
+    def test_a_garbled_or_empty_stat_is_no_process(self):
+        self.m.process(30, 1, ["bash"])
+        (self.m.proc / "30" / "stat").write_text("30 (bash) S x 0 0 0 0 0 0 0 0 0 a b 0 0 20 0 1 0 5 0 0\n")
+        self.assertIsNone(compute.read_process(self.m.proc, 30, 1000, TICK))
+        (self.m.proc / "30" / "stat").write_text("")
+        self.assertIsNone(compute.read_process(self.m.proc, 30, 1000, TICK))
+        self.assertIsNone(compute.read_process(self.m.proc, 31, 1000, TICK))
+
+    def test_memory_falls_back_to_vmrss_without_rssanon(self):
+        self.m.process(30, 1, ["bash"], swap_kb=2)
+        (self.m.proc / "30" / "status").write_text("Name:\tbash\nVmRSS:\t300 kB\nVmSwap:\t2 kB\n")
+        self.assertEqual(compute.read_process(self.m.proc, 30, 1000, TICK).memory_bytes, 302 * 1024)
+        (self.m.proc / "30" / "status").write_text("Name:\tbash\nVmRSS:\tlots\n")
+        self.assertEqual(compute.read_process(self.m.proc, 30, 1000, TICK).memory_bytes, 0)
+
+    def test_an_unlistable_proc_or_a_vanished_pid_is_skipped(self):
+        self.m.process(40, 1, ["bash"])
+        self.m.process(41, 1, ["zsh"])
+        (self.m.proc / "self").mkdir()
+        with patch("os.scandir", side_effect=PermissionError("denied")):
+            self.assertEqual(compute.read_processes(self.m.proc), [])
+        entries = list(os.scandir(self.m.proc))
+
+        class Gone:
+            def __init__(self, entry):
+                self.name = entry.name
+
+            def stat(self):
+                raise FileNotFoundError(self.name)
+
+        mixed = [Gone(e) if e.name == "41" else e for e in entries]
+        with patch("os.scandir", return_value=iter(mixed)):
+            self.assertEqual([p.pid for p in compute.read_processes(self.m.proc)], [40])
+
+    def test_a_home_folder_that_will_not_resolve_has_no_real_path(self):
+        registry = {"claude": {"command": "claude", "state": "starred"}}
+        with patch("swe.harness.registry.load_registry_readonly", return_value=registry), \
+                patch.object(Path, "resolve", side_effect=RuntimeError("symlink loop")):
+            matchers = compute.load_matchers(Path(HOME))
+        self.assertEqual([(m.harness, m.real_home_folder) for m in matchers], [("claude", "")])
+
+    def test_garbled_machine_counters_read_as_nothing(self):
+        for line in ("cpu  1 2 x 4", "cpu  1 2 3"):
+            self.m.cpu_line = line
+            self.m.write_stat()
+            self.assertIsNone(compute.read_cpu_times(self.m.proc), line)
+        self.m.cpu_line = "cpu  10 0 10 80"
+        self.m.write_stat()
+        self.assertEqual(compute.read_cpu_times(self.m.proc), (20, 100))
+        (self.m.proc / "loadavg").write_text("high higher highest\n")
+        self.assertIsNone(compute.read_load(self.m.proc))
+        (self.m.proc / "meminfo").write_text("MemTotal: 1000 kB\nMemFree: 100 kB\nCached: 200 kB\n")
+        self.assertEqual(compute.read_memory(self.m.proc)["used_bytes"], 700 * 1024)
+
+    def test_garbled_sensors_drop_only_that_sensor(self):
+        self.m.hwmon(0, "k10temp", temps=("hot", 50000), fans=(("fast", 0), (1200, "low")))
+        self.m.hwmon(1, "mystery-chip", temps=(70000,))
+        self.m.zone(0, "battery", "warm")
+        self.m.zone(1, "acpitz", 99000)
+        self.m.zone(2, "battery", 5000)  # implausible: no reading at all
+        values, fans = compute.read_temperatures(self.m.sys)
+        self.assertEqual(values, {"cpu": 50.0})
+        self.assertEqual(fans, {"rpm": 1200.0, "up": False})
+
+    def test_an_nvidia_row_without_an_index_is_skipped(self):
+        self.assertEqual(compute.parse_nvidia("N/A, Ghost, 1, 2, 3, 4, 5\n"), [])
+
+    def test_nvidia_smi_failing_or_answering(self):
+        which = patch("shutil.which", return_value="/usr/bin/nvidia-smi")
+        with which, patch("subprocess.run", side_effect=OSError("exec format error")):
+            self.assertIsNone(compute.read_nvidia())
+        failed = compute.subprocess.CompletedProcess([], 9, "", "no devices")
+        with which, patch("subprocess.run", return_value=failed):
+            self.assertIsNone(compute.read_nvidia())
+        done = compute.subprocess.CompletedProcess([], 0, "0, Tesla T4, 5, 1, 2, 40, 9\n", "")
+        with which, patch("subprocess.run", return_value=done):
+            self.assertEqual([g["name"] for g in compute.read_nvidia()], ["Tesla T4"])
+        with which, patch("subprocess.run", side_effect=OSError("gone")):
+            self.assertIsNone(compute.read_nvidia_processes())
+
+
+class TestSendSignal(unittest.TestCase):
+    """The signaller: a pidfd pins the process the sample saw, so a pid
+    that exited or was reused in the meantime is never signalled."""
+
+    def setUp(self):
+        self.m = FakeMachine(self)
+        self.m.process(50, 1, ["python3", "worker.py"], start=500)
+        self.started = compute.read_process(self.m.proc, 50, 1000, TICK).started_at
+        self.sent = []
+        self.closed = []
+        for name, fake in (("pidfd_open", lambda pid: 900 + pid),
+                           ("pidfd_send_signal", lambda fd, sig: self.sent.append((fd, sig)))):
+            patcher = patch.object(compute.os, name, side_effect=fake, create=True)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        ticks = patch.object(compute, "ticks", return_value=TICK)
+        ticks.start()
+        self.addCleanup(ticks.stop)
+
+    def send(self, pid, started_at):
+        with patch.object(compute.os, "close", side_effect=self.closed.append):
+            return compute.send_signal(pid, signal.SIGTERM, started_at, proc=self.m.proc)
+
+    def test_the_process_the_sample_saw_is_signalled_through_its_pidfd(self):
+        self.assertTrue(self.send(50, self.started))
+        self.assertEqual((self.sent, self.closed), ([(950, signal.SIGTERM)], [950]))
+
+    def test_a_reused_or_exited_pid_is_left_alone(self):
+        self.assertFalse(self.send(50, self.started + 1))
+        shutil.rmtree(self.m.proc / "50")
+        self.assertFalse(self.send(50, self.started))
+        self.assertEqual((self.sent, self.closed), ([], [950, 950]))
+
+    def test_a_pidfd_that_will_not_open_or_send_is_false(self):
+        with patch.object(compute.os, "pidfd_open", side_effect=ProcessLookupError(), create=True):
+            self.assertFalse(self.send(50, self.started))
+        self.assertEqual(self.closed, [])
+        with patch.object(compute.os, "pidfd_send_signal", side_effect=PermissionError(), create=True):
+            self.assertFalse(self.send(50, self.started))
+        self.assertEqual(self.closed, [950])
+
+    def test_without_a_start_time_it_is_a_plain_kill(self):
+        with patch.object(compute.os, "kill") as kill:
+            self.assertTrue(compute.send_signal(50, signal.SIGKILL))
+            kill.assert_called_once_with(50, signal.SIGKILL)
+            kill.side_effect = ProcessLookupError()
+            self.assertFalse(compute.send_signal(50, signal.SIGKILL))
+        self.assertEqual(self.sent, [])
+
+
 if __name__ == "__main__":
     unittest.main()

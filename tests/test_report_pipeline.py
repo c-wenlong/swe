@@ -504,5 +504,126 @@ class ReportPipelineTest(unittest.TestCase):
         self.assertIsNone(self.store.get_cursor("daily"))
 
 
+    def test_limits_and_cadence_are_checked_up_front(self):
+        for limit in ("max_workers", "max_batch_sessions", "max_summary_calls"):
+            with self.assertRaisesRegex(ValueError, "must be positive"):
+                self.pipeline(FakeRunner(), **{limit: 0})
+        with self.assertRaisesRegex(ValueError, "daily' or 'weekly"):
+            self.pipeline(FakeRunner()).preview(
+                self.sessions, cadence="monthly", period_start="2026-07-01", period_end="2026-07-31")
+
+    @patch("swe.reports.batching.resolve_project_root", side_effect=lambda path: path)
+    def test_an_over_budget_plan_names_the_phrase_it_needs(self, _root):
+        runner = FakeRunner()
+        pipeline = self.pipeline(runner, max_summary_calls=1)
+        other = Session(3, "Codex", "/repo-b", "Third", "s3", "codex")
+        self.transcripts["s3"] = transcript(other)
+        preview = self.preview(pipeline, [*self.sessions, other])
+        with self.assertRaisesRegex(ReportApprovalError, '"process all"'):
+            pipeline.run(ApprovedReportPlan(preview, True))
+        self.assertEqual(runner.calls, [])
+
+    @patch("swe.reports.batching.resolve_project_root", side_effect=lambda path: path)
+    def test_an_empty_session_is_excluded_and_recorded_with_the_report(self, _root):
+        empty = Session(3, "Codex", "/repo-a", "Nothing", "s3", "codex")
+        self.transcripts["s3"] = NormalizedTranscript("codex", "s3", empty.path, [])
+        pipeline = self.pipeline(FakeRunner())
+        preview = self.preview(pipeline, [*self.sessions, empty])
+        self.assertEqual([r.session_id for r in preview.exclusions], ["s3"])
+        self.assertEqual(self.store.load_exclusions(), [])
+        result = pipeline.run(ApprovedReportPlan(preview, True))
+        self.assertEqual(result.report.manifest.exclusion_ids, ["s3"])
+        recorded = self.store.load_exclusions()
+        self.assertEqual([(r.session_id, r.reason) for r in recorded], [("s3", "empty transcript")])
+
+    @patch("swe.reports.batching.resolve_project_root", side_effect=lambda path: path)
+    def test_a_batch_answering_for_other_sessions_fails(self, _root):
+        class WrongIds(FakeRunner):
+            def __call__(self, spec, prompt, *, output_kind):
+                result = super().__call__(spec, prompt, output_kind=output_kind)
+                if output_kind != "final_report":
+                    result.data["sessions"][0]["session_id"] = "someone-else"
+                return result
+
+        runner = WrongIds()
+        pipeline = self.pipeline(runner)
+        with self.assertRaisesRegex(ReportWriterError, "returned session IDs"):
+            pipeline.run(ApprovedReportPlan(self.preview(pipeline), True))
+        self.assertNotIn("final_report", runner.calls)
+        self.assertEqual(list(self.store.summaries_dir.glob("*.json")), [])
+
+    @patch("swe.reports.batching.resolve_project_root", side_effect=lambda path: path)
+    def test_a_previous_report_whose_markdown_is_gone_reads_as_none(self, _root):
+        pipeline = self.pipeline(FakeRunner())
+        first = pipeline.run(ApprovedReportPlan(self.preview(pipeline), True))
+        self.assertEqual(self.preview(pipeline).previous_report, "# Report\n")
+        first.markdown_path.unlink()
+        self.assertEqual(self.preview(pipeline).previous_report, "")
+
+    @patch("swe.reports.batching.resolve_project_root", side_effect=lambda path: path)
+    def test_unusable_follow_up_suggestions_become_warnings(self, _root):
+        runner = FakeRunner(suggestions=[
+            {"action": "create", "follow_up_id": "", "text": "  ", "project_path": "/repo-a"},
+            {"action": "create", "follow_up_id": "", "text": "Ship it", "project_path": "/repo-a",
+             "evidence": "s1"},
+            {"action": "suggest_resolved", "follow_up_id": "fu_missing", "text": "done",
+             "project_path": "/repo-a"},
+            {"action": "close", "follow_up_id": "", "text": "x", "project_path": "/repo-a"},
+        ])
+        pipeline = self.pipeline(runner)
+        result = pipeline.run(ApprovedReportPlan(self.preview(pipeline), True))
+        self.assertEqual(self.ledger.list(), [])
+        self.assertEqual(result.report.manifest.follow_up_ids, [])
+        self.assertEqual([w for w in result.warnings if "follow-up" in w], [
+            "ignored invalid follow-up suggestion: follow-up text must not be empty",
+            "ignored invalid follow-up suggestion: follow-up evidence must be a list",
+            "unknown follow-up suggestion target: fu_missing",
+            "ignored advisory follow-up action: close",
+        ])
+        self.assertTrue(result.report.manifest.partial)
+
+class WriterCompactionTest(unittest.TestCase):
+    """The writer's per-record bound: text keeps both edges, long lists say
+    how much they dropped, and a record still too big keeps its routing
+    identifiers beside one bounded serialized copy."""
+
+    def test_text_keeps_both_edges_and_a_tiny_limit_just_cuts(self):
+        from swe.reports.pipeline import WRITER_COMPACTION_MARKER, _compact_text
+
+        text = "a" * 50 + "z" * 50
+        compacted = _compact_text(text, 60)
+        self.assertEqual(len(compacted), 60)
+        self.assertTrue(compacted.startswith("a") and compacted.endswith("z"))
+        self.assertIn(WRITER_COMPACTION_MARKER, compacted)
+        self.assertEqual(_compact_text(text, 3), "aaa")
+        self.assertEqual(_compact_text("short", 60), "short")
+
+    def test_long_lists_and_nested_mappings_are_bounded(self):
+        from swe.reports.pipeline import _compact_mapping
+
+        record = {"session_id": "s1", "changes": [f"change {i}" for i in range(25)],
+                  "nested": {"note": "n" * 3_000}, "count": 3}
+        compacted = _compact_mapping(record)
+        self.assertEqual(compacted["changes"][:2], ["change 0", "change 1"])
+        self.assertEqual(compacted["changes"][-1], "[...5 items omitted...]")
+        self.assertEqual(len(compacted["changes"]), 21)
+        self.assertLessEqual(len(json.dumps(compacted["nested"], ensure_ascii=True, sort_keys=True)), 2_000)
+        self.assertIn("compacted_record", compacted["nested"])
+        self.assertEqual((compacted["session_id"], compacted["count"]), ("s1", 3))
+
+    def test_a_record_too_big_to_fit_keeps_its_identifiers(self):
+        from swe.reports.pipeline import _compact_mapping
+
+        record = {"session_id": "s1", "source_tool": "codex", "project_root": "/repo-a",
+                  **{f"field{i}": "x" * 400 for i in range(40)}}
+        compacted = _compact_mapping(record, limit=1_000)
+        self.assertEqual(set(compacted), {"session_id", "source_tool", "project_root", "compacted_record"})
+        self.assertEqual(compacted["project_root"], "/repo-a")
+        self.assertLessEqual(len(json.dumps(compacted, ensure_ascii=True, sort_keys=True)), 1_000)
+        tight = _compact_mapping(record, limit=200)
+        self.assertLessEqual(len(json.dumps(tight, ensure_ascii=True, sort_keys=True)), 200)
+        self.assertEqual(tight["session_id"], "s1")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from swe.reports.models import FollowUp
 from swe.reports.work import (
     FollowUpWorkError,
+    _default_launch,
     build_follow_up_prompt,
     choose_work_action,
     launch_follow_up_work,
     prepare_follow_up_work,
+    work_on_follow_up,
 )
 from swe.sessions.models import Session
 
@@ -190,6 +194,44 @@ class FollowUpWorkTest(unittest.TestCase):
         self.assertEqual(calls, [(plan.launch_args, str(self.root))])
         self.assertEqual(self.follow_up.status, "open")
 
+
+    def test_resume_needs_a_referenced_session_with_a_path(self):
+        unrelated = [Session(300, "Codex", str(self.root), session_id="other", tool_name="codex")]
+        with self.assertRaisesRegex(FollowUpWorkError, "no available referenced source session"):
+            prepare_follow_up_work(self.follow_up, mode="resume", session_loader=lambda: unrelated)
+        pathless = [Session(300, "Codex", "", session_id="new", tool_name="codex")]
+        with self.assertRaisesRegex(FollowUpWorkError, "has no project path"):
+            prepare_follow_up_work(self.follow_up, mode="resume", session_loader=lambda: pathless)
+
+    def test_a_bare_follow_up_prompt_has_only_the_task_and_the_rule(self):
+        bare = FollowUp(id="fu_3", text="  Tidy the cache  ", project_root=str(self.root))
+        self.assertEqual(build_follow_up_prompt(bare).split("\n\n"), [
+            "Work on this user-owned follow-up:", "Tidy the cache",
+            "Do not change the follow-up status automatically. The user must mark it done manually."])
+
+    def test_the_default_launcher_runs_in_the_project_and_comes_back(self):
+        here = os.getcwd()
+        seen = []
+        with patch("swe.harness.commands.cmd_use", side_effect=lambda args: seen.append((args, os.getcwd())) or 0):
+            self.assertEqual(_default_launch(["claude", "go"], str(self.child)), 0)
+        self.assertEqual(seen, [(["claude", "go"], os.path.realpath(self.child))])
+        self.assertEqual(os.getcwd(), here)
+        with patch("swe.harness.commands.cmd_use", side_effect=RuntimeError("no such harness")):
+            with self.assertRaises(RuntimeError):
+                _default_launch(["claude"], str(self.child))
+        self.assertEqual(os.getcwd(), here)
+
+    def test_work_on_follow_up_prepares_then_launches(self):
+        calls = []
+        result = work_on_follow_up(
+            self.follow_up, mode="new", harness="cc", registry_loader=lambda: REGISTRY,
+            launch_fn=lambda args, cwd: calls.append((args, cwd)) or "launched")
+        self.assertEqual(result, "launched")
+        self.assertEqual(calls[0][0][0], "claude")
+        self.assertEqual(calls[0][1], str(self.root))
+        with self.assertRaises(FollowUpWorkError):
+            work_on_follow_up(self.follow_up, mode="new", harness="nope", registry_loader=lambda: REGISTRY,
+                              launch_fn=lambda args, cwd: self.fail("launched"))
 
 if __name__ == "__main__":
     unittest.main()

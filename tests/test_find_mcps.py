@@ -192,6 +192,21 @@ class RenderTest(unittest.TestCase):
         self.assertIn("notion == pd__notion", out)
         self.assertIn("two of a kind is not", out)
 
+    def test_configs_swe_does_not_read_and_unmanaged_servers_are_listed(self):
+        from swe.find.mcps import FoundConfig
+
+        folder = temp_dir(self)
+        cfg = FoundConfig(path=folder / ".weird" / "mcp.json",
+                          servers={"a": LOCAL, "zz": REMOTE, "yy": LOCAL}, harness="weird")
+        code, out = self._render({"a": LOCAL}, [], configs=[cfg], stray={"zz": [cfg], "yy": [cfg]})
+        self.assertEqual(code, 0)
+        self.assertIn("Configs swe does not read", out)
+        self.assertIn("2 local, 1 remote", out)
+        self.assertIn("On disk but not in the hub", out)
+        lines = {line.split()[0]: line.split()[1:] for line in out.splitlines() if line.strip().startswith(("yy", "zz"))}
+        self.assertEqual(lines, {"yy": ["local", "weird"], "zz": ["remote", "weird"]})
+        self.assertIn("· 2 unmanaged", out)
+
 
 class ScanTest(unittest.TestCase):
     """The registered-paths view cannot see a config nobody registered.
