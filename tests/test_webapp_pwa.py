@@ -70,7 +70,10 @@ class TestSafeArea(unittest.TestCase):
         self.assertRegex(STYLES, r"\.sidebar \{[^}]*var\(--safe-top\)[^}]*var\(--safe-left\)")
         self.assertRegex(STYLES, r"\.page \{[^}]*var\(--safe-right\)[^}]*var\(--safe-bottom\)")
         chat = (STATIC / "pages/chat.css").read_text(encoding="utf-8")
-        self.assertIn("var(--safe-bottom)", chat)
+        self.assertRegex(chat, r"\.chat-page \{[^}]*padding-top: var\(--safe-top\)[^}]*var\(--safe-bottom\)")
+        # Narrow, the sidebar strip supplies the top inset, so the chat adds none.
+        narrow = chat.split("@media (max-width: 720px) {", 1)[1]
+        self.assertRegex(narrow, r"\.chat-page \{ padding-top: 0; \}")
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
