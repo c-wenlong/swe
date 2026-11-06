@@ -40,5 +40,33 @@ class TestReaskedApproval(ChatScript):
         self.assertEqual(out, {"cards": 1, "resolved": True, "at": 0})
 
 
+    def test_a_pending_answer_keeps_its_card(self):
+        out = self.run_js("""
+            T.appendEvent(%s, false);
+            const card = entries().find((c) => c.classList.contains('approval'));
+            card.dataset.queued = '1';
+            T.appendEvent(msg(3, 'assistant', 'still here'), false);
+            T.appendEvent(%s, false);
+            T.scrollBottom();
+            const cards = entries().filter((c) => c.classList.contains('approval'));
+            return { same: cards.length === 1 && cards[0] === card, queued: card.dataset.queued,
+              last: entries().indexOf(card) === entries().length - 1 };""" % (ASK % 2, ASK % 4))
+        self.assertEqual(out, {"same": True, "queued": "1", "last": True})
+
+    def test_an_answered_card_folded_away_still_stands(self):
+        out = self.run_js("""
+            T.appendEvent(%s, false);
+            T.appendEvent({ type: 'approval.resolved', seq: 2, data: { request_id: 'r1', decision: 'allow' } }, false);
+            for (const ev of transcript(300)) { ev.seq += 2; T.appendEvent(ev, false); }
+            T.scrollBottom();
+            const folded = T.chat.earlier.some((c) => c.classList.contains('approval'));
+            T.appendEvent(%s, false);
+            T.scrollBottom();
+            while (T.chat.earlier.length) T.showEarlier();
+            const cards = entries().filter((c) => c.classList.contains('approval'));
+            return { folded, cards: cards.length };""" % (ASK % 1, ASK % 400))
+        self.assertEqual(out, {"folded": True, "cards": 1})
+
+
 if __name__ == "__main__":
     unittest.main()
