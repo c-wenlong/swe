@@ -186,5 +186,70 @@ class ReportStoreTest(unittest.TestCase):
         self.assertNotIn("..", markdown_path.name)
 
 
+    def assert_refused_untouched(self, path, text, call):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        with self.assertRaises(MalformedReportStateError) as caught:
+            call()
+        self.assertEqual(caught.exception.path, path)
+        self.assertEqual(path.read_text(), text)
+
+    def test_an_unknown_cadence_is_refused(self):
+        for call in (lambda: self.store.get_cursor("hourly"),
+                     lambda: self.store.latest_manifest(" Monthly "),
+                     lambda: self.store.advance_cursor("", "2026-07-29", "r1")):
+            with self.assertRaisesRegex(ValueError, "daily' or 'weekly"):
+                call()
+        self.assertIsNone(self.store.get_cursor(" DAILY "))
+
+    def test_a_malformed_summary_cache_is_reported_on_read_and_invalidate(self):
+        path = self.store._summary_path("session-1", "codex")
+        for text in ("[]", '{"session_id": "session-1"}'):
+            self.assert_refused_untouched(
+                path, text, lambda: self.store.get_session_summary("session-1", "digest-1", "codex"))
+            self.assert_refused_untouched(
+                path, text, lambda: self.store.get_session_summary("session-1", "digest-1"))
+            self.assert_refused_untouched(
+                path, text, lambda: self.store.invalidate_session_summary("session-1", "codex"))
+
+    def test_invalidate_refuses_a_cache_file_holding_another_session(self):
+        path = self.store.save_session_summary(self.summary())
+        data = json.loads(path.read_text())
+        data["session_id"] = "session-2"
+        self.assert_refused_untouched(
+            path, json.dumps(data), lambda: self.store.invalidate_session_summary("session-1", "codex"))
+
+    def test_lookup_without_a_tool_skips_other_sessions(self):
+        self.store.save_session_summary(self.summary())
+        other = self.summary()
+        other.session_id = "session-2"
+        self.store.save_session_summary(other)
+        self.assertEqual(self.store.get_session_summary("session-2", "digest-1").session_id, "session-2")
+        self.assertIsNone(self.store.get_session_summary("session-3", "digest-1"))
+
+    def test_malformed_exclusions_are_never_rewritten(self):
+        record = ExclusionRecord(source_tool="codex", session_id="s", digest="d",
+                                 reason="private", excluded_at=NOW)
+        path = self.store.exclusions_file
+        for text in ("{}", "[1]", '[{"session_id": "s"}]'):
+            self.assert_refused_untouched(path, text, lambda: self.store.record_exclusions([record]))
+        for text in ("{}", '[{"session_id": "s"}]'):
+            self.assert_refused_untouched(path, text, self.store.load_exclusions)
+
+    def test_a_report_id_is_never_reused(self):
+        self.store.write_report("# One\n", self.manifest())
+        with self.assertRaisesRegex(FileExistsError, "daily-2026-07-29"):
+            self.store.write_report("# Two\n", self.manifest())
+        (markdown,) = (self.root / "daily").glob("*.md")
+        self.assertEqual(markdown.read_text(), "# One\n")
+
+    def test_malformed_cursors_are_reported_and_kept(self):
+        path = self.store.cursors_file
+        for text in ("[]", '{"daily": "yesterday"}', '{"daily": {"through": 1}}'):
+            self.assert_refused_untouched(path, text, lambda: self.store.get_cursor("daily"))
+            self.assert_refused_untouched(
+                path, text, lambda: self.store.advance_cursor("daily", "2026-07-29", "r1"))
+
+
 if __name__ == "__main__":
     unittest.main()

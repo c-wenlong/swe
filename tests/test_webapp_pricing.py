@@ -1,9 +1,11 @@
 """The Pricing page's data: per-model rows, sources, billing and brands."""
 
 import json
+import re
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from swe.ledger.models import LedgerRecord, UsageEvent
@@ -271,6 +273,27 @@ class TestBrands(unittest.TestCase):
                 self.assertTrue((STATIC_DIR / logo).is_file(), bid)
         self.assertTrue(_brands.brand_for("gpt-5")["mono"])
         self.assertFalse(_brands.brand_for("claude-opus-5")["mono"])
+
+    def test_a_missing_or_malformed_supplement_aliases_nothing(self):
+        folder = temp_dir(self)
+        bad = folder / "bad.json"
+        for text in (None, "{not json", "[1, 2]", json.dumps({"aliases": None})):
+            if text is None:
+                bad.unlink(missing_ok=True)
+            else:
+                bad.write_text(text)
+            with patch.object(_brands, "SUPPLEMENT", bad):
+                self.assertEqual(_brands._load_aliases(), {}, text)
+        bad.write_text(json.dumps({"aliases": {"Model_X": "claude-opus-5", "junk": 3}}))
+        with patch.object(_brands, "SUPPLEMENT", bad):
+            self.assertEqual(_brands._load_aliases(), {"model_x": "claude-opus-5"})
+
+    def test_a_brand_with_no_shipped_logo_has_none(self):
+        self.assertIsNone(_brands.logo_file(None))
+        self.assertIsNone(_brands.logo_file("no-such-lab"))
+        with patch.object(_brands, "_PATTERNS", [(re.compile("^lab"), ("lab", "Lab", None, "no-such-lab", (), ("lab",)))]):
+            brand = _brands.brand_for("lab-1")
+        self.assertEqual((brand["id"], brand["logo"], brand["mono"], brand["color"]), ("lab", None, False, "#45454b"))
 
 
 class TestRoute(HubBase):

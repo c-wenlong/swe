@@ -279,9 +279,12 @@ public final class HarnessesModel {
 
     /// Whether the In use list has unstarred rows to fold or unfold. A
     /// search shows every match, and the archived list is never folded.
+    /// Nor is a list with nothing starred: folding it would leave an empty
+    /// card with only "Show N more" in it.
     public var canCollapse: Bool {
         scope == .inUse
             && query.trimmingCharacters(in: .whitespaces).isEmpty
+            && visible.contains { $0.state == .starred }
             && visible.contains { $0.state != .starred }
     }
 
