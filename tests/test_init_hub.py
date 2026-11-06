@@ -420,5 +420,124 @@ class CmdInitHubTest(unittest.TestCase):
             self.assertIn("--hub clones", err.getvalue())
 
 
+
+def _ok(argv, **_kw):
+    return subprocess.CompletedProcess(argv, 0, "", "")
+
+
+class CloneFailureTest(unittest.TestCase):
+    """clone_hub with git stubbed: every failure is a HubError and leaves
+    the home as it was."""
+
+    def setUp(self):
+        from tests._tempdir import temp_dir
+
+        self.home = temp_dir(self)
+
+    def _clone(self, run):
+        return clone_hub(self.home, "https://h/r.git", run=run)
+
+    def test_an_empty_url_is_refused_before_git_runs(self):
+        run = mock.Mock()
+        with self.assertRaisesRegex(HubError, "--hub needs a git URL"):
+            clone_hub(self.home, "   ", run=run)
+        run.assert_not_called()
+
+    def test_git_that_cannot_start_is_a_hub_error(self):
+        with self.assertRaisesRegex(HubError, "could not run git: .*No such file"):
+            self._clone(mock.Mock(side_effect=FileNotFoundError(2, "No such file", "git")))
+
+    def test_a_failed_clone_names_gits_last_line_and_cleans_up(self):
+        def run(argv, **_kw):
+            if argv[1] == "ls-remote":
+                # 2: reachable but empty, which is still worth a clone.
+                return subprocess.CompletedProcess(argv, 2, "", "")
+            Path(argv[-1]).mkdir(parents=True)
+            return subprocess.CompletedProcess(argv, 128, "", "Cloning...\nfatal: disk full\n")
+
+        with self.assertRaisesRegex(HubError, r"git clone https://h/r.git failed: fatal: disk full$"):
+            self._clone(run)
+        self.assertEqual(list(self.home.iterdir()), [])
+
+    def test_a_silent_failed_clone_says_only_that_it_failed(self):
+        def run(argv, **_kw):
+            return _ok(argv) if argv[1] == "ls-remote" else \
+                subprocess.CompletedProcess(argv, 1, "", "")
+
+        with self.assertRaisesRegex(HubError, r"git clone https://h/r.git failed$"):
+            self._clone(run)
+
+    def test_no_staging_folder_is_a_hub_error(self):
+        with mock.patch("swe.init.hub.tempfile.mkdtemp",
+                        side_effect=PermissionError(13, "Permission denied")):
+            with self.assertRaisesRegex(HubError, "can't make a folder to clone into: Permission denied"):
+                self._clone(_ok)
+
+    def _cloning(self, argv, **_kw):
+        if argv[1] == "clone":
+            Path(argv[-1]).mkdir(parents=True)
+            (Path(argv[-1]) / "AGENTS.md").write_text("# hub\n")
+        return _ok(argv)
+
+    def test_a_move_that_fails_outright_is_a_hub_error_and_cleans_up(self):
+        with mock.patch("swe.init.hub._move_in", side_effect=OSError(28, "No space left")):
+            with self.assertRaisesRegex(HubError, "can't move the clone into ~/.swe: No space left"):
+                self._clone(self._cloning)
+        self.assertEqual(list(self.home.iterdir()), [])
+
+    def test_a_clone_without_git_metadata_needs_no_exclude(self):
+        root = self._clone(self._cloning)
+        self.assertEqual((root / "AGENTS.md").read_text(), "# hub\n")
+        self.assertFalse((root / ".git").exists())
+
+    def test_a_failed_exclude_write_still_reports_the_clone_done(self):
+        with mock.patch("swe.init.hub._exclude_local_state",
+                        side_effect=PermissionError(13, "denied")):
+            root = self._clone(self._cloning)
+        self.assertTrue((root / "AGENTS.md").is_file())
+
+
+class ExcludeLocalStateTest(unittest.TestCase):
+    def setUp(self):
+        from swe.init.hub import _exclude_local_state
+        from tests._tempdir import temp_dir
+
+        self.exclude_local_state = _exclude_local_state
+        self.root = temp_dir(self)
+        (self.root / ".git" / "info").mkdir(parents=True)
+        self.exclude = self.root / ".git" / "info" / "exclude"
+
+    def _patterns(self):
+        from swe.paths import GITIGNORE_BODY
+
+        return [line.strip() for line in GITIGNORE_BODY.splitlines()
+                if line.strip() and not line.lstrip().startswith("#")]
+
+    def test_a_hub_that_already_ignores_everything_is_left_alone(self):
+        (self.root / ".gitignore").write_text("\n".join(self._patterns()) + "\n")
+        self.exclude_local_state(self.root)
+        self.assertFalse(self.exclude.exists())
+
+    def test_an_exclude_without_a_final_newline_gets_one_before_the_patterns(self):
+        self.exclude.write_text("# mine")
+        self.exclude_local_state(self.root)
+        lines = self.exclude.read_text().splitlines()
+        self.assertEqual(lines[:2], ["# mine", "# Added by swe: this machine's own state, never versioned."])
+        self.assertEqual(lines[2:], self._patterns())
+
+    def test_an_unreadable_exclude_is_appended_to_as_if_empty(self):
+        self.exclude.write_bytes(b"\xff\xfe not text")
+        self.exclude_local_state(self.root)
+        self.assertTrue(self.exclude.read_bytes().startswith(b"\xff\xfe not text# Added by swe"))
+
+    def test_a_git_folder_that_is_a_link_is_not_written_through(self):
+        outside = self.root / "elsewhere"
+        (outside / "info").mkdir(parents=True)
+        shutil.rmtree(self.root / ".git")
+        (self.root / ".git").symlink_to(outside)
+        self.exclude_local_state(self.root)
+        self.assertEqual(list((outside / "info").iterdir()), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@ account .claude.json carrying a fake login.
 
 import json
 import os
+import shutil
 import tomllib
 import unittest
 from pathlib import Path
@@ -444,6 +445,202 @@ class RefuseTest(unittest.TestCase):
         data = _claude(home)
         self.assertEqual(data["numStartups"], 13)
         self.assertIn("github", data["mcpServers"])
+
+
+
+def _rows_with_detail(home: Path):
+    rows, notes = accounts.sync_accounts(home, [], {}, check_only=False)
+    return {(r.status.label, r.name): (r.result, r.status.detail) for r in rows}, notes
+
+
+CLAUDE_ROW = ("claude/claude-work", None)
+CODEX_ROW = ("codex/codex-alt", None)
+
+
+class HubShapeTest(unittest.TestCase):
+    def test_an_unparseable_record_skips_the_pass(self):
+        home = _setup(self)
+        _flags(home, mcp=True)
+        account_mcp.record_file(home).parent.mkdir(parents=True, exist_ok=True)
+        account_mcp.record_file(home).write_text("{nope")
+        before = (_acct(home) / ".claude.json").read_bytes()
+        _, notes = _sync(home)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("cannot read", notes[0])
+        self.assertEqual((_acct(home) / ".claude.json").read_bytes(), before)
+
+    def test_hub_servers_that_are_not_an_object_skip_the_pass(self):
+        home = _setup(self)
+        _flags(home, mcp=True)
+        (home / ".swe" / "mcp.json").write_text(json.dumps({"mcpServers": ["github"]}))
+        _, notes = _sync(home)
+        self.assertIn("mcpServers is not an object", notes[0])
+
+    def test_a_malformed_hub_server_is_skipped_by_name(self):
+        home = _setup(self)
+        _flags(home, mcp=True)
+        _hub(home, {"broken": "npx thing", "empty": {"env": {}}, "docs": HUB["docs"]})
+        rows, _ = _rows_with_detail(home)
+        self.assertEqual(rows[("claude/claude-work", "broken")],
+                         ("skipped", "server broken: not an object in mcp.json"))
+        self.assertEqual(rows[("claude/claude-work", "empty")],
+                         ("skipped", "server empty: no command or url"))
+        self.assertEqual(set(_claude(home)["mcpServers"]), {"mine", "docs"})
+
+    def test_a_server_that_loses_its_secret_stays_recorded_as_ours(self):
+        home = _setup(self)
+        _flags(home, mcp=True)
+        _sync(home)
+        (home / ".swe" / "secrets" / "mcp" / ".api_keys").write_text("")
+        rows, _ = _sync(home)
+        self.assertEqual(rows[("mcp", "claude/claude-work", "github")], "skipped")
+        # Still in the file and still in the record, so switching off later
+        # can take it out.
+        self.assertIn("github", _claude(home)["mcpServers"])
+        self.assertIn(("claude/claude-work", "github"),
+                      {(e["account"], e["name"]) for e in account_mcp.load_record(home)})
+        _flags(home, mcp=False)
+        rows, _ = _sync(home)
+        self.assertEqual(rows[("mcp", "claude/claude-work", "github")], "unlinked")
+        self.assertNotIn("github", _claude(home)["mcpServers"])
+
+    def test_a_truncated_key_is_replaced_before_writing(self):
+        home = _setup(self)
+        _flags(home, mcp=True)
+        key = account_mcp.key_file(home)
+        key.parent.mkdir(parents=True, exist_ok=True)
+        key.write_bytes(b"short")
+        _sync(home)
+        self.assertEqual(len(key.read_bytes()), 64)
+        self.assertEqual(set(_sync(home)[0].values()), {"linked"})
+
+
+class AccountFileShapeTest(unittest.TestCase):
+    def test_a_claude_json_that_is_not_an_object_is_blocked(self):
+        home = _setup(self, claude_json="[]")
+        _flags(home, mcp=True)
+        rows, _ = _rows_with_detail(home)
+        self.assertEqual(rows[CLAUDE_ROW], ("blocked", "not a JSON object, not changed"))
+
+    def test_codex_mcp_servers_that_are_not_a_table_is_blocked(self):
+        home = _setup(self, codex="mcp_servers = 3\n")
+        _flags(home, mcp=True)
+        rows, _ = _rows_with_detail(home)
+        self.assertEqual(rows[CODEX_ROW], ("blocked", "mcp_servers is not a table, not changed"))
+        self.assertEqual((_acct(home, "codex", "codex-alt") / "config.toml").read_text(),
+                         "mcp_servers = 3\n")
+
+    def test_a_claude_json_that_is_not_utf8_is_blocked(self):
+        home = _setup(self, claude_json=None)
+        (_acct(home) / ".claude.json").write_bytes(b'{"name": "\xff"}')
+        _flags(home, mcp=True)
+        rows, _ = _rows_with_detail(home)
+        self.assertEqual(rows[CLAUDE_ROW], ("blocked", "not UTF-8, not changed"))
+
+    def test_an_unreadable_file_is_blocked(self):
+        home = _setup(self)
+        _flags(home, mcp=True)
+        path = _acct(home) / ".claude.json"
+        real = Path.read_bytes
+
+        def read_bytes(p):
+            if p == path:
+                raise PermissionError(13, "Permission denied")
+            return real(p)
+
+        with mock.patch.object(Path, "read_bytes", read_bytes):
+            rows, _ = _rows_with_detail(home)
+        self.assertEqual(rows[CLAUDE_ROW], ("blocked", "cannot read: Permission denied"))
+
+    def test_a_missing_home_is_skipped_and_a_folder_is_a_conflict(self):
+        home = _setup(self, claude_json=None)
+        (_acct(home) / ".claude.json").mkdir()
+        shutil.rmtree(_acct(home, "codex", "codex-alt"))
+        _flags(home, mcp=True)
+        rows, _ = _rows_with_detail(home)
+        self.assertEqual(rows[CLAUDE_ROW], ("conflict", "not a file, left alone"))
+        self.assertEqual(rows[CODEX_ROW][0], "skipped")
+
+    def test_a_claude_account_with_no_file_and_nothing_to_add_has_no_row(self):
+        home = _setup(self, claude_json=None)
+        _hub(home, {})
+        _flags(home, mcp=True)
+        rows, _ = _rows_with_detail(home)
+        self.assertEqual([k for k in rows if k[0] == "claude/claude-work"], [])
+
+    def test_a_codex_config_without_a_final_newline_keeps_its_tables(self):
+        text = 'model = "gpt-5"\n\n[[profiles]]\nname = "a"'
+        home = _setup(self, codex=text)
+        _flags(home, mcp=True)
+        _sync(home)
+        written = (_acct(home, "codex", "codex-alt") / "config.toml").read_text()
+        self.assertTrue(written.startswith(text + "\n\n"))
+        parsed = tomllib.loads(written)
+        self.assertEqual(parsed["profiles"], [{"name": "a"}])
+        self.assertEqual(set(parsed["mcp_servers"]), {"github", "docs"})
+
+
+class WriteFailureTest(unittest.TestCase):
+    def test_a_layout_the_splicer_cannot_read_is_blocked(self):
+        home = _setup(self)
+        _flags(home, mcp=True)
+        before = (_acct(home) / ".claude.json").read_bytes()
+        with mock.patch("swe.mcp.cli.splice_json_member", return_value=None):
+            rows, _ = _rows_with_detail(home)
+        self.assertEqual(rows[CLAUDE_ROW], ("blocked", "layout not recognised, not changed"))
+        self.assertEqual((_acct(home) / ".claude.json").read_bytes(), before)
+
+    def test_an_edit_that_changes_more_than_the_servers_is_blocked(self):
+        home = _setup(self)
+        _flags(home, mcp=True)
+        with mock.patch("swe.mcp.cli.splice_json_member", return_value='{"mcpServers": {}}'):
+            rows, _ = _rows_with_detail(home)
+        self.assertEqual(rows[CLAUDE_ROW],
+                         ("blocked", "could not edit only the servers, not changed"))
+
+    def test_a_failed_rename_is_blocked_and_leaves_no_temp_file(self):
+        home = _setup(self)
+        _flags(home, mcp=True)
+        path = _acct(home) / ".claude.json"
+        before = path.read_bytes()
+        account_mcp._load_key(home, create=True)  # so only the account file's rename fails
+        real = os.replace
+
+        def replace(src, dst):
+            if Path(dst) == path:
+                raise PermissionError(13, "Permission denied")
+            return real(src, dst)
+
+        with mock.patch.object(account_mcp.os, "replace", replace):
+            rows, _ = _rows_with_detail(home)
+        self.assertEqual(rows[CLAUDE_ROW], ("blocked", "could not write: Permission denied"))
+        self.assertEqual((_acct(home) / ".claude.json").read_bytes(), before)
+        self.assertEqual(sorted(p.name for p in _acct(home).iterdir()), [".claude.json"])
+        self.assertNotIn(("claude/claude-work", "github"),
+                         {(e["account"], e["name"]) for e in account_mcp.load_record(home)})
+
+    def test_a_file_that_never_settles_gives_up_after_the_attempts(self):
+        home = _setup(self)
+        _flags(home, mcp=True)
+        path = _acct(home) / ".claude.json"
+        before = path.read_bytes()
+        real = Path.read_bytes
+        reads = {"n": 0}
+
+        def read_bytes(p):
+            out = real(p)
+            if p == path:
+                reads["n"] += 1
+                if reads["n"] % 2 == 0:  # the check right before every rename
+                    return out + b" "
+            return out
+
+        with mock.patch.object(Path, "read_bytes", read_bytes):
+            rows, _ = _rows_with_detail(home)
+        self.assertEqual(rows[CLAUDE_ROW],
+                         ("blocked", "kept changing while syncing, run swe init again"))
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(sorted(p.name for p in _acct(home).iterdir()), [".claude.json"])
 
 
 if __name__ == "__main__":
