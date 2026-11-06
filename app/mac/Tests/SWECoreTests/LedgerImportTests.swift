@@ -177,6 +177,7 @@ import Testing
     /// between, that stale read failed the retry "database is locked".
     @Test func aStoreFailureOnASessionTotalFileKeepsTheOldTotals() async throws {
         let temp = try TempDir()
+        defer { withExtendedLifetime(temp) {} }
         let home = try droidHome(temp, usage:
             """
             "inputTokens":1000,"outputTokens":200,"cacheReadTokens":0,

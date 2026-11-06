@@ -208,6 +208,7 @@ import Testing
     /// transaction open, so the next poll's ingest lands every record.
     @Test func aStoreFailureMidIngestRollsTheBatchBack() async throws {
         let temp = try TempDir()
+        defer { withExtendedLifetime(temp) {} }
         let ledger = try Ledger(directory: temp.path("cache"))
         func record(_ id: String, output: Int) -> LedgerRecord {
             CursorUsageFeed.record(
