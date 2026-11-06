@@ -204,7 +204,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hidden MCP harnesses, the setup offer) were still `quiver.*`. Each now
   lives under `swe.*`; the first load after the update moves a browser's
   old keys across and deletes them, so nobody is signed out or loses a
-  setting.
+  setting. The old credential key stays until the next sign-in or
+  sign-out, so a tab still open on an older page keeps working.
 
 - **The web app marks its own requests with `X-Swe-Pair`.** The header
   that lets the hub owner's tailnet identity in without a bearer was

@@ -10,7 +10,14 @@
  * the rename. Each moves to its swe.* name on the first load that finds
  * it: the old value is copied unless the new key already holds one (a
  * newer page wrote it), then the old key goes. It runs before any page
- * script reads storage, so no reader needs to know the old names. */
+ * script reads storage, so no reader needs to know the old names.
+ *
+ * The credential is the exception: quiver.remote is copied but kept, so
+ * a tab still running a page from before the rename (which shares this
+ * storage) keeps signing in until it reloads, and credential() falls back
+ * to it if the copy could not be written (storage full). Banking or
+ * forgetting a credential drops the old key. */
+const LEGACY_CREDENTIAL_KEY = "quiver.remote";
 function migrateStorageKeys(store) {
   const old = [];
   for (let i = 0; i < (store.length || 0); i++) {
@@ -20,13 +27,16 @@ function migrateStorageKeys(store) {
   for (const key of old) {
     const next = "swe." + key.slice("quiver.".length);
     if (store.getItem(next) == null) store.setItem(next, store.getItem(key));
-    store.removeItem(key);
+    if (key !== LEGACY_CREDENTIAL_KEY) store.removeItem(key);
   }
 }
 try { migrateStorageKeys(localStorage); } catch { /* storage off or full: the old keys wait for the next load */ }
 
 const credential = () => {
-  try { return (JSON.parse(localStorage.getItem("swe.remote") || "null") || {}).credential || ""; }
+  try {
+    const saved = localStorage.getItem("swe.remote") ?? localStorage.getItem(LEGACY_CREDENTIAL_KEY);
+    return (JSON.parse(saved || "null") || {}).credential || "";
+  }
   catch { return ""; }
 };
 
@@ -297,13 +307,13 @@ function pairStillLive(gen, rgen) {
 
 /* Bank a minted credential where every page looks for it. */
 function pairStore(data) {
-  try { localStorage.setItem("swe.remote", JSON.stringify(data)); } catch { }
+  try { localStorage.setItem("swe.remote", JSON.stringify(data)); localStorage.removeItem(LEGACY_CREDENTIAL_KEY); } catch { }
 }
 
 /* And drop it once the hub has revoked it, so this browser stops
  * presenting a dead credential. */
 function pairForget() {
-  try { localStorage.removeItem("swe.remote"); } catch { }
+  try { localStorage.removeItem("swe.remote"); localStorage.removeItem(LEGACY_CREDENTIAL_KEY); } catch { }
 }
 
 /* ``#pair=<token>[&name=]``: the address `swe remote pair` and Settings'
