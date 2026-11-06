@@ -1105,6 +1105,11 @@ class HubState:
                             row.get("kept")))
                 rows, as_of = self.catalog.tail_snapshot()
                 self.tail_manager.sync(rows, as_of=as_of)
+                # A launched ACP session's first-turn approvals waited
+                # for its tailer; it has one now.
+                inject.AcpInjector.release_held(
+                    self.tail_manager.tailers, self.emit,
+                    self.machine_id, self.deltas)
                 supervise.reap_kept(self.home, self.catalog.session_for)
                 self._prune_pair_requests()
                 # GitHub last: a slow ``gh`` must never hold up adoption
@@ -2953,11 +2958,17 @@ class _Handler(BaseHTTPRequestHandler):
             if blocked:
                 self._send_error(422, "unsupported_provider", blocked)
                 return
-        if not supervise.tmux_bin():
-            self._send_error(422, "launch_failed", "tmux is not installed")
-            return
         tracked = harness not in catalog_mod.untracked(
             catalog_mod.launchable_harnesses())
+        # An ACP launch needs no tmux; its fallback reports a missing
+        # tmux itself.
+        over_acp = supervise.acp_launch_eligible(
+            harness, cmd["prompt"], model=cmd["model"],
+            effort=cmd["effort"], yolo=cmd["yolo"],
+            provider=cmd["provider"], tracked=tracked)
+        if not over_acp and not supervise.tmux_bin():
+            self._send_error(422, "launch_failed", "tmux is not installed")
+            return
         # One new session per folder: adoption tells launches apart only
         # by harness, folder and time, so a second one waiting here
         # would leave both unadopted. launch_new re-checks under the
@@ -3000,7 +3011,7 @@ class _Handler(BaseHTTPRequestHandler):
         ).start()
         self._send_json(202, {
             "ok": True, "launch_id": launch_id, "state": "pending",
-            "note": "starting under tmux",
+            "note": "starting over ACP" if over_acp else "starting under tmux",
         })
 
     def _injector(self, key: str):

@@ -725,6 +725,241 @@ class TestHubRoute(unittest.TestCase):
         self.assertIn("Agent Client Protocol", body["message"])
 
 
+class _LaunchCase(_AcpCase):
+    """``supervise.launch_new`` for an ACP-speaking harness."""
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(patch.object(acp, "auto_eligible",
+                                       return_value=True))
+        self.tmux = self.enterContext(patch.object(
+            supervise, "_launch_new_tmux",
+            return_value=(True, "launched under tmux; the session "
+                                "appears on refresh", "qv-x")))
+        self.new_key = "devin:fresh-1"
+        self.addCleanup(inject.AcpInjector.close, self.new_key)
+
+    def _launch(self, **kw):
+        kw.setdefault("known_ids", ["old"])
+        kw.setdefault("launch_id", "l1")
+        return supervise.launch_new(
+            self.home, "devin", str(self.proj), "reply with ok",
+            binary=sys.executable, **kw)
+
+    def _markers(self):
+        found = supervise._pending_dir(self.home).glob("*.json")
+        return [json.loads(p.read_text()) for p in found]
+
+    def _adopt(self, sid="fresh-1"):
+        row = (f"devin:{sid}", _session(self.proj, sid=sid), "active")
+        return supervise.adopt_pending(self.home, [row])
+
+
+class TestLaunch(_LaunchCase):
+    def test_launch_runs_session_new_and_the_first_prompt(self):
+        ok, note, name = self._launch()
+        self.assertTrue(ok, note)
+        self.assertIn("over ACP", note)
+        self.assertIsNone(name)
+        self.tmux.assert_not_called()
+        conn = inject.AcpInjector._conns[self.new_key]
+        self.assertTrue(conn.idle.wait(10))
+        sent = self._sent()
+        self.assertFalse(any(m.get("method") == "session/load"
+                             for m in sent))
+        new = next(m for m in sent if m.get("method") == "session/new")
+        self.assertEqual(new["params"]["cwd"], os.path.realpath(self.proj))
+        prompt = next(m for m in sent if m.get("method") == "session/prompt")
+        self.assertEqual(prompt["params"]["sessionId"], "fresh-1")
+        self.assertEqual(prompt["params"]["prompt"][0]["text"],
+                         "reply with ok")
+        [marker] = self._markers()
+        self.assertEqual(marker["mode"], "acp")
+        self.assertEqual(marker["expect_id"], "fresh-1")
+        self.assertEqual(marker["exclude"], ["old"])
+
+    def test_adoption_binds_the_session_as_acp_and_reuses_the_agent(self):
+        self.assertTrue(self._launch()[0])
+        inject.AcpInjector._conns[self.new_key].idle.wait(10)
+        # Another new session in the folder is not ours: expect_id.
+        self.assertEqual(self._adopt("someone-else"), [])
+        self.assertEqual(self._adopt(), [self.new_key])
+        meta = supervise.meta_for(self.home, self.new_key)
+        self.assertEqual(meta["mode"], "acp")
+        self.assertEqual(meta["launch_id"], "l1")
+        self.assertEqual(meta["tmux"], "")
+        self.assertEqual(self._markers(), [])
+        inj = inject.injector_for(self.home, self.new_key, meta,
+                                  emit=self.rec.emit, machine="m1",
+                                  deltas=self.rec)
+        self.assertIsInstance(inj, inject.AcpInjector)
+        res = inj.send(_session(self.proj, sid="fresh-1"),
+                       {"text": "again"}, "done")
+        self.assertTrue(res.ok, res.note)
+        self.assertEqual(self._starts(), 1)
+
+    def test_a_model_pick_keeps_the_tmux_launch(self):
+        self.assertTrue(self._launch(model="gpt")[0])
+        self.tmux.assert_called_once()
+        self.assertFalse((self.home / "starts").exists())
+
+    def test_the_folder_frees_once_the_session_id_is_known(self):
+        self.assertTrue(self._launch()[0])
+        inject.AcpInjector._conns[self.new_key].idle.wait(10)
+        # The marker names its session (expect_id), so adoption can't
+        # confuse it with another launch here: it blocks nothing.
+        self.assertIsNone(supervise.fork_blocker(
+            self.home, "devin", str(self.proj)))
+
+    def test_eligibility_rules(self):
+        self.assertTrue(supervise.acp_launch_eligible("devin", "hi"))
+        for kw in ({"model": "m"}, {"effort": "high"}, {"yolo": True},
+                   {"provider": "groq"}, {"tracked": False}):
+            self.assertFalse(supervise.acp_launch_eligible(
+                "devin", "hi", **kw), kw)
+        self.assertFalse(supervise.acp_launch_eligible("devin", "  "))
+
+
+class TestLaunchApproval(_LaunchCase):
+    mode = "permission"
+
+    def test_first_turn_approval_waits_for_the_tailer(self):
+        asked = threading.Event()
+        real = acp.Connection._permission
+
+        def spy(conn, rpc_id, params):
+            real(conn, rpc_id, params)
+            asked.set()
+
+        with patch.object(acp.Connection, "_permission", spy):
+            self.assertTrue(self._launch()[0])
+            self.assertTrue(asked.wait(10))
+        conn = inject.AcpInjector._conns[self.new_key]
+        # The request came in, but nobody listens: it waits.
+        self.assertTrue(conn.approvals)
+        self.assertEqual(self.rec.events, [])
+        inject.AcpInjector.release_held({"other:key": 1}, self.rec.emit)
+        self.assertEqual(self.rec.events, [])
+        inject.AcpInjector.release_held(
+            {self.new_key: 1}, self.rec.emit, "m1", self.rec)
+        [ev] = self.rec.of("approval.requested")
+        self.assertEqual(ev["session"], self.new_key)
+        self._adopt()
+        inj = inject.injector_for(
+            self.home, self.new_key,
+            supervise.meta_for(self.home, self.new_key),
+            emit=self.rec.emit, machine="m1", deltas=self.rec)
+        res = inj.approval(_session(self.proj, sid="fresh-1"),
+                           ev["data"]["request_id"], "allow")
+        self.assertTrue(res.ok, res.note)
+        self.assertTrue(conn.idle.wait(10))
+
+
+class TestLaunchCancel(_LaunchCase):
+    mode = "slow"
+
+    def test_interrupt_a_launched_turn(self):
+        self.assertTrue(self._launch()[0])
+        self._adopt()
+        conn = inject.AcpInjector._conns[self.new_key]
+        self.assertFalse(conn.idle.is_set())
+        inj = inject.injector_for(
+            self.home, self.new_key,
+            supervise.meta_for(self.home, self.new_key),
+            emit=self.rec.emit, machine="m1", deltas=self.rec)
+        res = inj.control(_session(self.proj, sid="fresh-1"),
+                          "interrupt", "")
+        self.assertTrue(res.ok, res.note)
+        self.assertTrue(conn.idle.wait(10))
+        self.assertEqual(conn.last_stop, "cancelled")
+
+
+class TestLaunchCrashFallback(_LaunchCase):
+    mode = "crash"
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(patch.object(inject, "_ACP_EARLY_S", 10.0))
+
+    def test_agent_dying_on_the_first_prompt_falls_back_to_tmux(self):
+        ok, note, name = self._launch()
+        self.assertTrue(ok)
+        self.assertEqual(name, "qv-x")
+        self.assertIn("exited on the first prompt", note)
+        self.assertIn("fell back to tmux", note)
+        self.tmux.assert_called_once()
+        self.assertNotIn(self.new_key, inject.AcpInjector._conns)
+        self.assertEqual(self._markers(), [])
+
+
+class TestLaunchInitFallback(_LaunchCase):
+    mode = "init-error"
+
+    def test_initialize_failure_falls_back_to_tmux(self):
+        ok, note, _name = self._launch()
+        self.assertTrue(ok)
+        self.assertIn("auth required", note)
+        self.assertIn("fell back to tmux", note)
+        self.tmux.assert_called_once()
+        self.assertEqual(self._markers(), [])
+
+    def test_initialize_timeout_falls_back_to_tmux(self):
+        self.enterContext(patch.object(supervise, "LAUNCH_ACP_S", 0.0))
+        ok, note, _name = self._launch()
+        self.assertTrue(ok)
+        self.assertIn("too long", note)
+        self.tmux.assert_called_once()
+
+
+class TestLaunchRefused(_LaunchCase):
+    mode = "refuse"
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(patch.object(inject, "_ACP_EARLY_S", 10.0))
+
+    def test_a_refused_first_prompt_fails_without_tmux(self):
+        ok, note, _name = self._launch()
+        self.assertFalse(ok)
+        self.assertIn("quota exceeded", note)
+        self.tmux.assert_not_called()
+        self.assertEqual(self._markers(), [])
+
+
+class TestHubLaunch(unittest.TestCase):
+    def test_acp_launch_needs_no_tmux_and_says_so(self):
+        from tests.test_remote_hub import _Server
+
+        srv = _Server(sessions=[], statuses=lambda ss: [])
+        self.addCleanup(srv.stop)
+        cred = srv.pair()
+        proj = temp_dir(self)
+        with patch("swe.remote.catalog.launch_command",
+                   return_value="devin"), \
+             patch("swe.remote.catalog.launchable_harnesses",
+                   return_value=[]), \
+             patch("swe.remote.catalog.untracked", return_value=[]), \
+             patch("swe.remote.catalog.known_session_ids",
+                   return_value=[]), \
+             patch("swe.remote.supervise.tmux_bin", return_value=None), \
+             patch.object(acp, "auto_eligible", return_value=True), \
+             patch("swe.remote.supervise.launch_new",
+                   return_value=(True, "launched over ACP", None)) as run:
+            status, data = srv.request(
+                "POST", "/v1/sessions",
+                body={"harness": "devin", "cwd": str(proj),
+                      "prompt": "hi"},
+                headers={"Authorization": f"Bearer {cred['credential']}"})
+            for t in threading.enumerate():
+                if t.name.startswith("remote-launch-"):
+                    t.join(timeout=5)
+        self.assertEqual(status, 202, data)
+        body = json.loads(data)
+        self.assertEqual(body["note"], "starting over ACP")
+        self.assertEqual(set(body), {"ok", "launch_id", "state", "note"})
+        run.assert_called_once()
+
+
 class TestDetection(unittest.TestCase):
     """``command_for``: harness.json first, then the --help probe."""
 

@@ -261,7 +261,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session over ACP; if the agent can't load it or fails to start (not
   signed in, say), attach falls back to tmux and the note says why.
   `--mode=acp` on an agent that can't load sessions starts a new one
-  and says so. Claude can run through the `claude-agent-acp` adapter with `--mode=acp` when it is installed;
+  and says so. A new session launched from the apps for such a harness
+  starts over ACP too (`session/new`, then the first prompt), unless
+  the launch picks a model, effort, autonomy or provider; if the agent
+  fails to start, the launch falls back to tmux. Claude can run through the `claude-agent-acp` adapter with `--mode=acp` when it is installed;
   harness.json's `capabilities.acp` overrides or turns off detection
   ([#1637](https://github.com/c-wenlong/swe/issues/1637)).
 
