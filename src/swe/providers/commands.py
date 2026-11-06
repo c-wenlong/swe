@@ -7,7 +7,7 @@ from pathlib import Path
 
 from swe.console import c, cpad, truncate
 from swe.flags import expand_value_flags
-from swe.providers.defaults import DEFAULT_PROVIDERS, derived_alias
+from swe.providers.defaults import DEFAULT_ALL, derived_alias
 from swe.providers.discover import discover_provider_keys
 from swe.providers.help_text import print_providers_help
 from swe.providers.keys import default_keys_dir, read_shell_export_keys
@@ -95,13 +95,77 @@ def cmd_list(args: list[str]) -> int:
                 filt in (e or "").lower()
                 for e in r["info"].get("env_vars") or []
             )
+            # ``swe providers list infra`` narrows to the deploy/platform keys.
+            or filt in (r["info"].get("kind") or "").lower()
         ]
 
     rows.sort(key=lambda r: (r["info"].get("name") or r["name"]).lower())
 
     keys_dir_display = _display_keys_dir(keys_dir)
 
-    print(f"\n{c('bold', 'AI Providers')}\n")
+    # One section per kind, AI providers first, the same 5-column table
+    # in each. An empty section is skipped unless both are (a filter
+    # that matches nothing still prints the empty AI table, as before).
+    ai_rows = [r for r in rows if _kind(r) != "infra"]
+    infra_rows = [r for r in rows if _kind(r) == "infra"]
+    sections = [s for s in (("AI Providers", ai_rows),
+                            ("Infra Providers", infra_rows)) if s[1]]
+    if not sections:
+        sections = [("AI Providers", [])]
+    for title, section_rows in sections:
+        print(f"\n{c('bold', title)}\n")
+        _emit_table(section_rows, show_desc)
+    print()
+
+    n_with = sum(1 for r in rows if r["masked"] != "-")
+    no_keys = rows and n_with == 0
+    no_dir = not keys_dir.exists()
+
+    if no_dir:
+        if api_keys_dir is None:
+            # The default store is a single shell-export file — the same
+            # file the app's key editor writes.
+            advice = (
+                "Create it with one  export NAME=<key>  line per provider; "
+                "`swe providers info <name>` shows each NAME."
+            )
+        else:
+            advice = (
+                "Create it as a directory holding one bare-key file per "
+                "provider, or as a single file of  export NAME=<key>  lines."
+            )
+        print(c("yellow", f"  No key store at {keys_dir_display}. {advice}"))
+    if no_keys:
+        print(
+            c(
+                "yellow",
+                "  Tip: run `swe providers info <provider>` for instructions on adding a key.",
+            )
+        )
+    if no_dir or no_keys:
+        print()
+
+    print(
+        c(
+            "dim",
+            f"  {n_with}/{len(rows)} providers with keys  ·  "
+            f"dir: {keys_dir_display}  ·  "
+            f"swe providers info <provider>  │  add  │  help",
+        )
+    )
+    print()
+    return 0
+
+
+def _kind(row: dict) -> str:
+    """The registry kind, an absent one reading as inference."""
+    return row["info"].get("kind") or "inference"
+
+
+def _emit_table(rows: list[dict], show_desc: bool) -> None:
+    """The PROVIDER | ALIASES | ENV VAR | API KEY | URL table for one
+    section of ``cmd_list`` (its header, separator and rows, then the
+    optional description sub-lines)."""
 
     # 5-column PROVIDER | ALIASES | ENV VAR | API KEY | URL Table.
     # All five columns ship pre-coloured ANSI strings, so they use
@@ -277,46 +341,6 @@ def cmd_list(args: list[str]) -> int:
             if desc:
                 print(" " * desc_indent + c("dim", truncate(desc, 90)))
 
-    print()
-    n_with = sum(1 for r in rows if r["masked"] != "-")
-    no_keys = rows and n_with == 0
-    no_dir = not keys_dir.exists()
-
-    if no_dir:
-        if api_keys_dir is None:
-            # The default store is a single shell-export file — the same
-            # file the app's key editor writes.
-            advice = (
-                "Create it with one  export NAME=<key>  line per provider; "
-                "`swe providers info <name>` shows each NAME."
-            )
-        else:
-            advice = (
-                "Create it as a directory holding one bare-key file per "
-                "provider, or as a single file of  export NAME=<key>  lines."
-            )
-        print(c("yellow", f"  No key store at {keys_dir_display}. {advice}"))
-    if no_keys:
-        print(
-            c(
-                "yellow",
-                "  Tip: run `swe providers info <provider>` for instructions on adding a key.",
-            )
-        )
-    if no_dir or no_keys:
-        print()
-
-    print(
-        c(
-            "dim",
-            f"  {n_with}/{len(rows)} providers with keys  ·  "
-            f"dir: {keys_dir_display}  ·  "
-            f"swe providers info <provider>  │  add  │  help",
-        )
-    )
-    print()
-    return 0
-
 
 def cmd_info(args: list[str]) -> int:
     if args and args[0] in ("-h", "--help", "help"):
@@ -371,6 +395,7 @@ def cmd_info(args: list[str]) -> int:
 
     rows_out = [
         ("Slug", name),
+        ("Kind", info.get("kind") or "inference"),
         ("URL", info.get("url") or "—"),
         (
             "Aliases",
@@ -475,7 +500,7 @@ def cmd_add(args: list[str]) -> int:
         return 0
 
     try:
-        args = expand_value_flags(args, {"--url", "--env", "--file"})
+        args = expand_value_flags(args, {"--url", "--env", "--file", "--kind"})
     except ValueError as exc:
         print(c("red", str(exc)))
         return 1
@@ -495,6 +520,7 @@ def cmd_add(args: list[str]) -> int:
     key_filename = name
     file_flag_given = False
     env_vars: list[str] = []
+    kind_flag: str | None = None
 
     i = 1
     while i < len(args):
@@ -508,6 +534,15 @@ def cmd_add(args: list[str]) -> int:
         elif a == "--file":
             key_filename = args[i + 1]
             file_flag_given = True
+            i += 2
+        elif a == "--kind":
+            kind_flag = args[i + 1].strip().lower()
+            if kind_flag not in ("inference", "infra"):
+                print(
+                    c("red",
+                      f"Unknown kind: {args[i + 1]!r} — inference or infra.")
+                )
+                return 1
             i += 2
         elif a.startswith("--"):
             print(c("red", f"Unknown flag: {a}"))
@@ -535,7 +570,7 @@ def cmd_add(args: list[str]) -> int:
     # otherwise fork a bare entry while together_ai stays tombstoned.
     default_aliases = {
         alias: slug
-        for slug, info in DEFAULT_PROVIDERS.items()
+        for slug, info in DEFAULT_ALL.items()
         for alias in {slug, derived_alias(info)}
         if alias
     }
@@ -557,8 +592,9 @@ def cmd_add(args: list[str]) -> int:
 
     # A removed builtin re-add seeds from its default catalog entry —
     # otherwise the bare record would win over the default merge and
-    # lose env_vars/url/description.
-    existing = providers.get(name) or DEFAULT_PROVIDERS.get(name, {})
+    # lose env_vars/url/description/kind.
+    existing = providers.get(name) or DEFAULT_ALL.get(name, {})
+    kind = kind_flag or existing.get("kind") or "inference"
     # Without an explicit --file the key filename follows the canonical
     # slug (or the entry's existing pointer), never the alias the user
     # typed — `add together-ai` must not rename together_ai's key file.
@@ -573,6 +609,7 @@ def cmd_add(args: list[str]) -> int:
         "url": url or existing.get("url", ""),
         "key_filename": key_filename,
         "env_vars": env_vars or existing.get("env_vars", []) or [],
+        "kind": kind,
         "added": existing.get("added") or datetime.now().isoformat(),
     }
     save_registry(providers)
@@ -582,6 +619,8 @@ def cmd_add(args: list[str]) -> int:
         parts.append(f"env: {', '.join(env_vars)}")
     if url:
         parts.append(f"url: {url}")
+    if kind != "inference":
+        parts.append(f"kind: {kind}")
     print(f"  {c('green', '✓')} {action} '{name}' — {', '.join(parts)}")
     stored_env = providers[name]["env_vars"]
     print(

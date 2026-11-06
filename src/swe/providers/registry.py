@@ -10,12 +10,14 @@ from ``env_vars[0]`` (see :func:`swe.providers.defaults.display_name`
 and :func:`swe.providers.defaults.derived_alias`) at hydration time
 inside :func:`load_registry`. The persisted ``providers.json`` may
 carry either derived or omitted values — the loader recomputes them so
-that the API_KEY env var stays the single source of truth.
+that the API_KEY env var stays the single source of truth. ``kind``
+(``inference`` or ``infra``) is persisted data, not derived; an absent
+or empty one hydrates to ``inference``.
 
-When ``DEFAULT_PROVIDERS`` gains a new built-in (e.g. we ship
-``minimax`` in 0.2.7), a user who already has a ``providers.json``
-will see the new entry merged in automatically on the next ``swe``
-invocation. User-added entries, edits to description / url /
+When ``DEFAULT_PROVIDERS`` or ``DEFAULT_INFRA`` gains a new built-in
+(e.g. we ship ``minimax`` in 0.2.7), a user who already has a
+``providers.json`` will see the new entry merged in automatically on
+the next ``swe`` invocation. User-added entries, edits to description / url /
 key_filename, and removals are preserved.
 
 A user who runs ``swe providers remove <name>`` is recorded in the
@@ -30,7 +32,7 @@ from datetime import datetime
 from swe.configuration import CorruptConfigurationError, read_json_object
 from swe.paths import CONFIG_DIR, PROVIDERS_REGISTRY_FILE, atomic_write_text
 from swe.providers.defaults import (
-    DEFAULT_PROVIDERS,
+    DEFAULT_ALL,
     derived_alias,
     display_name,
 )
@@ -60,6 +62,11 @@ def _validated_entries(registry: dict, source) -> dict:
                 f"{source}: entry {name!r} must be a JSON object,"
                 f" got {type(entry).__name__}: fix or remove the file"
             )
+        if "kind" in entry and not isinstance(entry["kind"], str):
+            raise CorruptConfigurationError(
+                f"{source}: entry {name!r}'s kind must be a string,"
+                f" got {type(entry['kind']).__name__}: fix or remove the file"
+            )
     return registry
 
 
@@ -74,6 +81,9 @@ def _hydrate(entry: dict) -> dict:
     out["name"] = display_name(out)
     derived = derived_alias(out)
     out["aliases"] = [derived] if derived else []
+    # ``kind`` is registry data, not derived: an absent or empty one is
+    # an inference provider, anything else rides through as written.
+    out["kind"] = out.get("kind") or "inference"
     return out
 
 
@@ -104,7 +114,7 @@ def load_registry(include_removed: bool = False) -> dict:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         fresh = {
             name: _hydrate(dict(info))
-            for name, info in DEFAULT_PROVIDERS.items()
+            for name, info in DEFAULT_ALL.items()
         }
         save_registry(fresh)
         return fresh
@@ -117,7 +127,7 @@ def load_registry(include_removed: bool = False) -> dict:
     }
 
     added_now: list[str] = []
-    for name, info in DEFAULT_PROVIDERS.items():
+    for name, info in DEFAULT_ALL.items():
         if name in explicitly_removed:
             continue
         if name not in merged:

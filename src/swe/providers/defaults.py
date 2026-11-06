@@ -15,9 +15,13 @@ and ``derived_alias``) so the catalog has a single source of truth:
 the env-var name itself. Manual aliases are not supported.
 """
 
-# Known env-var suffixes, ordered longest-first so ``_HUB_TOKEN`` is
-# stripped before ``_TOKEN`` can accidentally match it.
-_STRIPPABLE_SUFFIXES = ("_API_KEY", "_HUB_TOKEN", "_TOKEN")
+# Known env-var suffixes, ordered longest-first so the compounds
+# (``_ACCESS_TOKEN``, ``_AUTH_TOKEN``, ``_HUB_TOKEN``, ``_API_TOKEN``)
+# are stripped before the ``_TOKEN`` they end with can match.
+_STRIPPABLE_SUFFIXES = (
+    "_ACCESS_TOKEN", "_AUTH_TOKEN", "_HUB_TOKEN", "_API_TOKEN",
+    "_API_KEY", "_TOKEN",
+)
 
 
 def _strip_suffix(env_var: str) -> str:
@@ -232,3 +236,94 @@ DEFAULT_PROVIDERS = {
         "env_vars": ["HUGGINGFACE_HUB_TOKEN", "HF_TOKEN"],
     },
 }
+
+# Providers a key deploys and manages resources with rather than runs
+# inference on: Vercel, Netlify, Cloudflare and friends. Same shape as
+# DEFAULT_PROVIDERS plus ``kind`` (the field that files them under the
+# providers page's Infra tab instead of Inference). ``swe providers``
+# merges both maps into providers.json.
+DEFAULT_INFRA = {
+    "vercel": {
+        "kind": "infra",
+        "description": "Vercel deployments and projects",
+        "url": "https://vercel.com/account/tokens",
+        "key_filename": "vercel",
+        "env_vars": ["VERCEL_TOKEN"],
+    },
+    "netlify": {
+        "kind": "infra",
+        "description": "Netlify deploys and sites",
+        "url": "https://app.netlify.com/user/applications#personal-access-tokens",
+        "key_filename": "netlify",
+        "env_vars": ["NETLIFY_AUTH_TOKEN"],
+    },
+    "cloudflare": {
+        "kind": "infra",
+        "description": "Cloudflare API (Workers, DNS)",
+        "url": "https://dash.cloudflare.com/profile/api-tokens",
+        "key_filename": "cloudflare",
+        "env_vars": ["CLOUDFLARE_API_TOKEN"],
+    },
+    "supabase": {
+        "kind": "infra",
+        "description": "Supabase management API",
+        "url": "https://supabase.com/dashboard/account/tokens",
+        "key_filename": "supabase",
+        "env_vars": ["SUPABASE_ACCESS_TOKEN"],
+    },
+    "neon": {
+        "kind": "infra",
+        "description": "Neon serverless Postgres",
+        "url": "https://console.neon.tech/app/settings/api-keys",
+        "key_filename": "neon",
+        "env_vars": ["NEON_API_KEY"],
+    },
+    "turso": {
+        "kind": "infra",
+        "description": "Turso / libSQL platform API",
+        "url": "https://app.turso.tech",
+        "key_filename": "turso",
+        "env_vars": ["TURSO_API_TOKEN"],
+    },
+    "railway": {
+        "kind": "infra",
+        "description": "Railway deployments",
+        "url": "https://railway.com/account/tokens",
+        "key_filename": "railway",
+        "env_vars": ["RAILWAY_TOKEN"],
+    },
+    "fly": {
+        "kind": "infra",
+        "description": "Fly.io apps and machines",
+        "url": "https://fly.io/user/personal_access_tokens",
+        "key_filename": "fly",
+        "env_vars": ["FLY_API_TOKEN"],
+    },
+    "render": {
+        "kind": "infra",
+        "description": "Render services and deploys",
+        "url": "https://dashboard.render.com/u/settings#api-keys",
+        "key_filename": "render",
+        "env_vars": ["RENDER_API_KEY"],
+    },
+    "digitalocean": {
+        "kind": "infra",
+        "description": "DigitalOcean API (doctl, droplets)",
+        "url": "https://cloud.digitalocean.com/account/api/tokens",
+        "key_filename": "digitalocean",
+        # DIGITALOCEAN_ACCESS_TOKEN is doctl's variable; DIGITALOCEAN_TOKEN
+        # is what the Terraform provider and older docs use.
+        "env_vars": ["DIGITALOCEAN_ACCESS_TOKEN", "DIGITALOCEAN_TOKEN"],
+    },
+    "heroku": {
+        "kind": "infra",
+        "description": "Heroku apps and releases",
+        "url": "https://dashboard.heroku.com/account",
+        "key_filename": "heroku",
+        "env_vars": ["HEROKU_API_KEY"],
+    },
+}
+
+# Every built-in, inference and infra: what the registry seed, the
+# default merge and ``providers add``'s re-seed lookup all read.
+DEFAULT_ALL = {**DEFAULT_PROVIDERS, **DEFAULT_INFRA}

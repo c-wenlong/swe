@@ -6,7 +6,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from swe.providers.defaults import DEFAULT_PROVIDERS, derived_alias, display_name
+from swe.providers.defaults import (
+    DEFAULT_ALL,
+    DEFAULT_INFRA,
+    DEFAULT_PROVIDERS,
+    derived_alias,
+    display_name,
+)
 from swe.providers.registry import alias_map, load_registry, resolve, save_registry
 
 
@@ -59,7 +65,7 @@ class RegistryAutoMergeTest(unittest.TestCase):
                 self.assertEqual(providers["openai"]["name"], "Openai")
                 self.assertEqual(providers["openai"]["aliases"], ["openai"])
                 # Defaults built-ins that weren't in the snapshot are merged in.
-                for name in DEFAULT_PROVIDERS:
+                for name in DEFAULT_ALL:
                     self.assertIn(name, providers)
 
     def test_explicit_remove_is_persisted_across_merges(self):
@@ -106,11 +112,15 @@ class RegistryLoadSeedingTest(unittest.TestCase):
             p1, p2 = _registry_patches(config_dir, registry_file)
             with p1, p2:
                 providers = load_registry()
-                self.assertEqual(set(providers), set(DEFAULT_PROVIDERS))
+                self.assertEqual(set(providers), set(DEFAULT_ALL))
                 self.assertIn("openai", providers)
                 self.assertIn("anthropic", providers)
                 self.assertTrue(registry_file.exists())
                 self.assertEqual(providers["openai"]["key_filename"], "openai")
+                # Inference entries hydrate kind; infra entries carry it.
+                self.assertEqual(providers["openai"]["kind"], "inference")
+                for name in DEFAULT_INFRA:
+                    self.assertEqual(providers[name]["kind"], "infra")
 
     def test_persisted_registry_loads_without_seeding(self):
         with TemporaryDirectory() as tmp:
@@ -282,7 +292,7 @@ class RegistrySaveRoundtripTest(unittest.TestCase):
                 self.assertEqual(loaded["myprov"]["env_vars"], ["MY_KEY"])
                 self.assertEqual(loaded["myprov"]["name"], "My Key")
                 self.assertEqual(loaded["myprov"]["aliases"], ["my-key"])
-                for name in DEFAULT_PROVIDERS:
+                for name in DEFAULT_ALL:
                     self.assertIn(name, loaded)
 
 
@@ -356,6 +366,94 @@ class DerivedNamingTest(unittest.TestCase):
         # Nothing is left once the suffix goes, so there is nothing to alias.
         self.assertIsNone(derived_alias({"env_vars": ["_API_KEY"]}))
         self.assertEqual(display_name({"env_vars": ["_API_KEY"]}), "")
+
+    def test_token_compound_suffixes_strip_whole(self):
+        # The infra seeds' variable spellings derive clean names:
+        # _ACCESS_TOKEN, _AUTH_TOKEN and _API_TOKEN go before _TOKEN.
+        cases = {
+            "NETLIFY_AUTH_TOKEN": ("Netlify", "netlify"),
+            "SUPABASE_ACCESS_TOKEN": ("Supabase", "supabase"),
+            "CLOUDFLARE_API_TOKEN": ("Cloudflare", "cloudflare"),
+            "VERCEL_TOKEN": ("Vercel", "vercel"),
+        }
+        for env_var, (name, alias) in cases.items():
+            with self.subTest(env_var):
+                self.assertEqual(display_name({"env_vars": [env_var]}), name)
+                self.assertEqual(derived_alias({"env_vars": [env_var]}), alias)
+
+
+class KindHydrationTest(unittest.TestCase):
+    """``kind`` is persisted data with an inference default, not derived."""
+
+    def _write(self, tmp_path: Path, payload) -> Path:
+        config_dir = tmp_path / ".config" / "swe"
+        registry_file = config_dir / "providers.json"
+        registry_file.parent.mkdir(parents=True, exist_ok=True)
+        registry_file.write_text(json.dumps(payload))
+        return registry_file
+
+    def test_absent_kind_hydrates_to_inference(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            registry_file = self._write(
+                tmp_path,
+                {"mine": {"env_vars": ["MINE_API_KEY"],
+                          "key_filename": "mine"}},
+            )
+            p1, p2 = _registry_patches(tmp_path / ".config" / "swe", registry_file)
+            with p1, p2:
+                loaded = load_registry()
+            self.assertEqual(loaded["mine"]["kind"], "inference")
+            self.assertEqual(loaded["openai"]["kind"], "inference")
+            self.assertEqual(loaded["vercel"]["kind"], "infra")
+
+    def test_persisted_kind_survives_and_infra_defaults_merge(self):
+        # A user registry from before infra existed gains the infra
+        # defaults on next load; a kind it persisted stays as written.
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            registry_file = self._write(
+                tmp_path,
+                {"mine": {"env_vars": ["MINE_API_KEY"], "kind": "infra"},
+                 "openai": {"env_vars": ["OPENAI_API_KEY"]}},
+            )
+            p1, p2 = _registry_patches(tmp_path / ".config" / "swe", registry_file)
+            with p1, p2:
+                loaded = load_registry()
+            self.assertEqual(loaded["mine"]["kind"], "infra")
+            self.assertEqual(loaded["openai"]["kind"], "inference")
+            for name in DEFAULT_INFRA:
+                self.assertIn(name, loaded)
+                self.assertEqual(loaded[name]["kind"], "infra")
+
+    def test_removed_infra_default_stays_removed(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            registry_file = self._write(
+                tmp_path,
+                {"_removed": ["vercel"],
+                 "openai": {"env_vars": ["OPENAI_API_KEY"]}},
+            )
+            p1, p2 = _registry_patches(tmp_path / ".config" / "swe", registry_file)
+            with p1, p2:
+                loaded = load_registry()
+            self.assertNotIn("vercel", loaded)
+            self.assertIn("netlify", loaded)
+
+    def test_non_string_kind_raises_naming_the_row(self):
+        from swe.configuration import CorruptConfigurationError
+
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            registry_file = self._write(
+                tmp_path,
+                {"mine": {"env_vars": ["MINE_API_KEY"], "kind": 5}},
+            )
+            p1, p2 = _registry_patches(tmp_path / ".config" / "swe", registry_file)
+            with p1, p2:
+                with self.assertRaises(CorruptConfigurationError) as ctx:
+                    load_registry()
+            self.assertIn("mine", str(ctx.exception))
 
 
 if __name__ == "__main__":
