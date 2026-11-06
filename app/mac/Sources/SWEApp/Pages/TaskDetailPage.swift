@@ -172,7 +172,8 @@ struct TaskDetailPage: View {
 
     private func sessionSubtitle(_ s: HubTaskSessionRow) -> String {
         let name = s.harness.map(UsageFormat.harness) ?? s.agent ?? "Session"
-        var parts = [name, s.status ?? ""]
+        // The chat's words for the hub's status, not its raw value.
+        var parts = [name, HubSessionRow.statusTitle(s.status) ?? s.status ?? ""]
         if s.remote == true { parts.append(s.machine ?? "remote") }
         if let at = s.lastActiveAt {
             parts.append(UsageFormat.ago(Date(timeIntervalSince1970: at), now: .now))
@@ -643,7 +644,7 @@ private struct LinkRow: View {
 
     private var subtitle: String {
         let name = session.harness.map(UsageFormat.harness) ?? session.agent ?? "Session"
-        var parts = [name, session.status ?? ""]
+        var parts = [name, HubSessionRow.statusTitle(session.status) ?? session.status ?? ""]
         if session.remote == true { parts.append(session.machine ?? "remote") }
         if let at = session.lastActiveAt {
             parts.append(UsageFormat.ago(Date(timeIntervalSince1970: at), now: .now))

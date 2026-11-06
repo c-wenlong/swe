@@ -482,3 +482,19 @@ public enum HubJSON: Codable, Sendable, Equatable {
         }
     }
 }
+
+extension HubSessionRow {
+    /// The words for the hub's session statuses, as the web app's chat
+    /// shows them; nil for a status it has no word for.
+    public static func statusTitle(_ raw: String?) -> String? {
+        switch raw {
+        case "active": "Active"
+        case "done": "Done"
+        case "followup": "Waiting"
+        case "error": "Error"
+        case "interrupted": "Interrupted"
+        case "approval": "Approval needed"
+        default: nil
+        }
+    }
+}

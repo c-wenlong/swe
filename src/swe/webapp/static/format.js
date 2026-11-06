@@ -356,9 +356,16 @@ const Fmt = (() => {
     return `Thought for ${s}s`;
   }
 
+  /* The words for the hub's session statuses, as the chat badge says
+   * them (chat.js's STATUS, the Mac app's HubSessionRow.statusTitle);
+   * an unknown status reads as itself. */
+  const SESSION_STATUS = Object.freeze({ active: "Active", done: "Done", followup: "Waiting", error: "Error",
+    interrupted: "Interrupted", approval: "Approval needed" });
+  const sessionStatus = (raw) => SESSION_STATUS[raw] || raw || "";
+
   return { tokens, dollars, ago, relative, harnessName, modelName, thought, harnessColor, logo, mark, markView, tilde, marbleScale,
     resetIn, windowLabel, meterInfo, planTitle, money, balance, onDemand,
-    copyIcon, copy, copyTick, shellWord };
+    copyIcon, copy, copyTick, shellWord, sessionStatus };
 })();
 
 /* Loading skeletons: blocks laid out like the rows or document a fetch

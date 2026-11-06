@@ -629,6 +629,30 @@ class TestShellWord(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestSessionStatus(unittest.TestCase):
+    """Fmt.sessionStatus: the task page's session rows say the chat
+    badge's words for the hub's statuses, not the raw value."""
+
+    def status(self, value):
+        src = (FORMAT_JS.read_text(encoding="utf-8")
+               + "\nprocess.stdout.write(JSON.stringify(Fmt.sessionStatus("
+               + json.dumps(value) + ")));\n")
+        done = subprocess.run(["node", "-e", src], capture_output=True,
+                              text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def test_known_statuses_read_as_words(self):
+        self.assertEqual(self.status("approval"), "Approval needed")
+        self.assertEqual(self.status("followup"), "Waiting")
+        self.assertEqual(self.status("active"), "Active")
+
+    def test_unknown_or_missing_status(self):
+        self.assertEqual(self.status("idle"), "idle")
+        self.assertEqual(self.status(None), "")
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
 class TestHarnessColor(unittest.TestCase):
     """Fmt.harnessColor: a hand-picked colour, else the palette slot the
     Mac's HarnessColor.stableIndex and iOS Theme.harnessHex pick (64-bit

@@ -68,7 +68,10 @@ struct SessionChatPage: View {
     /// model is the hub's row for the newest reply, left out while unknown.
     private var subtitle: String {
         let folder = (model?.row?.cwd ?? row.session.cwd).map { displayPath($0) }
-        return [HarnessMark(row.session.harness).name, folder, model?.row?.modelLabel]
+        // A model name keeps its hyphens unbroken: "claude-" and
+        // "opus-4-5" on two lines read as two things.
+        let model = model?.row?.modelLabel?.replacingOccurrences(of: "-", with: "\u{2011}")
+        return [HarnessMark(row.session.harness).name, folder, model]
             .compactMap { $0 }.joined(separator: " · ")
     }
 }
@@ -81,7 +84,7 @@ private struct ChatBadges: View {
     var model: SessionChatModel
 
     var body: some View {
-        if let row = model.row, let status = Self.status(row.status) { Badge(status) }
+        if let row = model.row, let status = HubSessionRow.statusTitle(row.status) { Badge(status) }
         HStack(spacing: 6) {
             Circle()
                 .fill(model.connection == .live ? Theme.success
@@ -98,18 +101,6 @@ private struct ChatBadges: View {
                   : "Connecting to the session stream.")
     }
 
-    /// The web app's chat labels for the hub's statuses.
-    static func status(_ raw: String?) -> String? {
-        switch raw {
-        case "active": "Active"
-        case "done": "Done"
-        case "followup": "Waiting"
-        case "error": "Error"
-        case "interrupted": "Interrupted"
-        case "approval": "Approval needed"
-        default: nil
-        }
-    }
 }
 
 private struct ChatTranscript: View {
