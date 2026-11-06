@@ -247,6 +247,50 @@ final class PrimitiveHome {
         #expect((object?["interface"] as? [String: Any])?["displayName"] as? String == "Shown")
     }
 
+    /// A new object or array lines up under its key like the rest of
+    /// the file: its entries one level in, its closing bracket under
+    /// the key, at the top level and one object down. (The space before
+    /// a new object's colons is JSONSerialization's own.)
+    @Test func aNewObjectIsIndentedUnderItsKey() throws {
+        let text = "{\n  \"name\": \"eng\"\n}\n"
+        let top = try JSONTextEdit.set(["url": "https://github.com/o/r"], at: ["repository"], in: text)
+        #expect(top == """
+            {
+              "name": "eng",
+              "repository": {
+                "url" : "https://github.com/o/r"
+              }
+            }
+
+            """)
+        let nested = "{\n  \"author\": {\n    \"name\": \"dev\"\n  }\n}\n"
+        let deep = try JSONTextEdit.set(["a", "b"], at: ["author", "tags"], in: nested)
+        #expect(deep == """
+            {
+              "author": {
+                "name": "dev",
+                "tags": [
+                  "a",
+                  "b"
+                ]
+              }
+            }
+
+            """)
+        // Into an empty object, written compactly: the value takes the
+        // indent of the line the brace sits on.
+        let empty = "{\n  \"author\": {}\n}\n"
+        let compact = try JSONTextEdit.set(["a"], at: ["author", "tags"], in: empty)
+        #expect(compact == """
+            {
+              "author": {"tags": [
+                "a"
+              ]}
+            }
+
+            """)
+    }
+
     @Test func insertsIntoAnExistingObject() throws {
         let text = "{\n  \"author\": {\n    \"name\": \"dev\"\n  }\n}\n"
         let edited = try JSONTextEdit.set("k@x.dev", at: ["author", "email"], in: text)
