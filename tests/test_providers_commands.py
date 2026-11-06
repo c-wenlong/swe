@@ -48,7 +48,7 @@ from unittest.mock import patch
 
 from swe.console import c, strip_ansi, visible_len
 from swe.providers.commands import cmd_info, cmd_list
-from swe.providers.defaults import DEFAULT_PROVIDERS
+from swe.providers.defaults import DEFAULT_ALL, DEFAULT_INFRA, DEFAULT_PROVIDERS
 
 
 def _registry_patches(config_dir: Path, registry_file: Path):
@@ -445,7 +445,7 @@ class CmdListMigrationTest(unittest.TestCase):
             self.assertGreater(idx_dashes, 0)
             self.assertGreater(idx_tip, idx_dashes)
             # It counts against the whole catalog and names the next step.
-            self.assertIn(f"0/{len(DEFAULT_PROVIDERS)}", output)
+            self.assertIn(f"0/{len(DEFAULT_ALL)}", output)
             self.assertIn("swe providers info", output)
 
     def test_no_keys_dir_advisory_after_table(self):
@@ -487,8 +487,8 @@ class CmdListMigrationTest(unittest.TestCase):
                 output = _run_cmd_list([])
             plain = strip_ansi(output)
             self.assertIn(
-                f"1/{len(DEFAULT_PROVIDERS)} providers with keys", plain,
-                f"expected '1/{len(DEFAULT_PROVIDERS)} providers with "
+                f"1/{len(DEFAULT_ALL)} providers with keys", plain,
+                f"expected '1/{len(DEFAULT_ALL)} providers with "
                 f"keys' in footer: {plain!r}",
             )
 
@@ -536,6 +536,107 @@ class CmdListMigrationTest(unittest.TestCase):
                 f"separator (cmd_list should match swe list's "
                 f"column_gap pattern): {plain!r}",
             )
+
+
+class CmdListInfraSectionTest(unittest.TestCase):
+    """``swe providers list`` files infra providers under their own
+    "Infra Providers" heading after the AI Providers table."""
+
+    def _patches(self, tmp_path: Path):
+        config_dir, registry_file, keys_dir = _setup(tmp_path)
+        return _registry_patches(config_dir, registry_file) + (
+            patch(
+                "swe.providers.commands.default_keys_dir",
+                return_value=keys_dir,
+            ),
+        )
+
+    def test_infra_section_renders_after_the_ai_table(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            patches = self._patches(tmp_path)
+            with patches[0], patches[1], patches[2]:
+                output = _run_cmd_list([])
+            plain = strip_ansi(output)
+            self.assertLess(plain.find("AI Providers"), plain.find("Infra Providers"))
+            self.assertGreater(plain.find("Infra Providers"), 0)
+            # The AI table still holds exactly the inference defaults;
+            # the infra table every infra default.
+            ai_body = _body_block(output)
+            self.assertEqual(len(ai_body), len(DEFAULT_PROVIDERS))
+            lines = plain.split("\n")
+            infra_idx = next(i for i, ln in enumerate(lines)
+                             if "Infra Providers" in ln)
+            infra_body = [
+                ln for ln in lines[infra_idx + 4:]
+                if ln.strip()
+            ]
+            # The table ends at the footer's dim line, which also
+            # carries " │ " ("add  │  help"): rows are the " │ " lines
+            # minus the footer.
+            infra_rows = [ln for ln in infra_body if " │ " in ln]
+            self.assertEqual(len(infra_rows) - 1, len(DEFAULT_INFRA),
+                             infra_rows)
+            self.assertTrue(
+                any("vercel" in ln for ln in infra_rows), infra_rows)
+
+    def test_infra_rows_carry_keys_like_any_provider(self):
+        # A VERCEL_TOKEN export shows masked in the infra table.
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_dir, registry_file, _ = _setup(
+                tmp_path, create_keys_dir=False)
+            shell_keys = tmp_path / ".api_keys"
+            shell_keys.write_text(
+                "export VERCEL_TOKEN=vtoken-InfraMaskTest12345678\n")
+            patches = _registry_patches(config_dir, registry_file) + (
+                patch(
+                    "swe.providers.commands.default_keys_dir",
+                    return_value=shell_keys,
+                ),
+            )
+            with patches[0], patches[1], patches[2]:
+                output = _run_cmd_list([])
+            plain = strip_ansi(output)
+            self.assertIn("vtoken-I***5678", plain)
+            self.assertNotIn("vtoken-InfraMaskTest12345678", plain)
+
+    def test_filter_infra_shows_only_the_infra_section(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            patches = self._patches(tmp_path)
+            with patches[0], patches[1], patches[2]:
+                output = _run_cmd_list(["infra"])
+            plain = strip_ansi(output)
+            # The kind field itself is a filter match, so "infra" picks
+            # every infra row and nothing else; the empty AI section is
+            # skipped rather than rendered blank.
+            self.assertNotIn("AI Providers", plain)
+            self.assertIn("Infra Providers", plain)
+            self.assertIn("vercel", plain)
+            self.assertNotIn("openai", plain)
+
+    def test_filter_an_infra_slug_shows_the_infra_section(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            patches = self._patches(tmp_path)
+            with patches[0], patches[1], patches[2]:
+                output = _run_cmd_list(["vercel"])
+            plain = strip_ansi(output)
+            self.assertIn("Infra Providers", plain)
+            self.assertIn("vercel", plain)
+            self.assertNotIn("openai", plain)
+
+    def test_no_infra_entries_skips_the_section(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            patches = self._patches(tmp_path)
+            with patches[0], patches[1], patches[2], patch(
+                "swe.providers.commands.load_registry",
+                return_value=_FAKE_PROVIDERS,
+            ):
+                output = _run_cmd_list([])
+            self.assertNotIn("Infra Providers", strip_ansi(output))
 
 
 class CmdInfoMigrationTest(unittest.TestCase):
@@ -612,7 +713,7 @@ class CmdInfoMigrationTest(unittest.TestCase):
                 output, rc = self._run_cmd_info(["openai"])
         self.assertEqual(rc, 0)
         body_rows = self._body_rows(output)
-        self.assertEqual(len(body_rows), 8, strip_ansi(output))
+        self.assertEqual(len(body_rows), 9, strip_ansi(output))
         # Rows end at their own value's width (fit="content"), but every
         # value starts in the same column: outer pad (2) + the label cell
         # (15, "  Key filename:") + the gap (1).
@@ -973,6 +1074,16 @@ class CmdInfoMigrationTest(unittest.TestCase):
         self.assertEqual(_info_value(alpha, "Aliases"), "al")
         self.assertEqual(_info_value(openai, "Aliases"), "—")
 
+    def test_kind_row_shows_the_registry_kind(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            patches = self._patches(tmp_path)
+            with patches[0], patches[1], patches[2]:
+                openai, _ = self._run_cmd_info(["openai"])
+                vercel, _ = self._run_cmd_info(["vercel"])
+        self.assertEqual(_info_value(openai, "Kind"), "inference")
+        self.assertEqual(_info_value(vercel, "Kind"), "infra")
+
 
 class CmdAddTest(unittest.TestCase):
     """``providers add`` must not erase the ``_removed`` tombstone list."""
@@ -1136,6 +1247,69 @@ class CmdAddTest(unittest.TestCase):
                 rc, _ = self._run_add(["myprov", "--aliases=my-provider"])
         self.assertEqual(rc, 1)
         self.assertFalse(registry_file.exists())
+
+    def test_add_kind_infra_persists_and_echoes(self):
+        with TemporaryDirectory() as tmp:
+            patches, registry_file = self._patches(Path(tmp))
+            with patches[0], patches[1]:
+                rc, out = self._run_add(
+                    ["myinfra", "--kind=infra", "--env=MY_TOKEN"])
+            saved = self._read_registry(registry_file)
+        self.assertEqual(rc, 0)
+        self.assertEqual(saved["myinfra"]["kind"], "infra")
+        self.assertIn("kind: infra", out)
+
+    def test_add_defaults_kind_to_inference(self):
+        with TemporaryDirectory() as tmp:
+            patches, registry_file = self._patches(Path(tmp))
+            with patches[0], patches[1]:
+                rc, out = self._run_add(["myprov", "--env=MY_API_KEY"])
+            saved = self._read_registry(registry_file)
+        self.assertEqual(rc, 0)
+        self.assertEqual(saved["myprov"]["kind"], "inference")
+        # The confirmation stays quiet about the default kind.
+        self.assertNotIn("kind:", out)
+
+    def test_add_rejects_an_unknown_kind(self):
+        with TemporaryDirectory() as tmp:
+            patches, registry_file = self._patches(Path(tmp))
+            with patches[0], patches[1]:
+                rc, out = self._run_add(
+                    ["myprov", "--kind=cloud", "--env=MY_API_KEY"])
+        self.assertEqual(rc, 1)
+        self.assertIn("Unknown kind", out)
+        self.assertFalse(registry_file.exists())
+
+    def test_update_preserves_kind_without_the_flag(self):
+        # Re-adding an infra entry without --kind must not file it back
+        # under inference.
+        with TemporaryDirectory() as tmp:
+            patches, registry_file = self._patches(Path(tmp))
+            self._write_registry(registry_file, {
+                "myinfra": {"env_vars": ["MY_TOKEN"], "kind": "infra",
+                            "key_filename": "myinfra"},
+            })
+            with patches[0], patches[1]:
+                rc, _ = self._run_add(["myinfra", "--url=https://x"])
+            saved = self._read_registry(registry_file)
+        self.assertEqual(rc, 0)
+        self.assertEqual(saved["myinfra"]["kind"], "infra")
+
+    def test_readd_removed_infra_builtin_restores_kind_and_vars(self):
+        # A removed infra default re-adds with its catalog kind and env
+        # vars, not a bare inference record.
+        with TemporaryDirectory() as tmp:
+            patches, registry_file = self._patches(Path(tmp))
+            self._write_registry(registry_file, {"_removed": ["vercel"]})
+            with patches[0], patches[1]:
+                rc, _ = self._run_add(["vercel"])
+            saved = self._read_registry(registry_file)
+        self.assertEqual(rc, 0)
+        self.assertEqual(saved["vercel"]["kind"], "infra")
+        self.assertEqual(saved["vercel"]["env_vars"],
+                         DEFAULT_INFRA["vercel"]["env_vars"])
+        # Lifting the only tombstone drops the bookkeeping key entirely.
+        self.assertNotIn("vercel", saved.get("_removed") or [])
 
 
 class CmdRemoveTest(unittest.TestCase):

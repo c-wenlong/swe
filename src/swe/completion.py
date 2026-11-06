@@ -303,6 +303,7 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
         ("--url=", "Provider base URL"),
         ("--env=", "Environment variable holding the key"),
         ("--file=", "Path to a key file"),
+        ("--kind=", "Provider kind: inference or infra"),
     ],
     "mcp discover": [
         ("--apply", "Add discoveries to ~/.swe/mcp.json"),

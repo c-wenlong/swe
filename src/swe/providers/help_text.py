@@ -9,13 +9,16 @@ def print_providers_help() -> None:
   {c('bold', 'swe providers')} — Manage AI provider API keys and metadata
 
   {c('cyan', 'swe providers list [-d] [--api-keys-dir=DIR] [<filter>]')}
-      List registered providers + masked key status (``-`` = no key file)
+      List registered providers + masked key status (``-`` = no key file),
+      AI providers first and infra providers (deploy/platform keys) under
+      their own heading. A filter matches the kind too: ``list infra``.
 
   {c('cyan', 'swe providers info <name|alias> [--api-keys-dir=DIR]')}
       Show full details for one provider, including key status + path
 
-  {c('cyan', 'swe providers add <name> [desc] [--url=URL] [--env=ENV] [--file=NAME]')}
+  {c('cyan', 'swe providers add <name> [desc] [--url=URL] [--env=ENV] [--file=NAME] [--kind=inference|infra]')}
       Register a provider in {c('bold', '~/.swe/config/providers.json')}.
+      ``--kind=infra`` files it with the deploy/platform providers.
       Does not create or touch any key file.
 
   {c('cyan', 'swe providers remove <name>')}
@@ -44,6 +47,7 @@ def print_providers_help() -> None:
       --env=ANTHROPIC_API_KEY \
       --url=https://console.anthropic.com/settings/keys
   swe providers add myprov --env=MY_API_KEY --url=https://example.com
+  swe providers add myinfra --kind=infra --env=MY_TOKEN --url=https://example.com
   swe providers remove myprov
 """
     )

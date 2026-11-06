@@ -211,6 +211,22 @@ class SetupWizardTest(unittest.TestCase):
         self.assertEqual(ready.status, "ready")
         self.assertEqual(attention.status, "attention")
 
+    @patch("swe.setup.wizard.discover_provider_keys", return_value=[])
+    @patch(
+        "swe.setup.wizard.load_provider_registry",
+        return_value={
+            "openai": {},
+            "anthropic": {"kind": "inference"},
+            "vercel": {"kind": "infra"},
+        },
+    )
+    def test_provider_stage_leaves_infra_keys_out(self, _registry, discover):
+        _stage_providers(
+            1, 1, input_fn=lambda _prompt: "", home=Path("/tmp/home"), quick=False
+        )
+        providers = discover.call_args.args[0]
+        self.assertEqual(sorted(providers), ["anthropic", "openai"])
+
     @patch("swe.setup.wizard.backup_file", return_value=Path("/tmp/mcp.json.bak"))
     @patch(
     "swe.setup.wizard.apply_mcp_findings",

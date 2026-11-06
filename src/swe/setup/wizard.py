@@ -266,6 +266,16 @@ def _stage_harnesses(
     )
 
 
+def _llm_providers() -> dict:
+    """The registry's inference providers: this stage is "LLM providers",
+    so infra keys (Vercel and friends) stay out of its counts."""
+    return {
+        name: info
+        for name, info in load_provider_registry().items()
+        if (info or {}).get("kind") != "infra"
+    }
+
+
 def _stage_providers(
     number: int,
     total: int,
@@ -276,7 +286,7 @@ def _stage_providers(
 ) -> StageOutcome:
     del input_fn, quick
     _stage_header(number, total, SECTION_LABELS["providers"])
-    providers = load_provider_registry()
+    providers = _llm_providers()
     keys_dir = default_keys_dir(home).expanduser()
     rows = discover_provider_keys(providers, keys_dir)
     configured = [row["name"] for row in rows if row["masked"] != "-"]
@@ -441,7 +451,7 @@ def _stage_check(
     findings = discover_harnesses(include_registered=True, include_missing=True)
     available = [item for item in findings if item.status == "registered" and item.path]
     missing = [item for item in findings if item.status == "missing"]
-    provider_rows = discover_provider_keys(load_provider_registry(), default_keys_dir(home))
+    provider_rows = discover_provider_keys(_llm_providers(), default_keys_dir(home))
     provider_count = sum(row["masked"] != "-" for row in provider_rows)
     config_issues = check_config()
     report_ready = report_setup_complete(load_resolved_config())
