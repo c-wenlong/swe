@@ -932,17 +932,18 @@ public final class ChaptersModel {
     ) {
         guard let manager = movesUndoManager else { return }
         moveError = nil
+        // macOS adds "Undo " / "Redo " in front of the action name itself.
         manager.registerUndo(withTarget: self) { _ in
             if let manager = self.movesUndoManager {
                 manager.registerUndo(withTarget: self) { _ in
                     self.registerMoveUndo(forward: forward, backward: backward)
                     Task { await self.reportMove(forward) }
                 }
-                manager.setActionName("Redo Move Chapter")
+                manager.setActionName("Move Chapter")
             }
             Task { await self.reportMove(backward) }
         }
-        manager.setActionName("Undo Move Chapter")
+        manager.setActionName("Move Chapter")
     }
 
     /// An undo or redo move: a refusal goes to `moveError` rather than
