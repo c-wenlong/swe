@@ -431,7 +431,9 @@ struct PartsCard: View {
                 ForEach(Array(shown.enumerated()), id: \.element.id) { index, unit in
                     switch unit {
                     case .header(let section):
-                        Text("\(section.kind.title) · \(section.entries.count)")
+                        // The main file is one file: no count to give.
+                        Text(section.kind == .main ? section.kind.title
+                             : "\(section.kind.title) · \(section.entries.count)")
                             .font(Theme.caption).foregroundStyle(Theme.textSecondary)
                             .padding(.top, index == 0 ? 0 : 14)
                             .padding(.bottom, 6)
