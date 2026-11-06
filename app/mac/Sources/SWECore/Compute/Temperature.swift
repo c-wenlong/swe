@@ -260,11 +260,17 @@ public struct MacTemperatureSampler: TemperatureSampling {
     private let hid: any TemperatureSampling
     /// One AppleSMC connection for every read, rather than an
     /// IOServiceOpen and close per tick.
-    private let smc = SMCSession()
+    private let smc: SMCSession
 
     public init(brand: String = MacTemperatureSampler.brand(), hid: any TemperatureSampling = HIDTemperatureSampler()) {
+        self.init(brand: brand, hid: hid, smc: SMCSession())
+    }
+
+    /// Tests hand in a session over a fake SMC.
+    init(brand: String, hid: any TemperatureSampling, smc: SMCSession) {
         keys = ThermalKeys.keys(forBrand: brand)
         self.hid = hid
+        self.smc = smc
     }
 
     /// `machdep.cpu.brand_string`, "Apple M4 Pro" on this kind of Mac.

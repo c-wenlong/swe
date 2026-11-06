@@ -96,6 +96,22 @@ import Testing
         #expect(a.byHarness["codex"]?.count == 2)
     }
 
+    @Test func aProcessWithNoReadablePathIsNamedByItsArgvThenItsPid() {
+        // Another user's process or one that exited mid-sample can leave
+        // the path unread; argv[0] names it, else the pid.
+        let argv = ProcessSample(pid: 42, ppid: 1, arguments: ["/opt/tools/bin/Python3.12", "serve.py"],
+                                 startedAt: Self.now)
+        #expect(argv.name == "Python3.12")
+        #expect(argv.runnerName == "python")
+        #expect(argv.commandLine == "/opt/tools/bin/Python3.12 serve.py")
+        #expect(ProcessSample(pid: 43, ppid: 1, arguments: [""], startedAt: Self.now).name == "pid 43")
+        let bare = ProcessSample(pid: 44, ppid: 1, startedAt: Self.now)
+        #expect(bare.name == "pid 44" && bare.id == 44)
+        #expect(bare.commandLine == "")
+        // No argv: the command line is the path.
+        #expect(Self.proc(45, 1, path: "/bin/zsh").commandLine == "/bin/zsh")
+    }
+
     @Test func versionedPythonStillCountsAsARunner() {
         // "python3.12" orphaned under pid 1 is an orphan tree root.
         let py = Self.proc(10, 1, path: "/usr/bin/python3.12", args: ["python3.12", "/x/serve.py"],

@@ -100,6 +100,81 @@ import Testing
         #expect(smc.filling(from: nil) == smc)
     }
 
+    @Test func everyComponentHasItsOwnTitle() {
+        let titles = ThermalComponent.allCases.map(\.title)
+        #expect(Set(titles).count == titles.count)
+        #expect(ThermalComponent.cpu.title == "CPU" && ThermalComponent.airflow.title == "Airflow")
+    }
+
+    @Test func chipsTheKeyMapDoesNotKnowParseToNil() {
+        #expect(ThermalKeys.chip("Apple") == nil)
+        #expect(ThermalKeys.chip("Apple Mx Pro") == nil)
+        // Only the A18 Pro has a key list; other A-series chips are unknown.
+        #expect(ThermalKeys.chip("Apple A18") == nil)
+        #expect(ThermalKeys.chip("Apple A17 Pro") == nil)
+    }
+
+    @Test func everyKnownGenerationGetsItsOwnCPUAndGPUKeys() {
+        let brands = ["Apple M1", "Apple M2", "Apple M3", "Apple M4", "Apple M5", "Apple M6", "Apple A18 Pro"]
+        let maps = brands.map { ThermalKeys.keys(forBrand: $0) }
+        for (brand, keys) in zip(brands, maps) {
+            #expect(keys[.cpu]?.isEmpty == false, "\(brand)")
+            #expect(keys[.gpu]?.isEmpty == false, "\(brand)")
+            // The shared keys ride along on every chip.
+            #expect(keys[.ssd] == ["TH0x"] && keys[.battery]?.count == 3, "\(brand)")
+        }
+        // The same key can be another core on another chip, so no two
+        // generations share a CPU list.
+        let cpu = maps.compactMap { $0[.cpu] }
+        #expect(Set(cpu).count == brands.count)
+        // Memory keys exist for the M1 and M4 lines only.
+        #expect(maps.map { $0[.memory] != nil } == [true, false, false, true, false, false, false])
+    }
+
+    @Test func aSamplerTakesTheSMCAndFansAndLeavesHIDAlone() {
+        let smc = FakeSMC.twoFans()
+        smc.put("Tp01", 70); smc.put("TH0x", 40); smc.put("TB0T", 30)
+        let hid = Thermometer(TemperatureReading([.cpu: 99, .ssd: 99, .battery: 99]))
+        let session = SMCSession(open: { smc })
+        let sampler = MacTemperatureSampler(brand: "Apple M4 Pro", hid: hid, smc: session)
+        let reading = sampler.read()
+        #expect(reading?.values == [.cpu: 70, .ssd: 40, .battery: 30])
+        #expect(reading?.fans == FanSummary(rpm: 2509, up: false))
+        #expect(hid.reads == 0)
+        _ = sampler.read()
+        #expect(session.opened == 1)
+    }
+
+    @Test func fansAloneKeepTheConnectionAndHIDGivesTheTemperatures() {
+        let smc = FakeSMC.twoFans()
+        let hid = Thermometer(TemperatureReading([.cpu: 55]))
+        let session = SMCSession(open: { smc })
+        let sampler = MacTemperatureSampler(brand: "Apple M4 Pro", hid: hid, smc: session)
+        #expect(sampler.read() == TemperatureReading([.cpu: 55], fans: FanSummary(rpm: 2509, up: false)))
+        _ = sampler.read()
+        #expect(session.opened == 1)
+    }
+
+    @Test func aSilentSMCIsReopenedNextTickAndHIDStandsIn() {
+        let session = SMCSession(open: { FakeSMC() })
+        let hid = Thermometer(TemperatureReading([.cpu: 55]))
+        let sampler = MacTemperatureSampler(brand: "Apple M4 Pro", hid: hid, smc: session)
+        #expect(sampler.read() == TemperatureReading([.cpu: 55]))
+        #expect(sampler.read() == TemperatureReading([.cpu: 55]))
+        // Nothing back drops the connection, so each tick opens a new one.
+        #expect(session.opened == 2)
+        hid.reading = nil
+        #expect(sampler.read() == nil)
+    }
+
+    @Test func noSMCAtAllLeavesHIDAsTheWholeReading() {
+        let session = SMCSession(open: { nil })
+        let hid = Thermometer(TemperatureReading([.battery: 31]))
+        let sampler = MacTemperatureSampler(brand: "Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz", hid: hid, smc: session)
+        #expect(sampler.read() == TemperatureReading([.battery: 31]))
+        #expect(session.opened == 0 && hid.reads == 1)
+    }
+
     // MARK: SMC values
 
     @Test func smcNumbersDecodeByType() {
@@ -115,6 +190,21 @@ import Testing
         #expect(AppleSMC.fourCC("F0Ac") == 0x4630_4163)
         #expect(AppleSMC.string(0x4630_4163) == "F0Ac")
         #expect(AppleSMC.fourCC("TOO LONG") == nil)
+    }
+
+    @Test func theDriverStructIsItsOwnEightyBytes() {
+        // The driver refuses a struct of any other size, which would read
+        // as every key missing rather than as an error.
+        #expect(AppleSMC.paramSize == 80)
+    }
+
+    @Test func aRefusedWriteSaysWhy() {
+        #expect(SMCWriteResult.sizeMismatch(type: "ui8 ", size: 1, given: 4).description
+                == "the key is 'ui8 ' with 1 bytes, 4 given")
+        // kIOReturnNotPrivileged prints as its unsigned hex, not a negative.
+        #expect(SMCWriteResult.failed(kern: -536_870_206, result: 0x84).description
+                == "refused (kern 0xe00002c2, SMC result 0x84)")
+        #expect(SMCWriteResult.failed(kern: 0, result: 1).description == "refused (kern 0x0, SMC result 0x1)")
     }
 
     // MARK: Fan readings
@@ -1823,6 +1913,18 @@ import Testing
     }
 
     // MARK: - Fakes
+
+    /// A HID stand-in that counts its reads.
+    final class Thermometer: TemperatureSampling, @unchecked Sendable {
+        var reading: TemperatureReading?
+        private(set) var reads = 0
+        init(_ reading: TemperatureReading?) { self.reading = reading }
+        func read() -> TemperatureReading? {
+            reads += 1
+            return reading
+        }
+    }
+
 
     /// An SMC in a dictionary. Mode writes can be refused a number of times,
     /// and only once Ftst is 1 when the Mac has the gate, like an M4.

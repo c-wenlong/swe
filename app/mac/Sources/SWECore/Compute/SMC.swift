@@ -123,6 +123,11 @@ public final class AppleSMC: SMCAccess {
         var bytes: (UInt64, UInt64, UInt64, UInt64) = (0, 0, 0, 0)
     }
 
+    /// The size every driver call sends and expects back, for tests: the
+    /// driver refuses a struct that isn't its own 80 bytes, which would read
+    /// as every key missing rather than as an error.
+    static var paramSize: Int { MemoryLayout<Param>.stride }
+
     private enum Command: UInt8 {
         case read = 5, write = 6, keyInfo = 9
     }
