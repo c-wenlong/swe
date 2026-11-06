@@ -54,6 +54,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flight is orphaned. The Mac, iPhone and web sheets' fallback label
   says `swe/issue-<n>` too.
 
+- **SWE.app ships the licences of the Python and Sparkle it carries.**
+  The bundle held only SWE's own licence and CPython's and OpenSSL's
+  texts. `Contents/Resources/Licenses/` now has Sparkle's `LICENSE` and
+  the licence of each library the bundled Python links (libffi, Expat,
+  SQLite, xz, bzip2, mpdecimal, libuuid, OpenSSL, zlib, libedit,
+  ncurses), and the build stops if one is missing.
+  `app/mac/THIRD_PARTY_NOTICES.md` lists them all and now names every
+  colour harness logo.
+
 - **The web app installs as an app and respects the notch.** Its
   manifest now says `display: "standalone"` and carries an `id`, and its
   background and theme colours follow the light default and the dark
@@ -221,6 +230,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Safe Storage item.
 
 ### Changed
+
+- **Pair QR codes stay on `quiver://pair` for one more release.** The
+  iPhone app has opened both `swe://` and `quiver://` links since it
+  became SWE Remote (2026-11-01), but a phone still running a build from
+  before then registers only `quiver://`, and a `swe://` code would open
+  nothing there. Hubs keep writing `quiver://pair` until the next
+  release, which switches to `swe://pair`: rebuild the iPhone app from a
+  current checkout before then.
+
+- **The MCP pages name the hub `swe` when they sync or remove.** The
+  Mac and web MCP sheets still sent the hub's pre-rename name, `quiver`,
+  as a sync source and remove place. Both now send `swe`; the hub's web
+  API, the Mac model and `swe mcp` keep accepting `quiver`, and server
+  rows still list the hub under both names in `remote_in`, so an older
+  app build or an open page keeps working.
 
 - **The web app marks its own requests with `X-Swe-Pair`.** The header
   that lets the hub owner's tailnet identity in without a bearer was

@@ -141,6 +141,11 @@ for notice in "$here/../../LICENSE" "$here/THIRD_PARTY_NOTICES.md"; do
   cp "$notice" "$bundle/Contents/Resources/"
 done
 
+# Licence texts for what the app links or embeds (see bundle-licenses.sh):
+# the python-build-standalone texts under Licenses/ and Sparkle's LICENSE.
+# The build stops when one THIRD_PARTY_NOTICES.md promises is missing.
+"$here/script/bundle-licenses.sh" "$bundle"
+
 # swe and its Python, so the app works on a Mac that has neither.
 "$here/script/bundle-swe.sh" "$bundle"
 

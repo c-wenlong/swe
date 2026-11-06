@@ -159,6 +159,15 @@ the Tasks rows still find the PR such a branch opened, so no work in
 flight is orphaned. The Mac, iPhone and web sheets' fallback label
 says <code>swe/issue-&lt;n&gt;</code> too.</p>
 </li>
+<li><p><strong>SWE.app ships the licences of the Python and Sparkle it carries.</strong>
+The bundle held only SWE's own licence and CPython's and OpenSSL's
+texts. <code>Contents/Resources/Licenses/</code> now has Sparkle's <code>LICENSE</code> and
+the licence of each library the bundled Python links (libffi, Expat,
+SQLite, xz, bzip2, mpdecimal, libuuid, OpenSSL, zlib, libedit,
+ncurses), and the build stops if one is missing.
+<code>app/mac/THIRD_PARTY_NOTICES.md</code> lists them all and now names every
+colour harness logo.</p>
+</li>
 <li><p><strong>The web app installs as an app and respects the notch.</strong> Its
 manifest now says <code>display: &quot;standalone&quot;</code> and carries an <code>id</code>, and its
 background and theme colours follow the light default and the dark
@@ -327,6 +336,21 @@ Safe Storage item.</p>
 </ul>
 <h3 id="changed"><a class="anchor" href="#changed"></a>Changed</h3>
 <ul>
+<li><p><strong>Pair QR codes stay on <code>quiver://pair</code> for one more release.</strong> The
+iPhone app has opened both <code>swe://</code> and <code>quiver://</code> links since it
+became SWE Remote (2026-11-01), but a phone still running a build from
+before then registers only <code>quiver://</code>, and a <code>swe://</code> code would open
+nothing there. Hubs keep writing <code>quiver://pair</code> until the next
+release, which switches to <code>swe://pair</code>: rebuild the iPhone app from a
+current checkout before then.</p>
+</li>
+<li><p><strong>The MCP pages name the hub <code>swe</code> when they sync or remove.</strong> The
+Mac and web MCP sheets still sent the hub's pre-rename name, <code>quiver</code>,
+as a sync source and remove place. Both now send <code>swe</code>; the hub's web
+API, the Mac model and <code>swe mcp</code> keep accepting <code>quiver</code>, and server
+rows still list the hub under both names in <code>remote_in</code>, so an older
+app build or an open page keeps working.</p>
+</li>
 <li><p><strong>The web app marks its own requests with <code>X-Swe-Pair</code>.</strong> The header
 that lets the hub owner's tailnet identity in without a bearer was
 still called <code>X-Quiver-Pair</code>. The web app now sends <code>X-Swe-Pair: 1</code>;

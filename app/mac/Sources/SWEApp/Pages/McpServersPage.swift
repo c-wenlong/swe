@@ -652,7 +652,7 @@ private struct ServerSheet: View {
         do {
             _ = try await app.swe.mcpRemove(
                 name: server.name,
-                from: server.harnesses + (server.inHub ? ["quiver"] : []))
+                from: server.harnesses + (server.inHub ? [McpServer.hubSource] : []))
             await reload()
             dismiss()
         } catch {

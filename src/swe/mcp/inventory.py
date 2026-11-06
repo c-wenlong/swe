@@ -136,7 +136,7 @@ def server_inventory(tool_data: dict, include_hub: bool = False) -> list[tuple[d
             secrets_missing=(unresolved_names(hub[name], secrets)
                              if name in hub else []),
             in_hub=name in hub,
-            remote_in=entry["remote"] + (["quiver", "swe"] if name in hub and _is_url(hub[name]) else []),  # "quiver" is the hub's name to older apps; "swe" the renamed one
+            remote_in=entry["remote"] + (["swe", "quiver"] if name in hub and _is_url(hub[name]) else []),  # "swe" is the hub's name; "quiver" stays for apps from before the rename
         )
         inventory.append((row.to_json(), entry["raw"]))
 
@@ -165,7 +165,7 @@ def server_inventory(tool_data: dict, include_hub: bool = False) -> list[tuple[d
             variants=[],
             secrets_missing=unresolved_names(raw, secrets),
             in_hub=True,
-            remote_in=["quiver", "swe"] if canonical.get("url") else [],  # wire names; see above
+            remote_in=["swe", "quiver"] if canonical.get("url") else [],  # wire names; see above
         )
         inventory.append((row.to_json(), raw))
     inventory.sort(key=lambda pair: pair[0]["name"])
