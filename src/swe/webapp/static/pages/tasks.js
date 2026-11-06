@@ -467,7 +467,7 @@
         <a class="gh-note-link" href="#/sessions?chat=${encodeURIComponent(s.key)}">${sessionLogo(s)}
           <span class="gh-row-main">
             <span class="gh-note-title">${esc(s.title || s.key)}</span>
-            <span class="caption gh-muted gh-ellipsis">${esc(sessionName(s))} · ${esc(s.status || "")}${where}${when}</span>
+            <span class="caption gh-muted gh-ellipsis">${esc(sessionName(s))} · ${esc(Fmt.sessionStatus(s.status))}${where}${when}</span>
           </span></a>
         <button type="button" class="icon-button gh-note-read${busy ? " spinning" : ""}" data-unlink="${esc(s.key)}"
           title="Unlink this session" aria-label="Unlink ${esc(s.title || s.key)}"${busy ? " disabled" : ""}>${ico(busy ? "running" : "minusCircle")}</button></div>`);
@@ -574,7 +574,7 @@
         return `<div class="gh-note"><span class="gh-note-link tk-still">
           ${sessionLogo(s)}
           <span class="gh-row-main"><span class="gh-note-title">${esc(s.title || s.key)}</span>
-          <span class="caption gh-muted gh-ellipsis">${esc(sessionName(s))} · ${esc(s.status || "")}${where}${when}</span></span></span>
+          <span class="caption gh-muted gh-ellipsis">${esc(sessionName(s))} · ${esc(Fmt.sessionStatus(s.status))}${where}${when}</span></span></span>
           <button type="button" class="btn lg hairline gh-button tk-link-go" data-link="${esc(s.key)}"${busy ? " disabled" : ""}>${busy ? "Linking…" : "Link"}</button></div>`;
       }).join("")}</div>`;
     }

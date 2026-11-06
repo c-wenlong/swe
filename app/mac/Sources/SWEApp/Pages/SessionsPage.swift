@@ -898,9 +898,12 @@ private struct SessionRail: View {
                             RailRow(selected: row.id == current.id, select: { select(row) }) {
                                 HarnessIcon(harness: HarnessMark(row.session.harness).icon ?? row.session.harness,
                                             size: 13)
-                                Text(model.hubOverlay.title(for: row) ?? row.session.id)
+                                // A title reads from its start; only a bare
+                                // id keeps both ends.
+                                let title = model.hubOverlay.title(for: row)
+                                Text(title ?? row.session.id)
                                     .font(Theme.nav)
-                                    .lineLimit(1).truncationMode(.middle)
+                                    .lineLimit(1).truncationMode(title == nil ? .middle : .tail)
                                 Spacer(minLength: 6)
                                 // Named for VoiceOver only: a .help inside the
                                 // RailRow's button label never shows, and a
