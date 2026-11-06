@@ -223,6 +223,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The web app keeps its browser settings under `swe.` names.** Its
+  `localStorage` keys (the device credential, appearance, hidden pages,
+  the Settings section, Compute and Calendar choices, the Agents folder,
+  hidden MCP harnesses, the setup offer) were still `quiver.*`. Each now
+  lives under `swe.*`; the first load after the update moves a browser's
+  old keys across and deletes them, so nobody is signed out or loses a
+  setting. The old credential key stays until the next sign-in or
+  sign-out, so a tab still open on an older page keeps working.
+
 - **Pair QR codes stay on `quiver://pair` for one more release.** The
   iPhone app has opened both `swe://` and `quiver://` links since it
   became SWE Remote (2026-11-01), but a phone still running a build from

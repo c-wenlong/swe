@@ -4,7 +4,7 @@ A port of the Mac app's first-run setup sheet (`FirstRunSetupSheet`,
 `SWECore/Onboarding/FirstRunSetup.swift`) for the machine the hub runs
 on. Page id `setup`, at `#/setup`; it is not in the sidebar. While the hub
 machine has no shared `~/.swe/AGENTS.md`, opening a bare `/` goes
-here once per browser (remembered under `quiver.setup.offered`), and
+here once per browser (remembered under `swe.setup.offered`), and
 Overview shows a **Set up** card linking here. Settings links it too. Files:
 `swe/webapp/pages/setup.py`, `static/pages/setup.js` and `setup.css`,
 `tests/test_webapp_setup.py`.
@@ -79,7 +79,7 @@ subtitle, and a footer with Skip setup, Back and Continue.
 3. **Pick a look.** System, Light and Dark, each drawn as a small SWE
    window, with the Mac app's blurbs ("Matches this browser" for System).
    A click applies it at once and saves it in this browser under
-   `quiver.appearance`, the key Settings › General uses, so the two stay
+   `swe.appearance`, the key Settings › General uses, so the two stay
    in step. Start using SWE finishes.
 
 After setting up, Continue moves to the look; when setup left something

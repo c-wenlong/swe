@@ -33,7 +33,7 @@ const COMPUTE_ORPHAN_FOLD = 8;
 const GB = 1024 * 1024 * 1024;
 
 function computeStored(key, fallback) {
-  try { return localStorage.getItem(`quiver.compute.${key}`) || fallback; } catch { return fallback; }
+  try { return localStorage.getItem(`swe.compute.${key}`) || fallback; } catch { return fallback; }
 }
 function computeChoice(value, known, fallback) {
   return known.includes(value) ? value : fallback;
@@ -44,7 +44,7 @@ function computeLines(saved) {
   return Array.isArray(saved) ? saved.filter((c) => known.includes(c)) : ["cpu", "gpu", "ssd", "battery"];
 }
 function computeStoredJSON(key, fallback) {
-  try { const v = JSON.parse(localStorage.getItem(`quiver.compute.${key}`)); return v == null ? fallback : v; }
+  try { const v = JSON.parse(localStorage.getItem(`swe.compute.${key}`)); return v == null ? fallback : v; }
   catch { return fallback; }
 }
 /* ComputeLimits: 1, 2, 4 or 8 GB (2 by default); an orphan age of a
@@ -66,7 +66,7 @@ function computeAgeFollowUp(pendingAge, savedAge) {
 }
 
 function computeStore(key, value) {
-  try { localStorage.setItem(`quiver.compute.${key}`, typeof value === "string" ? value : JSON.stringify(value)); }
+  try { localStorage.setItem(`swe.compute.${key}`, typeof value === "string" ? value : JSON.stringify(value)); }
   catch { /* private window: the choice lasts this visit */ }
 }
 

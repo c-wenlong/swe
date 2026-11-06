@@ -795,7 +795,7 @@ class TestStoredChoices(unittest.TestCase):
 
     def choices(self, stored):
         script = Path(__file__).resolve().parents[1] / "src/swe/webapp/static/pages/compute.js"
-        prelude = ("const stored = " + json.dumps({f"quiver.compute.{k}": v for k, v in stored.items()}) + ";\n"
+        prelude = ("const stored = " + json.dumps({f"swe.compute.{k}": v for k, v in stored.items()}) + ";\n"
                    "globalThis.localStorage = { getItem: (k) => (k in stored ? stored[k] : null) };\n"
                    "function registerPage() {}\n")
         body = ("process.stdout.write(JSON.stringify({ tab: computePage.tab, interval: computePage.interval,"

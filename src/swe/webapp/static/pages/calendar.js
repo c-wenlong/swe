@@ -18,7 +18,7 @@
   const LANE_MIN = 56;        // narrower lanes fold into a "+N" chip
   const ROW = 16;             // a month entry row
   const CARD_ROWS = 8;        // sessions a hover card lists
-  const STORE = "quiver.calendar.";
+  const STORE = "swe.calendar.";
 
   const load = (key, fallback) => {
     try { const v = localStorage.getItem(STORE + key); return v == null ? fallback : JSON.parse(v); }
