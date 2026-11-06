@@ -469,6 +469,26 @@ class TestHandle(unittest.TestCase):
         actions = self.posts[0]["actions"]
         self.assertEqual([a["action"] for a in actions], ["view"])
 
+    def test_rows_marked_standing_get_no_button_whatever_the_label(self):
+        # An ACP agent's allow_always option, named in another language:
+        # the label passes the English filter, the kind does not.
+        opts = [{"n": "1", "label": "Permitir", "kind": "allow_once"},
+                {"n": "2", "label": "Permitir siempre",
+                 "kind": "allow_always", "standing": True},
+                {"n": "3", "label": "Rechazar", "kind": "reject_once"}]
+        ev = {"type": "approval.requested", "session": "k1",
+              "data": {"request_id": "acp-1", "prompt": "ls?",
+                       "options": opts}}
+        self.n._handle(ev, self.cfg)
+        actions = self.posts[0]["actions"]
+        sent = [json.loads(a["body"])["decision"]
+                for a in actions if a["action"] == "http"]
+        self.assertEqual(sent, ["1", "3"])
+        self.assertEqual(actions[-1]["action"], "view")
+        token = actions[0]["headers"]["Authorization"][7:]
+        self.assertEqual(self.state.approval_tokens.consume(
+            token, "k1", "acp-1", "2"), notify.SPEND_REFUSED)
+
     def test_action_url_escapes_session_key(self):
         act = self.n._action("a b@c/d", "r", "allow", "Allow", "c")
         self.assertIn("a%20b%40c%2Fd", act["url"])

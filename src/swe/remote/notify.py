@@ -388,11 +388,17 @@ class Notifier:
                 f"{self._base}/#/sessions?chat="
                 f"{urllib.parse.quote(key, safe='')}"
             )
+            rows = [o for o in (data.get("options") or [])
+                    if isinstance(o, dict)]
             options = [
                 (str(o.get("n") or ""), str(o.get("label") or ""))
-                for o in (data.get("options") or [])
-                if isinstance(o, dict)
+                for o in rows
             ]
+            # A row its channel marks ``standing`` (an ACP option of
+            # kind allow_always/reject_always) is a standing grant
+            # whatever its label says.
+            standing = {str(o.get("n") or "") for o in rows
+                        if o.get("standing")}
             options = [(n, l) for n, l in options if n.isdigit() and l]
             if options:
                 # One button per row a token may answer, while they fit.
@@ -402,7 +408,8 @@ class Notifier:
                 # trades the last slot for a link to the chat, where
                 # every option answers. The push is a shortcut, never
                 # the only way in.
-                safe = [(n, l) for n, l in options if spendable(n, l)]
+                safe = [(n, l) for n, l in options
+                        if spendable(n, l) and n not in standing]
                 if len(safe) == len(options) and len(safe) <= _ACTION_MAX:
                     shown = safe
                 else:

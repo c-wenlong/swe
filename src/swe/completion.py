@@ -120,7 +120,7 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
         ("--json", "Print the device list as JSON"),
     ],
     "remote attach": [
-        ("--mode=", "Channel: auto|tmux|headless|serve|appserver"),
+        ("--mode=", "Channel: auto|tmux|headless|serve|appserver|acp"),
     ],
     "remote agent": [
         ("--hub=", "Hub URL (http://<tailscale-ip>:8477)"),

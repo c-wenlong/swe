@@ -76,7 +76,7 @@ _USAGE = f"""\
                                   List/revoke devices and approve pair requests
   {c('cyan', 'swe remote devices --auto-approve=on|off')}
                                   Pair your own untagged tailnet devices without a code
-  {c('cyan', 'swe remote attach <session> [--mode=auto|tmux|headless|serve|appserver] [--model=<m>] [--effort=<e>]')}
+  {c('cyan', 'swe remote attach <session> [--mode=auto|tmux|headless|serve|appserver|acp] [--model=<m>] [--effort=<e>]')}
                                   Move an observed session under supervision
   {c('cyan', 'swe remote notify [--ntfy=URL --topic=T] [--on|--off] [--service-status=on|off]')}
                                   Configure ntfy push notifications
