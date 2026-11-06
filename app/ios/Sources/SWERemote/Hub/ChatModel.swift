@@ -604,8 +604,18 @@ final class ChatModel {
             if !rows.isEmpty { approvalOptions[rid] = rows }
             if let i = items.firstIndex(where: { $0.id == "approval-\(rid)" }) {
                 // The inbox placeholder learns its real prompt.
-                if case .approval(_, _, let state) = items[i].kind {
-                    items[i].kind = .approval(requestId: rid, prompt: req.prompt ?? "Approval requested", state: state)
+                guard case .approval(_, _, let state) = items[i].kind else { return }
+                let card = ChatItem(id: "approval-\(rid)", kind: .approval(
+                    requestId: rid, prompt: req.prompt ?? "Approval requested", state: state))
+                if case .resolved = state {
+                    items[i] = card
+                } else {
+                    // Asked again under the same id (a satellite resends a
+                    // refused batch whole): the open card moves to the
+                    // newest ask instead of waiting mid-transcript (the
+                    // Mac's SessionChatModel and the web chat do the same).
+                    items.remove(at: i)
+                    items.append(card)
                 }
                 return
             }
