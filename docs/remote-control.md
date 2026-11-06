@@ -548,8 +548,12 @@ repo?|project?, ref, title, url}` — mapped to the sessions and launches
 the hub ran for it. Links land three ways: a resolve or a PR open
 stamps `origin` on its launch record — the launch links at once, so
 the task reads `agent_running` while it prepares, and adoption adds
-the session; `POST /v1/sessions/{id}/task` links by hand;
-`DELETE` unlinks one task (or every task, without a `task_ref`). `GET
+the session; `POST /v1/sessions/{id}/task` links by hand (a GitHub
+task the store doesn't hold yet must be in a pinned repo, `422
+not_pinned` otherwise, since every stored task is read with `gh`; a
+task already stored keeps its links and refreshes after its repo is
+unpinned); `DELETE` unlinks one task (or every task, without a
+`task_ref`). `GET
 /v1/tasks` merges the store over what the sources list — GitHub, the
 pinned repos' open issues and PRs behind the same 60-second `gh` cache
 `/v1/pulls` uses, and Linear (`remote/linear.py`), the issues assigned
