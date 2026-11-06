@@ -619,9 +619,19 @@ public final class SessionChatModel {
             let options = req.options ?? []
             if let i = items.firstIndex(where: { $0.id == "approval-\(rid)" }) {
                 // The placeholder for a waiting approval learns its prompt and menu.
-                if case .approval(_, _, _, _, let state) = items[i].kind {
-                    items[i].kind = .approval(requestId: rid, prompt: prompt, options: options,
-                                              picked: decisions[rid], state: state)
+                guard case .approval(_, _, _, _, let state) = items[i].kind else { return }
+                let card = HubChatItem(id: "approval-\(rid)", kind: .approval(
+                    requestId: rid, prompt: prompt, options: options,
+                    picked: decisions[rid], state: state))
+                if case .resolved = state {
+                    items[i] = card
+                } else {
+                    // Asked again under the same id (a satellite resends a
+                    // refused batch whole): the open card moves to the newest
+                    // ask, below what it came after, instead of waiting
+                    // mid-transcript where nobody scrolls.
+                    items.remove(at: i)
+                    insert(card, seq: env.seq ?? .max)
                 }
                 return
             }
