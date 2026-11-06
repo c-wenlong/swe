@@ -165,7 +165,9 @@ and root lookups only caught <code>OSError</code>, so a <code>~/.codex/skills</c
 pointing at itself ended <code>swe skills &lt;filter&gt;</code>, <code>swe skills tree</code>,
 <code>swe skills link</code> and <code>swe skills move</code> in a traceback. A looped root
 is now handled like a dangling one: <code>swe skills link</code> replaces it, a
-path argument skips it, and <code>move</code> names it in an error.</p>
+path argument skips it, and <code>move</code> names it in an error. Linking a
+root to a target that loops is refused before the old link is
+removed, on every Python version.</p>
 </li>
 <li><p><strong>One unreadable log no longer empties <code>swe models</code> for its harness.</strong>
 The model tally read each Claude, Codex and Freebuff log with the

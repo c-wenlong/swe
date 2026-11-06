@@ -569,12 +569,35 @@ class SkillsLayoutEdgeTest(unittest.TestCase):
             find_skill_directory("x", "codex", home=home, cwd=home)
         self.assertIn("No skill matching", str(ctx.exception))
 
-    def test_a_skill_path_that_is_a_symlink_loop_has_no_scopes(self):
+    def test_a_skill_path_that_cannot_resolve_has_no_scopes(self):
+        # A loop raises RuntimeError before Python 3.13; from 3.13 on the
+        # default resolve() no longer raises, so the error is forced.
         from swe.skills.layout import shared_scopes_for_skill
 
         home = self._home()
-        loop = self._loop(home, ".swe/skills/loop")
-        self.assertEqual(shared_scopes_for_skill(loop, home=home), [])
+        skill = home / ".swe" / "skills" / "x"
+        real = Path.resolve
+
+        def resolve(path, *args, **kwargs):
+            if path == skill:
+                raise RuntimeError(f"Symlink loop from {path!r}")
+            return real(path, *args, **kwargs)
+
+        with patch.object(Path, "resolve", resolve):
+            self.assertEqual(shared_scopes_for_skill(skill, home=home), [])
+
+    def test_link_refuses_a_target_that_is_a_symlink_loop(self):
+        home = self._home()
+        claude = home / ".claude" / "skills"
+        claude.parent.mkdir()
+        claude.symlink_to(home / ".swe" / "skills")
+        self._loop(home)
+
+        with self.assertRaises(SkillLayoutError) as ctx:
+            link_skill_root("claude", "codex", home=home, cwd=home)
+        self.assertIn("symlink loop", str(ctx.exception))
+        # The working link was left as it was.
+        self.assertEqual(claude.resolve(), (home / ".swe" / "skills").resolve())
 
     def test_unlink_refuses_a_missing_root_and_a_real_directory(self):
         home = self._home()

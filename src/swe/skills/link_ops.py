@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 from pathlib import Path
@@ -24,12 +25,29 @@ from swe.skills.layout import (
 __all__ = ["SkillLayoutError", "link_skill_root", "unlink_skill_root", "move_skill"]
 
 
+def _loops(path: Path) -> bool:
+    """Whether ``path`` is (or runs through) a symlink loop.
+
+    ``resolve(strict=True)`` reports a loop as RuntimeError before Python
+    3.13 and as OSError(ELOOP) from 3.13 on, where the default non-strict
+    resolve() no longer raises at all. A path that is merely missing is
+    not a loop.
+    """
+    try:
+        path.resolve(strict=True)
+    except RuntimeError:
+        return True
+    except OSError as exc:
+        return exc.errno == errno.ELOOP
+    return False
+
+
 def _same_tree(a: Path, b: Path) -> bool:
     """Whether two roots resolve to one directory.
 
-    A root that cannot be resolved (a symlink loop, which ``resolve()``
-    reports as RuntimeError before Python 3.13) is not the same tree as
-    anything, so linking replaces it instead of crashing.
+    A source root that cannot be resolved (a symlink loop) is not the same
+    tree as anything, so linking replaces it instead of crashing; the
+    target was already checked.
     """
     try:
         return a.resolve() == b.resolve()
@@ -54,6 +72,10 @@ def link_skill_root(
     src_label, src_path = resolve_root_ref(source_ref, home=home, cwd=cwd)
     _tgt_label, tgt_path = resolve_root_ref(target_ref, home=home, cwd=cwd)
 
+    # Checked before anything moves: replacing a working link with one
+    # into a loop would leave the source root unreadable.
+    if _loops(tgt_path):
+        raise SkillLayoutError(f"{tgt_path} is a symlink loop; fix it before linking to it")
     if _same_tree(src_path, tgt_path):
         raise SkillLayoutError(f"{src_label} already resolves to {tgt_path}")
 

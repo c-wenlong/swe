@@ -60,7 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pointing at itself ended `swe skills <filter>`, `swe skills tree`,
   `swe skills link` and `swe skills move` in a traceback. A looped root
   is now handled like a dangling one: `swe skills link` replaces it, a
-  path argument skips it, and `move` names it in an error.
+  path argument skips it, and `move` names it in an error. Linking a
+  root to a target that loops is refused before the old link is
+  removed, on every Python version.
 - **One unreadable log no longer empties `swe models` for its harness.**
   The model tally read each Claude, Codex and Freebuff log with the
   locale's strict decoder and no error handling, so a single file with a
