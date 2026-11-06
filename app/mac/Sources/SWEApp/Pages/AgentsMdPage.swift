@@ -456,7 +456,7 @@ private struct CompileView: View {
             self.rule = rule
             self.onError = onError
             _expanded = AppStorage(wrappedValue: true,
-                                   "agentsMd.compile.\(node.path)")
+                                   ChapterFolderState.compilePrefix + node.path)
         }
 
         /// Every file path under this node (the node itself for a file).
@@ -1217,7 +1217,7 @@ private struct ChaptersEditor: View {
             self.onDrop = onDrop
             // Expanded by default; each folder's state is its own key.
             _expanded = AppStorage(wrappedValue: true,
-                                   "agentsMd.outline.\(node.path)")
+                                   ChapterFolderState.outlinePrefix + node.path)
         }
 
         var body: some View {
