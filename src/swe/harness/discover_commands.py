@@ -127,6 +127,19 @@ def cmd_discover(args):
         new_names = {f.name for f in findings if f.status == "new"}
         unknown = [n for n in opts["names"] if n not in new_names]
         if unknown:
+            if opts["json"]:
+                # The app decodes stdout whole, so the refusal is a
+                # document in the `applied.refused` shape, not red text.
+                emit({
+                    "findings": [DiscoveryRow.of(f).to_json() for f in findings],
+                    "applied": {
+                        "added": [],
+                        "skipped": [{"name": n, "reason": "not a new match"}
+                                    for n in unknown],
+                        "refused": True,
+                    },
+                })
+                return 1
             print(c("red", f"  Not a new match: {', '.join(unknown)}"))
             if new_names:
                 print(c("dim", f"  New matches: {', '.join(sorted(new_names))}"))

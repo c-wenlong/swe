@@ -151,6 +151,11 @@ comments in <code>--json</code> gain <code>association</code>.</p>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong><code>swe harness discover --json --apply NAME</code> answers in JSON when NAME
+is not a new match.</strong> It printed red text, which the app could not
+decode. It now prints the usual document with <code>applied.refused</code> and the
+name under <code>applied.skipped</code>, and exits 1.</p>
+</li>
 <li><p><strong>The web app's model search and price edits no longer wait on the
 daily price download.</strong> The LiteLLM price list was fetched while
 holding the lock every catalog read and price save takes, so a slow
