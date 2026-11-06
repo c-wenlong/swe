@@ -67,6 +67,7 @@ struct TrendChart: View {
         // The chart only renders once a point exists, so latest is set.
         let domain = Self.window(model) ?? Date.now.addingTimeInterval(-60)...Date.now
         let plotted = plotted()
+        let axis = TrendScale.axis(top: yTop(plotted), marks: compact ? 4 : 6)
         Chart {
             ForEach(harnesses, id: \.self) { harness in
                 let points = plotted[harness] ?? []
@@ -91,14 +92,19 @@ struct TrendChart: View {
                 RuleMark(y: .value("Flag", limitGB))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4]))
                     .foregroundStyle(Theme.warning)
-                    .annotation(position: .top, alignment: .leading, spacing: 4) {
+                    // Under the line in the popup: above it, the label sat on
+                    // the next gridline and read as part of its axis label
+                    // ("2 GB Flag above 1 GB").
+                    .annotation(position: compact ? .bottom : .top, alignment: .leading, spacing: compact ? 2 : 4) {
                         Text("Flag above \(ComputeSummary.bytes(model.limits.memoryBytes))")
-                            .font(Theme.caption).foregroundStyle(Theme.warning)
+                            .font(compact ? Theme.font(size: 10) : Theme.caption)
+                            .foregroundStyle(Theme.warning)
+                            .padding(.leading, 6)
                     }
             }
         }
         .chartXScale(domain: domain)
-        .chartYScale(domain: 0...yTop(plotted))
+        .chartYScale(domain: 0...axis.top)
         .chartXAxis {
             if showsXAxis {
                 AxisMarks(values: .automatic(desiredCount: compact ? 4 : 6)) { value in
@@ -108,11 +114,11 @@ struct TrendChart: View {
                 }
             }
         }
-        // A compact chart puts its scale on the left, so the icons at the
-        // lines' right ends have the trailing edge to themselves.
+        // The scale sits on the left, so the icons at the lines' right
+        // ends have the trailing edge to themselves: on the right, they
+        // covered the axis labels.
         .chartYAxis {
-            AxisMarks(position: compact ? .leading : .automatic,
-                      values: .automatic(desiredCount: compact ? 3 : 5)) { value in
+            AxisMarks(position: .leading, values: axis.ticks) { value in
                 AxisGridLine()
                 AxisValueLabel { axisLabel(value) }
             }
@@ -129,7 +135,9 @@ struct TrendChart: View {
     private func axisLabel(_ value: AxisValue) -> some View {
         let number = value.as(Double.self) ?? 0
         if metric == .ram {
-            return Text("\(number.formatted(.number.precision(.fractionLength(compact ? 0 : 1)))) GB")
+            // A 2.5 GB step keeps its half in the popup too.
+            let digits = compact && number == number.rounded() ? 0 : 1
+            return Text("\(number.formatted(.number.precision(.fractionLength(digits)))) GB")
         }
         return Text("\(Int(number.rounded()))%")
     }

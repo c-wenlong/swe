@@ -22,7 +22,7 @@ struct ModelsPage: View {
     }
 }
 
-private struct ModelsContent: View {
+struct ModelsContent: View {
     @Bindable var model: ModelsModel
     @Environment(AppModel.self) private var app
     /// The logged name the link sheet is editing.
@@ -68,81 +68,147 @@ private struct ModelsContent: View {
     /// The controls row: view mode, metric, scope, harness and period on
     /// the left; the freshness stamp, warning and reload buttons on the
     /// right. When the row runs out of room the stamp hides and its text
-    /// moves into the reload button's hover tip — nothing else gives.
+    /// moves into the reload button's hover tip. When even the controls,
+    /// the search field's floor and the buttons don't fit (a narrow
+    /// window), the controls wrap and the search field takes a row of its
+    /// own, so the page never grows wider than the window.
     private var toolbar: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 8) {
-                Tabs(options: [(ModelsModel.ViewMode.chart, "Chart"),
-                               (ModelsModel.ViewMode.table, "Table")],
-                     selection: Binding(get: { model.viewMode },
-                                        set: { model.set(viewMode: $0) }),
-                     style: .segmented)
-                SelectMenu(options: ModelsModel.Metric.allCases.map { ($0, $0.title) },
-                           selection: Binding(get: { model.metric },
-                                              set: { model.set(metric: $0) }),
-                           width: nil,
-                           symbols: Dictionary(uniqueKeysWithValues:
-                               ModelsModel.Metric.allCases.map { ($0, $0.symbol) }))
-                let scopeMenu = SelectMenu(options: ModelsModel.Scope.allCases.map { ($0, $0.title) },
-                                           selection: Binding(get: { model.scope },
-                                                              set: { model.set(scope: $0) }),
-                                           width: nil)
-                // Off while a search runs, and only then does it need a tip.
-                if model.searching {
-                    scopeMenu.disabled(true)
-                        .hoverTip("Searching the whole catalog. Clear the search to pick a scope.",
-                                  replacesLabel: false)
-                } else {
-                    scopeMenu
+        VStack(alignment: .leading, spacing: 0) {
+            Color.clear.frame(height: 0)
+                .background(alignment: .leading) {
+                    // The controls' one-row width, from a hidden copy, so
+                    // wrapping them never changes the figure it was based on.
+                    HStack(spacing: 8) { controlItems }
+                        .fixedSize().hidden().accessibilityHidden(true)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { controlsWidth = $0 }
                 }
-                MultiSelectMenu(allTitle: "All harnesses",
-                                options: model.harnessOptions.map {
-                                    (value: $0, title: HarnessMark($0).name, icon: $0)
-                                },
-                                selection: Binding(get: { model.harnessFilter },
-                                                   set: { model.set(harnessFilter: $0) }),
-                                countTitle: { "\($0) harnesses" })
-                SelectMenu(options: OverviewPeriod.allCases.map { ($0, $0.title) },
-                           selection: Binding(get: { model.period },
-                                              set: { value in
-                                                  Task<Void, Never> { await model.set(period: value) }
-                                              }),
-                           width: nil)
-            }
-            .fixedSize()
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { controlsWidth = $0 }
-            SearchField(prompt: "Search the whole catalog", text: $model.query)
-                .frame(minWidth: Self.searchMinWidth)
-            Spacer(minLength: 8)
-            if let updatedAt = model.updatedAt, roomForStamp {
-                Text("Updated \(updatedAt.formatted(.relative(presentation: .named)))")
-                    .font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                    .lineLimit(1).fixedSize()
-            }
-            HStack(spacing: 8) {
-                if !model.unmatched.isEmpty {
-                    UnmatchedBadge(model: model) { linking = $0 }
+            if fitsOneRow {
+                HStack(spacing: 8) {
+                    HStack(spacing: 8) { controlItems }.fixedSize()
+                    search
+                    Spacer(minLength: 8)
+                    stamp
+                    trailing
                 }
-                reload
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 8) {
+                        FlowLayout(spacing: 8, lineSpacing: 8) { controlItems }
+                        trailing
+                    }
+                    HStack(spacing: 8) {
+                        search
+                        stamp
+                    }
+                }
             }
-            .fixedSize()
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { trailingWidth = $0 }
         }
+        // Exactly the width offered, whatever the row asks for: a row
+        // wider than the page used to widen the page (and every card under
+        // it) past the window, and measuring it then read that overflow
+        // back as room, so the stamp kept itself on screen.
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { toolbarWidth = $0 }
+    }
+
+    @ViewBuilder private var controlItems: some View {
+        Tabs(options: [(ModelsModel.ViewMode.chart, "Chart"),
+                       (ModelsModel.ViewMode.table, "Table")],
+             selection: Binding(get: { model.viewMode },
+                                set: { model.set(viewMode: $0) }),
+             style: .segmented)
+        SelectMenu(options: ModelsModel.Metric.allCases.map { ($0, $0.title) },
+                   selection: Binding(get: { model.metric },
+                                      set: { model.set(metric: $0) }),
+                   width: nil,
+                   symbols: Dictionary(uniqueKeysWithValues:
+                       ModelsModel.Metric.allCases.map { ($0, $0.symbol) }))
+        let scopeMenu = SelectMenu(options: ModelsModel.Scope.allCases.map { ($0, $0.title) },
+                                   selection: Binding(get: { model.scope },
+                                                      set: { model.set(scope: $0) }),
+                                   width: nil)
+        // Off while a search runs, and only then does it need a tip.
+        if model.searching {
+            scopeMenu.disabled(true)
+                .hoverTip("Searching the whole catalog. Clear the search to pick a scope.",
+                          replacesLabel: false)
+        } else {
+            scopeMenu
+        }
+        MultiSelectMenu(allTitle: "All harnesses",
+                        options: model.harnessOptions.map {
+                            (value: $0, title: HarnessMark($0).name, icon: $0)
+                        },
+                        selection: Binding(get: { model.harnessFilter },
+                                           set: { model.set(harnessFilter: $0) }),
+                        countTitle: { "\($0) harnesses" })
+        SelectMenu(options: OverviewPeriod.allCases.map { ($0, $0.title) },
+                   selection: Binding(get: { model.period },
+                                      set: { value in
+                                          Task<Void, Never> { await model.set(period: value) }
+                                      }),
+                   width: nil)
+    }
+
+    private var search: some View {
+        SearchField(prompt: "Search the whole catalog", text: $model.query)
+            .frame(minWidth: Self.searchMinWidth)
+    }
+
+    @ViewBuilder private var stamp: some View {
+        if let updatedAt = model.updatedAt, roomForStamp {
+            Text("Updated \(updatedAt.formatted(.relative(presentation: .named)))")
+                .font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                .lineLimit(1).fixedSize()
+        }
+    }
+
+    private var trailing: some View {
+        HStack(spacing: 8) {
+            if !model.unmatched.isEmpty {
+                UnmatchedBadge(model: model) { linking = $0 }
+            }
+            reload
+        }
+        .fixedSize()
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { trailingWidth = $0 }
     }
 
     /// The search field's floor: below it the stamp gives up its room.
     static let searchMinWidth: CGFloat = 140
 
-    /// Whether the stamp fits beside the controls, the search field's
-    /// floor and the buttons. The clusters are fixedSize, so their
-    /// rendered width is their ideal.
-    private var roomForStamp: Bool {
-        guard let updatedAt = model.updatedAt else { return false }
+    private var stampWidth: CGFloat {
+        guard let updatedAt = model.updatedAt else { return 0 }
         let text = "Updated \(updatedAt.formatted(.relative(presentation: .named)))"
-        let stamp = (text as NSString)
-            .size(withAttributes: [.font: Theme.nsFont(size: 12)]).width
-        return controlsWidth + 8 + Self.searchMinWidth + 8 + stamp + 8 + trailingWidth <= toolbarWidth
+        return (text as NSString).size(withAttributes: [.font: Theme.nsFont(size: 12)]).width
+    }
+
+    /// Whether the controls, the search field's floor and the buttons fit
+    /// on one row. Until the widths are measured, assume they do.
+    private var fitsOneRow: Bool {
+        guard toolbarWidth > 0, controlsWidth > 0 else { return true }
+        return Self.oneRowWidth(controls: controlsWidth, stamp: nil, trailing: trailingWidth) <= toolbarWidth
+    }
+
+    /// Whether the stamp fits: beside everything on one row, or beside
+    /// the search field's floor on the wrapped layout's second row.
+    private var roomForStamp: Bool {
+        guard model.updatedAt != nil, toolbarWidth > 0 else { return false }
+        if fitsOneRow {
+            return Self.oneRowWidth(controls: controlsWidth, stamp: stampWidth,
+                                    trailing: trailingWidth) <= toolbarWidth
+        }
+        return Self.searchMinWidth + Self.gap + stampWidth <= toolbarWidth
+    }
+
+    static let gap: CGFloat = 8
+
+    /// The one-row toolbar's narrowest width: controls, search floor,
+    /// spacer floor, the stamp if any and the buttons, with the HStack's
+    /// gap between every pair (the spacer is an item too).
+    static func oneRowWidth(controls: CGFloat, stamp: CGFloat?, trailing: CGFloat) -> CGFloat {
+        let items = [controls, searchMinWidth, gap /* Spacer(minLength:) */, stamp, trailing].compactMap { $0 }
+        return items.reduce(0, +) + gap * CGFloat(items.count - 1)
     }
 
     /// The freshness stamp lives here too, for when the row drops it.
@@ -551,6 +617,18 @@ private struct BarColumn: View {
                 .contentShape(.rect)
                 .onHover(perform: hover)
                 .frame(height: ChartCard.barHeight, alignment: .bottom)
+                // A model with no figure keeps its 8pt stub, labelled so it
+                // doesn't read as a bar that failed to draw.
+                .overlay(alignment: .bottom) {
+                    if row.value == nil {
+                        Text("No score")
+                            .font(Theme.font(size: 10)).foregroundStyle(Theme.textMuted)
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                            .padding(.bottom, 12)
+                            .hoverTip(metric.missingNote ?? "Artificial Analysis has no \(metric.title.lowercased()) figure for this model.",
+                                      replacesLabel: false)
+                    }
+                }
             // Zone 2: the provider logo.
             BrandLogo(vendor: vendor, size: ChartCard.logoSize)
                 .frame(height: ChartCard.logoHeight)
@@ -586,7 +664,8 @@ struct TableCard: View {
     @State private var width: CGFloat = 0
 
     var body: some View {
-        let columns = TableColumns.widths(for: width, extraMetric: model.showsExtraMetric)
+        let columns = TableColumns.widths(for: width, extraMetric: model.showsExtraMetric,
+                                          hidden: model.emptyBenchmarks)
         Card {
             // Narrow windows scroll sideways instead of crushing the
             // columns below their minimum widths.
@@ -615,13 +694,17 @@ struct TableCard: View {
         HStack(spacing: TableColumns.gap) {
             Text("Model").frame(width: columns.model, alignment: .leading)
             Text("Ran in").frame(width: columns.ranIn, alignment: .leading)
-            iconHeader(.intelligence).frame(width: columns.intelligence, alignment: .trailing)
-            iconHeader(.coding).frame(width: columns.coding, alignment: .trailing)
-            iconHeader(.reasoning).frame(width: columns.reasoning, alignment: .trailing)
-            iconHeader(.speed).frame(width: columns.speed, alignment: .trailing)
+            benchmarkHeader(.intelligence).frame(width: columns.intelligence, alignment: .trailing)
+            if columns.coding > 0 {
+                benchmarkHeader(.coding).frame(width: columns.coding, alignment: .trailing)
+            }
+            if columns.reasoning > 0 {
+                benchmarkHeader(.reasoning).frame(width: columns.reasoning, alignment: .trailing)
+            }
+            benchmarkHeader(.speed).frame(width: columns.speed, alignment: .trailing)
             // The picked metric shows when it has no column of its own.
             if model.showsExtraMetric {
-                iconHeader(model.metric).frame(width: columns.extra, alignment: .trailing)
+                benchmarkHeader(model.metric).frame(width: columns.extra, alignment: .trailing)
             }
             Text("Cost / 1M")
                 .hoverTip(ColumnTip.listPrice.text, title: ColumnTip.listPrice.title)
@@ -638,14 +721,12 @@ struct TableCard: View {
     }
 }
 
-/// A benchmark column's header: the metric's symbol, with a tip naming
-/// what it measures.
-@MainActor private func iconHeader(_ metric: ModelsModel.Metric) -> some View {
+/// A benchmark column's header: the metric's short name in words (an
+/// icon alone left the reader guessing), with a tip naming what it
+/// measures.
+@MainActor private func benchmarkHeader(_ metric: ModelsModel.Metric) -> some View {
     let tip = ColumnTip.of(metric)
-    // No padding around the glyph: its right edge lines up with the
-    // right-aligned figures under it.
-    return Image(systemName: metric.symbol)
-        .font(Theme.font(size: 13))
+    return Text(metric.columnTitle)
         .hoverTip(tip.text, title: tip.title)
 }
 
@@ -699,10 +780,10 @@ struct TableColumns: Equatable {
     /// (floor, weight) per column, in display order.
     static let model = (min: 180.0, weight: 24.0)
     static let ranIn = (min: 56.0, weight: 6.0)
-    static let intelligence = (min: 40.0, weight: 6.0)
-    static let coding = (min: 40.0, weight: 6.0)
-    static let reasoning = (min: 40.0, weight: 6.0)
-    static let speed = (min: 40.0, weight: 6.0)
+    static let intelligence = (min: 72.0, weight: 6.0)
+    static let coding = (min: 48.0, weight: 6.0)
+    static let reasoning = (min: 64.0, weight: 6.0)
+    static let speed = (min: 44.0, weight: 6.0)
     static let extra = (min: 44.0, weight: 6.0)
     static let price = (min: 162.0, weight: 12.0)
     static let cost = (min: 130.0, weight: 16.0)
@@ -718,9 +799,15 @@ struct TableColumns: Equatable {
         return shown.reduce(0, +) + Self.gap * CGFloat(max(shown.count - 1, 0))
     }
 
-    static func widths(for available: CGFloat, extraMetric: Bool) -> TableColumns {
-        let specs = [model, ranIn, intelligence, coding, reasoning, speed,
-                     extraMetric ? extra : (min: 0, weight: 0), price, cost, tokens]
+    /// `hidden` drops benchmark columns no row has a figure for: a column
+    /// of dashes says nothing the missing header doesn't.
+    static func widths(for available: CGFloat, extraMetric: Bool,
+                       hidden: Set<ModelsModel.Metric> = []) -> TableColumns {
+        let none = (min: 0.0, weight: 0.0)
+        let specs = [model, ranIn, intelligence,
+                     hidden.contains(.coding) ? none : coding,
+                     hidden.contains(.reasoning) ? none : reasoning, speed,
+                     extraMetric ? extra : none, price, cost, tokens]
         let count = specs.filter { $0.min > 0 }.count
         let floors = specs.map(\.min).reduce(0, +) + gap * CGFloat(count - 1)
         let room = max(0, available - floors)
@@ -734,6 +821,28 @@ struct TableColumns: Equatable {
 extension ModelsModel {
     /// The picked metric gets a table column when no fixed one shows it.
     var showsExtraMetric: Bool { metric == .ttft }
+
+    /// The optional benchmark columns no listed row has a score for.
+    var emptyBenchmarks: Set<ModelsModel.Metric> {
+        var empty: Set<ModelsModel.Metric> = []
+        if !rows.isEmpty, rows.allSatisfy({ $0.aa?.coding == nil }) { empty.insert(.coding) }
+        if !rows.isEmpty, rows.allSatisfy({ $0.aa?.reasoning == nil }) { empty.insert(.reasoning) }
+        return empty
+    }
+}
+
+extension ModelsModel.Metric {
+    /// The table header's words.
+    var columnTitle: String {
+        switch self {
+        case .intelligence: "Intelligence"
+        case .coding: "Coding"
+        case .reasoning: "Reasoning"
+        case .speed: "Speed"
+        case .ttft: "TTFT"
+        case .cost: "Cost"
+        }
+    }
 }
 
 private struct TableRow: View {
@@ -766,10 +875,14 @@ private struct TableRow: View {
             }
             .frame(width: columns.ranIn, alignment: .leading)
             metric(row.aa?.intelligence).frame(width: columns.intelligence, alignment: .trailing)
-            metric(row.aa?.coding, missing: AALanguageModel.noCodingScore)
-                .frame(width: columns.coding, alignment: .trailing)
-            metric(row.aa?.reasoning, missing: AALanguageModel.noReasoningScore)
-                .frame(width: columns.reasoning, alignment: .trailing)
+            if columns.coding > 0 {
+                metric(row.aa?.coding, missing: AALanguageModel.noCodingScore)
+                    .frame(width: columns.coding, alignment: .trailing)
+            }
+            if columns.reasoning > 0 {
+                metric(row.aa?.reasoning, missing: AALanguageModel.noReasoningScore)
+                    .frame(width: columns.reasoning, alignment: .trailing)
+            }
             metric(row.aa?.speed).frame(width: columns.speed, alignment: .trailing)
             if model.showsExtraMetric {
                 // The unit lives in the header's tip, as for the others.

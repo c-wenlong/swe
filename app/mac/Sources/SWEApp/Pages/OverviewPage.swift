@@ -272,6 +272,8 @@ private struct TotalCard: View {
     /// instead of rolling back to the totals in between.
     @State private var unfocus: Task<Void, Never>?
     @State private var size: CGSize = .zero
+    /// Where the figures end (the logo row's bottom), in the card's space.
+    @State private var figuresBottom: CGFloat = 0
 
     nonisolated static let space = "total-card"
     /// The width the marbles clear around the figures: the widest line
@@ -289,12 +291,16 @@ private struct TotalCard: View {
         return order.compactMap { id in shown.first { $0.harness == id } }.sortedBySpend()
     }
 
-    /// Marbles for about half the card. Rounded to tens so a window
-    /// resize doesn't add and drop a marble at every step, and capped so a
-    /// very large window doesn't mean hundreds of physics bodies.
+    /// Marbles for the room under the figures, less a marble's height, so
+    /// the pile's uneven top stays below the caption and the logo row
+    /// (half the whole card piled up over them). Rounded to tens so a
+    /// window resize doesn't add and drop a marble at every step, and
+    /// capped so a very large window doesn't mean hundreds of physics
+    /// bodies.
     var scale: MarbleScale {
         let r = MarbleScene.radius
-        let fit = 0.5 * size.width * size.height / (.pi * r * r / 0.82)
+        let room = max(size.height - figuresBottom - r, 0)
+        let fit = 0.95 * size.width * room / (.pi * r * r / 0.82)
         let capacity = min(max(Int(fit / 10) * 10, 20), 220)
         return MarbleScale(shares: shares, capacity: capacity)
     }
@@ -311,6 +317,7 @@ private struct TotalCard: View {
                 // card's width, so the clear zone is the middle of it.
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { box in
                     MarbleScene.shared.clearRect = box.insetBy(dx: max((box.width - Self.clearWidth) / 2, 0), dy: 0)
+                    if abs(figuresBottom - box.maxY) > 1 { figuresBottom = box.maxY }
                 }
         }
         .padding(Theme.cardPadding)

@@ -18,13 +18,26 @@ struct MarblePile: View, @MainActor Equatable {
     var scale: MarbleScale
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// False while a sheet covers the window (`sheetHost` disables what
+    /// it covers).
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The sheet scrim's darkening (`Theme.scrim`: 12% black in light, 32%
+    /// in dark), or none. The SpriteKit view draws over SwiftUI's scrim,
+    /// so the scene darkens its own marbles to match.
+    private var dim: CGFloat { isEnabled ? 0 : (colorScheme == .dark ? 0.32 : 0.12) }
 
     var body: some View {
         SpriteView(scene: MarbleScene.shared, preferredFramesPerSecond: 120, options: [.allowsTransparency])
             .allowsHitTesting(false)
             .accessibilityHidden(true)
-            .onAppear { MarbleScene.shared.show(scale, animated: !reduceMotion) }
+            .onAppear {
+                MarbleScene.shared.dim = dim
+                MarbleScene.shared.show(scale, animated: !reduceMotion)
+            }
             .onChange(of: scale) { MarbleScene.shared.show(scale, animated: !reduceMotion) }
+            .onChange(of: dim) { MarbleScene.shared.dim = dim }
     }
 
     static func == (lhs: MarblePile, rhs: MarblePile) -> Bool { lhs.scale == rhs.scale }
@@ -65,6 +78,15 @@ final class MarbleScene: SKScene {
     private var pourEnding = false
 
     var focus: String? { didSet { if focus != oldValue { wake() } } }
+    /// How far every marble is darkened toward black: the sheet scrim's
+    /// share while a sheet is up, else 0.
+    var dim: CGFloat = 0 {
+        didSet {
+            guard dim != oldValue else { return }
+            for marble in marbles { marble.dim(dim) }
+            wake()
+        }
+    }
     /// In SwiftUI's top-left coordinates.
     var clearRect: CGRect = .zero { didSet { if clearRect != oldValue { wake() } } }
 
@@ -174,6 +196,7 @@ final class MarbleScene: SKScene {
         marble.physicsBody?.angularVelocity = .random(in: -3...3)
         // A placed marble fades in where it lands.
         marble.alpha = position == nil ? 1 : 0
+        marble.dim(dim)
         addChild(marble)
         marbles.append(marble)
     }
@@ -321,6 +344,15 @@ private final class Marble: SKSpriteNode {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    /// Blends the marble and its shading toward black, keeping their
+    /// alpha: the same as a black scrim of that opacity over them.
+    func dim(_ amount: CGFloat) {
+        for node in [self, shade] {
+            node.color = .black
+            node.colorBlendFactor = amount
+        }
+    }
 }
 
 /// The marble images, drawn once per harness. The marble's own texture
