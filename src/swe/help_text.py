@@ -814,8 +814,13 @@ to use their own login state and environment."""
                                             {c('cyan', '--mode=auto')} picks the
                                             harness's API channel (opencode
                                             serve, codex app-server) when the
-                                            binary exists, else relaunches in
+                                            binary exists, then its Agent
+                                            Client Protocol mode (devin acp,
+                                            cursor-agent acp, ...) when the
+                                            CLI has one, else relaunches in
                                             tmux with resume flags.
+                                            {c('cyan', '--mode=acp')} forces ACP
+                                            (claude via claude-agent-acp).
                                             {c('cyan', '--mode=headless')} sends
                                             each prompt via claude -p instead.
                                             {c('cyan', '--model=<m>')} and

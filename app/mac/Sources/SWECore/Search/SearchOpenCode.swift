@@ -136,15 +136,19 @@ enum SearchOpenCode {
     /// (`readOpenCodeSessionMessages`): a turn's `text` and `reasoning`
     /// parts join into the turn's one message — the way every other
     /// provider hands a consumer one message per turn — and each `tool`
-    /// part is its own `.tool` message after the turn's words.
+    /// part is its own `.tool` message after the turn's words. A part whose
+    /// `data` is not valid JSON is skipped: `json_extract` raises on it, which
+    /// would fail the whole session's read.
     static func messages(in db: SQLiteDatabase, sessionID: String) throws -> [SearchMessage] {
         let statement = try db.prepare("""
             SELECT m.id, json_extract(m.data, '$.role'),
-                   json_extract(p.data, '$.type'), p.data, m.time_created
+                   CASE WHEN json_valid(p.data) THEN json_extract(p.data, '$.type') END,
+                   p.data, m.time_created
             FROM message m JOIN part p ON p.message_id = m.id
             WHERE m.session_id = ?
               AND json_extract(m.data, '$.role') IN ('user','assistant')
-              AND json_extract(p.data, '$.type') IN ('text','reasoning','tool')
+              AND CASE WHEN json_valid(p.data) THEN json_extract(p.data, '$.type') END
+                  IN ('text','reasoning','tool')
             ORDER BY m.time_created, m.id, p.time_created, p.rowid
             """)
         statement.bind([.text(sessionID)])
