@@ -171,6 +171,12 @@ class AcpError(Exception):
     pass
 
 
+class NoLoadSession(AcpError):
+    """The agent does not advertise ``loadSession`` and the caller
+    refused a new session (an attach: the chat tails the attached
+    session's transcript, which a new ACP session never writes)."""
+
+
 # ``Connection.stop_waiting``: the turn is still running.
 PENDING = object()
 
@@ -450,7 +456,9 @@ class Connection:
             self.resumed = True
             return ""
         if not allow_new:
-            raise AcpError(f"{self.label} can't load sessions over ACP")
+            raise NoLoadSession(
+                f"{self.label} can't load sessions over ACP, and a new "
+                "ACP session would not write to this chat")
         made = self.call("session/new", {"cwd": cwd, "mcpServers": []},
                          timeout=within(INIT_TIMEOUT_S))
         sid = made.get("sessionId")

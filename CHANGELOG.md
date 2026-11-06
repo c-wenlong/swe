@@ -266,8 +266,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   options as the answers, and Stop cancels the turn. Attach loads the
   session over ACP; if the agent can't load it or fails to start (not
   signed in, say), attach falls back to tmux and the note says why.
-  `--mode=acp` on an agent that can't load sessions starts a new one
-  and says so. A new session launched from the apps for such a harness
+  `--mode=acp` on an agent that can't load sessions falls back to tmux
+  too, since a new ACP session would never write to the chat. A new session launched from the apps for such a harness
   starts over ACP too (`session/new`, then the first prompt), unless
   the launch picks a model, effort or provider. With Autonomy on, the
   channel answers each permission request with the agent's "allow
