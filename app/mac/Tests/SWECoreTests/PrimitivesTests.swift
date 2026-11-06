@@ -277,6 +277,18 @@ final class PrimitiveHome {
             }
 
             """)
+        // Into an empty object, written compactly: the value takes the
+        // indent of the line the brace sits on.
+        let empty = "{\n  \"author\": {}\n}\n"
+        let compact = try JSONTextEdit.set(["a"], at: ["author", "tags"], in: empty)
+        #expect(compact == """
+            {
+              "author": {"tags": [
+                "a"
+              ]}
+            }
+
+            """)
     }
 
     @Test func insertsIntoAnExistingObject() throws {
