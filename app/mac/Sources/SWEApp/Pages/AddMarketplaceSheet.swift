@@ -37,7 +37,7 @@ struct AddMarketplaceSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Add marketplace").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+            Text("Add marketplace").font(Theme.sectionTitle).tracking(-0.5)
             Text("A GitHub owner/repo, a Git URL, or a folder with marketplace.json.")
                 .font(Theme.caption).foregroundStyle(Theme.textSecondary)
             FormField("Source") {

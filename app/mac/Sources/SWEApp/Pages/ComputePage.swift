@@ -647,15 +647,20 @@ private struct CleanupSheet: View {
                     .font(Theme.caption).foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            ScrollView {
-                VStack(spacing: 8) {
-                    ForEach(groups) { group in
-                        groupCard(group)
+            if items.isEmpty {
+                EmptyCard(text: "Nothing to clean up: no orphaned processes or leftovers right now.",
+                          icon: "checkmark.circle")
+            } else {
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(groups) { group in
+                            groupCard(group)
+                        }
                     }
                 }
+                .scrollIndicators(.automatic)
+                .frame(minHeight: 160, maxHeight: 480)
             }
-            .scrollIndicators(.automatic)
-            .frame(minHeight: 160, maxHeight: 480)
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }

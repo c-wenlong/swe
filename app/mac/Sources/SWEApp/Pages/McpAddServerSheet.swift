@@ -95,13 +95,7 @@ struct McpAddServerSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center) {
-                Text("Add a server").font(Theme.sectionTitle).tracking(-0.5)
-                Spacer(minLength: 16)
-                Button("Close", systemImage: "xmark") { dismiss() }
-                    .labelStyle(.iconOnly)
-                    .iconButton()
-            }
+            Text("Add a server").font(Theme.sectionTitle).tracking(-0.5)
             serverSection
             variablesSection
             whereSection

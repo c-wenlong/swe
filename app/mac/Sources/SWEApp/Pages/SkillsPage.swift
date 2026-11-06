@@ -73,7 +73,7 @@ private struct NewSkillSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("New skill").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+            Text("New skill").font(Theme.sectionTitle).tracking(-0.5)
             FormField("Name") {
                 TextField("my-skill", text: $name)
                     .sweField(monospaced: true)
@@ -102,7 +102,7 @@ private struct NewSkillSheet: View {
                     }
                     .secondaryButton()
                 }
-                Button(created == nil ? "Close" : "Done") { dismiss() }
+                Button(created == nil ? "Cancel" : "Done") { dismiss() }
                     .secondaryButton()
                 if created == nil {
                     Button("Create") {
