@@ -46,6 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **SWE.app ships the licences of the Python and Sparkle it carries.**
+  The bundle held only SWE's own licence and CPython's and OpenSSL's
+  texts. `Contents/Resources/Licenses/` now has Sparkle's `LICENSE` and
+  the licence of each library the bundled Python links (libffi, Expat,
+  SQLite, xz, bzip2, mpdecimal, libuuid, OpenSSL, zlib, libedit,
+  ncurses), and the build stops if one is missing.
+  `app/mac/THIRD_PARTY_NOTICES.md` lists them all and now names every
+  colour harness logo.
+
 - **The web app installs as an app and respects the notch.** Its
   manifest now says `display: "standalone"` and carries an `id`, and its
   background and theme colours follow the light default and the dark
