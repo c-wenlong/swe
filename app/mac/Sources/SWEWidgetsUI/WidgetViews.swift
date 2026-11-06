@@ -627,7 +627,7 @@ private struct ComputeColumns: View {
 }
 
 /// One running harness: its logo and name, then its share of the Mac.
-private struct ComputeLine: View {
+struct ComputeLine: View {
     var row: WidgetSnapshot.ComputeSection.Row
     var hasGPU: Bool
 
@@ -647,7 +647,10 @@ private struct ComputeLine: View {
                 Text("\(ComputeSummary.percent(row.cpuPercent))%")
                     .frame(width: Self.percentWidth, alignment: .trailing)
                 if hasGPU {
-                    Text(row.gpuPercent.map { "\(ComputeSummary.percent($0))%" } ?? "-")
+                    // No reading leaves the cell blank, as the small row
+                    // leaves the figure out; the cell keeps its width so
+                    // RAM and CPU stay under their labels.
+                    Text(Self.gpuFigure(row) ?? "")
                         .frame(width: Self.percentWidth, alignment: .trailing)
                 }
             }
@@ -655,6 +658,11 @@ private struct ComputeLine: View {
             .widgetAccentable()
         }
         .frame(height: ComputeView.rowHeight(compact: false))
+    }
+
+    /// The GPU column's figure, or nil when the row has no GPU reading.
+    nonisolated static func gpuFigure(_ row: WidgetSnapshot.ComputeSection.Row) -> String? {
+        row.gpuPercent.map { "\(ComputeSummary.percent($0))%" }
     }
 }
 

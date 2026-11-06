@@ -3,7 +3,8 @@ import SWECore
 @testable import SWEWidgetsUI
 
 /// The small Compute widget has no room for the medium's column labels,
-/// so its figures name CPU and GPU themselves.
+/// so its figures name CPU and GPU themselves. Both sizes leave a missing
+/// GPU figure out rather than print a placeholder.
 @Suite struct ComputeFiguresTests {
     @Test func theSmallRowNamesItsFigures() {
         let row = WidgetSnapshot.ComputeSection.Row(harness: "codex", memoryBytes: 858_300_000,
@@ -19,5 +20,14 @@ import SWECore
                                                     cpuPercent: 3, gpuPercent: nil)
         #expect(!ComputeLineCompact.figures(row).contains("GPU"))
         #expect(ComputeLineCompact.figures(row).hasSuffix("CPU \(ComputeSummary.percent(3))%"))
+    }
+
+    @Test func theMediumRowLeavesAMissingGPUCellBlank() {
+        let read = WidgetSnapshot.ComputeSection.Row(harness: "codex", memoryBytes: 858_300_000,
+                                                     cpuPercent: 12, gpuPercent: 4)
+        let unread = WidgetSnapshot.ComputeSection.Row(harness: "cursor", memoryBytes: 619_900_000,
+                                                       cpuPercent: 3, gpuPercent: nil)
+        #expect(ComputeLine.gpuFigure(read) == "\(ComputeSummary.percent(4))%")
+        #expect(ComputeLine.gpuFigure(unread) == nil)
     }
 }
