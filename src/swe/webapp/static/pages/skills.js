@@ -773,7 +773,8 @@ function skillsContents(d) {
   const fileRow = (e, child = false) => `<button class="sk-file${child ? " child" : ""}" type="button" data-file="${esc(e.preview || e.path)}">
       <span class="sk-ficon" aria-hidden="true">▤</span><span>${esc(e.name)}</span></button>`;
   const rows = shown.map((u, i) => {
-    if (u.head) return `<div class="sk-section${i ? "" : " first"}">${esc(u.head.title)} · ${u.head.entries.length}</div>`;
+    // The main file is one file: no count to give.
+    if (u.head) return `<div class="sk-section${i ? "" : " first"}">${esc(u.head.title)}${u.head.kind === "main" ? "" : ` · ${u.head.entries.length}`}</div>`;
     const e = u.entry;
     if (!e.folder) return fileRow(e);
     const open = p.open.has(e.path);
