@@ -151,6 +151,15 @@ comments in <code>--json</code> gain <code>association</code>.</p>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>Linux hubs and satellites run as <code>swe-remote-*.service</code>.</strong> <code>swe remote serve --install</code> and <code>swe remote agent --install</code> still wrote
+<code>quiver-remote-hub.service</code> and <code>quiver-remote-agent.service</code>. They
+now write <code>swe-remote-hub.service</code> and <code>swe-remote-agent.service</code>, and
+once the new unit has started they stop, disable and remove the old
+one, so a machine never runs two hubs after the upgrade. <code>--uninstall</code>
+removes both names, <code>--status</code> and <code>swe remote setup</code> still see an old
+unit that is all a machine has, and <code>scripts/install.sh</code> restarts
+whichever is active.</p>
+</li>
 <li><p><strong>SWE.app ships the licences of the Python and Sparkle it carries.</strong>
 The bundle held only SWE's own licence and CPython's and OpenSSL's
 texts. <code>Contents/Resources/Licenses/</code> now has Sparkle's <code>LICENSE</code> and

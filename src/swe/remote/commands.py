@@ -297,13 +297,15 @@ class Service:
     description: str  # systemd Description=
     log_name: str     # under ~/.swe/data/remote/
     old_label: str    # launchd label the pre-rename app installed under
+    old_unit: str     # systemd unit a pre-rename hub installed under
 
 
 HUB = Service("hub", "serve", launchd.LABEL, systemd.UNIT,
-              systemd.HUB_DESCRIPTION, "serve.log", launchd.OLD_LABEL)
+              systemd.HUB_DESCRIPTION, "serve.log", launchd.OLD_LABEL,
+              systemd.OLD_UNIT)
 AGENT = Service("agent", "agent", launchd.AGENT_LABEL, systemd.AGENT_UNIT,
                 "SWE remote agent (swe remote agent)", "agent.log",
-                launchd.OLD_AGENT_LABEL)
+                launchd.OLD_AGENT_LABEL, systemd.OLD_AGENT_UNIT)
 
 
 def _service_swe(service: Service) -> tuple[str, str | None]:
@@ -375,13 +377,16 @@ def service_file(service: Service = HUB, home: Path | None = None) -> Path:
 def service_files(service: Service, home: Path | None = None) -> list[Path]:
     """Every path an install of ``service`` can live at, newest first.
 
-    A pre-rename install left the old label's plist, and it keeps a job
-    running exactly like the new one's: conflict and presence checks
-    that only look at ``service_file`` would call it absent.
+    A pre-rename install left the old label's plist (or the old unit),
+    and it keeps a job running exactly like the new one's: conflict and
+    presence checks that only look at ``service_file`` would call it
+    absent.
     """
     files = [service_file(service, home)]
     if sys.platform == "darwin":
         files.append(launchd.plist_path(home, service.old_label))
+    else:
+        files.append(systemd.unit_path(home, service.old_unit))
     return files
 
 
@@ -391,7 +396,8 @@ def service_status(service: Service = HUB, home: Path | None = None,
     if sys.platform == "darwin":
         return launchd.status(home, run=run, label=service.label,
                               old_label=service.old_label)
-    return systemd.status(home, run=run, unit=service.unit)
+    return systemd.status(home, run=run, unit=service.unit,
+                          old_unit=service.old_unit)
 
 
 def service_conflict(service: Service, home: Path | None = None) -> str | None:
@@ -444,12 +450,24 @@ def install_service(program: list[str], log_path: Path, home: Path | None = None
             raise RuntimeError(f"launchctl could not load the {service.name}: {exc}") from exc
     try:
         path, linger = systemd.install(program, log_path, path_env, home=home, run=run,
-                                       unit=service.unit, description=service.description)
+                                       unit=service.unit, description=service.description,
+                                       old_unit=service.old_unit)
     except RuntimeError as exc:
         raise RuntimeError(f"systemctl could not start the {service.name}: {exc}") from exc
-    note = (f"it runs only while you're logged in; to keep it after logout, run `{linger}`"
-            if linger else "")
-    return path, note
+    notes = []
+    if linger:
+        notes.append(f"it runs only while you're logged in; to keep it after logout, "
+                     f"run `{linger}`")
+    old = systemd.unit_path(home, service.old_unit)
+    if old.exists():
+        # systemd.install keeps the pre-rename unit's file only when it
+        # would not stop: that one may still hold the port the new
+        # service needs, so the upgrade is not done.
+        notes.append(f"the pre-rename {service.old_unit} would not stop and may still be "
+                     f"running in place of the new {service.name}; stop it with "
+                     f"`systemctl --user disable --now {service.old_unit}`, then run "
+                     f"--install again")
+    return path, "; ".join(notes)
 
 
 def _cmd_uninstall_service(service: Service) -> int:
@@ -457,7 +475,8 @@ def _cmd_uninstall_service(service: Service) -> int:
     try:
         removed = (launchd.uninstall(label=service.label,
                                      old_label=service.old_label) if darwin
-                   else systemd.uninstall(unit=service.unit))
+                   else systemd.uninstall(unit=service.unit,
+                                          old_unit=service.old_unit))
     except RuntimeError as exc:
         print(c("red", f"could not stop the {service.name}: {exc}"), file=sys.stderr)
         return 1
@@ -505,7 +524,8 @@ def _cmd_serve_launchd(flags: dict) -> int:
     # A hub started from a shell would keep the port, and the service's
     # copy would fail to bind on every retry.
     probe_host = host or _tailscale_ip() or "127.0.0.1"
-    loaded = launchd.loaded_pid()[0] if darwin else systemd.status()[1]
+    loaded = (launchd.loaded_pid()[0] if darwin
+              else systemd.status(old_unit=systemd.OLD_UNIT)[1])
     stray = not loaded and _probe(probe_host, port, timeout=1.0) is not None
     log_path = remote_dir_for() / HUB.log_name
     try:

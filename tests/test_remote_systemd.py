@@ -14,8 +14,11 @@ from tests._tempdir import temp_dir
 class FakeCtl:
     """Records systemctl/loginctl calls; `linger` flips when enabled."""
 
-    def __init__(self, fail=(), linger="yes", can_linger=True, active="active", loginctl=True):
+    def __init__(self, fail=(), linger="yes", can_linger=True, active="active", loginctl=True,
+                 units=None):
         self.calls = []
+        # Per-unit is-active answers; a unit not listed answers `active`.
+        self.units = dict(units or {})
         self.loginctl = loginctl
         self.fail = set(fail)
         self.linger = linger
@@ -32,8 +35,11 @@ class FakeCtl:
             return subprocess.CompletedProcess(argv, 0, stdout=f"{self.linger}\n", stderr="")
         verb = argv[2]
         if verb == "is-active":
-            return subprocess.CompletedProcess(argv, 0, stdout=f"{self.active}\n", stderr="")
+            answer = self.units.get(argv[3], self.active)
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{answer}\n", stderr="")
         rc = 1 if verb in self.fail else 0
+        if verb == "disable" and not rc and "--now" in argv:
+            self.units[argv[-1]] = "inactive"
         return subprocess.CompletedProcess(argv, rc, stdout="", stderr="boom" if rc else "")
 
     def verbs(self):
@@ -50,7 +56,7 @@ class UnitTest(unittest.TestCase):
     def test_install_writes_a_restarting_unit_enables_and_restarts_it(self):
         ctl = FakeCtl()
         path, note = systemd.install(self.program, self.log, "/usr/bin:/bin", home=self.home, run=ctl)
-        self.assertEqual(path, self.home / ".config/systemd/user/quiver-remote-hub.service")
+        self.assertEqual(path, self.home / ".config/systemd/user/swe-remote-hub.service")
         text = path.read_text()
         self.assertIn("Restart=always", text)
         self.assertIn(f"StandardOutput=append:{self.log}", text)
@@ -115,9 +121,77 @@ class UnitTest(unittest.TestCase):
         self.assertEqual(systemd.ensure_linger(ctl), systemd.LINGER_FIX)
         self.assertIn("enable-linger", ctl.verbs())
 
+    def _old_unit(self, unit=systemd.OLD_UNIT):
+        old = systemd.unit_path(self.home, unit)
+        old.parent.mkdir(parents=True, exist_ok=True)
+        old.write_text("[Service]\nExecStart=/old/quiver remote serve\n")
+        return old
+
+    def test_install_retires_the_pre_rename_unit(self):
+        old = self._old_unit()
+        ctl = FakeCtl()
+        path, _ = systemd.install(self.program, self.log, "/bin", home=self.home, run=ctl,
+                                  old_unit=systemd.OLD_UNIT)
+        self.assertEqual(path.name, "swe-remote-hub.service")
+        self.assertFalse(old.exists())
+        sys_calls = [a[2:] for a in ctl.calls if a[0] == "systemctl"]
+        # The new unit is up before the old one goes, as launchd does it.
+        self.assertLess(sys_calls.index(["restart", systemd.UNIT]),
+                        sys_calls.index(["disable", "--now", systemd.OLD_UNIT]))
+        self.assertEqual(sys_calls[-1], ["daemon-reload"])
+
+    def test_an_old_unit_that_will_not_stop_keeps_its_file(self):
+        old = self._old_unit()
+        ctl = FakeCtl(fail={"disable"})
+        systemd.install(self.program, self.log, "/bin", home=self.home, run=ctl,
+                        old_unit=systemd.OLD_UNIT)
+        self.assertTrue(old.exists())
+
+    def test_install_without_an_old_unit_asks_nothing_about_it(self):
+        ctl = FakeCtl()
+        systemd.install(self.program, self.log, "/bin", home=self.home, run=ctl,
+                        old_unit=systemd.OLD_UNIT)
+        self.assertNotIn(systemd.OLD_UNIT, [a[-1] for a in ctl.calls])
+
+    def test_uninstall_removes_the_old_unit_too(self):
+        systemd.install(self.program, self.log, "/bin", home=self.home, run=FakeCtl())
+        old = self._old_unit()
+        ctl = FakeCtl()
+        self.assertTrue(systemd.uninstall(self.home, ctl, old_unit=systemd.OLD_UNIT))
+        self.assertFalse(systemd.unit_path(self.home).exists())
+        self.assertFalse(old.exists())
+        disabled = [a[-1] for a in ctl.calls if a[0] == "systemctl" and a[2] == "disable"]
+        self.assertEqual(disabled, [systemd.UNIT, systemd.OLD_UNIT])
+        # A machine with only the old unit still has something to remove.
+        old = self._old_unit()
+        self.assertTrue(systemd.uninstall(self.home, FakeCtl(), old_unit=systemd.OLD_UNIT))
+        self.assertFalse(old.exists())
+        self.assertFalse(systemd.uninstall(self.home, FakeCtl(), old_unit=systemd.OLD_UNIT))
+
+    def test_uninstall_keeps_an_old_unit_that_will_not_stop(self):
+        old = self._old_unit()
+        with self.assertRaises(RuntimeError):
+            systemd.uninstall(self.home, FakeCtl(fail={"disable"}), old_unit=systemd.OLD_UNIT)
+        self.assertTrue(old.exists())
+
+    def test_status_reports_a_running_old_unit(self):
+        self._old_unit()
+        ctl = FakeCtl(units={systemd.UNIT: "inactive"})
+        self.assertEqual(systemd.status(self.home, ctl, old_unit=systemd.OLD_UNIT),
+                         (["/old/quiver", "remote", "serve"], True))
+        # Without the old name, a pre-rename machine reads as not installed.
+        self.assertEqual(systemd.status(self.home, ctl), (None, False))
+        # A stopped new unit beside a running old one: the running one wins.
+        systemd.install(self.program, self.log, "/bin", home=self.home, run=FakeCtl())
+        self.assertEqual(systemd.status(self.home, ctl, old_unit=systemd.OLD_UNIT),
+                         (["/old/quiver", "remote", "serve"], True))
+        both_stopped = FakeCtl(active="inactive")
+        self.assertEqual(systemd.status(self.home, both_stopped, old_unit=systemd.OLD_UNIT),
+                         (self.program, False))
+
     def test_xdg_config_home_is_honoured(self):
         with patch.dict("os.environ", {"XDG_CONFIG_HOME": "/cfg"}):
-            self.assertEqual(systemd.unit_path(), Path("/cfg/systemd/user/quiver-remote-hub.service"))
+            self.assertEqual(systemd.unit_path(), Path("/cfg/systemd/user/swe-remote-hub.service"))
 
 
 if __name__ == "__main__":

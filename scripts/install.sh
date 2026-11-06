@@ -125,7 +125,8 @@ try_venv() {
 # restart warns but does not fail the install.
 restart_remote_units() {
     command -v systemctl >/dev/null 2>&1 || return 0
-    for unit in quiver-remote-hub.service quiver-remote-agent.service; do
+    for unit in swe-remote-hub.service swe-remote-agent.service \
+                quiver-remote-hub.service quiver-remote-agent.service; do
         if systemctl --user is-active --quiet "$unit" </dev/null 2>/dev/null; then
             if systemctl --user restart "$unit" </dev/null; then
                 say "restarted $unit"

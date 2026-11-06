@@ -46,6 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Linux hubs and satellites run as `swe-remote-*.service`.** `swe
+  remote serve --install` and `swe remote agent --install` still wrote
+  `quiver-remote-hub.service` and `quiver-remote-agent.service`. They
+  now write `swe-remote-hub.service` and `swe-remote-agent.service`, and
+  once the new unit has started they stop, disable and remove the old
+  one, so a machine never runs two hubs after the upgrade. `--uninstall`
+  removes both names, `--status` and `swe remote setup` still see an old
+  unit that is all a machine has, and `scripts/install.sh` restarts
+  whichever is active.
+
 - **SWE.app ships the licences of the Python and Sparkle it carries.**
   The bundle held only SWE's own licence and CPython's and OpenSSL's
   texts. `Contents/Resources/Licenses/` now has Sparkle's `LICENSE` and

@@ -381,6 +381,15 @@ class TestSystemdRestart(InstallScriptCase):
         self.assertFalse(any("restart quiver-remote-agent.service" in l
                              for l in self.log_lines()))
 
+    def test_active_renamed_and_pre_rename_units_are_restarted(self):
+        self.env["STUB_ACTIVE_UNITS"] = "swe-remote-agent.service quiver-remote-hub.service"
+        r = self.run_installer()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("restarted swe-remote-agent.service", r.stdout)
+        self.assertIn("restarted quiver-remote-hub.service", r.stdout)
+        self.assertFalse(any("restart swe-remote-hub.service" in l
+                             for l in self.log_lines()))
+
     def test_no_active_units_no_restart(self):
         r = self.run_installer()
         self.assertEqual(r.returncode, 0, r.stderr)
