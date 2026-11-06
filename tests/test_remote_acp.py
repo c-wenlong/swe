@@ -1162,6 +1162,61 @@ class TestHubLaunch(unittest.TestCase):
         run.assert_called_once()
 
 
+class TestPermissionPrompt(unittest.TestCase):
+    def test_devin_shape_uses_the_meta_command(self):
+        # What devin acp sends: only the id and vendor _meta.
+        tool = {"toolCallId": "exec:0#a2",
+                "_meta": {"cognition.ai/editableCommand": "rm auto.txt",
+                          "cognition.ai/permissionRule": "Exec(rm)"}}
+        self.assertEqual(acp._permission_prompt(tool, {}),
+                         "Run a command\n\n`rm auto.txt`")
+
+    def test_an_earlier_tool_call_names_it(self):
+        known = {"t1": {"title": "Delete auto.txt",
+                        "rawInput": {"command": "rm auto.txt"}}}
+        self.assertEqual(acp._permission_prompt({"toolCallId": "t1"}, known),
+                         "Delete auto.txt\n\n`rm auto.txt`")
+
+    def test_spec_shape_and_nothing_at_all(self):
+        self.assertEqual(acp._permission_prompt(
+            {"toolCallId": "t", "title": "Edit a.py",
+             "rawInput": {"path": "/x/a.py"}}, {}),
+            "Edit a.py\n\n`/x/a.py`")
+        self.assertEqual(acp._permission_prompt(None, {}),
+                         "permission requested")
+
+    def test_tool_updates_are_remembered_even_before_a_sink(self):
+        conn = acp.Connection.__new__(acp.Connection)
+        conn.replaying, conn.session_id, conn.deltas, conn.key = \
+            False, "s", None, ""
+        conn._tool_info = {}
+        conn._update({"sessionId": "s", "update": {
+            "sessionUpdate": "tool_call", "toolCallId": "t2",
+            "title": "Run ls", "rawInput": {"command": "ls"}}})
+        self.assertEqual(conn._tool_info["t2"]["title"], "Run ls")
+        # A partial update keeps what the first said, and adds to it.
+        conn._update({"sessionId": "s", "update": {
+            "sessionUpdate": "tool_call_update", "toolCallId": "t2",
+            "status": "in_progress", "title": None}})
+        conn._update({"sessionId": "s", "update": {
+            "sessionUpdate": "tool_call_update", "toolCallId": "t2",
+            "rawInput": {"command": "ls -la"}}})
+        self.assertEqual(conn._tool_info["t2"],
+                         {"title": "Run ls", "rawInput": {"command": "ls -la"}})
+        self.assertEqual(
+            acp._permission_prompt({"toolCallId": "t2"}, conn._tool_info),
+            "Run ls\n\n`ls -la`")
+
+    def test_the_tool_table_stays_bounded_oldest_first(self):
+        conn = acp.Connection.__new__(acp.Connection)
+        conn._tool_info = {}
+        for i in range(acp._TOOL_INFO_MAX + 10):
+            conn._remember_tool({"toolCallId": f"t{i}", "title": f"n{i}"})
+        self.assertEqual(len(conn._tool_info), acp._TOOL_INFO_MAX)
+        self.assertNotIn("t0", conn._tool_info)
+        self.assertIn(f"t{acp._TOOL_INFO_MAX + 9}", conn._tool_info)
+
+
 class TestDetection(unittest.TestCase):
     """``command_for``: harness.json first, then the --help probe."""
 
