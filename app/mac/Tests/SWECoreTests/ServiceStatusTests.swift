@@ -1010,3 +1010,186 @@ private final class ClockAdvancingTransport: HTTPTransport {
         return try await inner.send(request)
     }
 }
+
+/// What the parser and the stored-record decode do with a feed that leaves
+/// fields out or uses words the app does not know. Bodies are made up.
+@Suite struct StatusFallbackTests {
+    private func report(_ json: String) throws -> StatusReport {
+        try #require(StatusParser.statuspage(Data(json.utf8), now: usageEpoch))
+    }
+
+    @Test func indicatorsAndComponentStatusesMapAndUnknownOnesAreNil() {
+        #expect(ServiceHealth(indicator: "none") == .operational)
+        #expect(ServiceHealth(indicator: "maintenance") == .maintenance)
+        #expect(ServiceHealth(indicator: "minor") == .minor)
+        #expect(ServiceHealth(indicator: "major") == .major)
+        #expect(ServiceHealth(indicator: "critical") == .critical)
+        #expect(ServiceHealth(indicator: "degraded") == nil)
+
+        #expect(ComponentState(statuspage: "under_maintenance") == .maintenance)
+        #expect(ComponentState(statuspage: "degraded_performance") == .degraded)
+        #expect(ComponentState(statuspage: "partial_outage") == .partialOutage)
+        #expect(ComponentState(statuspage: "major_outage") == .majorOutage)
+        // Operational and anything new are not "affected".
+        #expect(ComponentState(statuspage: "operational") == nil)
+        #expect(ComponentState(statuspage: "full_blackout") == nil)
+    }
+
+    @Test func statesOrderWorstLastAndTitleInSentenceCase() {
+        #expect(ComponentState.maintenance < .degraded)
+        #expect(ComponentState.degraded < .partialOutage)
+        #expect(ComponentState.partialOutage < .majorOutage)
+        #expect(ComponentState.majorOutage.title == "Major outage")
+        #expect(ComponentState.partialOutage.title == "Partial outage")
+        #expect(ComponentState.degraded.title == "Degraded performance")
+        #expect(ComponentState.maintenance.title == "Under maintenance")
+        #expect(ServiceHealth.allCases.sorted() == [.operational, .maintenance, .minor, .major, .critical])
+    }
+
+    @Test func aFeedWithAnUnknownIndicatorIsNotAReport() {
+        let body = #"{"status": {"indicator": "wobbly", "description": "?"}}"#
+        #expect(StatusParser.statuspage(Data(body.utf8), now: usageEpoch) == nil)
+    }
+
+    @Test func aBareFeedIsAnOperationalReportWithNoSummaryOrLists() throws {
+        let bare = try report(#"{"status": {"indicator": "none"}}"#)
+        #expect(bare == StatusReport(health: .operational, summary: nil, components: [], incidents: []))
+    }
+
+    @Test func componentsMissingANameOrWithAnUnknownStatusAreSkipped() throws {
+        let parsed = try report(#"""
+        {"status": {"indicator": "minor"},
+         "components": [
+          {"name": "API", "status": "degraded_performance"},
+          {"status": "major_outage"},
+          {"name": "Dashboard", "status": "operational"},
+          {"name": "Search", "status": "something_new"},
+          {"name": "Webhooks"},
+          {"name": "Login", "status": "major_outage"}]}
+        """#)
+        // Worst first; the rest keep page order.
+        #expect(parsed.components == [
+            AffectedComponent(name: "Login", state: .majorOutage),
+            AffectedComponent(name: "API", state: .degraded),
+        ])
+    }
+
+    @Test func groupsAreListedOnlyWhenNoMemberIs() throws {
+        let onlyGroup = try report(#"""
+        {"status": {"indicator": "minor"},
+         "components": [{"name": "Europe", "status": "partial_outage", "group": true},
+                        {"name": "Berlin", "status": "operational"}]}
+        """#)
+        #expect(onlyGroup.components == [AffectedComponent(name: "Europe", state: .partialOutage)])
+    }
+
+    @Test func anIncidentWithoutAnIdOrNameIsDropped() throws {
+        let parsed = try report(#"""
+        {"status": {"indicator": "minor"},
+         "incidents": [{"name": "No id", "status": "investigating"},
+                       {"id": "i1", "status": "investigating"},
+                       {"id": "i2", "name": "Kept", "status": "investigating"}]}
+        """#)
+        #expect(parsed.incidents.map(\.id) == ["i2"])
+    }
+
+    @Test func anIncidentWithNoImpactOrASoftOneReadsAsMinor() throws {
+        let parsed = try report(#"""
+        {"status": {"indicator": "minor"},
+         "incidents": [{"id": "a", "name": "No impact field", "status": "investigating"},
+                       {"id": "b", "name": "Impact none", "status": "monitoring", "impact": "none"},
+                       {"id": "c", "name": "Impact odd", "status": "monitoring", "impact": "sideways"},
+                       {"id": "d", "name": "Impact major", "status": "identified", "impact": "major"}]}
+        """#)
+        let impacts = Dictionary(uniqueKeysWithValues: parsed.incidents.map { ($0.id, $0.impact) })
+        #expect(impacts == ["a": .minor, "b": .minor, "c": .minor, "d": .major])
+        #expect(parsed.incidents.first?.id == "d")
+    }
+
+    @Test func resolvedIncidentsAndMaintenanceNotYetStartedAreLeftOut() throws {
+        let parsed = try report(#"""
+        {"status": {"indicator": "none"},
+         "incidents": [{"id": "r", "name": "Done", "status": "resolved"},
+                       {"id": "p", "name": "Review", "status": "postmortem"},
+                       {"id": "c", "name": "Closed", "status": "completed"}],
+         "scheduled_maintenances": [{"id": "s", "name": "Next week", "status": "scheduled"},
+                                    {"id": "v", "name": "Wrapping up", "status": "verifying"}]}
+        """#)
+        #expect(parsed.incidents.map(\.id) == ["v"])
+        #expect(parsed.incidents.first?.impact == .maintenance)
+    }
+
+    @Test func theNewestUpdateAndTheStageComeFromTheIncidentsOwnFields() throws {
+        let parsed = try report(#"""
+        {"status": {"indicator": "minor"},
+         "incidents": [{"id": "i", "name": "Slow", "status": "in_progress", "impact": "minor",
+           "created_at": "2026-10-01T10:00:00.000Z", "updated_at": "2026-10-01T12:00:00.000Z",
+           "shortlink": "https://stspg.io/abc",
+           "incident_updates": [
+             {"body": "Looking", "created_at": "2026-10-01T10:05:00.000Z"},
+             {"body": "Fix rolling out", "created_at": "2026-10-01T11:00:00.000Z",
+              "display_at": "2026-10-01T11:30:00.000Z"},
+             {"body": "Earlier note", "created_at": "2026-10-01T10:30:00.000Z"}]}]}
+        """#)
+        let incident = try #require(parsed.incidents.first)
+        #expect(incident.stage == "In progress")
+        #expect(incident.latestUpdate == "Fix rolling out")
+        #expect(incident.updatedAt == UsageJSON.iso8601("2026-10-01T11:30:00.000Z"))
+        // With no `started_at`, the creation time stands in.
+        #expect(incident.startedAt == UsageJSON.iso8601("2026-10-01T10:00:00.000Z"))
+        #expect(incident.url == URL(string: "https://stspg.io/abc"))
+        #expect(!incident.isMaintenance)
+    }
+
+    @Test func anIncidentWithNoUpdatesFallsBackToItsOwnUpdatedTime() throws {
+        let parsed = try report(#"""
+        {"status": {"indicator": "minor"},
+         "incidents": [{"id": "i", "name": "Quiet", "updated_at": "2026-10-02T08:00:00Z"}]}
+        """#)
+        let incident = try #require(parsed.incidents.first)
+        #expect(incident.latestUpdate == nil)
+        #expect(incident.stage == nil)
+        #expect(incident.url == nil)
+        #expect(incident.updatedAt == UsageJSON.iso8601("2026-10-02T08:00:00Z"))
+        #expect(incident.startedAt == nil)
+    }
+
+    @Test func aStoredReportReadsBackWithItsOptionalFieldsMissing() throws {
+        let json = #"""
+        {"health": 2, "components": [{"name": "API", "state": 1}],
+         "incidents": [{"id": "i", "name": "Slow", "impact": 2, "isMaintenance": false}]}
+        """#
+        let stored = try JSONDecoder().decode(StatusReport.self, from: Data(json.utf8))
+        #expect(stored.health == .minor)
+        #expect(stored.summary == nil)
+        #expect(stored.components == [AffectedComponent(name: "API", state: .degraded)])
+        let incident = try #require(stored.incidents.first)
+        #expect(incident.stage == nil && incident.startedAt == nil && incident.latestUpdate == nil)
+        #expect(incident.updatedAt == nil && incident.url == nil)
+        let again = try JSONDecoder().decode(StatusReport.self, from: JSONEncoder().encode(stored))
+        #expect(again == stored)
+    }
+
+    @Test func groupsFromOlderRecordsLandWhereTheyBelongAndUnknownOnesInServices() throws {
+        func decode(_ raw: String) throws -> StatusService.Group {
+            try JSONDecoder().decode(StatusService.Group.self, from: Data("\"\(raw)\"".utf8))
+        }
+        #expect(try decode("providers") == .modelProviders)
+        #expect(try decode("infrastructure") == .services)
+        #expect(try decode("cloud") == .cloud)
+        #expect(try decode("registries") == .registries)
+        #expect(try decode("from-a-future-version") == .services)
+        for group in StatusService.Group.allCases {
+            #expect(try decode(group.rawValue) == group)
+        }
+    }
+
+    @Test func everyGroupHasADistinctTitleAndShortTitle() {
+        let groups = StatusService.Group.allCases
+        #expect(Set(groups.map(\.title)).count == groups.count)
+        #expect(Set(groups.map(\.shortTitle)).count == groups.count)
+        #expect(StatusService.Group.cloud.title == "Cloud & network")
+        #expect(StatusService.Group.devtools.shortTitle == "Dev tools")
+        #expect(StatusService.Group.observability.shortTitle == "Monitoring")
+    }
+}
