@@ -354,10 +354,10 @@ struct PartsCard: View {
     var onChanged: () -> Void
 
     @State private var tree: PrimitiveTree?
-    /// The tree's paths that stay inside `root` once symlinks resolve
-    /// (`PrimitiveTree.pathsInside`), worked out with the walk off the
-    /// main actor: only these may be trashed or edited.
-    @State private var inside: Set<String> = []
+    /// The rows that get a trash button (`PrimitiveTree.trashablePaths`:
+    /// inside `root` once symlinks resolve, and never a SKILL.md a skill
+    /// stands on), worked out with the walk off the main actor.
+    @State private var trashable: Set<String> = []
     /// The running tree walk, kept so a new reload cancels it before a
     /// stale tree can land over a newer one.
     @State private var treeTask: Task<Void, Never>?
@@ -508,8 +508,9 @@ struct PartsCard: View {
             }
             .buttonStyle(.plain)
             // A symlink inside the folder that resolves outside it is
-            // not the user's to trash.
-            if editable, inside.contains(entry.path) {
+            // not the user's to trash, and a skill's SKILL.md goes only
+            // with the whole skill.
+            if editable, trashable.contains(entry.path) {
                 Button { trashEntry = entry } label: {
                     Image(systemName: "trash").font(Theme.font(size: 11))
                 }
@@ -546,11 +547,11 @@ struct PartsCard: View {
         treeTask = Task {
             let (walked, owned) = await offMain {
                 let tree = PrimitiveTree(root: root)
-                return (tree, tree.pathsInside(root))
+                return (tree, tree.trashablePaths(root))
             }
             guard !Task.isCancelled else { return }
             tree = walked
-            inside = owned
+            trashable = owned
             if let selected {
                 let all = walked.sections.flatMap(\.entries).flatMap { [$0] + $0.children }
                 if !all.contains(where: { $0.previewPath == selected }) { self.selected = nil }

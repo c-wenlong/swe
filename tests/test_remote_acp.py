@@ -653,16 +653,39 @@ class TestAttachNoLoad(_AcpCase):
         self.assertFalse(any(m.get("method") == "session/new"
                              for m in self._sent()))
 
-    def test_new_session_recorded_and_noted(self):
-        with patch.object(supervise, "_local_writer_pids", return_value=[]):
+    def test_explicit_acp_takes_tmux_too_and_says_why(self):
+        # A forced --mode=acp used to run session/new here: the chat
+        # kept tailing the attached transcript, which that new session
+        # never wrote, so replies went nowhere the chat could follow.
+        with patch.object(supervise, "_local_writer_pids", return_value=[]), \
+             patch.object(supervise, "_attach_tmux",
+                          return_value=(True, "attached under tmux swe-x")) \
+                as tmux:
             ok, note = supervise.attach(
                 self.home, self.key, self.session, mode="acp",
                 last_append_at=None, status="done")
         self.assertTrue(ok, note)
-        self.assertIn("new session", note)
         self.assertEqual(
-            supervise.meta_for(self.home, self.key)["acp_session_id"],
-            "fresh-1")
+            note, "attached under tmux swe-x (fake-agent can't load "
+                  "sessions over ACP, and a new ACP session would not "
+                  "write to this chat; fell back to tmux)")
+        self.assertEqual(tmux.call_args[0][4]["mode"], "tmux")
+        self.assertNotIn("acp_session_id", tmux.call_args[0][4])
+        self.assertFalse(any(m.get("method") == "session/new"
+                             for m in self._sent()))
+        self.assertNotIn(self.key, inject.AcpInjector._conns)
+
+    def test_explicit_acp_fallback_failure_keeps_both_reasons(self):
+        with patch.object(supervise, "_local_writer_pids", return_value=[]), \
+             patch.object(supervise, "_attach_tmux",
+                          return_value=(False, "tmux is not available")):
+            ok, note = supervise.attach(
+                self.home, self.key, self.session, mode="acp",
+                last_append_at=None, status="done")
+        self.assertFalse(ok)
+        self.assertIn("tmux is not available", note)
+        self.assertIn("can't load sessions", note)
+        self.assertIsNone(supervise.meta_for(self.home, self.key))
 
 
 class TestAttachFallback(_AcpCase):
@@ -1160,6 +1183,61 @@ class TestHubLaunch(unittest.TestCase):
         self.assertEqual(body["note"], "starting over ACP")
         self.assertEqual(set(body), {"ok", "launch_id", "state", "note"})
         run.assert_called_once()
+
+
+class TestPermissionPrompt(unittest.TestCase):
+    def test_devin_shape_uses_the_meta_command(self):
+        # What devin acp sends: only the id and vendor _meta.
+        tool = {"toolCallId": "exec:0#a2",
+                "_meta": {"cognition.ai/editableCommand": "rm auto.txt",
+                          "cognition.ai/permissionRule": "Exec(rm)"}}
+        self.assertEqual(acp._permission_prompt(tool, {}),
+                         "Run a command\n\n`rm auto.txt`")
+
+    def test_an_earlier_tool_call_names_it(self):
+        known = {"t1": {"title": "Delete auto.txt",
+                        "rawInput": {"command": "rm auto.txt"}}}
+        self.assertEqual(acp._permission_prompt({"toolCallId": "t1"}, known),
+                         "Delete auto.txt\n\n`rm auto.txt`")
+
+    def test_spec_shape_and_nothing_at_all(self):
+        self.assertEqual(acp._permission_prompt(
+            {"toolCallId": "t", "title": "Edit a.py",
+             "rawInput": {"path": "/x/a.py"}}, {}),
+            "Edit a.py\n\n`/x/a.py`")
+        self.assertEqual(acp._permission_prompt(None, {}),
+                         "permission requested")
+
+    def test_tool_updates_are_remembered_even_before_a_sink(self):
+        conn = acp.Connection.__new__(acp.Connection)
+        conn.replaying, conn.session_id, conn.deltas, conn.key = \
+            False, "s", None, ""
+        conn._tool_info = {}
+        conn._update({"sessionId": "s", "update": {
+            "sessionUpdate": "tool_call", "toolCallId": "t2",
+            "title": "Run ls", "rawInput": {"command": "ls"}}})
+        self.assertEqual(conn._tool_info["t2"]["title"], "Run ls")
+        # A partial update keeps what the first said, and adds to it.
+        conn._update({"sessionId": "s", "update": {
+            "sessionUpdate": "tool_call_update", "toolCallId": "t2",
+            "status": "in_progress", "title": None}})
+        conn._update({"sessionId": "s", "update": {
+            "sessionUpdate": "tool_call_update", "toolCallId": "t2",
+            "rawInput": {"command": "ls -la"}}})
+        self.assertEqual(conn._tool_info["t2"],
+                         {"title": "Run ls", "rawInput": {"command": "ls -la"}})
+        self.assertEqual(
+            acp._permission_prompt({"toolCallId": "t2"}, conn._tool_info),
+            "Run ls\n\n`ls -la`")
+
+    def test_the_tool_table_stays_bounded_oldest_first(self):
+        conn = acp.Connection.__new__(acp.Connection)
+        conn._tool_info = {}
+        for i in range(acp._TOOL_INFO_MAX + 10):
+            conn._remember_tool({"toolCallId": f"t{i}", "title": f"n{i}"})
+        self.assertEqual(len(conn._tool_info), acp._TOOL_INFO_MAX)
+        self.assertNotIn("t0", conn._tool_info)
+        self.assertIn(f"t{acp._TOOL_INFO_MAX + 9}", conn._tool_info)
 
 
 class TestDetection(unittest.TestCase):

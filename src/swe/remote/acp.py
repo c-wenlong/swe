@@ -171,6 +171,12 @@ class AcpError(Exception):
     pass
 
 
+class NoLoadSession(AcpError):
+    """The agent does not advertise ``loadSession`` and the caller
+    refused a new session (an attach: the chat tails the attached
+    session's transcript, which a new ACP session never writes)."""
+
+
 # ``Connection.stop_waiting``: the turn is still running.
 PENDING = object()
 
@@ -253,6 +259,8 @@ class Connection:
         self.emit = None
         self.deltas = None
         self._held: list[tuple[str, dict]] = []
+        # toolCallId -> {title, rawInput} from session/update.
+        self._tool_info: dict[str, dict] = {}
         self._flush_lock = threading.Lock()
         # The stream id currently growing per kind, and tool calls whose
         # title streams until they finish.
@@ -448,7 +456,9 @@ class Connection:
             self.resumed = True
             return ""
         if not allow_new:
-            raise AcpError(f"{self.label} can't load sessions over ACP")
+            raise NoLoadSession(
+                f"{self.label} can't load sessions over ACP, and a new "
+                "ACP session would not write to this chat")
         made = self.call("session/new", {"cwd": cwd, "mcpServers": []},
                          timeout=within(INIT_TIMEOUT_S))
         sid = made.get("sessionId")
@@ -685,17 +695,7 @@ class Connection:
         if once is None:
             with self.lock:
                 self.approvals[request_id] = (rpc_id, options)
-        tool = params.get("toolCall")
-        tool = tool if isinstance(tool, dict) else {}
-        prompt = str(tool.get("title") or "permission requested")
-        raw_input = tool.get("rawInput")
-        if isinstance(raw_input, dict):
-            detail = raw_input.get("command") or raw_input.get("path") \
-                or raw_input.get("file_path")
-            if isinstance(detail, list):
-                detail = " ".join(str(p) for p in detail)
-            if isinstance(detail, str) and detail and detail not in prompt:
-                prompt += f"\n\n`{detail[:500]}`"
+        prompt = _permission_prompt(params.get("toolCall"), self._tool_info)
         request = {
             "request_id": request_id,
             "prompt": _tr._redact_secrets(prompt),
@@ -714,6 +714,21 @@ class Connection:
         self._emit("approval.resolved", {
             "request_id": request_id, "decision": "allow",
             "source": "autonomy"})
+
+    def _remember_tool(self, update: dict) -> None:
+        """Keep each tool call's title and input by id: a permission
+        request may name only the id (devin sends ``toolCallId`` and
+        vendor ``_meta``), and the card should still say what it runs."""
+        call_id = update.get("toolCallId")
+        if not isinstance(call_id, str) or not call_id:
+            return
+        info = self._tool_info.setdefault(call_id, {})
+        for field in ("title", "rawInput"):
+            value = update.get(field)
+            if value:
+                info[field] = value
+        while len(self._tool_info) > _TOOL_INFO_MAX:
+            self._tool_info.pop(next(iter(self._tool_info)))
 
     def _retire_approvals(self, source: str, *, answer: bool) -> None:
         with self.lock:
@@ -736,6 +751,8 @@ class Connection:
         if not isinstance(update, dict):
             return
         what = update.get("sessionUpdate")
+        if what in ("tool_call", "tool_call_update"):
+            self._remember_tool(update)
         deltas = self.deltas
         if deltas is None or not self.key:
             return
@@ -798,6 +815,39 @@ class Connection:
         deltas = self.deltas
         if deltas is not None and self.key:
             deltas.finish_all(self.key)
+
+
+# Tool calls remembered for permission prompts; the oldest go first.
+_TOOL_INFO_MAX = 256
+
+
+def _permission_prompt(tool, known: dict) -> str:
+    """What a permission card says: the tool call's title, else what an
+    earlier ``tool_call`` update said about the same id, plus the
+    command or path it acts on. A ``_meta`` field whose name ends in
+    ``command`` (devin's ``cognition.ai/editableCommand``) stands in for
+    an input the agent sent no other way."""
+    tool = tool if isinstance(tool, dict) else {}
+    seen = known.get(tool.get("toolCallId")) or {} \
+        if isinstance(tool.get("toolCallId"), str) else {}
+    title = tool.get("title") or seen.get("title")
+    raw_input = tool.get("rawInput") or seen.get("rawInput")
+    detail = None
+    if isinstance(raw_input, dict):
+        detail = raw_input.get("command") or raw_input.get("path") \
+            or raw_input.get("file_path")
+        if isinstance(detail, list):
+            detail = " ".join(str(p) for p in detail)
+    meta = tool.get("_meta")
+    if not detail and isinstance(meta, dict):
+        detail = next((v for k, v in meta.items()
+                       if isinstance(k, str) and isinstance(v, str)
+                       and k.lower().endswith("command") and v), None)
+    prompt = str(title or ("Run a command" if detail
+                           else "permission requested"))
+    if isinstance(detail, str) and detail and detail not in prompt:
+        prompt += f"\n\n`{detail[:500]}`"
+    return prompt
 
 
 # Option kinds whose answer outlives this one request.

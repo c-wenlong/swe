@@ -38,6 +38,10 @@ struct MarkdownTextView: NSViewRepresentable {
                                                        height: CGFloat.greatestFiniteMagnitude)
         textView.textContainer?.widthTracksTextView = true
         textView.textContainerInset = NSSize(width: 0, height: 4)
+        // The field behind the editor paints its own fill; NSTextView's
+        // default textBackgroundColor would draw a second, mismatched
+        // rectangle inside it (visible in dark mode, where the two differ).
+        textView.drawsBackground = false
 
         // Plain text: no ruler, no rich paste, and none of the writing
         // help that mangles config files.

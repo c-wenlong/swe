@@ -158,6 +158,19 @@ comments in <code>--json</code> gain <code>association</code>.</p>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>The Mac app no longer offers to trash a skill's SKILL.md by
+itself.</strong> A skill's Contents card put a trash button on its main
+SKILL.md (and on each skill folder's SKILL.md in a plugin), though a
+skill can't work without it. Those rows now have none; every other
+file keeps its button, and removing the whole skill stays its own
+action.</p>
+</li>
+<li><p><strong>Devin's ACP approvals say what they run.</strong> <code>devin acp</code> sends a
+permission request with only the tool call's id, so the card read
+&quot;permission requested&quot;. It now shows the title and command from the
+tool call Devin announced earlier, such as &quot;Ran rm&quot; with
+<code>rm hello.txt</code>.</p>
+</li>
 <li><p><strong>A skills root that links to itself no longer crashes the skills
 commands on Python 3.11 and 3.12.</strong> Before Python 3.13, <code>resolve()</code>
 raises <code>RuntimeError</code> on a symlink loop, and the skills root scan
@@ -365,8 +378,8 @@ live, permission requests arrive as approvals with the agent's own
 options as the answers, and Stop cancels the turn. Attach loads the
 session over ACP; if the agent can't load it or fails to start (not
 signed in, say), attach falls back to tmux and the note says why.
-<code>--mode=acp</code> on an agent that can't load sessions starts a new one
-and says so. A new session launched from the apps for such a harness
+<code>--mode=acp</code> on an agent that can't load sessions falls back to tmux
+too, since a new ACP session would never write to the chat. A new session launched from the apps for such a harness
 starts over ACP too (<code>session/new</code>, then the first prompt), unless
 the launch picks a model, effort or provider. With Autonomy on, the
 channel answers each permission request with the agent's &quot;allow

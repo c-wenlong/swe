@@ -53,6 +53,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Mac app no longer offers to trash a skill's SKILL.md by
+  itself.** A skill's Contents card put a trash button on its main
+  SKILL.md (and on each skill folder's SKILL.md in a plugin), though a
+  skill can't work without it. Those rows now have none; every other
+  file keeps its button, and removing the whole skill stays its own
+  action.
+
+- **Devin's ACP approvals say what they run.** `devin acp` sends a
+  permission request with only the tool call's id, so the card read
+  "permission requested". It now shows the title and command from the
+  tool call Devin announced earlier, such as "Ran rm" with
+  `rm hello.txt`.
+
 - **A skills root that links to itself no longer crashes the skills
   commands on Python 3.11 and 3.12.** Before Python 3.13, `resolve()`
   raises `RuntimeError` on a symlink loop, and the skills root scan
@@ -260,8 +273,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   options as the answers, and Stop cancels the turn. Attach loads the
   session over ACP; if the agent can't load it or fails to start (not
   signed in, say), attach falls back to tmux and the note says why.
-  `--mode=acp` on an agent that can't load sessions starts a new one
-  and says so. A new session launched from the apps for such a harness
+  `--mode=acp` on an agent that can't load sessions falls back to tmux
+  too, since a new ACP session would never write to the chat. A new session launched from the apps for such a harness
   starts over ACP too (`session/new`, then the first prompt), unless
   the launch picks a model, effort or provider. With Autonomy on, the
   channel answers each permission request with the agent's "allow
