@@ -1,5 +1,6 @@
 import Foundation
 import Synchronization
+import Testing
 @testable import SWECore
 
 /// How long a test waits on a gate before giving up, so a regression
@@ -192,6 +193,61 @@ func isLive(_ pid: pid_t) -> Bool {
     let size = Int32(MemoryLayout<proc_bsdinfo>.size)
     guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return false }
     return info.pbi_status != SZOMB
+}
+
+/// Waits for `process` to exit, at most `timeout`. Past that it and every
+/// process under it are killed and the test fails, rather than hang the
+/// suite on a child that never ends (a freshly written executable can sit
+/// in `_dyld_start` for minutes on a loaded machine). Blocks the calling
+/// thread, like `waitUntilExit`; the wait itself is a semaphore, not a poll.
+func waitForExit(_ process: Process, timeout: Duration = gateTimeout) {
+    let ended = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+        process.waitUntilExit()
+        ended.signal()
+    }
+    let (seconds, attoseconds) = timeout.components
+    let interval = Double(seconds) + Double(attoseconds) / 1e18
+    guard ended.wait(timeout: .now() + interval) == .timedOut else { return }
+    killTree(process.processIdentifier)
+    Issue.record("a child was still running after \(timeout); killed it")
+    // SIGKILL cannot be ignored, so this is the kernel reaping, bounded
+    // all the same.
+    _ = ended.wait(timeout: .now() + 10)
+}
+
+/// SIGKILLs `pid` and every process under it, leaves first, so nothing it
+/// started reparents to launchd and keeps running. Each process is tagged
+/// with its start time when listed and signalled only if the tag still
+/// matches, so a number freed and reused in between is left alone.
+func killTree(_ pid: pid_t) {
+    var tree: [(pid: pid_t, started: StartTime)] = []
+    var queue = [pid]
+    while let parent = queue.popLast() {
+        if let started = StartTime(parent) { tree.append((parent, started)) }
+        var children = [pid_t](repeating: 0, count: 256)
+        let count = proc_listchildpids(parent, &children,
+                                       Int32(MemoryLayout<pid_t>.stride * children.count))
+        guard count > 0 else { continue }
+        queue += children.prefix(min(Int(count), children.count)).filter { $0 > 0 }
+    }
+    for member in tree.reversed() where StartTime(member.pid) == member.started {
+        kill(member.pid, SIGKILL)
+    }
+}
+
+/// When a process started, or nil once it is gone.
+struct StartTime: Equatable {
+    let seconds: UInt64
+    let microseconds: UInt64
+
+    init?(_ pid: pid_t) {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+        seconds = info.pbi_start_tvsec
+        microseconds = info.pbi_start_tvusec
+    }
 }
 
 /// Answers call `i` with `replies[i]`, each held at its own gate until the

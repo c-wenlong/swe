@@ -94,6 +94,27 @@ import Testing
     }
 }
 
+/// The real runner over `/bin/sh`, with a stand-in script as the first
+/// argument of every run. The script is a plain file that `sh` reads, never
+/// executed itself: macOS checks a freshly written executable before its
+/// first run, and on a loaded machine that held a stub in `_dyld_start`
+/// for minutes.
+private struct ScriptRunner: CommandRunning {
+    let script: String
+    let environment: [String: String]
+    private var shell: ProcessRunner { ProcessRunner(executable: "/bin/sh", environment: environment) }
+
+    func run(_ arguments: [String]) async throws -> CommandResult {
+        try await shell.run([script] + arguments)
+    }
+    func run(_ arguments: [String], input: Data?) async throws -> CommandResult {
+        try await shell.run([script] + arguments, input: input)
+    }
+    func run(_ arguments: [String], input: Data?, timeout: Duration?) async throws -> CommandResult {
+        try await shell.run([script] + arguments, input: input, timeout: timeout)
+    }
+}
+
 /// `SweClient` over the real runner and a stand-in `swe` script, for the
 /// two callers that send a secret or private text: `mcp secret set` and
 /// `gh issue comment`. The script records its argv (both as given and as
@@ -102,7 +123,7 @@ import Testing
     /// A `swe` that records what it got into `$RECORD_DIR`, then answers
     /// with `reply` on stdout, `stderr` on stderr and exit `status`.
     private func fakeSwe(in temp: TempDir, reply: String, stderr: String = "",
-                         status: Int32 = 0) throws -> ProcessRunner {
+                         status: Int32 = 0) throws -> some CommandRunning {
         let script = temp.path("swe")
         let body = """
         #!/bin/sh
@@ -114,9 +135,8 @@ import Testing
         exit \(status)
         """
         try body.write(to: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-        return ProcessRunner(executable: script.path,
-                             environment: ["PATH": "/usr/bin:/bin", "RECORD_DIR": temp.url.path])
+        return ScriptRunner(script: script.path,
+                            environment: ["PATH": "/usr/bin:/bin", "RECORD_DIR": temp.url.path])
     }
 
     private func recorded(_ name: String, in temp: TempDir) throws -> Data {

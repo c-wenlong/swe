@@ -38,6 +38,12 @@ public struct ClaudeSignInRenewer: ClaudeSignInRenewing {
     /// Tests hold it until a slow-starting child is ready; it does
     /// nothing otherwise.
     var launched: @Sendable (Process) async -> Void = { _ in }
+    /// For tests: runs the found script as `interpreter script args`, not
+    /// as a program. macOS checks a freshly written executable before its
+    /// first run, and on a loaded machine that held a stub in
+    /// `_dyld_start` for minutes; an interpreter that only reads the stub
+    /// skips the check.
+    var interpreter: String?
 
     public init(timeout: Duration = .seconds(45),
                 sigtermGrace: Duration = .seconds(5),
@@ -98,8 +104,8 @@ public struct ClaudeSignInRenewer: ClaudeSignInRenewing {
         try? FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
+        process.executableURL = URL(fileURLWithPath: interpreter ?? executable)
+        process.arguments = (interpreter == nil ? [] : [executable]) + arguments
         process.environment = env
         process.currentDirectoryURL = workingDirectory
         // stdin, stdout and stderr go nowhere: the output is model text,

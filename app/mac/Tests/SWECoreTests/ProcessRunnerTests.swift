@@ -41,13 +41,16 @@ import Testing
         let temp = try TempDir()
         let folder = temp.url.appendingPathComponent("a=b", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // `swe` is a link to /bin/echo, so it prints its argument. A script
+        // written here would be a fresh executable, and macOS checks one
+        // before its first run: on a loaded machine that held a stub in
+        // `_dyld_start` for minutes.
         let script = folder.appendingPathComponent("swe")
-        try "#!/bin/sh\nprintf '%s' \"$1\"\n".write(to: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try FileManager.default.createSymbolicLink(at: script, withDestinationURL: URL(fileURLWithPath: "/bin/echo"))
         let runner = ProcessRunner(executable: script.path, environment: env)
         let result = try await runner.run(["--json"])
         #expect(result.status == 0)
-        #expect(String(decoding: result.stdout, as: UTF8.self) == "--json")
+        #expect(String(decoding: result.stdout, as: UTF8.self) == "--json\n")
     }
 
     @Test func aMissingPathHoldingAnEqualsSignIsStillNotInstalled() async throws {
