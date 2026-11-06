@@ -23,6 +23,20 @@ const esc = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
+/* The two theme-color metas follow the system scheme by media query. A
+ * Light or Dark chosen in Settings sets data-theme on <html> and beats the
+ * system, so the browser chrome takes the page's own --wash then; System
+ * puts each meta's own colour back. */
+function syncThemeColor() {
+  const root = document.documentElement;
+  const forced = root.dataset.theme === "light" || root.dataset.theme === "dark";
+  const wash = forced ? getComputedStyle(root).getPropertyValue("--wash").trim() : "";
+  document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => {
+    if (!meta.dataset.system) meta.dataset.system = meta.content;
+    meta.content = wash || meta.dataset.system;
+  });
+}
+
 /* An href for a URL the hub passed on from somewhere else (GitHub, a
  * tracker, a status feed, a plugin's manifest), escaped for an attribute.
  * Only http(s) and mailto pass: a `javascript:` or `data:` URL in that

@@ -53,6 +53,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their `qv-` name: the hub still writes to them, a satellite's rows
   still carry them, and a launch never starts a second pane beside one.
 
+- **The web app installs as an app and respects the notch.** Its
+  manifest now says `display: "standalone"` and carries an `id`, and its
+  background and theme colours follow the light default and the dark
+  scheme (`color_scheme_dark`). The page declares one `theme-color` per
+  scheme, and a Light or Dark picked in Settings overrides both, so the
+  status bar matches the page. The sidebar, pages and chat composer pad
+  themselves by `env(safe-area-inset-*)`, since the viewport covers the
+  whole screen.
+
 - **Phone SSH keys carry the `swe-remote:` tag.** The hub still tagged
   the `~/.ssh/authorized_keys` lines it manages `quiver-remote:<device
   id>`. New lines say `swe-remote:<device id>`; a line under the old

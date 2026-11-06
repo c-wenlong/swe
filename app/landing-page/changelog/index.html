@@ -158,6 +158,15 @@ button and the docs give. Panes a hub started before the upgrade keep
 their <code>qv-</code> name: the hub still writes to them, a satellite's rows
 still carry them, and a launch never starts a second pane beside one.</p>
 </li>
+<li><p><strong>The web app installs as an app and respects the notch.</strong> Its
+manifest now says <code>display: &quot;standalone&quot;</code> and carries an <code>id</code>, and its
+background and theme colours follow the light default and the dark
+scheme (<code>color_scheme_dark</code>). The page declares one <code>theme-color</code> per
+scheme, and a Light or Dark picked in Settings overrides both, so the
+status bar matches the page. The sidebar, pages and chat composer pad
+themselves by <code>env(safe-area-inset-*)</code>, since the viewport covers the
+whole screen.</p>
+</li>
 <li><p><strong>Phone SSH keys carry the <code>swe-remote:</code> tag.</strong> The hub still tagged
 the <code>~/.ssh/authorized_keys</code> lines it manages <code>quiver-remote:&lt;device id&gt;</code>. New lines say <code>swe-remote:&lt;device id&gt;</code>; a line under the old
 tag still counts as the hub's (and as installed), and the next
