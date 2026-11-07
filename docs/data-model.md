@@ -98,6 +98,8 @@ every key below is live.
 | `popupHiddenHarnesses`, `popupHiddenWindows`, `popupHarnessOrder` | legacy popup keys, read-only migration fallbacks; keep until the new keys have covered every install |
 | `mcpHiddenHarnesses` | harness columns hidden on the MCP page |
 | `providerOrder`, `providerDisabled` | provider list order and switches |
+| `inferenceOrder`, `infraOrder` | row order on the Providers page's Inference and Infra tabs |
+| `infraKeys` | variables filed to the Infra tab that no catalogue claims |
 | `computeTrendInterval`, `computeTrendTab`, `computeMemoryLimitGB`, `computeOrphanAgeMinutes`, `fanManualLevel`, `fanThresholdEnabled`, `fanThresholdCelsius`, `fanReleaseBelowCelsius`, `computeTemperatureLines` | Compute page preferences (`computeTrendTab` also takes `temperature`; `computeTemperatureLines` lists the Temperature tab's switched-on lines, default `cpu`, `gpu`, `ssd`, `battery`) |
 | `refreshFreshMinutes` | the "Refresh only what failed for" window (default 5, clamped to 1..120) |
 | `customStatusServices` | user-added status services |

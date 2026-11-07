@@ -38,6 +38,10 @@ struct InfraSection: View {
     /// keeps its room.
     static let compactBelow: CGFloat = 560
     static let statusWidth: CGFloat = 120
+    /// Custom keys make the list unbounded, so it folds like the app's
+    /// other growing lists.
+    private static let foldLimit = 12
+    @State private var showsAll = false
 
     var body: some View {
         let model = app.apiKeys
@@ -54,7 +58,8 @@ struct InfraSection: View {
                     .iconButton()
                     .disabled(model.isLoading)
                     .keyboardShortcut("r", modifiers: .command)
-                    .help("Read the file and the shell again (⌘R)")
+                    .hoverTip("Read the file and the shell again (⌘R)",
+                              replacesLabel: false, pinsOnClick: false)
                 Button("Check keys", systemImage: "checkmark.shield") { Task { await model.checkAll() } }
                     .secondaryButton()
                     .disabled(model.isChecking)
@@ -68,14 +73,13 @@ struct InfraSection: View {
                 .primaryButton()
             }
             if let error = model.error ?? actionError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(Theme.bodySmall).foregroundStyle(Theme.warningText)
+                ErrorCard(message: error)
             }
             if let added = sourceAdded {
                 Text(added).font(Theme.caption).foregroundStyle(Theme.textSecondary)
             }
             if let error = sourceError {
-                Text(error).font(Theme.caption).foregroundStyle(Theme.dangerText)
+                ErrorCard(message: error)
             }
             KeysFileNotices(model: model) { confirmingSource = $0 }
             filterBar(all)
@@ -83,9 +87,10 @@ struct InfraSection: View {
             KeysFileFooter(model: model)
         }
         .task(id: model.path) { await model.load() }
+        .keysFileWatch(model)
         .onDisappear { revealed.removeAll() }
         .cardSheet(isPresented: $cataloguing) {
-            ProviderCatalogueSheet(entries: InfraCatalogue.entries(keys: model.rows),
+            ProviderCatalogueSheet(entries: InfraCatalogue.entries(keys: model.rows, marked: marked),
                                    title: "Infra catalogue",
                                    prompt: "Search infra services", kinds: []) { entry in
                 if case .provider(let provider) = entry.target {
@@ -138,8 +143,14 @@ struct InfraSection: View {
     /// the mark, so the key follows its edit rather than its old name.
     private func settleMark(saved name: String, previous: String?) {
         if let previous, previous != name { app.infraMarks.unmark(previous) }
-        if APIKeyProviders.infraProvider(forVariable: name) == nil
-            && APIKeyProviders.provider(forVariable: name) == nil {
+        if let provider = APIKeyProviders.infraProvider(forVariable: name) {
+            // A key under a sibling variable replaces the catalogue row's
+            // id; keep the dragged position on the new one.
+            if provider.envVars[0] != name {
+                app.infraOrder.substitute(provider.envVars[0], with: name)
+            }
+            app.infraMarks.unmark(name)
+        } else if APIKeyProviders.provider(forVariable: name) == nil {
             app.infraMarks.mark(name)
         } else {
             app.infraMarks.unmark(name)
@@ -198,10 +209,20 @@ struct InfraSection: View {
                     .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
                     .frame(maxWidth: .infinity).padding(.vertical, 20)
             } else {
-                ReorderableRows(rows, showsDividers: true) { id, before in
-                    app.infraOrder.move(id, before: before ?? after(rows, all: all, moving: id), in: all)
+                let shown = RowFold.visible(rows, limit: Self.foldLimit, expanded: showsAll)
+                ReorderableRows(shown, showsDividers: true) { id, before in
+                    app.infraOrder.move(id, before: before ?? after(shown, all: all, moving: id), in: all)
                 } row: { item in
                     row(item, compact: compact)
+                }
+                if RowFold.hiddenCount(total: rows.count, limit: Self.foldLimit) > 0 {
+                    Rectangle().fill(Theme.border).frame(height: Theme.hairline)
+                    ExpandRow(isExpanded: showsAll,
+                              hidden: RowFold.hiddenCount(total: rows.count, limit: Self.foldLimit),
+                              help: (expand: "Show every row",
+                                     collapse: "Show only the first \(Self.foldLimit)")) {
+                        withAnimation(.easeOut(duration: Theme.fadeDuration)) { showsAll.toggle() }
+                    }
                 }
             }
         }
@@ -336,7 +357,8 @@ private struct InfraRow: View {
         .contentShape(.rect)
         .onTapGesture(perform: open)
         .onHover { hovering = $0 }
-        .help(item.hasKey ? "Click to edit \(item.id)" : "Click to add a key for \(item.title)")
+        .hoverTip(item.hasKey ? "Click to edit \(item.id)" : "Click to add a key for \(item.title)",
+                  replacesLabel: false, pinsOnClick: false)
         .contextMenu {
             Button(item.hasKey ? "Edit…" : "Add key…", action: open)
             if let renameProvider { Button("Rename provider…", action: renameProvider) }
@@ -361,7 +383,8 @@ private struct InfraRow: View {
             .buttonStyle(.plain)
             .frame(width: 16, height: 16)
             .contentShape(.rect)
-            .help(isRevealed ? "Hide the value" : "Show the value")
+            .hoverTip(isRevealed ? "Hide the value" : "Show the value",
+                      replacesLabel: false, pinsOnClick: false)
     }
 }
 
@@ -538,7 +561,8 @@ private struct InfraKeyEditor: View {
                 if draft.isNew {
                     Button("Browse…") { browsing = true }
                         .secondaryButton()
-                        .help("Every infra service SWE knows")
+                        .hoverTip("Every infra service SWE knows",
+                                  replacesLabel: false, pinsOnClick: false)
                         .disabled(working || testing)
                 } else if confirmingRemove {
                     Text("Delete \(originalName)?").font(Theme.caption).foregroundStyle(Theme.textSecondary)
@@ -549,7 +573,8 @@ private struct InfraKeyEditor: View {
                 } else {
                     Button("Delete", role: .destructive) { confirmingRemove = true }
                         .secondaryButton()
-                        .help("Delete \(originalName) from the keys file")
+                        .hoverTip("Delete \(originalName) from the keys file",
+                                  replacesLabel: false, pinsOnClick: false)
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).secondaryButton()
@@ -689,7 +714,8 @@ private struct InfraKeyEditor: View {
                 .onChange(of: draft.value) { saveAnyway = false }
                 Button(showValue ? "Hide" : "Show", systemImage: showValue ? "eye.slash" : "eye") { showValue.toggle() }
                     .iconButton()
-                    .help(showValue ? "Hide the value" : "Show the value")
+                    .hoverTip(showValue ? "Hide the value" : "Show the value",
+                              replacesLabel: false, pinsOnClick: false)
                 if canTest {
                     Button(testing ? "Testing…" : "Test", action: testTapped)
                         .secondaryButton()

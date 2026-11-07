@@ -136,6 +136,25 @@ extension View {
     }
 }
 
+/// A `.task` that follows the keys file for terminal edits while the
+/// tab is on screen, per the FolderChanges rule for `~/.swe` views. A
+/// custom path outside `~/.swe` can't be watched, so Reload stays its
+/// answer there.
+extension View {
+    func keysFileWatch(_ model: APIKeysModel) -> some View {
+        task {
+            let swe = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".swe")
+            let file = model.path
+            guard file.hasPrefix(swe.path + "/") else { return }
+            let relative = String(file.dropFirst(swe.path.count + 1))
+            for await _ in FolderChanges.stream(root: swe) { $0 == relative }
+            where !model.isLoading {
+                await model.load()
+            }
+        }
+    }
+}
+
 /// Copies a key marked concealed, so clipboard managers skip it.
 func copySecret(_ value: String) {
     let board = NSPasteboard.general

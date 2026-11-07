@@ -82,6 +82,7 @@ struct InferenceSection: View {
             KeysFileFooter(model: model)
         }
         .task(id: model.path) { await model.load() }
+        .keysFileWatch(model)
         .onDisappear { revealed.removeAll() }
         .cardSheet(isPresented: $cataloguing) {
             ProviderCatalogueSheet(entries: InferenceCatalogue.entries(keys: model.rows)) { entry in

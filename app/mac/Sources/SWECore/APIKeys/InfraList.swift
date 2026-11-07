@@ -25,13 +25,16 @@ public struct InfraItem: Identifiable, Equatable, Sendable {
 }
 
 public enum InfraList {
-    /// Whether a keys-file row is infra. An inference provider's
-    /// variable stays inference even under an infra heading; an infra
+    /// Whether a keys-file row is infra. An inference provider's or
+    /// coding plan's variable stays inference even under an infra
+    /// heading (a saved Token Pass key sits under "# Vercel"); an infra
     /// variable or a heading naming an infra service is infra; a name no
     /// provider claims is infra only when the user moved it here (a
     /// "mark"), so a plain unknown key still lands on Inference.
-    public static func isInfra(_ row: APIKeysModel.Row, marked: Set<String>) -> Bool {
-        if APIKeyProviders.provider(forVariable: row.name) != nil { return false }
+    public static func isInfra(_ row: APIKeysModel.Row, marked: Set<String>,
+                               plans: [InferencePlan] = InferenceCatalog.all) -> Bool {
+        if APIKeyProviders.provider(forVariable: row.name) != nil
+            || plans.contains(where: { $0.keyName == row.name }) { return false }
         if infraProvider(for: row) != nil { return true }
         return marked.contains(row.name)
     }
@@ -135,6 +138,14 @@ public final class InfraOrder {
         return known + items.filter { rank[$0.id] == nil }
     }
 
+    /// The row `old` becomes `new` in place, so a catalogue row whose key
+    /// landed under a sibling variable keeps its dragged position.
+    public func substitute(_ old: String, with new: String) {
+        guard old != new, let index = saved.firstIndex(of: old), !saved.contains(new) else { return }
+        saved[index] = new
+        store.set(saved, forKey: Self.key)
+    }
+
     /// Moves `id` to sit just before `target`, or to the end for nil,
     /// among every row (filtered out or not).
     public func move(_ id: String, before target: String?, in items: [InfraItem]) {
@@ -159,14 +170,18 @@ public final class InfraOrder {
 /// offering a duplicate. The rows reuse the inference sheet's Entry so
 /// both catalogues draw the same way.
 public enum InfraCatalogue {
-    /// Every infra service, in DEFAULT_INFRA's order.
-    public static func entries(keys: [APIKeysModel.Row],
+    /// Every infra service, in DEFAULT_INFRA's order. `hasKey` uses the
+    /// same claim the table does — variable or heading — so a key that
+    /// fills a row here reads Set there too.
+    public static func entries(keys: [APIKeysModel.Row], marked: Set<String> = [],
                                providers: [APIKeyProvider] = APIKeyProviders.infra)
         -> [InferenceCatalogue.Entry] {
-        let filled = Set(keys.filter { !$0.value.isEmpty }.map(\.name))
-        return providers.map {
-            InferenceCatalogue.Entry(target: .provider($0),
-                                     hasKey: $0.envVars.contains { filled.contains($0) })
+        let filled = keys.filter { !$0.value.isEmpty && InfraList.isInfra($0, marked: marked) }
+        return providers.map { provider in
+            InferenceCatalogue.Entry(target: .provider(provider),
+                                     hasKey: filled.contains {
+                                         InfraList.infraProvider(for: $0)?.id == provider.id
+                                     })
         }
     }
 }
