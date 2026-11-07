@@ -147,7 +147,7 @@ extension View {
             let file = model.path
             guard file.hasPrefix(swe.path + "/") else { return }
             let relative = String(file.dropFirst(swe.path.count + 1))
-            for await _ in FolderChanges.stream(root: swe) { $0 == relative }
+            for await _ in FolderChanges.stream(root: swe, matches: { $0 == relative })
             where !model.isLoading {
                 await model.load()
             }
