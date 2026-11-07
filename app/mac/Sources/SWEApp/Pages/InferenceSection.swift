@@ -41,12 +41,14 @@ struct InferenceSection: View {
 
     var body: some View {
         let model = app.apiKeys
-        let all = app.inferenceOrder.sorted(InferenceList.items(keys: model.rows))
+        // Infra-classified keys live on the Infra tab, not here.
+        let keys = model.rows.filter { !InfraList.isInfra($0, marked: app.infraMarks.names) }
+        let all = app.inferenceOrder.sorted(InferenceList.items(keys: keys))
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Keys and plans").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
-                    Text(subtitle(model)).font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                    Text(keysSubtitle(model)).font(Theme.caption).foregroundStyle(Theme.textSecondary)
                 }
                 Spacer(minLength: 12)
                 Button("Reload", systemImage: "arrow.clockwise") { actionError = nil; Task { await model.load() } }
@@ -74,53 +76,10 @@ struct InferenceSection: View {
             if let error = sourceError {
                 Text(error).font(Theme.caption).foregroundStyle(Theme.dangerText)
             }
-            if case .notSourced(let rc) = model.sourcing, !model.rows.isEmpty {
-                Card {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("New terminals don't get these keys. SWE can add one line to \(rc.lastPathComponent).")
-                            .font(Theme.bodySmall).foregroundStyle(Theme.textPrimary)
-                        HStack {
-                            Spacer()
-                            Button("Add to \(rc.lastPathComponent)") { confirmingSource = rc }
-                                .primaryButton()
-                        }
-                    }
-                }
-            }
-            if case .notWritable(let rc, let real) = model.sourcing, !model.rows.isEmpty {
-                Card {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("New terminals don't get these keys. \(rc.lastPathComponent) resolves to \(real.path), which is read-only, so SWE can't edit it.")
-                            .font(Theme.bodySmall).foregroundStyle(Theme.textPrimary)
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("Add this line to the file that generates it: \(model.sourceLine)")
-                                .font(Theme.font(size: 12, design: .monospaced))
-                                .foregroundStyle(Theme.textSecondary)
-                                .textSelection(.enabled)
-                            Spacer()
-                            CopyButton(help: "Copy the line") { copyToPasteboard(model.sourceLine) }
-                        }
-                    }
-                }
-            }
-            if !model.problems.isEmpty {
-                Card(title: "Lines that set nothing") {
-                    ForEach(model.problems, id: \.line) { problem in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Line \(problem.line): \(problem.reason)")
-                                .font(Theme.bodySmall).foregroundStyle(Theme.textPrimary)
-                            // Already redacted by APIKeysFile: the value never reaches the page.
-                            Text(problem.text)
-                                .font(Theme.font(size: 12, design: .monospaced)).foregroundStyle(Theme.textSecondary)
-                        }
-                    }
-                    Text("Fix these in an editor; SWE leaves lines it can't read untouched.")
-                        .font(Theme.caption).foregroundStyle(Theme.textMuted)
-                }
-            }
+            KeysFileNotices(model: model) { confirmingSource = $0 }
             filterBar(all)
             table(all)
-            footer(model)
+            KeysFileFooter(model: model)
         }
         .task(id: model.path) { await model.load() }
         .onDisappear { revealed.removeAll() }
@@ -191,31 +150,8 @@ struct InferenceSection: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog(
-            "Add a line to \(confirmingSource?.lastPathComponent ?? "the startup file")?",
-            isPresented: Binding(get: { confirmingSource != nil }, set: { if !$0 { confirmingSource = nil } })) {
-            Button("Add line") {
-                let model = app.apiKeys
-                sourceError = nil
-                Task {
-                    do {
-                        let result = try await model.addSourceLine()
-                        let file = result.file.lastPathComponent
-                        sourceAdded = "Added to \(file)."
-                            + (result.backup.map { " Backup at \($0.path)." } ?? "")
-                            + " Open a new terminal to use the keys."
-                    } catch {
-                        sourceError = error.localizedDescription
-                    }
-                    confirmingSource = nil
-                }
-            }
-            Button("Cancel", role: .cancel) { confirmingSource = nil }
-        } message: {
-            if let rc = confirmingSource {
-                Text("SWE appends \(app.apiKeys.sourceLine) to \(rc.path). SWE backs up \(rc.lastPathComponent) first.")
-            }
-        }
+        .keysSourceDialog(model: app.apiKeys, confirming: $confirmingSource,
+                          added: $sourceAdded, error: $sourceError)
     }
 
     private func state(of item: InferenceItem) -> InferenceKeyState {
@@ -337,7 +273,12 @@ struct InferenceSection: View {
                 providerBeingRenamed = item.key?.provider ?? ""
                 providerDraft = providerBeingRenamed
                 renamingProvider = true
-            })
+            },
+            // Only a name no provider claims can move: a catalogue
+            // variable sorts by its own table whatever the mark says.
+            moveToInfra: item.plan == nil && item.key != nil
+                && APIKeyProviders.provider(forVariable: item.id) == nil
+                ? { app.infraMarks.mark(item.id) } : nil)
     }
 
     private func open(_ item: InferenceItem) {
@@ -348,42 +289,6 @@ struct InferenceSection: View {
         }
     }
 
-    private func subtitle(_ model: APIKeysModel) -> String {
-        switch model.sourcing {
-        case .sourced:
-            return "From \(displayPath(model.path)). New terminals pick up changes."
-        case .notSourced, .notWritable:
-            return "From \(displayPath(model.path)). New terminals don't read this file yet."
-        case .unsupportedShell:
-            return "From \(displayPath(model.path)). Add \"source \(displayPath(model.path))\" to your shell's startup file so new terminals get these keys."
-        case .unknown:
-            return "From \(displayPath(model.path))."
-        }
-    }
-
-    private func footer(_ model: APIKeysModel) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Text("\(model.rows.count) \(model.rows.count == 1 ? "key" : "keys") from \(model.providers.count) \(model.providers.count == 1 ? "provider" : "providers")")
-                if let saved = model.savedAt {
-                    Text("· saved \(saved, format: .relative(presentation: .named))")
-                }
-            }
-            if model.savedAt != nil && model.sourcing == .sourced {
-                Text("Terminals already open keep the old values until you run source \(displayPath(model.path)).")
-            }
-        }
-        .font(Theme.caption).foregroundStyle(Theme.textMuted)
-    }
-
-    /// Copies a key marked concealed, so clipboard managers skip it.
-    private func copySecret(_ value: String) {
-        let board = NSPasteboard.general
-        board.clearContents()
-        board.declareTypes([.string, NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")], owner: nil)
-        board.setString(value, forType: .string)
-        board.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
-    }
 }
 
 /// One row: grip, logo and name, the variable with its value and two small
@@ -402,6 +307,8 @@ private struct InferenceRow: View {
     var open: () -> Void
     /// Set on a key under a heading of its own, to rename that heading.
     var renameProvider: (() -> Void)?
+    /// Set on a key no catalogue names, to file it on the Infra tab.
+    var moveToInfra: (() -> Void)? = nil
     @State private var hovering = false
 
     private var logo: String? {
@@ -473,6 +380,7 @@ private struct InferenceRow: View {
         .contextMenu {
             Button(item.hasKey ? "Edit…" : "Add key…", action: open)
             if let renameProvider { Button("Rename provider…", action: renameProvider) }
+            if let moveToInfra { Button("Move to Infra", action: moveToInfra) }
         }
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: item.hasKey ? "Edit" : "Add key", open)
@@ -629,7 +537,7 @@ private struct PlanKeyEditor: View {
 /// accepted goes green, refused goes red behind `xmark.circle`, and a
 /// spinner sits where the icon was while the provider is being asked.
 /// Clicking asks again, queued behind the same limiter as a full run.
-private struct StatusLabel: View {
+struct StatusLabel: View {
     var status: APIKeysModel.Status
     var check: APIKeyCheck?
     var isChecking: Bool
@@ -1387,7 +1295,8 @@ private struct KeyEditor: View {
 /// first when it is worth a test and has no verdict yet, stop once on a
 /// rejection so the button can turn into "Save anyway", then save with the
 /// verdict. An empty value (a provider move that keeps its key) saves with
-/// no verdict. Pure apart from its two closures, so tests drive it.
+/// no verdict. Pure apart from its two closures, so tests drive it. The
+/// Infra tab's editor runs the same flow.
 @MainActor
 struct KeySaveFlow {
     enum Outcome: Equatable {
@@ -1430,8 +1339,16 @@ struct KeySaveFlow {
 /// Picking a row starts its add-key flow and closes the sheet. A row the
 /// keys file already covers reads Set and still picks: for a plan that
 /// edits the existing key, for a provider it adds a sibling variable.
-private struct ProviderCatalogueSheet: View {
+/// `title` and `prompt` name the sheet; `kinds` lists the chips, an
+/// empty list hiding the row (the Infra tab's catalogue is all API keys).
+struct ProviderCatalogueSheet: View {
     var entries: [InferenceCatalogue.Entry]
+    /// `title` and `prompt` name the sheet; `kinds` lists the chips, an
+    /// empty list hiding the row (the Infra tab's catalogue is all API
+    /// keys).
+    var title = "Provider catalogue"
+    var prompt = "Search plans and providers"
+    var kinds: [InferenceItem.Kind] = [.plan, .apiKey]
     /// Runs with the pick just before the sheet closes itself.
     var pick: (InferenceCatalogue.Entry) -> Void
     @Environment(\.dismissSheet) private var dismiss
@@ -1442,17 +1359,19 @@ private struct ProviderCatalogueSheet: View {
     private static let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 2)
 
     private var shown: [InferenceCatalogue.Entry] {
-        InferenceCatalogue.filter(entries, kind: kind, query: query)
+        InferenceCatalogue.filter(entries, kind: kinds.count > 1 ? kind : nil, query: query)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Provider catalogue")
+            Text(title)
                 .font(Theme.sectionTitle).tracking(-0.5).foregroundStyle(Theme.textPrimary)
-            SearchField(prompt: "Search plans and providers", text: $query)
-            Tabs(options: [(InferenceItem.Kind?.none, "All"),
-                           (.plan, "Coding plans"), (.apiKey, "API keys")],
-                 selection: $kind, style: .table)
+            SearchField(prompt: prompt, text: $query)
+            if kinds.count > 1 {
+                Tabs(options: [(InferenceItem.Kind?.none, "All")]
+                        + kinds.map { (Optional($0), $0 == .plan ? "Coding plans" : "API keys") },
+                     selection: $kind, style: .table)
+            }
             ScrollView {
                 if shown.isEmpty {
                     Text("Nothing matches.")

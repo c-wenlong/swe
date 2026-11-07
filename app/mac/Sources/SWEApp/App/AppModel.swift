@@ -420,6 +420,10 @@ final class AppModel {
     let hubWebViews = HubWebViews()
     /// The order of Settings › Providers › Inference's rows.
     let inferenceOrder = InferenceOrder(store: UserDefaultsStore())
+    /// The same for the Infra tab's rows, under its own store key.
+    let infraOrder = InfraOrder(store: UserDefaultsStore())
+    /// The variables filed to the Infra tab that no catalogue claims.
+    let infraMarks = InfraMarks(store: UserDefaultsStore())
     /// What the starred harnesses are running right now (the Compute page).
     let compute: ComputeModel
     /// The Compute page's fan popover; a manual speed lives in a root

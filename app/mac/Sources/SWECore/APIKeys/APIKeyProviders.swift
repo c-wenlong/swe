@@ -1,6 +1,6 @@
 import Foundation
 
-/// A provider the "Add key" sheet offers, mirrored from
+/// A provider the "Add key" sheets offer, mirrored from
 /// `src/swe/providers/defaults.py` (`APIKeyProvidersSyncTests` fails
 /// when the two drift apart). The slug is defaults.py's key, the env
 /// vars its `env_vars` in the same order, and the key URL its `url`.
@@ -114,14 +114,65 @@ public enum APIKeyProviders {
                        keyURL: URL(string: "https://huggingface.co/settings/tokens")!),
     ]
 
-    /// The provider one of whose variables is `name`, if any.
+    /// Every entry in defaults.py's DEFAULT_INFRA, same order: the keys
+    /// that deploy and manage resources rather than run inference, shown
+    /// on the Providers page's Infra tab instead of Inference.
+    public static let infra: [APIKeyProvider] = [
+        APIKeyProvider(id: "vercel", name: "Vercel",
+                       envVars: ["VERCEL_TOKEN"],
+                       keyURL: URL(string: "https://vercel.com/account/tokens")!),
+        APIKeyProvider(id: "netlify", name: "Netlify",
+                       envVars: ["NETLIFY_AUTH_TOKEN"],
+                       keyURL: URL(string: "https://app.netlify.com/user/applications#personal-access-tokens")!),
+        APIKeyProvider(id: "cloudflare", name: "Cloudflare",
+                       envVars: ["CLOUDFLARE_API_TOKEN"],
+                       keyURL: URL(string: "https://dash.cloudflare.com/profile/api-tokens")!),
+        APIKeyProvider(id: "supabase", name: "Supabase",
+                       envVars: ["SUPABASE_ACCESS_TOKEN"],
+                       keyURL: URL(string: "https://supabase.com/dashboard/account/tokens")!),
+        APIKeyProvider(id: "neon", name: "Neon",
+                       envVars: ["NEON_API_KEY"],
+                       keyURL: URL(string: "https://console.neon.tech/app/settings/api-keys")!),
+        APIKeyProvider(id: "turso", name: "Turso",
+                       envVars: ["TURSO_API_TOKEN"],
+                       keyURL: URL(string: "https://app.turso.tech")!),
+        APIKeyProvider(id: "railway", name: "Railway",
+                       envVars: ["RAILWAY_TOKEN"],
+                       keyURL: URL(string: "https://railway.com/account/tokens")!),
+        APIKeyProvider(id: "fly", name: "Fly.io",
+                       envVars: ["FLY_API_TOKEN"],
+                       keyURL: URL(string: "https://fly.io/user/personal_access_tokens")!),
+        APIKeyProvider(id: "render", name: "Render",
+                       envVars: ["RENDER_API_KEY"],
+                       keyURL: URL(string: "https://dashboard.render.com/u/settings#api-keys")!),
+        APIKeyProvider(id: "digitalocean", name: "DigitalOcean",
+                       envVars: ["DIGITALOCEAN_ACCESS_TOKEN", "DIGITALOCEAN_TOKEN"],
+                       keyURL: URL(string: "https://cloud.digitalocean.com/account/api/tokens")!),
+        APIKeyProvider(id: "heroku", name: "Heroku",
+                       envVars: ["HEROKU_API_KEY"],
+                       keyURL: URL(string: "https://dashboard.heroku.com/account")!),
+    ]
+
+    /// The inference provider one of whose variables is `name`, if any.
     public static func provider(forVariable name: String) -> APIKeyProvider? {
         all.first { $0.envVars.contains(name) }
     }
 
-    /// A provider from the picker's id, nil for "other" or none picked.
+    /// The infra provider one of whose variables is `name`, if any.
+    public static func infraProvider(forVariable name: String) -> APIKeyProvider? {
+        infra.first { $0.envVars.contains(name) }
+    }
+
+    /// An inference provider from the picker's id, nil for "other" or
+    /// none picked.
     public static func provider(forID id: String) -> APIKeyProvider? {
         all.first { $0.id == id }
+    }
+
+    /// An infra provider from the picker's id, nil for "custom" or none
+    /// picked.
+    public static func infraProvider(forID id: String) -> APIKeyProvider? {
+        infra.first { $0.id == id }
     }
 
     /// The heading a new key for `provider` goes under: an existing group

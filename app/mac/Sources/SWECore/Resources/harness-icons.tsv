@@ -67,6 +67,7 @@ grafana	mono	https://unpkg.com/simple-icons@16.34.0/icons/grafana.svg	CC0-1.0 (S
 grok	mono	TokenTracker dashboard/public/brand-logos/grok.svg	MIT (TokenTracker)	xAI Grok mark
 groq	mono	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/groq.svg	MIT (LobeHub icons); Groq trademark	Groq mark
 hashicorp	mono	https://unpkg.com/simple-icons@16.34.0/icons/hashicorp.svg	CC0-1.0 (Simple Icons); HashiCorp trademark	HashiCorp mark, for its status page
+heroku	mono	https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/heroku/heroku-plain.svg	MIT (Devicon); Heroku trademark	Heroku glyph; the plain variant's plate subpaths were dropped, keeping the mark itself
 homebrew	mono	https://unpkg.com/simple-icons@16.34.0/icons/homebrew.svg	CC0-1.0 (Simple Icons); Homebrew trademark	Homebrew mug, for brew and cask installs
 honeycomb	color	https://www.honeycomb.io/ (inline footer SVG)	trademark, no licence stated	Honeycomb bee mark, from the site's inline logo; the wordmark paths were removed
 huaweicloud	color	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/huaweicloud-color.svg	MIT (LobeHub icons); Huawei trademark	Huawei petal mark, for Huawei Cloud Token Plan
@@ -100,6 +101,7 @@ mongodb	mono	https://unpkg.com/simple-icons@16.34.0/icons/mongodb.svg	CC0-1.0 (S
 morph	mono	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/morph.svg	MIT (LobeHub icons); Morph trademark	Morph mark, for its status page
 mthreads	color	https://mt-website-prod.mthreads.com/image/logos/logo-black.png	trademark, no licence stated	triangle symbol vector-traced with potrace from the official PNG (no vector source exists), for KUAE AI Coding Plan
 nebius	mono	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/nebius.svg	MIT (LobeHub icons); Nebius trademark	Nebius mark
+neon	mono	https://cdn.simpleicons.org/neon	CC0-1.0 (Simple Icons); Neon trademark	Neon mark
 netlify	mono	https://unpkg.com/simple-icons@16.34.0/icons/netlify.svg	CC0-1.0 (Simple Icons); Netlify trademark	Netlify mark, for its status page
 newrelic	mono	https://unpkg.com/simple-icons@16.34.0/icons/newrelic.svg	CC0-1.0 (Simple Icons); New Relic trademark	New Relic mark, for its status page
 ngrok	mono	https://unpkg.com/simple-icons@16.34.0/icons/ngrok.svg	CC0-1.0 (Simple Icons); ngrok trademark	ngrok mark, for its status page
@@ -124,6 +126,7 @@ pypi	mono	https://unpkg.com/simple-icons@16.34.0/icons/pypi.svg	CC0-1.0 (Simple 
 qoder	mono	TokenTracker dashboard/public/brand-logos/qoder.svg	MIT (TokenTracker)	Qoder mono mark (LobeHub icons)
 qoder-cn	color	TokenTracker dashboard/public/brand-logos/qoder-cn.svg	MIT (TokenTracker)	Qoder CN mark in its green
 qwen-code	color	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/qwen-color.svg	MIT (LobeHub icons); Qwen mark is Alibaba trademark	Qwen colour mark
+railway	mono	https://cdn.simpleicons.org/railway	CC0-1.0 (Simple Icons); Railway trademark	Railway mark
 render	mono	https://unpkg.com/simple-icons@16.34.0/icons/render.svg	CC0-1.0 (Simple Icons); Render trademark	Render mark
 replit	mono	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/replit.svg	MIT (LobeHub icons); Replit trademark	Replit mark, for its status page
 revenuecat	mono	https://unpkg.com/simple-icons@16.34.0/icons/revenuecat.svg	CC0-1.0 (Simple Icons); RevenueCat trademark	RevenueCat mark, for its status page
@@ -154,6 +157,7 @@ temporal	mono	https://unpkg.com/simple-icons@16.34.0/icons/temporal.svg	CC0-1.0 
 tencentcloud	color	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/tencentcloud-color.svg	MIT (LobeHub icons); Tencent trademark	Tencent Cloud mark, for TokenHub plans
 together	color	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/together-color.svg	MIT (LobeHub icons); Together AI trademark	Together AI colour mark
 travisci	mono	https://unpkg.com/simple-icons@16.34.0/icons/travisci.svg	CC0-1.0 (Simple Icons); Travis CI trademark	Travis CI mark, for its status page
+turso	mono	https://cdn.simpleicons.org/turso	CC0-1.0 (Simple Icons); Turso trademark	Turso mark
 twilio	mono	https://unpkg.com/simple-icons@13.21.0/icons/twilio.svg	CC0-1.0 (Simple Icons); Twilio trademark	Twilio dots-in-circle mark; dropped from Simple Icons releases after 13.x, so pinned to 13.21.0
 ucloud	color	https://static.ucloud.cn/c20741a9a7e4bc6b19b20390a5346de9.zip (VI kit PDF, page 1 vector paths)	trademark, brand kit with no licence stated	U and pixel-grid symbol, for Compshare Coding Plan
 unicom	color	https://upload.wikimedia.org/wikipedia/en/f/fd/China_Unicom_logo_(2022).svg	trademark; non-free logo on English Wikipedia	Chinese-knot heart symbol, text dropped, for Unicom Cloud Coding Plan

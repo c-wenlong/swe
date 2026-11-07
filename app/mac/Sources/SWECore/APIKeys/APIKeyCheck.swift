@@ -86,6 +86,24 @@ public struct APIKeyProbe: Equatable, Sendable {
                         method: "POST", body: Data("{}".utf8), auth: .bearer,
                         worksOnBadRequest: true),
             "ROUTING_RUN_API_KEY")
+        // The infra seeds, each verified against a fake key: a bare GET
+        // on the service's cheapest auth-reading endpoint refuses it as
+        // the table lists. Cloudflare's purpose-built tokens/verify
+        // answers 400, so the probe reads /accounts instead, which
+        // refuses a bad token with 403. Fly.io answers its Machines API
+        // 404 without an app in the path, Railway's GraphQL answers a
+        // bad key with a 200 body of errors, and Heroku needs a
+        // versioned Accept header the table can't send: all three have
+        // no check rather than a wrong one.
+        put(get(.bearer, "https://api.vercel.com/v2/user"), "VERCEL_TOKEN")
+        put(get(.bearer, "https://api.cloudflare.com/client/v4/accounts"), "CLOUDFLARE_API_TOKEN")
+        put(get(.bearer, "https://api.netlify.com/api/v1/user"), "NETLIFY_AUTH_TOKEN")
+        put(get(.bearer, "https://api.supabase.com/v1/projects"), "SUPABASE_ACCESS_TOKEN")
+        put(get(.bearer, "https://console.neon.tech/api/v2/projects"), "NEON_API_KEY")
+        put(get(.bearer, "https://api.turso.tech/v1/organizations"), "TURSO_API_TOKEN")
+        put(get(.bearer, "https://api.render.com/v1/services?limit=1"), "RENDER_API_KEY")
+        put(get(.bearer, "https://api.digitalocean.com/v2/account"),
+            "DIGITALOCEAN_ACCESS_TOKEN", "DIGITALOCEAN_TOKEN")
         for plan in InferenceCatalog.all {
             if let probe = InferenceCatalog.probe(for: plan) { put(probe, plan.keyName) }
         }
@@ -103,7 +121,16 @@ public struct APIKeyProbe: Equatable, Sendable {
         if name == "NVIDIA_API_KEY" {
             return "NVIDIA's API doesn't check the key on a free request."
         }
-        return "SWE doesn't know how to check this key."
+        switch name {
+        case "FLY_API_TOKEN":
+            return "Fly.io's API needs an app in the path, so a bare request can't check the key."
+        case "RAILWAY_TOKEN":
+            return "Railway's GraphQL API answers a bad key with a 200 body of errors, which can't tell the key apart."
+        case "HEROKU_API_KEY":
+            return "Heroku needs a versioned Accept header SWE doesn't send."
+        default:
+            return "SWE doesn't know how to check this key."
+        }
     }
 }
 

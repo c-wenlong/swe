@@ -3,10 +3,11 @@ import Testing
 @testable import SWECore
 
 @Suite struct APIKeyProvidersTests {
-    /// The (slug, url, env_vars) of every DEFAULT_PROVIDERS entry, in file
-    /// order, read straight out of defaults.py so the Swift table can't
-    /// drift from the Python one without failing this test.
-    private static func pythonProviders() throws -> [(slug: String, url: String, envVars: [String])] {
+    /// The (slug, url, env_vars) of every entry one defaults.py dict
+    /// holds, in file order: `from` is `DEFAULT_PROVIDERS = {` or
+    /// `DEFAULT_INFRA = {`. Reading straight out of the file keeps the
+    /// Swift tables honest when the Python one changes.
+    private static func pythonProviders(from marker: String) throws -> [(slug: String, url: String, envVars: [String])] {
         let file = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // SWECoreTests
             .deletingLastPathComponent() // Tests
@@ -14,12 +15,17 @@ import Testing
             .appending(path: "../../src/swe/providers/defaults.py")
             .standardizedFileURL
         let text = try String(contentsOf: file, encoding: .utf8)
+        let start = try #require(text.range(of: marker), "defaults.py has no \(marker)")
+        // The dict runs to the next top-level definition.
+        let rest = text[start.upperBound...]
+        let end = rest.firstMatch(of: #/(?m)^[A-Z_]+ = /#)?.range.lowerBound ?? rest.endIndex
+        let body = String(rest[..<end])
         let entryPattern = #/(?m)^    "([a-z0-9_]+)": \{\n(?:(?!^    \},)[\s\S])*^    \},?$/#
         let urlPattern = #/"url": "([^"]+)"/#
         let envPattern = #/"env_vars": \[([^\]]*)\]/#
         let quoted = #/"([^"]*)"/#
         var parsed: [(String, String, [String])] = []
-        for entry in text.matches(of: entryPattern) {
+        for entry in body.matches(of: entryPattern) {
             let block = entry.output.0
             let slug = String(entry.output.1)
             let url = try #require(block.firstMatch(of: urlPattern)).1
@@ -35,16 +41,25 @@ import Testing
     }
 
     @Test func theTableMatchesDefaultsPy() throws {
-        let python = try Self.pythonProviders()
+        let python = try Self.pythonProviders(from: "DEFAULT_PROVIDERS = {")
         #expect(python.count > 20, "defaults.py parsed almost empty; the sync regex broke")
-        let swiftIDs = APIKeyProviders.all.map(\.id), pythonIDs = python.map(\.slug)
+        expect(APIKeyProviders.all, match: python)
+        let infra = try Self.pythonProviders(from: "DEFAULT_INFRA = {")
+        #expect(infra.count >= 10, "DEFAULT_INFRA parsed almost empty; the sync regex broke")
+        expect(APIKeyProviders.infra, match: infra)
+    }
+
+    /// One Swift table against the parsed entries of one defaults.py
+    /// dict: same slugs in the same order, then url and env vars equal.
+    private func expect(_ swift: [APIKeyProvider], match python: [(slug: String, url: String, envVars: [String])]) {
+        let swiftIDs = swift.map(\.id), pythonIDs = python.map(\.slug)
         #expect(swiftIDs == pythonIDs, """
             The Swift table and defaults.py list different providers. Only in Swift: \
             \(Set(swiftIDs).subtracting(pythonIDs).sorted()); only in defaults.py: \
             \(Set(pythonIDs).subtracting(swiftIDs).sorted()). If both look the same, \
             defaults.py was likely reformatted and pythonProviders() needs its new layout.
             """)
-        for (provider, expected) in zip(APIKeyProviders.all, python) {
+        for (provider, expected) in zip(swift, python) {
             #expect(provider.keyURL.absoluteString == expected.url,
                     "\(provider.id) url differs from defaults.py")
             #expect(provider.envVars == expected.envVars,
