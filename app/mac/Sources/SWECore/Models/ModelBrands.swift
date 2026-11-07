@@ -100,6 +100,19 @@ public enum ModelBrands {
               keywords: ["huggingface", "hugging"]),
         .init(id: "routing-run", name: "Routing.Run", icon: "routing-run",
               keywords: ["routing", "routingrun"]),
+        // Infra services: keys that deploy and manage resources, on the
+        // Providers page's Infra tab.
+        .init(id: "netlify", name: "Netlify", icon: "netlify", keywords: ["netlify"]),
+        .init(id: "cloudflare", name: "Cloudflare", icon: "cloudflare", keywords: ["cloudflare"]),
+        .init(id: "supabase", name: "Supabase", icon: "supabase", keywords: ["supabase"]),
+        .init(id: "neon", name: "Neon", icon: "neon", keywords: ["neon"]),
+        .init(id: "turso", name: "Turso", icon: "turso", keywords: ["turso"]),
+        .init(id: "railway", name: "Railway", icon: "railway", keywords: ["railway"]),
+        .init(id: "flyio", name: "Fly.io", icon: "flyio", keywords: ["fly", "flyio"]),
+        .init(id: "render", name: "Render", icon: "render", keywords: ["render"]),
+        .init(id: "digitalocean", name: "DigitalOcean", icon: "digitalocean",
+              keywords: ["digitalocean", "digital ocean", "doctl"]),
+        .init(id: "heroku", name: "Heroku", icon: "heroku", keywords: ["heroku"]),
         // Inference plan vendors and API key providers, so a key filed
         // under their name shows the logo too.
         .init(id: "tencent", name: "Tencent", icon: "tencentcloud", keywords: ["tencent", "hunyuan", "tokenhub"]),

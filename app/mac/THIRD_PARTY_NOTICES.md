@@ -293,8 +293,10 @@ Where each came from is in `Resources/harness-icons.tsv`:
   Sanity, Contentful, Temporal, Maven Central (the Apache Maven
   feather), StackBlitz (the bolt Bolt.new's mark reuses), Braintrust,
   ClickHouse, CockroachDB (Cockroach Labs), Loom, Make, PlanetScale,
-  Prefect, Semaphore, Snowflake, Sonatype and Zapier; Routing.Run's
-  planet mark from Phosphor Icons (`@phosphor-icons/core`, MIT).
+  Prefect, Semaphore, Snowflake, Sonatype and Zapier, and the
+  infrastructure marks for Neon, Turso and Railway; Routing.Run's
+  planet mark from Phosphor Icons (`@phosphor-icons/core`, MIT) and
+  Heroku's glyph from devicons/devicon (MIT, its plate subpaths dropped).
 - The remaining status-page marks come from each company's own site,
   brand page or logo file: E2B, Ona, Pinecone, Runloop, Writer,
   Supermemory, incident.io, LaunchDarkly, Inngest, Astronomer, Cartesia,

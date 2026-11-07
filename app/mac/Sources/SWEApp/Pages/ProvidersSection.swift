@@ -1,11 +1,12 @@
 import SWECore
 import SwiftUI
 
-/// Settings › Providers: two tabs. Harnesses are the CLIs that run
+/// Settings › Providers: three tabs. Harnesses are the CLIs that run
 /// sessions; Inference is what they run on, the coding plans and the API
-/// keys, in one list.
+/// keys, in one list; Infra is the keys that deploy and manage
+/// resources, in the same file.
 struct ProvidersSection: View {
-    enum Tab: String { case harnesses, inference }
+    enum Tab: String { case harnesses, inference, infra }
 
     @Environment(AppModel.self) private var app
     @AppStorage("providersTab") private var saved = Tab.harnesses.rawValue
@@ -16,13 +17,16 @@ struct ProvidersSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Tabs(options: [(Tab.harnesses, "Harnesses"), (.inference, "Inference")], selection: tab)
+            Tabs(options: [(Tab.harnesses, "Harnesses"), (.inference, "Inference"), (.infra, "Infra")],
+                 selection: tab)
                 .fixedSize()
             switch tab.wrappedValue {
             case .harnesses:
                 ProviderVisibilityCard(model: app.providers)
             case .inference:
                 InferenceSection()
+            case .infra:
+                InfraSection()
             }
         }
     }
