@@ -3,7 +3,8 @@
  * cards of rows. What belongs to the hub machine works: Integrations ›
  * Remote (hub status, paired devices with Revoke, Pair a device with a QR
  * code), the GitHub CLI, the API keys (masked, with reveal, copy, Add
- * key, edit and delete, as the Mac app's Inference tab), the hub's paths. Appearance and Sidebar are kept per browser, in localStorage.
+ * key, edit and delete, as the Mac app's Inference and Infra tabs), the
+ * hub's paths. Appearance and Sidebar are kept per browser, in localStorage.
  * Rows that configure the Mac app itself are greyed out and say
  * "Mac app only". Experimental › Session search turns the hub's transcript
  * index on and off and shows what it holds. Writes: POST
@@ -381,9 +382,14 @@ function notificationsSection() {
 
 /* ------------------------------------------------------------ Providers */
 
+function providersTab() {
+  const saved = settingsRead(SETTINGS_KEYS.providersTab);
+  return saved === "harnesses" || saved === "infra" ? saved : "inference";
+}
+
 function providersSection() {
-  const tab = settingsRead(SETTINGS_KEYS.providersTab) === "harnesses" ? "harnesses" : "inference";
-  const tabs = `<div class="tabs set-segment" role="tablist">${[["harnesses", "Harnesses"], ["inference", "Inference"]].map(([id, label]) =>
+  const tab = providersTab();
+  const tabs = `<div class="tabs set-segment" role="tablist">${[["harnesses", "Harnesses"], ["inference", "Inference"], ["infra", "Infra"]].map(([id, label]) =>
     `<button class="tab${id === tab ? " selected" : ""}" role="tab" aria-selected="${id === tab}" data-providers-tab="${id}">${label}</button>`).join("")}</div>`;
   const body = tab === "harnesses"
     ? setCard([
@@ -391,14 +397,50 @@ function providersSection() {
       setRow("Harnesses on the hub", "Star the ones you use and archive the ones you've ruled out.",
         `<a class="btn medium set-button" href="#/harnesses">Open Harnesses</a>`),
     ])
-    : inferenceTab();
+    : keysTab(tab);
   return `<div class="set-stack">${tabs}${body}</div>`;
 }
 
-function inferenceTab() {
+/* "vercel", "Vercel" and "# VERCEL" fold together, like the Mac's
+ * InfraList normalize and _key_heading's fold. */
+function catalogFold(text) {
+  return String(text || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/* The infra catalog's claim over the keys file, the Mac's InfraList
+ * without the marks store: an inference provider's variable stays
+ * inference even under an infra heading; an infra variable is infra;
+ * a heading naming an infra service claims what sits under it. A key
+ * nothing claims still lands on Inference. */
+function infraClaim(prov) {
+  const vars = new Set(), names = new Set(), claimed = new Set();
+  for (const c of prov.catalog || []) {
+    if (c.kind === "infra") {
+      for (const v of c.env_vars) vars.add(v);
+      names.add(catalogFold(c.name));
+      names.add(catalogFold(c.id));
+    } else {
+      for (const v of c.env_vars) claimed.add(v);
+    }
+  }
+  return { vars, names, claimed };
+}
+
+function isInfraKey(r, claim) {
+  if (claim.claimed.has(r.name)) return false;
+  if (claim.vars.has(r.name)) return true;
+  return !!r.provider && claim.names.has(catalogFold(r.provider));
+}
+
+/* Inference and Infra share one table: same filters, masking, reveal
+ * and catalogue sheet, different rows. `kind` is "inference" or
+ * "infra". */
+function keysTab(kind) {
+  const infra = kind === "infra";
   const prov = settingsPage.data && settingsPage.data.providers;
   if (!prov) return setCardSkeleton(4);
-  const rows = prov.keys || [];
+  const claim = infraClaim(prov);
+  const rows = (prov.keys || []).filter((r) => isInfraKey(r, claim) === infra);
   const withValue = rows.filter((r) => r.has_value).length;
   const p = settingsPage;
   const q = p.query.trim().toLowerCase();
@@ -416,10 +458,10 @@ function inferenceTab() {
     <span class="caption count num">${visible.length === 1 ? "1 row" : `${visible.length} rows`}</span>
   </div>`;
   const body = visible.length ? visible.map(settingsKeyRow).join("")
-    : `<p class="empty set-pad">${rows.length ? "Nothing matches these filters." : `No keys yet. Add one and SWE writes it to ${esc(prov.path)}.`}</p>`;
+    : `<p class="empty set-pad">${rows.length ? "Nothing matches these filters." : `No ${infra ? "infra " : ""}keys yet. Add one and SWE writes it to ${esc(prov.path)}.`}</p>`;
   return `<div class="set-stack">
     <div class="set-keys-top">
-      <div class="set-keys-head"><div class="set-group-title">Keys and plans</div><div class="caption">${esc(subtitle)}</div></div>
+      <div class="set-keys-head"><div class="set-group-title">${infra ? "Infra keys" : "Keys and plans"}</div><div class="caption">${esc(subtitle)}</div></div>
       <div class="set-keys-actions">
         <button class="btn medium set-button" id="set-keys-reload"${p.keysBusy ? " disabled" : ""} title="Read the file again">${settingsIcon("rescan")}<span>Reload</span></button>
         <button class="btn medium set-button" id="set-key-catalog"${prov.stamp == null ? " disabled" : ""}><span>Catalogue</span></button>
@@ -441,7 +483,9 @@ function inferenceTab() {
 
 /* The Mac app's ProviderCatalogueSheet, API-key providers only (coding
  * plans stay in the Mac app): search + a grid where a pick opens the
- * Add-key editor with that provider chosen. */
+ * Add-key editor with that provider chosen. The current tab's kind
+ * filters the list: infra services under Infra, everything else under
+ * Inference. */
 const PROVIDER_LOGOS = {
   openai: "harness-openai.svg", anthropic: "harness-claude-color.svg",
   gemini: "harness-gemini-color.svg", deepseek: "harness-deepseek-color.svg",
@@ -451,14 +495,21 @@ const PROVIDER_LOGOS = {
   stepfun: "harness-stepfun-color.svg", mistral: "harness-mistral-vibe-color.svg",
   upstage: "harness-upstage-color.svg", vercel_gateway: "harness-vercel.svg",
   opencode_zen: "harness-opencode-color.svg",
+  vercel: "harness-vercel.svg", netlify: "harness-netlify.svg",
+  cloudflare: "harness-cloudflare-color.svg", supabase: "harness-supabase.svg",
+  neon: "harness-neon.svg", turso: "harness-turso.svg", railway: "harness-railway.svg",
+  fly: "harness-flyio.svg", render: "harness-render.svg",
+  digitalocean: "harness-digitalocean.svg", heroku: "harness-heroku.svg",
 };
 
 function settingsCatalogSheet() {
   const p = settingsPage;
   if (!p.catalog) return "";
   const prov = p.data.providers;
+  const infra = providersTab() === "infra";
+  const catalog = (prov.catalog || []).filter((c) => (c.kind === "infra") === infra);
   const q = p.catalogQuery.trim().toLowerCase();
-  const rows = [...(prov.catalog || [])].sort((a, b) => a.name.localeCompare(b.name))
+  const rows = [...catalog].sort((a, b) => a.name.localeCompare(b.name))
     .filter((c) => !q || c.name.toLowerCase().includes(q) || c.env_vars.some((v) => v.toLowerCase().includes(q)));
   const cell = (c) => {
     const file = PROVIDER_LOGOS[c.id];
@@ -471,10 +522,10 @@ function settingsCatalogSheet() {
   };
   return `<dialog class="sheet set-cat-sheet" id="set-cat-sheet" aria-labelledby="set-cat-title">
     <div class="sheet-body">
-      <div class="sheet-title" id="set-cat-title">Provider catalogue</div>
-      <input class="field search" id="set-cat-search" type="search" placeholder="Search providers" value="${esc(p.catalogQuery)}" aria-label="Search providers">
+      <div class="sheet-title" id="set-cat-title">${infra ? "Infra catalogue" : "Provider catalogue"}</div>
+      <input class="field search" id="set-cat-search" type="search" placeholder="${infra ? "Search infra services" : "Search providers"}" value="${esc(p.catalogQuery)}" aria-label="${infra ? "Search infra services" : "Search providers"}">
       <div class="set-cat-grid">${rows.length ? rows.map(cell).join("") : '<p class="empty">Nothing matches.</p>'}</div>
-      <div class="set-key-foot"><span class="caption count num">${rows.length} of ${(prov.catalog || []).length}</span><span class="set-key-spacer"></span>
+      <div class="set-key-foot"><span class="caption count num">${rows.length} of ${catalog.length}</span><span class="set-key-spacer"></span>
         <button class="btn medium set-button" data-cat-act="close">Close</button></div>
     </div>
   </dialog>`;
@@ -507,7 +558,9 @@ function settingsKeySheet() {
   const e = settingsPage.keyEditor;
   if (!e) return "";
   const prov = settingsPage.data.providers;
-  const catalog = [...(prov.catalog || [])].sort((a, b) => a.name.localeCompare(b.name));
+  const infra = providersTab() === "infra";
+  const catalog = (prov.catalog || []).filter((c) => (c.kind === "infra") === infra)
+    .sort((a, b) => a.name.localeCompare(b.name));
   const picked = e.isNew ? catalog.find((c) => c.id === e.provider) : null;
   const name = settingsKeyName(e);
   const existing = (prov.keys || []).find((k) => k.name === name);
@@ -1208,6 +1261,9 @@ function bindSettings(section) {
     btn.onclick = () => {
       settingsWrite(SETTINGS_KEYS.providersTab, btn.dataset.providersTab);
       settingsForgetRevealed();
+      // An editor or catalogue open on the old tab doesn't move with it.
+      settingsPage.keyEditor = null;
+      settingsPage.catalog = false;
       paintSettings();
     };
   }
