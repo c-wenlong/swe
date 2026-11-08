@@ -112,13 +112,23 @@ public struct APIKeyProbe: Equatable, Sendable {
         // The services, each verified against a fake key the same way:
         // a bare GET on the cheapest auth-reading endpoint refuses it
         // as the table lists. TinyFish and Browser Use take the key
-        // under their own header.
-        put(get(.header("x-api-key"), "https://api.parallel.ai/v1/tasks"), "PARALLEL_API_KEY")
+        // under their own header. Parallel and Exa answer a GET with
+        // auth middleware before routing, so a valid key earns a 404
+        // after it passes: like Tavily they check on a POST, where a
+        // real key's empty body is a request error that counts as
+        // works and a fake still 401s.
+        put(APIKeyProbe(hosts: [URL(string: "https://api.parallel.ai/v1/tasks/runs")!],
+                        method: "POST", body: Data("{}".utf8),
+                        auth: .header("x-api-key"), worksOnBadRequest: true),
+            "PARALLEL_API_KEY")
         put(get(.bearer, "https://api.firecrawl.dev/v2/team/credit-usage"), "FIRECRAWL_API_KEY")
         put(get(.header("X-API-Key"), "https://agent.tinyfish.ai/v1/runs"), "TINYFISH_API_KEY")
         put(get(.header("X-Browser-Use-API-Key"), "https://api.browser-use.com/api/v3/sessions"),
             "BROWSER_USE_API_KEY")
-        put(get(.header("x-api-key"), "https://api.exa.ai/websets/v0/searches"), "EXA_API_KEY")
+        put(APIKeyProbe(hosts: [URL(string: "https://api.exa.ai/search")!],
+                        method: "POST", body: Data("{}".utf8),
+                        auth: .header("x-api-key"), worksOnBadRequest: true),
+            "EXA_API_KEY")
         // The common agent services. Tavily only reads the key on a
         // POST, and a real key's empty body earns a request error that
         // counts as works; Supermemory's search body is a complete call

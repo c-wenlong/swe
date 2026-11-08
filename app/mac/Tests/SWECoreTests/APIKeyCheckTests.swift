@@ -93,10 +93,8 @@ import Testing
     /// The services taking the key under a custom header send exactly
     /// the header their API documents, not a Bearer.
     @Test(arguments: [
-        ("PARALLEL_API_KEY", "x-api-key", "https://api.parallel.ai/v1/tasks"),
         ("TINYFISH_API_KEY", "X-API-Key", "https://agent.tinyfish.ai/v1/runs"),
         ("BROWSER_USE_API_KEY", "X-Browser-Use-API-Key", "https://api.browser-use.com/api/v3/sessions"),
-        ("EXA_API_KEY", "x-api-key", "https://api.exa.ai/websets/v0/searches"),
         ("BROWSERBASE_API_KEY", "x-bb-api-key", "https://api.browserbase.com/v1/projects"),
         ("E2B_API_KEY", "X-API-KEY", "https://api.e2b.dev/sandboxes"),
         ("PINECONE_API_KEY", "Api-Key", "https://api.pinecone.io/indexes"),
@@ -160,6 +158,28 @@ import Testing
         #expect(request.url?.absoluteString == url)
         #expect(request.httpBody == Data(body.utf8))
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(key)")
+    }
+
+    /// Parallel and Exa run auth middleware before routing, so a valid
+    /// key 404s their GET endpoints after it passes: they check on a
+    /// POST whose empty body a real key answers with a request error,
+    /// under the same service header.
+    @Test(arguments: [
+        ("PARALLEL_API_KEY", "x-api-key", "https://api.parallel.ai/v1/tasks/runs"),
+        ("EXA_API_KEY", "x-api-key", "https://api.exa.ai/search"),
+    ])
+    func aPostOnlyServiceProbeSendsItsBody(name: String, header: String, url: String) async throws {
+        let transport = FakeTransport()
+        transport.reply(200)
+        let probe = try #require(APIKeyProbe.probe(forName: name))
+        _ = await APIKeyChecker(transport: transport).check(key: key, probe: probe)
+        let request = try #require(transport.requests.first)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.absoluteString == url)
+        #expect(request.httpBody == Data("{}".utf8))
+        #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+        #expect(request.value(forHTTPHeaderField: header) == key)
+        #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
     }
 
     @Test func firecrawlGoesOutAsBearer() async throws {

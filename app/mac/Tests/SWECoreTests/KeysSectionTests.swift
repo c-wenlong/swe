@@ -275,17 +275,23 @@ import Testing
             == APIKeyProbe.probe(forName: "DIGITALOCEAN_ACCESS_TOKEN"))
     }
 
-    /// The services probes: a GET on the cheapest auth-reading endpoint
-    /// under the header the service actually takes, each verified to
-    /// refuse a fake key.
+    /// The services probes: the cheapest auth-reading endpoint under
+    /// the header the service actually takes, each verified to refuse a
+    /// fake key. Parallel and Exa run auth middleware before routing a
+    /// request, so a valid key 404s every GET after it passes: they
+    /// check on a POST whose empty body a real key answers with a
+    /// request error.
     @Test func servicesProbesMatchTheDocumentedAuth() {
         #expect(APIKeyProbe.probe(forName: "PARALLEL_API_KEY")
-            == APIKeyProbe(hosts: [URL(string: "https://api.parallel.ai/v1/tasks")!],
-                           method: "GET", body: nil, auth: .header("x-api-key"),
-                           worksOnBadRequest: false))
+            == APIKeyProbe(hosts: [URL(string: "https://api.parallel.ai/v1/tasks/runs")!],
+                           method: "POST", body: Data("{}".utf8), auth: .header("x-api-key"),
+                           worksOnBadRequest: true))
         #expect(APIKeyProbe.probe(forName: "FIRECRAWL_API_KEY")?.auth == .bearer)
         #expect(APIKeyProbe.probe(forName: "TINYFISH_API_KEY")?.auth == .header("X-API-Key"))
         #expect(APIKeyProbe.probe(forName: "BROWSER_USE_API_KEY")?.auth == .header("X-Browser-Use-API-Key"))
-        #expect(APIKeyProbe.probe(forName: "EXA_API_KEY")?.auth == .header("x-api-key"))
+        #expect(APIKeyProbe.probe(forName: "EXA_API_KEY")
+            == APIKeyProbe(hosts: [URL(string: "https://api.exa.ai/search")!],
+                           method: "POST", body: Data("{}".utf8), auth: .header("x-api-key"),
+                           worksOnBadRequest: true))
     }
 }
