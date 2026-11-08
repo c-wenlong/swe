@@ -586,6 +586,14 @@ extension SweClient {
         try await call(["mcp", "remove", name, "--from=" + places.joined(separator: ","), "--json"])
     }
 
+    /// `swe mcp set-type NAME TYPE --json`: the hub entry's label after
+    /// the call. The picker's word goes verbatim; a server outside the
+    /// hub, a transport word or a live `sse` marker is refused and
+    /// throws `commandFailed` with swe's reason.
+    public func mcpSetType(_ type: String, server name: String) async throws -> McpSetTypeResult {
+        try await call(["mcp", "set-type", name, type, "--json"])
+    }
+
     /// `swe mcp enable`/`disable NAME --for=...`: a per-harness switch.
     /// `on` false pulls the entry out of the harnesses' configs (the hub
     /// keeps the copy), true restores it. Empty `harnesses` means every
@@ -783,6 +791,13 @@ public struct McpToggleResult: Decodable, Sendable, Equatable {
             ?? container.decodeIfPresent([String].self, forKey: .enabledIn) ?? []
         failedIn = try container.decodeIfPresent([String].self, forKey: .failedIn) ?? []
     }
+}
+
+/// `swe mcp set-type --json`: the label left on the hub entry (nil when
+/// the call cleared it, or the entry keeps its `sse` transport marker).
+public struct McpSetTypeResult: Decodable, Sendable, Equatable {
+    public let name: String
+    public let type: String?
 }
 
 /// `swe mcp secret set --json`: where the value landed, never the value.
