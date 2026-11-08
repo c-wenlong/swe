@@ -17,7 +17,7 @@ be rebuilt; deleting them loses user state.
 |---|---|---|---|---|---|
 | `config/harness.json` | swe | JSON object keyed by harness name | registry: state (`active`/`starred`/`archived`), install evidence, capabilities, order | `harness/registry.py` only; versioned in the hub, and `swe sync` merges two machines' copies with `registry.merge_registries` | every swe command, the app via `swe list` |
 | `config/config.json` | swe | JSON object | `swe config` values (report settings etc.), secret keys rejected | `configuration.save_config` | `configuration.load_config` |
-| `mcp.json` | swe | JSON | hub MCP server definitions, `${NAME}` secret refs | `swe mcp` commands | `swe mcp`, app via `swe mcp list` |
+| `mcp.json` | swe | JSON | hub MCP server definitions (`type` is the `swe mcp set-type` label, except on a URL entry where it stays the `sse` transport marker), `${NAME}` secret refs; the `swe` block holds the per-harness switches (`disabled`, `disabled_defs`) and `master_off` — `{server: [harnesses]}` a bare `mcp disable` switched off, so a bare `mcp enable` restores exactly those | `swe mcp` commands | `swe mcp`, app via `swe mcp list` |
 | `config/providers.json` | swe | JSON | provider registry, seeded from built-ins (`kind`: `inference`, `infra` or `services`), `_removed` list blocks re-merge | `providers/registry.py` | `swe providers`, doctor |
 | `config/skill_catalogs.json` | swe | JSON list | extra skill catalog paths | `swe skills catalog` | `skills/discovery.py` |
 | `config/skill_links.json` | swe | JSON `{links, updated}` | recorded harness skill symlinks (`kind: "symlink"`) and per-skill selections (`kind: "selection"` with `mode: "except"|"only"` plus a `disabled`/`enabled` name list) | `skills` link ops | `swe skills`, `init --check` |

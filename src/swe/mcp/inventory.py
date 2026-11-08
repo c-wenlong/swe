@@ -139,6 +139,7 @@ def server_inventory(tool_data: dict, include_hub: bool = False) -> list[tuple[d
             in_hub=name in hub,
             remote_in=entry["remote"] + (["swe", "quiver"] if name in hub and _is_url(hub[name]) else []),  # "swe" is the hub's name; "quiver" stays for apps from before the rename
             disabled_in=sorted(t for t, names in disabled.items() if name in names),
+            type=gateway.label_of(hub.get(name)),
         )
         inventory.append((row.to_json(), entry["raw"]))
 
@@ -169,6 +170,7 @@ def server_inventory(tool_data: dict, include_hub: bool = False) -> list[tuple[d
             in_hub=True,
             remote_in=["swe", "quiver"] if canonical.get("url") else [],  # wire names; see above
             disabled_in=sorted(t for t, names in disabled.items() if name in names),
+            type=gateway.label_of(raw),
         )
         inventory.append((row.to_json(), raw))
     inventory.sort(key=lambda pair: pair[0]["name"])

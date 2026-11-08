@@ -39,6 +39,9 @@ class ServerRow:
     # Harnesses the server is toggled off for — the entry left their file
     # and the hub keeps the copy ``swe mcp enable`` restores.
     disabled_in: list = field(default_factory=list)
+    # The hub entry's ``type`` label (``swe mcp set-type``); None when the
+    # hub does not hold the server or its ``type`` is a transport marker.
+    type: str | None = None
 
     def to_json(self) -> dict:
         return {
@@ -56,6 +59,7 @@ class ServerRow:
             "in_hub": self.in_hub,
             "remote_in": self.remote_in,
             "disabled_in": self.disabled_in,
+            "type": self.type,
         }
 
 
@@ -133,6 +137,8 @@ class InfoReply:
     health: str
     health_detail: str | None
     updated: str | None
+    # The hub entry's ``type`` label (``swe mcp set-type``), or None.
+    type: str | None = None
     gateway: dict | None = None
 
     def to_json(self) -> dict:
@@ -148,6 +154,7 @@ class InfoReply:
             "in_hub": self.in_hub,
             "harnesses": self.harnesses,
             "shared": self.shared,
+            "type": self.type,
             "conflict": self.conflict,
             "variants": self.variants,
             "disabled_in": self.disabled_in,

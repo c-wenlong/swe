@@ -268,6 +268,82 @@ class McpEnableDisableTest(unittest.TestCase):
         self.assertEqual(data["failed_in"], ["claude"])
         self.assertNotIn("enabled_in", data)
 
+    def master_off(self):
+        return self.swe_state().get("master_off", {})
+
+    def seed_everywhere(self):
+        self.seed()
+        self.seed_codex()
+
+    def test_master_enable_never_resurrects_a_hand_disabled_harness(self):
+        # codex was switched off by hand before the master-off: a bare
+        # enable restores only what the master-off took — codex stays off.
+        self.seed_everywhere()
+        self.run_mcp("disable", "github", "--for=codex")
+        r = self.run_mcp("disable", "github")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(self.master_off(), {"github": ["claude"]})
+
+        r = self.run_mcp("enable", "github")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn("github", self.claude())
+        self.assertNotIn("github", self.codex())
+        self.assertIn("github", self.swe_state()["disabled"].get("codex", []))
+        self.assertEqual(self.master_off(), {})
+
+    def test_for_enable_leaves_the_restore_set_until_empty(self):
+        self.seed_everywhere()
+        r = self.run_mcp("disable", "github")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(sorted(self.master_off()["github"]),
+                         ["claude", "codex"])
+
+        r = self.run_mcp("enable", "github", "--for=claude")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(self.master_off(), {"github": ["codex"]})
+
+        r = self.run_mcp("enable", "github", "--for=codex")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertNotIn("master_off", self.swe_state())
+
+    def test_for_disable_drops_a_harness_from_the_restore_set(self):
+        self.seed_everywhere()
+        self.run_mcp("disable", "github")
+        # claude's entry comes back by hand, then the user asks for it off
+        # again — the master-on that follows must not resurrect it.
+        self.claude_write({"github": self.GITHUB})
+        r = self.run_mcp("disable", "github", "--for=claude")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(self.master_off(), {"github": ["codex"]})
+
+        r = self.run_mcp("enable", "github")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn("github", self.codex())
+        self.assertNotIn("github", self.claude())
+
+    def test_bare_enable_without_provenance_keeps_the_old_all_off_semantics(self):
+        # A disabled map with no master_off — state written by an older
+        # swe, or a hand-edited file — restores every marked harness.
+        self.seed_everywhere()
+        self.run_mcp("disable", "github")
+        data = json.loads(self.hub_file.read_text())
+        data["swe"].pop("master_off")
+        self.hub_file.write_text(json.dumps(data))
+
+        r = self.run_mcp("enable", "github")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn("github", self.claude())
+        self.assertIn("github", self.codex())
+
+    def test_a_second_bare_disable_keeps_the_first_restore_set(self):
+        self.seed_everywhere()
+        self.run_mcp("disable", "github")
+        # Already off everywhere: the no-op run must not clobber the set.
+        r = self.run_mcp("disable", "github")
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(sorted(self.master_off()["github"]),
+                         ["claude", "codex"])
+
 
 if __name__ == "__main__":
     unittest.main()

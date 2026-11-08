@@ -18,6 +18,13 @@ servers in mcp.json:
 ``enabled`` is set by ``swe mcp gateway install`` and cleared by
 ``uninstall``, so sync never points a harness at a gateway that isn't
 installed. Logic only: callers print.
+
+Hub entries carry a second swe-side flag, ``type``: a free-form label
+(``swe mcp set-type``) grouping servers ("dev", "research", ...). It is
+metadata like ``shared`` — a harness never receives it — except that
+``type`` is also the SSE transport marker on a URL server, so the
+transport words stay reserved for the wire and ``without_flags`` strips
+any other ``type``.
 """
 
 from __future__ import annotations
@@ -28,6 +35,14 @@ from swe.paths import cache_dir_for
 
 GATEWAY_KEY = "gateway"
 SHARED_KEY = "shared"
+# The hub entry's label key. ``type`` is also the transport marker on a
+# URL server — sync writes "sse" — so only a value outside
+# ``TRANSPORT_TYPES`` is a label.
+TYPE_KEY = "type"
+TRANSPORT_TYPES = frozenset({"stdio", "sse", "http", "local", "remote"})
+# The labels ``swe mcp set-type`` offers in help and completion; the field
+# itself accepts any word that is not a transport marker.
+EXPECTED_TYPES = ("dev", "productivity", "research", "social", "search", "other")
 HOST = "127.0.0.1"
 # Beside the remote hub's 8477.
 DEFAULT_PORT = 8478
@@ -59,11 +74,45 @@ def is_shared(server) -> bool:
     return isinstance(server, dict) and server.get(SHARED_KEY) is True
 
 
+def label_of(server) -> str | None:
+    """The hub entry's ``type`` label, or None.
+
+    Swe-side metadata like ``shared``: trimmed, free-form, and never
+    written into a harness config. A value in ``TRANSPORT_TYPES`` is the
+    wire marker (a URL server's "sse"), not a label.
+    """
+    if not isinstance(server, dict):
+        return None
+    value = server.get(TYPE_KEY)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or value.lower() in TRANSPORT_TYPES:
+        return None
+    return value
+
+
+def is_transport_marked(server) -> bool:
+    """Whether the entry's ``type`` is a live wire marker — a URL server
+    tagged ``sse``, the one ``type`` value the canonical shape keeps and
+    sync writes. Everywhere else a ``type`` is swe-side: a label, or dead
+    weight a label may overwrite."""
+    return (isinstance(server, dict) and bool(server.get("url"))
+            and str(server.get(TYPE_KEY, "")).strip().lower() == "sse")
+
+
 def without_flags(server):
-    """The hub entry minus the gateway's flag: what a harness would hold."""
-    if not isinstance(server, dict) or SHARED_KEY not in server:
+    """The hub entry minus the swe-side flags: what a harness would hold.
+
+    ``shared`` never leaves the hub, and neither does a ``type`` label —
+    only the "sse" marker on a URL server is wire data sync writes.
+    """
+    if not isinstance(server, dict):
         return server
-    return {k: v for k, v in server.items() if k != SHARED_KEY}
+    out = {k: v for k, v in server.items() if k != SHARED_KEY}
+    if not is_transport_marked(out):
+        out.pop(TYPE_KEY, None)
+    return out
 
 
 def runs_on_gateway(server, settings: dict) -> bool:
