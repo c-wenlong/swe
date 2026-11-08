@@ -2,16 +2,6 @@ import AppKit
 import SWECore
 import SwiftUI
 
-/// The Plugins page's two views.
-enum PluginsTab: Hashable {
-    /// Every plugin in every marketplace, with install, uninstall, enable
-    /// and disable per harness.
-    case explore
-    /// Where the copies Claude Code and Codex run no longer match
-    /// `~/.swe/plugins`, each with the fix swe would run.
-    case health
-}
-
 struct PluginsPage: View {
     @Environment(AppModel.self) private var app
     @State private var confirming: PluginDrift?

@@ -37,6 +37,12 @@ struct TasksPage: View {
         }
         .task { await model.loadUntilHubAnswers(hub: app.hub) }
         .onChange(of: app.navReselects) { selectedId = nil }
+        // The ⌘K search's task pick opens its detail.
+        .task(id: app.pendingTask) {
+            guard let id = app.pendingTask else { return }
+            selectedId = id
+            app.pendingTask = nil
+        }
     }
 
     // MARK: - list

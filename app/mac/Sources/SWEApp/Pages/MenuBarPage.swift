@@ -7,7 +7,16 @@ import SwiftUI
 /// tab's own settings). The desktop widgets have their own page. A stored "widgets" tab from the old three-tab page reads as an
 /// unknown raw value and falls back to the first tab.
 struct MenuBarPage: View {
-    enum Tab: String { case menuBar, popup }
+    enum Tab: String, CaseIterable {
+        case menuBar, popup
+
+        var title: String {
+            switch self {
+            case .menuBar: "Menu bar"
+            case .popup: "Popup"
+            }
+        }
+    }
 
     @AppStorage("menuBarPageTab") private var tab = Tab.menuBar
 
@@ -15,7 +24,7 @@ struct MenuBarPage: View {
         Page(title: "Menu bar",
              subtitle: "What SWE shows at the top of your screen.") {
             VStack(alignment: .leading, spacing: 24) {
-                Tabs(options: [(Tab.menuBar, "Menu bar"), (.popup, "Popup")],
+                Tabs(options: Tab.allCases.map { ($0, $0.title) },
                      selection: $tab, style: .underline)
                 switch tab {
                 case .menuBar: MenuBarSection()

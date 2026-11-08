@@ -259,7 +259,21 @@ public final class HarnessesModel {
     }
 
     /// The current tab: starred first, then the busiest, then by name.
-    public var visible: [Harness] {
+    public var visible: [Harness] { rows(scope) }
+
+    /// A search pick lands here: filter to `needle`, unfold the list, and
+    /// sit on the scope that shows a match — an archived pick is invisible
+    /// under In use, and the reverse. The scope check needs the loaded
+    /// list, so a caller racing the load asks again once it finishes.
+    public func focus(_ needle: String) {
+        query = needle
+        showsUnstarred = true
+        guard case .loaded = state, rows(scope).isEmpty else { return }
+        let other: Scope = scope == .inUse ? .archived : .inUse
+        if !rows(other).isEmpty { scope = other }
+    }
+
+    private func rows(_ scope: Scope) -> [Harness] {
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
         return all
             .filter { ($0.state == .archived) == (scope == .archived) }
