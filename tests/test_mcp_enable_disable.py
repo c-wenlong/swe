@@ -169,10 +169,43 @@ class McpEnableDisableTest(unittest.TestCase):
     def test_enable_without_a_hub_copy_clears_the_mark(self):
         self.seed()
         self.run_mcp("disable", "github")
-        self.hub_write({})  # the hub copy is gone
+        # The definition is gone but the disabled mark is kept.
+        self.hub_write({}, swe=self.swe_state())
         r = self.run_mcp("enable", "github")
         self.assertEqual(r.returncode, 1)
+        self.assertIn("no copy", r.stdout)
         self.assertEqual(self.swe_state().get("disabled", {}).get("claude"), None)
+
+    def test_enable_json_reports_the_places(self):
+        self.seed()
+        self.run_mcp("disable", "github")
+        r = self.run_mcp("enable", "github", "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["data"]["enabled_in"], ["claude"])
+
+    def test_enable_for_an_unknown_harness_fails(self):
+        self.seed()
+        self.run_mcp("disable", "github")
+        self.assertEqual(self.run_mcp("enable", "github", "--for=bogus").returncode, 1)
+        self.assertIn("github", json.loads(self.hub_file.read_text())["swe"]["disabled"]["claude"])
+
+    def test_both_reject_a_missing_name_and_bad_flag(self):
+        self.assertEqual(self.run_mcp("disable").returncode, 1)
+        self.assertEqual(self.run_mcp("enable").returncode, 1)
+        self.assertEqual(self.run_mcp("disable", "x", "--bogus").returncode, 1)
+        self.assertEqual(self.run_mcp("enable", "x", "--bogus").returncode, 1)
+
+    def test_both_help_pages_print(self):
+        for verb in ("disable", "enable"):
+            r = self.run_mcp(verb, "help")
+            self.assertEqual(r.returncode, 0)
+            self.assertIn(f"swe mcp {verb}", r.stdout)
+
+    def test_disable_skip_is_quiet_under_json(self):
+        self.seed()
+        r = self.run_mcp("disable", "github", "--for=codex", "--json")
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(r.stdout.strip(), "")  # the skip note stays off stdout
 
 
 if __name__ == "__main__":
