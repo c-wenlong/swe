@@ -46,9 +46,11 @@ from swe.harness.registry import alias_map as _harness_alias_map
 from swe.mcp.inventory import server_inventory
 from swe.mcp import gateway as gateway_defaults
 from swe.flags import expand_value_flags
+from swe.mcp.models import ToggleReply
 from swe.mcp.secrets import _SECRET_FLAG_RE
 from swe.mcp.secrets import load_secrets
 from swe.mcp.secrets import redact as redact_secrets
+from swe.mcp.secrets import shield_credentials
 from swe.mcp.secrets import resolve as resolve_secrets
 from swe.mcp.secrets import scrub_args, scrub_url
 from swe.mcp.secrets import remove_secret, set_secret
@@ -715,16 +717,47 @@ def disabled_map() -> dict[str, list[str]]:
             for k, v in disabled.items() if isinstance(v, list)}
 
 
-def _set_disabled(harness: str, name: str, off: bool) -> None:
+def disabled_defs() -> dict[str, dict]:
+    """``{harness: {name: raw entry}}`` — the copies kept at disable time.
+
+    Enable restores a harness's own raw entry, so per-format keys the
+    canonical shape drops (``startup_timeout_sec`` and friends) and
+    per-harness variants survive a toggle. Credentials inside are already
+    shielded to ``${NAME}`` references; the raw never reaches this file
+    with a plaintext value.
+    """
+    defs_ = _swe_state().get("disabled_defs")
+    if not isinstance(defs_, dict):
+        return {}
+    return {str(h): dict(n) for h, n in defs_.items() if isinstance(n, dict)}
+
+
+def _mark_disabled(harness: str, name: str, raw_entry: dict | None) -> None:
+    """One state write for a switch-off: the mark plus the harness's own
+    (already shielded) raw copy ``swe mcp enable`` restores."""
     state = _swe_state()
-    disabled = state.setdefault("disabled", {})
-    names = disabled.setdefault(harness, [])
-    if off and name not in names:
+    names = state.setdefault("disabled", {}).setdefault(harness, [])
+    if name not in names:
         names.append(name)
-    if not off and name in names:
+    if raw_entry is not None:
+        state.setdefault("disabled_defs", {}).setdefault(harness, {})[name] = raw_entry
+    _save_swe_state(state)
+
+
+def _mark_enabled(harness: str, name: str) -> None:
+    """One state write for a switch-on: the mark and the kept raw copy go."""
+    state = _swe_state()
+    disabled = state.get("disabled") or {}
+    names = disabled.get(harness) or []
+    if name in names:
         names.remove(name)
     if not names:
         disabled.pop(harness, None)
+    defs_ = state.get("disabled_defs") or {}
+    harness_defs = defs_.get(harness) or {}
+    harness_defs.pop(name, None)
+    if not harness_defs:
+        defs_.pop(harness, None)
     _save_swe_state(state)
 
 
@@ -1371,6 +1404,8 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
             print(f"{source} has no MCP servers.")
         return 0
 
+    disabled = disabled_map()
+
     # Every name the source could have offered, before --only/--except
     # narrow it: --prune may only delete inside this pool, so a filtered
     # run never removes servers it was never asked to look at.
@@ -1425,7 +1460,13 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
         hub_servers = get_hub_servers()
         missing: dict[str, list[str]] = {}
         any_remote_ok = any(takes_remote(t) for t in targets)
-        for server_name in selected:
+        # A server every target holds off is never written, so its missing
+        # secrets and lossy conversions cannot block the sync either.
+        writeable = [
+            n for n in selected
+            if any(n not in set(disabled.get(t, [])) for t in targets)
+        ]
+        for server_name in writeable:
             if not any_remote_ok and server_type(source_servers[server_name]) == "http":
                 # No target can take this one: it is left out below, so
                 # its secrets don't matter to this run.
@@ -1465,6 +1506,8 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
         for target in targets:
             target_format = get_tool_format(target)
             for name in selected:
+                if name in disabled.get(target, []):
+                    continue  # this pair is held off — nothing is written
                 issues = get_conversion_issues(source_servers[name], source_format, target_format)
                 if issues:
                     strict_errors.append((target, name, issues))
@@ -1478,8 +1521,6 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
                 print(f"  ... and {len(strict_errors) - 20} more")
             print(c("dim", "Tip: rerun without --strict to proceed."))
             return 1
-
-    disabled = disabled_map()
 
     for target in targets:
         target_cfg = get_tool_config(target)
@@ -2523,8 +2564,10 @@ MCP_HELP = {
     "enable": f"""\
   {c('cyan', 'swe mcp enable <name> [--for=h1,h2]')}    Switch a server back on
 
-  Restores the hub's copy into the harness (the hub's version wins).
-  No ``--for`` means every harness the server is marked off for.
+  Restores what ``disable`` kept: the harness's own entry when one was
+  stored (per-format keys and this harness's variant survive the toggle),
+  else the hub's canonical copy. No ``--for`` means every harness the
+  server is marked off for.
 
 {c('bold', 'Flags')}
   --for=a,b         Only these harnesses
@@ -2640,7 +2683,8 @@ def cmd_help(args=None):
     return 0
 
 
-def _enable_disable_targets(registry, mcp_tools, for_flag, fallback) -> list[str] | None:
+def _enable_disable_targets(registry, mcp_tools, for_flag, fallback,
+                            err=None) -> list[str] | None:
     """Resolve ``--for=a,b`` into harness names, or use ``fallback``.
 
     Prints and returns None on a bad name or the hub being named — the
@@ -2652,10 +2696,45 @@ def _enable_disable_targets(registry, mcp_tools, for_flag, fallback) -> list[str
     for arg in for_flag:
         resolved = resolve_tool_arg(registry, arg)
         if not resolved or is_hub(resolved):
-            print(f"Unknown harness: {arg}")
+            print(f"Unknown harness: {arg}", file=err or sys.stdout)
             return None
         targets.append(resolved)
     return targets
+
+
+def _for_flag(args, json_view):
+    """Shared ``--for=a,b`` parse for enable/disable: (names, positionals)
+    or (None, None) with the refusal already printed."""
+    refusal = error_stream(json_view)
+    try:
+        args = expand_value_flags(args, {"--for"})
+    except ValueError as exc:
+        print(c("red", str(exc)), file=refusal)
+        return None, None
+    for_flag: list[str] | None = None
+    positional: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--for":
+            for_flag = [s for s in args[i + 1].split(",") if s]
+            i += 2
+        elif arg.startswith("--"):
+            print(f"Unknown flag: {arg}", file=refusal)
+            return None, None
+        else:
+            positional.append(arg)
+            i += 1
+    return for_flag, positional
+
+
+def _shielded_copy(server: dict) -> dict | None:
+    """``shield_credentials`` with its notes sent to stderr, keeping
+    ``--json``'s stdout a clean document."""
+    shielded, notes = shield_credentials(server)
+    for note in notes:
+        print(c("yellow", f"  {note}"), file=sys.stderr)
+    return shielded
 
 
 def cmd_disable(args):
@@ -2663,62 +2742,85 @@ def cmd_disable(args):
         print(MCP_HELP["disable"])
         return 0
     args, json_view = take_json_flag(list(args))
-    for_flag = None
-    positional = []
-    for a in args:
-        if a.startswith("--for="):
-            for_flag = [s for s in a.split("=", 1)[1].split(",") if s]
-        elif a.startswith("--"):
-            print(f"Unknown flag: {a}")
-            return 1
-        else:
-            positional.append(a)
+    refusal = error_stream(json_view)
+    for_flag, positional = _for_flag(args, json_view)
+    if positional is None:
+        return 1
     if not positional:
-        print(f"Usage: {c('cyan', 'swe mcp disable NAME [--for=h1,h2]')}")
+        print(f"Usage: {c('cyan', 'swe mcp disable NAME [--for=h1,h2]')}", file=refusal)
         return 1
     name = positional[0]
 
     registry = load_registry()
     mcp_tools = get_mcp_tools(registry)
-    holding = [t for t in _display_tools(mcp_tools)
-               if not is_hub(t) and name in get_tool_servers(t)]
-    targets = _enable_disable_targets(registry, mcp_tools, for_flag, holding)
+    holding_names = [t for t in _display_tools(mcp_tools)
+                     if not is_hub(t) and name in get_tool_servers(t)]
+    targets = _enable_disable_targets(registry, mcp_tools, for_flag,
+                                      holding_names, err=refusal)
     if targets is None:
         return 1
     if not targets:
-        print(f"{name} is not defined in any harness.")
+        print(f"{name} is not defined in any harness.", file=refusal)
         return 1
 
-    hub = get_hub_servers()
-    stashed = False
-    turned_off: list[str] = []
+    # First the backups, then any deletion: a disabled server must always
+    # be recoverable, so nothing leaves a file until the hub and the
+    # per-harness raw copies are proven storable.
+    holding: dict[str, dict] = {}
+    shielded_raws: dict[str, dict] = {}
     for target in targets:
         servers = get_tool_servers(target)
         if name not in servers:
             if not json_view:
                 print(f"  {target}: {name} is not defined — skipped")
             continue
-        if name not in hub:
-            # Stash a canonical copy first, so the toggle stays reversible
-            # even when this harness held the only definition.
-            hub[name] = get_mcp_handler(target).parse(servers[name])
-            stashed = True
-        del servers[name]
         saver = get_tool_saver(target)
-        if saver is not None:
-            saver(servers, get_tool_config(target)["path"])
-        _set_disabled(target, name, off=True)
-        turned_off.append(target)
-    if stashed:
+        if saver is None:
+            if not json_view:
+                print(f"  {target}: cannot write {target}'s config — skipped")
+            continue
+        shielded_raw = _shielded_copy(dict(servers[name]))
+        if shielded_raw is None:
+            print(f"  {target}: {name} holds a credential the secrets file "
+                  f"cannot store — left alone", file=refusal)
+            continue
+        holding[target] = servers
+        shielded_raws[target] = shielded_raw
+
+    if not holding:
+        print(f"{name} cannot be switched off anywhere.", file=refusal)
+        return 1
+
+    if name not in get_hub_servers():
+        # A canonical hub copy keeps the server listed and is the restore
+        # for harnesses toggled off before raw copies existed. Saved before
+        # the first deletion: a write that fails loses nothing yet.
+        first = next(iter(holding))
+        canonical = get_mcp_handler(first).parse(holding[first][name])
+        shielded = _shielded_copy(canonical)
+        if shielded is None:
+            print(f"The hub cannot keep a copy of {name} — left alone.",
+                  file=refusal)
+            return 1
+        hub = get_hub_servers()
+        hub[name] = shielded
         save_hub_servers(hub)
+
+    turned_off: list[str] = []
+    for target in targets:
+        servers = holding.get(target)
+        if servers is None:
+            continue
+        del servers[name]
+        get_tool_saver(target)(servers, get_tool_config(target)["path"])
+        _mark_disabled(target, name, shielded_raws[target])
+        turned_off.append(target)
     if not json_view:
         for target in turned_off:
             print(f"{c('green', '✓')} {name} off for {c('cyan', target)}")
-    if not turned_off:
-        return 1
     if json_view:
-        return emit({"name": name, "disabled_in": turned_off})
-    return 0
+        emit(ToggleReply(name, disabled_in=turned_off).to_json())
+    return 0 if turned_off else 1
 
 
 def cmd_enable(args):
@@ -2726,55 +2828,97 @@ def cmd_enable(args):
         print(MCP_HELP["enable"])
         return 0
     args, json_view = take_json_flag(list(args))
-    for_flag = None
-    positional = []
-    for a in args:
-        if a.startswith("--for="):
-            for_flag = [s for s in a.split("=", 1)[1].split(",") if s]
-        elif a.startswith("--"):
-            print(f"Unknown flag: {a}")
-            return 1
-        else:
-            positional.append(a)
+    refusal = error_stream(json_view)
+    for_flag, positional = _for_flag(args, json_view)
+    if positional is None:
+        return 1
     if not positional:
-        print(f"Usage: {c('cyan', 'swe mcp enable NAME [--for=h1,h2]')}")
+        print(f"Usage: {c('cyan', 'swe mcp enable NAME [--for=h1,h2]')}", file=refusal)
         return 1
     name = positional[0]
 
     registry = load_registry()
     mcp_tools = get_mcp_tools(registry)
-    disabled = disabled_map()
-    fallback = [t for t, names in disabled.items() if name in names]
-    targets = _enable_disable_targets(registry, mcp_tools, for_flag, fallback)
+    fallback = [t for t, names in disabled_map().items() if name in names]
+    targets = _enable_disable_targets(registry, mcp_tools, for_flag,
+                                      fallback, err=refusal)
     if targets is None:
         return 1
     if not targets:
-        print(f"{name} is not disabled anywhere.")
+        print(f"{name} is not disabled anywhere.", file=refusal)
         return 1
 
     hub = get_hub_servers()
-    if name not in hub:
+    defs_ = disabled_defs()
+    secrets = load_secrets()
+    if name not in hub and not any(name in (defs_.get(t) or {}) for t in targets):
         for target in targets:
-            _set_disabled(target, name, off=False)
+            _mark_enabled(target, name)
         print(f"The hub has no copy of {name} to restore — "
-              f"cleared the disabled mark. Re-add it with `swe mcp add`.")
+              f"cleared the disabled mark. Re-add it with `swe mcp add`.",
+              file=refusal)
         return 1
 
-    turned_on: list[str] = []
-    for target in targets:
-        # Clear the mark first: sync honours it, so it must be gone before
-        # the restore runs. A failed sync puts it back.
-        _set_disabled(target, name, off=False)
+    def restore(target: str) -> str | None:
+        """Put the server back for one harness; None, or why it did not.
+
+        Each path manages its own mark: a restore that cannot land leaves
+        the mark (and the kept copy) in place for a later enable.
+        """
+        servers = get_tool_servers(target)
+        if name in servers:
+            # Re-added while marked off; the mark just clears.
+            _mark_enabled(target, name)
+            return None
+        raw = (defs_.get(target) or {}).get(name)
+        if raw is not None:
+            # The harness's own copy, kept verbatim: per-format keys and
+            # this harness's variant survive the toggle.
+            restored = resolve_secrets(raw, secrets)
+            missing = unresolved_names(restored, secrets)
+            if missing:
+                return (f"no value for {', '.join(missing)} — set it with: "
+                        f"swe mcp secret set {missing[0]}")
+            saver = get_tool_saver(target)
+            if saver is None:
+                return f"cannot write {target}'s config"
+            servers[name] = restored
+            saver(servers, get_tool_config(target)["path"])
+            if name not in get_tool_servers(target):
+                return "the entry did not reach the config"
+            _mark_enabled(target, name)
+            return None
+        if name not in hub:
+            return "no copy to restore it from"
+        # Sync skips disabled names, so the mark lifts first and goes back
+        # on any failure.
+        _mark_enabled(target, name)
         # --json's stdout is one document: the inner sync reports to stderr.
         with redirect_stdout(sys.stderr if json_view else sys.stdout):
             code = _sync([HUB_LABEL, target, f"--only={name}",
                           "--no-interactive", "--force"], None)
-        if code == 0:
+        if code != 0 or name not in get_tool_servers(target):
+            _mark_disabled(target, name, None)
+            return "restore sync failed"
+        return None
+
+    turned_on: list[str] = []
+    failed: list[str] = []
+    for target in targets:
+        try:
+            why = restore(target)
+        except Exception as exc:
+            # The mark may have been lifted mid-restore; put it back.
+            _mark_disabled(target, name, None)
+            why = str(exc)
+        if why is None:
             turned_on.append(target)
         else:
-            _set_disabled(target, name, off=True)
+            failed.append(target)
+            if not json_view:
+                print(f"  {target}: {name} stays off — {why}", file=refusal)
     if json_view:
-        return emit({"name": name, "enabled_in": turned_on})
+        emit(ToggleReply(name, enabled_in=turned_on, failed_in=failed).to_json())
     return 0 if turned_on else 1
 
 

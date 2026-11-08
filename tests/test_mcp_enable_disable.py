@@ -131,7 +131,8 @@ class McpEnableDisableTest(unittest.TestCase):
     def seed_codex(self):
         (self.home / ".codex").mkdir(exist_ok=True)
         (self.home / ".codex" / "config.toml").write_text(
-            'model = "x"\n[mcp_servers.github]\ncommand = "npx"\n')
+            'model = "x"\n[mcp_servers.github]\ncommand = "npx"\n'
+            'startup_timeout_sec = 30\n')
 
     def test_disable_for_flag_only_touches_named_harnesses(self):
         self.seed()
@@ -169,8 +170,9 @@ class McpEnableDisableTest(unittest.TestCase):
     def test_enable_without_a_hub_copy_clears_the_mark(self):
         self.seed()
         self.run_mcp("disable", "github")
-        # The definition is gone but the disabled mark is kept.
-        self.hub_write({}, swe=self.swe_state())
+        # The definition and the kept copy are gone; only the mark remains
+        # (an older swe's mark, or a manually edited file).
+        self.hub_write({}, swe={"disabled": self.swe_state()["disabled"]})
         r = self.run_mcp("enable", "github")
         self.assertEqual(r.returncode, 1)
         self.assertIn("no copy", r.stdout)
@@ -206,6 +208,65 @@ class McpEnableDisableTest(unittest.TestCase):
         r = self.run_mcp("disable", "github", "--for=codex", "--json")
         self.assertEqual(r.returncode, 1)
         self.assertEqual(r.stdout.strip(), "")  # the skip note stays off stdout
+
+    def test_enable_restores_harness_specific_keys(self):
+        self.seed()
+        self.seed_codex()
+        self.run_mcp("disable", "github", "--for=codex")
+        r = self.run_mcp("enable", "github", "--for=codex")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        # startup_timeout_sec lives in codex's format, not the canonical
+        # shape — a canonical restore would drop it.
+        self.assertIn("startup_timeout_sec", self.codex())
+
+    def test_disable_shields_plaintext_secrets(self):
+        self.seed()
+        self.claude_write({"github": dict(self.GITHUB, env={"API_KEY": "sk-live"})})
+        r = self.run_mcp("disable", "github")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        kept = self.swe_state()["disabled_defs"]["claude"]["github"]
+        self.assertNotIn("sk-live", json.dumps(kept))
+        self.assertNotIn("sk-live", self.hub_file.read_text())
+        # The restore resolves the reference back to the literal.
+        r = self.run_mcp("enable", "github")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertEqual(self.claude()["github"]["env"]["API_KEY"], "sk-live")
+
+    def test_discover_prune_keeps_a_disabled_servers_hub_copy(self):
+        self.seed()
+        self.run_mcp("disable", "github")
+        r = self.run_mcp("discover", "--apply", "--prune")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn("github", self.hub())
+
+    def test_disabled_server_missing_secret_does_not_block_sync(self):
+        self.seed()
+        self.hub_write({"github": dict(self.GITHUB, env={"K": "${NO_SUCH_SECRET}"}),
+                        "extra": {"command": "x"}})
+        self.claude_write({"github": self.GITHUB})
+        self.run_mcp("disable", "github")
+        r = self.run_mcp("sync", "swe", "claude", "--no-interactive")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn("extra", self.claude())
+        self.assertNotIn("github", self.claude())
+
+    def test_enable_with_unresolvable_secret_stays_off(self):
+        self.seed()
+        self.claude_write({"github": dict(self.GITHUB, env={"K": "${GONE}"})})
+        self.run_mcp("disable", "github")
+        r = self.run_mcp("enable", "github")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("claude", self.swe_state()["disabled"])
+
+    def test_enable_json_failure_still_emits_a_document(self):
+        self.seed()
+        self.claude_write({"github": dict(self.GITHUB, env={"K": "${GONE}"})})
+        self.run_mcp("disable", "github")
+        r = self.run_mcp("enable", "github", "--json")
+        self.assertEqual(r.returncode, 1)
+        data = json.loads(r.stdout)["data"]
+        self.assertEqual(data["failed_in"], ["claude"])
+        self.assertNotIn("enabled_in", data)
 
 
 if __name__ == "__main__":

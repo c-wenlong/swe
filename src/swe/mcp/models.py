@@ -60,6 +60,31 @@ class ServerRow:
 
 
 @dataclass(frozen=True)
+class ToggleReply:
+    """``swe mcp enable``/``disable --json``: the harnesses the call switched.
+
+    ``disabled_in`` is what a disable wrote off; ``enabled_in`` what an
+    enable restored. ``failed_in`` names targets an enable could not
+    restore — the server stays marked off there.
+    """
+
+    name: str
+    enabled_in: list = field(default_factory=list)
+    disabled_in: list = field(default_factory=list)
+    failed_in: list = field(default_factory=list)
+
+    def to_json(self) -> dict:
+        out = {"name": self.name}
+        if self.enabled_in:
+            out["enabled_in"] = self.enabled_in
+        if self.disabled_in:
+            out["disabled_in"] = self.disabled_in
+        if self.failed_in:
+            out["failed_in"] = self.failed_in
+        return out
+
+
+@dataclass(frozen=True)
 class DiscoveryRow:
     """One ``swe mcp discover --json`` row (a bare list, no envelope)."""
 

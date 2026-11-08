@@ -8,6 +8,7 @@ from pathlib import Path
 from swe.configuration import CorruptConfigurationError
 from swe.console import c
 from swe.mcp.cli import (
+    disabled_map,
     get_mcp_tools,
     get_tool_config,
     get_tool_servers_canonical,
@@ -225,7 +226,11 @@ def discover_mcp_servers(*, include_in_source: bool = False) -> list[McpFinding]
             file=sys.stderr,
         )
     else:
-        for name in sorted(set(source) - set(by_name)):
+        # A server switched off in every harness keeps its hub copy as the
+        # restore source — parked, not orphaned. Without this, --prune
+        # would delete the only definition an enable can restore.
+        held_off = {n for names in disabled_map().values() for n in names}
+        for name in sorted(set(source) - set(by_name) - held_off):
             findings.append(
                 McpFinding(
                     name=name,
