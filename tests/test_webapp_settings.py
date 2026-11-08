@@ -540,6 +540,46 @@ class TestGet(_Settings):
         self.assertIn("anthropic", ids)
         self.assertEqual((config / "providers.json").read_text(), before)
 
+    def test_a_non_text_kind_is_rejected_like_the_other_fields(self):
+        # providers.json's own validation catches a bad kind first; the
+        # row builder refuses it too so a registry change can't smuggle
+        # one into the payload.
+        with self.assertRaises(TypeError):
+            settings_page._catalog_row("acme", {"env_vars": ["A"], "kind": 7})
+
+    def test_the_payload_lists_the_plan_variables_for_the_tab_split(self):
+        prov = settings_page.get(self.ctx(), {})["providers"]
+        # The page keeps these on Inference however their headings read;
+        # the list is the same table test_remote_plan_providers keeps in
+        # step with the Mac's InferenceCatalog.all.
+        self.assertIn("VERCEL_TOKEN_PASS_KEY", prov["plan_vars"])
+        self.assertIn("GLM_CODING_PLAN_KEY", prov["plan_vars"])
+        self.assertEqual(prov["plan_vars"], sorted(set(prov["plan_vars"])))
+
+    def test_the_catalog_carries_each_provider_s_kind(self):
+        catalog = {r["id"]: r for r in settings_page.get(self.ctx(), {})["providers"]["catalog"]}
+        # DEFAULT_INFRA's services land as infra; inference providers and
+        # a custom entry with no kind read as inference.
+        self.assertEqual(catalog["vercel"]["kind"], "infra")
+        self.assertEqual(catalog["vercel"]["env_vars"], ["VERCEL_TOKEN"])
+        self.assertEqual(catalog["netlify"]["kind"], "infra")
+        self.assertEqual(catalog["openai"]["kind"], "inference")
+        config = self.home / ".swe" / "config"
+        config.mkdir(parents=True)
+        (config / "providers.json").write_text(json.dumps({
+            "acme": {"env_vars": ["ACME_API_KEY"], "url": "https://acme.example/keys"},
+            "deploybox": {"env_vars": ["DEPLOYBOX_TOKEN"], "kind": "infra"},
+        }))
+        catalog = {r["id"]: r for r in settings_page.get(self.ctx(), {})["providers"]["catalog"]}
+        self.assertEqual(catalog["acme"]["kind"], "inference")
+        self.assertEqual(catalog["deploybox"]["kind"], "infra")
+        # A saved infra key marks the service's Set badge too.
+        keys = self.home / ".swe" / "secrets" / "providers" / ".api_keys"
+        keys.parent.mkdir(parents=True)
+        keys.write_text("export DEPLOYBOX_TOKEN=tok123\n")
+        catalog = {r["id"]: r for r in settings_page.get(self.ctx(), {})["providers"]["catalog"]}
+        self.assertTrue(catalog["deploybox"]["has_key"])
+
     def test_a_corrupt_providers_json_is_reported_not_raised(self):
         config = self.home / ".swe" / "config"
         config.mkdir(parents=True)
@@ -696,6 +736,13 @@ class TestKeys(_Settings):
         self.keys.write_text("# OpenAI\nexport OPENAI_API_KEY=old # mine\nexport B=1\n")
         self.call("key_set", name="OPENAI_API_KEY", value='new"$', stamp=self.stamp())
         self.assertEqual(self.keys.read_text(), '# OpenAI\nexport OPENAI_API_KEY="new\\"\\$"\nexport B=1\n')
+
+    def test_an_infra_key_files_under_its_service_heading(self):
+        reply = self.call("key_set", name="VERCEL_TOKEN", value="vk_secret",
+                          provider="vercel", stamp=self.stamp())
+        self.assertNotIn("vk_secret", json.dumps(reply))
+        self.assertEqual(self.keys.read_text(), "# OpenAI\nexport OPENAI_API_KEY=sk-proj-OLDOLDOLDOLDOLD0000\n"
+                         '\n# Vercel\nexport VERCEL_TOKEN="vk_secret"\n')
 
     def test_a_second_variable_of_a_provider_joins_its_group(self):
         self.keys.write_text("# GEMINI\nexport GEMINI_API_KEY=a\n\n# Other\nexport X=1\n")

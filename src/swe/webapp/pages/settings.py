@@ -11,11 +11,13 @@ belongs to the hub machine:
   hub), its paired devices with ``this_device`` marking the browser's own
   credential, and the tailnet pair requests waiting for approval (no
   codes or secrets, as ``swe remote devices --requests`` lists them).
-- ``providers``: Providers › Inference, as the Mac app's: ``keys``, every
-  ``export`` in the API keys file in file order with its ``# Provider``
-  heading and the value masked (``APIKeyMask``'s form, never the value),
-  and ``catalog``, ``swe providers list``'s providers for the Add key
-  picker (name, variables, where to get a key). ``stamp`` fingerprints
+- ``providers``: Providers › Inference and Infra, as the Mac app's:
+  ``keys``, every ``export`` in the API keys file in file order with its
+  ``# Provider`` heading and the value masked (``APIKeyMask``'s form,
+  never the value); ``catalog``, ``swe providers list``'s providers
+  for the Add key picker (name, variables, ``kind`` for the tab split,
+  where to get a key); and ``plan_vars``, the coding plans' key
+  variables the tab split keeps on Inference. ``stamp`` fingerprints
   the file as read, so a write over a newer file is refused.
 - ``paths``: where the hub's swe, API keys file and MCP servers folder are.
 - ``session_search``: Experimental › Session search, the hub's transcript
@@ -328,10 +330,15 @@ def _revoke(ctx, body: dict) -> dict:
 def _providers(ctx, home: Path) -> dict:
     from swe.paths import provider_keys_path_for
     from swe.providers import keyfile
+    from swe.remote.plan_providers import PLANS
 
     path = provider_keys_path_for(ctx.home)
     out = {"path": _display(path, home), "exists": path.exists(), "stamp": None,
-           "keys": [], "catalog": [], "error": None}
+           "keys": [], "catalog": [], "error": None,
+           # The tab split keeps a plan's key variable on Inference no
+           # matter which heading it sits under, like the Mac's
+           # InfraList checking InferenceCatalog.all first.
+           "plan_vars": sorted({p[2] for p in PLANS})}
     set_vars: set[str] | None = None
     try:
         keys, data = keyfile.load(path)
@@ -364,10 +371,16 @@ def _catalog_row(pid: str, info: dict, set_vars: set[str] | None = None) -> dict
     name = info.get("name")
     if name is not None and not isinstance(name, str):
         raise TypeError(f"{pid}: name must be text")
+    kind = info.get("kind")
+    if kind is not None and not isinstance(kind, str):
+        raise TypeError(f"{pid}: kind must be text")
     return {
         "id": pid,
         "name": name or pid,
         "env_vars": env_vars,
+        # "infra" for deploy and platform keys; absent on older or custom
+        # entries, which read as inference.
+        "kind": kind or "inference",
         # The catalogue sheet's "Set" badge: the file covers any variable.
         "has_key": bool(set_vars) and any(v in set_vars for v in env_vars),
         # Only a web link: the page puts it in an href.
@@ -467,7 +480,7 @@ def _provider_registry(ctx) -> dict:
     from swe.configuration import read_json_object
     from swe.paths import config_dir_for
     from swe.providers import registry as preg
-    from swe.providers.defaults import DEFAULT_PROVIDERS
+    from swe.providers.defaults import DEFAULT_ALL
 
     path = config_dir_for(ctx.home) / "providers.json"
     user = preg._validated_entries(read_json_object(path), path) if path.exists() else {}
@@ -477,7 +490,7 @@ def _provider_registry(ctx) -> dict:
         for name, info in user.items()
         if name != preg._REMOVED_KEY and name not in removed
     }
-    for name, info in DEFAULT_PROVIDERS.items():
+    for name, info in DEFAULT_ALL.items():
         if name not in removed and name not in merged:
             merged[name] = preg._hydrate(dict(info))
     return merged

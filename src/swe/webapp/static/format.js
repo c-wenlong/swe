@@ -82,11 +82,11 @@ const Fmt = (() => {
     + "statsig stepfun upstage workos zapier").split(" "));
   const MONO_LOGOS = new Set(("ai21 anyscale assemblyai astronomer atlassian augment baseten bitbucket blackbox bolt braintrust buildkite "
     + "cerebras circleci clerk cline clickhouse cockroach codecov contentful convex copilot crates cursor datadog deepgram devin "
-    + "digitalocean discord docker droid e2b elevenlabs expo figma flyio freebuff grafana grok groq hashicorp "
+    + "digitalocean discord docker droid e2b elevenlabs expo figma flyio freebuff grafana grok groq hashicorp heroku "
     + "incidentio inngest kilo kimi lambda langfuse launchdarkly linear linode loom lovable mailgun make manus maven mongodb morph "
-    + "nebius netlify newrelic ngrok notion npm ona openai pi pinecone planetscale poe postman prefect prisma pypi render replit "
+    + "nebius neon netlify newrelic ngrok notion npm ona openai pi pinecone planetscale poe postman prefect prisma pypi railway render replit "
     + "revenuecat rubygems runloop sambanova sanity semaphore sentry snowflake snyk sonatype stability supermemory supabase tailscale tavily "
-    + "temporal travisci twilio upstash v0 vercel warp windsurf writer xiaomimimo yi zai").split(" "));
+    + "temporal travisci turso twilio upstash v0 vercel warp windsurf writer xiaomimimo yi zai").split(" "));
   // HarnessIcons.aliases: other names the same harness goes by.
   const ALIASES = { "claude-code": "claude", "github-copilot": "copilot", factory: "droid", qwen: "qwen-code",
     mistral: "mistral-vibe", codebuff: "freebuff", "command-code": "commandcode", muse: "meta" };
