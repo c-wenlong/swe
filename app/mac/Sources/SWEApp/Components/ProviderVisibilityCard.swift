@@ -54,8 +54,8 @@ struct ProviderVisibilityCard: View {
                     .frame(maxWidth: .infinity).padding(.vertical, 16)
             } else {
                 ReorderableRows(shown) { id, before in
-                    if let before {
-                        model.move(id, before: before)
+                    if let target = before ?? afterLast(dropping: id) {
+                        model.move(id, before: target)
                     } else {
                         model.moveToEnd(id)
                     }
@@ -76,6 +76,15 @@ struct ProviderVisibilityCard: View {
         // Once per swe: this card is rebuilt on every visit and at the
         // 720pt layout flip, and each check starts a swe process.
         .task(id: app.swePath) { await model.loadIfNeeded(for: app.swePath) }
+    }
+
+    /// Dropped below the last shown row: land just after it in the full
+    /// order, not after every row the filter hides. Nil when the last
+    /// shown row is already last, where the drop is the real end.
+    private func afterLast(dropping id: String) -> String? {
+        guard let last = shown.last(where: { $0.id != id }),
+              let index = model.rows.firstIndex(where: { $0.id == last.id }) else { return nil }
+        return model.rows[(index + 1)...].first { $0.id != id }?.id
     }
 }
 
