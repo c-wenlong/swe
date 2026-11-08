@@ -383,7 +383,7 @@ DEFAULT_SERVICES = {
         "description": "Browserbase hosted browser API",
         "url": "https://www.browserbase.com/settings",
         "key_filename": "browserbase",
-        "env_vars": ["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"],
+        "env_vars": ["BROWSERBASE_API_KEY"],
     },
     "apify": {
         "kind": "services",
@@ -425,7 +425,7 @@ DEFAULT_SERVICES = {
         "description": "Langfuse LLM observability API",
         "url": "https://cloud.langfuse.com",
         "key_filename": "langfuse",
-        "env_vars": ["LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_HOST"],
+        "env_vars": ["LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY"],
     },
     "braintrust": {
         "kind": "services",

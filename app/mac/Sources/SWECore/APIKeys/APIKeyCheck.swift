@@ -119,9 +119,10 @@ public struct APIKeyProbe: Equatable, Sendable {
         put(get(.header("X-Browser-Use-API-Key"), "https://api.browser-use.com/api/v3/sessions"),
             "BROWSER_USE_API_KEY")
         put(get(.header("x-api-key"), "https://api.exa.ai/websets/v0/searches"), "EXA_API_KEY")
-        // The common agent services. Tavily and Supermemory only read
-        // the key on a POST, so a real key's empty body earns a request
-        // error that counts as works; both refuse a fake with 401.
+        // The common agent services. Tavily only reads the key on a
+        // POST, and a real key's empty body earns a request error that
+        // counts as works; Supermemory's search body is a complete call
+        // a real key answers 200. Both refuse a fake with 401.
         // AssemblyAI takes the bare key in `authorization`; Browserbase,
         // ElevenLabs, Pinecone, Cartesia and E2B each take their own
         // header; Deepgram and Replicate take `Token <key>`. Brave
@@ -176,7 +177,7 @@ public struct APIKeyProbe: Equatable, Sendable {
             return "Heroku needs a versioned Accept header SWE doesn't send."
         case "BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY":
             return "Brave's API answers a bad key with a 422, which can't tell the key apart."
-        case "LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_HOST":
+        case "LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY":
             return "Langfuse's API wants the public/secret pair as basic auth, so one key alone can't check."
         default:
             return "SWE doesn't know how to check this key."

@@ -252,6 +252,14 @@ import Testing
         #expect(try await outcome("ROUTING_RUN_API_KEY", 422) == .works)
     }
 
+    /// Tavily's probe sends an empty body a real key earns a request
+    /// error for; Supermemory's is a complete call, so its 400 means
+    /// nothing about the key.
+    @Test func tavily400WorksButSupermemory400DoesNot() async throws {
+        #expect(try await outcome("TAVILY_API_KEY", 400) == .works)
+        #expect(try await outcome("SUPERMEMORY_API_KEY", 400) != .works)
+    }
+
     @Test func a500CouldNotCheck() async throws {
         guard case .couldNotCheck(let reason) = try await outcome("OPENAI_API_KEY", 500) else {
             Issue.record("expected couldNotCheck")
