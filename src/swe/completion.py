@@ -351,6 +351,14 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
         ("--from=", "Where to remove from (required)"),
         ("--json", "Machine-readable output"),
     ],
+    "mcp disable": [
+        ("--for=", "Only these harnesses"),
+        ("--json", "Machine-readable output"),
+    ],
+    "mcp enable": [
+        ("--for=", "Only these harnesses"),
+        ("--json", "Machine-readable output"),
+    ],
     "mcp gateway status": [
         ("--json", "Machine-readable output"),
     ],
@@ -523,6 +531,7 @@ _NESTED_FLAGS: dict[str, dict[str, str]] = {
         "secret": "mcp secret set", "secret set": "mcp secret set",
         "secret remove": "mcp secret remove",
         "add": "mcp add", "remove": "mcp remove",
+        "disable": "mcp disable", "enable": "mcp enable",
         "gateway": "mcp gateway status", "gateway status": "mcp gateway status",
         "gateway install": "mcp gateway install", "gateway serve": "mcp gateway serve",
         "gateway share": "mcp gateway share",

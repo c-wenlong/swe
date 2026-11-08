@@ -684,6 +684,50 @@ def save_hub_servers(servers: dict) -> None:
     save_json(MCP_SOURCE_FILE, data)
 
 
+def _swe_state() -> dict:
+    """The hub file's own ``swe`` block: state swe keeps in mcp.json."""
+    try:
+        data = load_json(MCP_SOURCE_FILE) or {}
+    except CorruptConfigurationError:
+        return {}
+    state = data.get("swe")
+    return state if isinstance(state, dict) else {}
+
+
+def _save_swe_state(state: dict) -> None:
+    data = load_json(MCP_SOURCE_FILE) or {}
+    data["swe"] = state
+    save_json(MCP_SOURCE_FILE, data)
+
+
+def disabled_map() -> dict[str, list[str]]:
+    """``{harness: [server names]}`` — the per-harness switches.
+
+    Disabling is swe's own state, not a config flag: every harness format
+    honours it the same way — the entry leaves the file and the hub keeps
+    a copy to restore. ``swe mcp sync`` also honours it, so a later sync
+    cannot silently turn a server back on.
+    """
+    disabled = _swe_state().get("disabled")
+    if not isinstance(disabled, dict):
+        return {}
+    return {str(k): [str(n) for n in v]
+            for k, v in disabled.items() if isinstance(v, list)}
+
+
+def _set_disabled(harness: str, name: str, off: bool) -> None:
+    state = _swe_state()
+    disabled = state.setdefault("disabled", {})
+    names = disabled.setdefault(harness, [])
+    if off and name not in names:
+        names.append(name)
+    if not off and name in names:
+        names.remove(name)
+    if not names:
+        disabled.pop(harness, None)
+    _save_swe_state(state)
+
+
 def servers_for_source(name: str) -> dict:
     """Servers to sync FROM, in that source's own on-disk shape.
 
@@ -1435,9 +1479,13 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
             print(c("dim", "Tip: rerun without --strict to proceed."))
             return 1
 
+    disabled = disabled_map()
+
     for target in targets:
         target_cfg = get_tool_config(target)
         target_servers = get_tool_servers(target)
+        held_off = sorted(set(selected) & set(disabled.get(target, [])))
+        target_selected = [n for n in selected if n not in set(held_off)]
         if target_cfg.get("unverified") and not target_cfg["path"].exists():
             print(
                 f"\n  {c('yellow', 'Note')}: {c('cyan', target)} has no verified MCP "
@@ -1445,7 +1493,7 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
                 f"{c('dim', str(target_cfg['path']))}."
             )
 
-        conflicts = [s for s in selected if s in target_servers]
+        conflicts = [s for s in target_selected if s in target_servers]
         overwrite = set()
 
         if conflicts:
@@ -1480,7 +1528,7 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
 
         via_gateway: list[str] = []
 
-        for name in selected:
+        for name in target_selected:
             server = source_servers[name]
             on_gateway = remote_ok and gateway_defaults.runs_on_gateway(server, gateway)
             if on_gateway:
@@ -1531,7 +1579,8 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
             report["targets"].append({"name": target, "added": added,
                                       "updated": updated, "skipped": skipped,
                                       "pruned": pruned, "unsupported": unsupported,
-                                      "via_gateway": via_gateway})
+                                      "via_gateway": via_gateway,
+                                      "disabled": held_off})
 
         if (added or updated or pruned) and not dry_run:
             saver = get_tool_saver(target)
@@ -1554,6 +1603,8 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
             )
         if via_gateway:
             parts.append(f"{len(via_gateway)} through the gateway")
+        if held_off:
+            parts.append(f"{len(held_off)} left off (disabled: {', '.join(held_off)})")
         if unsupported:
             parts.append(f"{len(unsupported)} remote left out ({', '.join(unsupported)}): "
                          f"{get_tool_config(target).get('label', target)} {LOCAL_ONLY_NOTE}")
@@ -2452,6 +2503,37 @@ MCP_HELP = {
   swe mcp remove github --from=claude,codex
   swe mcp remove github --from=all""",
 
+    "disable": f"""\
+  {c('cyan', 'swe mcp disable <name> [--for=h1,h2]')}   Switch a server off per harness
+
+  The entry leaves the harness config and the hub keeps a copy, so it
+  toggles back on without losing anything. No ``--for`` means every
+  harness that defines it. This is swe's own state in mcp.json, not a
+  format flag, so it works the same for every harness — and ``sync``
+  honours it: a sync cannot silently turn a disabled server back on.
+
+{c('bold', 'Flags')}
+  --for=a,b         Only these harnesses (default: all that define it)
+  --json            Print the result as one JSON document
+
+{c('bold', 'Examples')}
+  swe mcp disable github
+  swe mcp disable github --for=cursor""",
+
+    "enable": f"""\
+  {c('cyan', 'swe mcp enable <name> [--for=h1,h2]')}    Switch a server back on
+
+  Restores the hub's copy into the harness (the hub's version wins).
+  No ``--for`` means every harness the server is marked off for.
+
+{c('bold', 'Flags')}
+  --for=a,b         Only these harnesses
+  --json            Print the result as one JSON document
+
+{c('bold', 'Examples')}
+  swe mcp enable github
+  swe mcp enable github --for=cursor,codex""",
+
     "secret": f"""\
   {c('cyan', 'swe mcp secret set NAME')}       Store a ${'{'}NAME{'}'} value in ~/.swe/secrets/mcp/.api_keys
   {c('cyan', 'swe mcp secret remove NAME')}    Drop a stored value
@@ -2558,6 +2640,144 @@ def cmd_help(args=None):
     return 0
 
 
+def _enable_disable_targets(registry, mcp_tools, for_flag, fallback) -> list[str] | None:
+    """Resolve ``--for=a,b`` into harness names, or use ``fallback``.
+
+    Prints and returns None on a bad name or the hub being named — the
+    hub cannot be toggled, it is the restore source.
+    """
+    if for_flag is None:
+        return fallback
+    targets = []
+    for arg in for_flag:
+        resolved = resolve_tool_arg(registry, arg)
+        if not resolved or is_hub(resolved):
+            print(f"Unknown harness: {arg}")
+            return None
+        targets.append(resolved)
+    return targets
+
+
+def cmd_disable(args):
+    if args and args[0] in ("-h", "--help", "help"):
+        print(MCP_HELP["disable"])
+        return 0
+    args, json_view = take_json_flag(list(args))
+    for_flag = None
+    positional = []
+    for a in args:
+        if a.startswith("--for="):
+            for_flag = [s for s in a.split("=", 1)[1].split(",") if s]
+        elif a.startswith("--"):
+            print(f"Unknown flag: {a}")
+            return 1
+        else:
+            positional.append(a)
+    if not positional:
+        print(f"Usage: {c('cyan', 'swe mcp disable NAME [--for=h1,h2]')}")
+        return 1
+    name = positional[0]
+
+    registry = load_registry()
+    mcp_tools = get_mcp_tools(registry)
+    holding = [t for t in _display_tools(mcp_tools)
+               if not is_hub(t) and name in get_tool_servers(t)]
+    targets = _enable_disable_targets(registry, mcp_tools, for_flag, holding)
+    if targets is None:
+        return 1
+    if not targets:
+        print(f"{name} is not defined in any harness.")
+        return 1
+
+    hub = get_hub_servers()
+    stashed = False
+    turned_off: list[str] = []
+    for target in targets:
+        servers = get_tool_servers(target)
+        if name not in servers:
+            if not json_view:
+                print(f"  {target}: {name} is not defined — skipped")
+            continue
+        if name not in hub:
+            # Stash a canonical copy first, so the toggle stays reversible
+            # even when this harness held the only definition.
+            hub[name] = get_mcp_handler(target).parse(servers[name])
+            stashed = True
+        del servers[name]
+        saver = get_tool_saver(target)
+        if saver is not None:
+            saver(servers, get_tool_config(target)["path"])
+        _set_disabled(target, name, off=True)
+        turned_off.append(target)
+    if stashed:
+        save_hub_servers(hub)
+    if not json_view:
+        for target in turned_off:
+            print(f"{c('green', '✓')} {name} off for {c('cyan', target)}")
+    if not turned_off:
+        return 1
+    if json_view:
+        return emit({"name": name, "disabled_in": turned_off})
+    return 0
+
+
+def cmd_enable(args):
+    if args and args[0] in ("-h", "--help", "help"):
+        print(MCP_HELP["enable"])
+        return 0
+    args, json_view = take_json_flag(list(args))
+    for_flag = None
+    positional = []
+    for a in args:
+        if a.startswith("--for="):
+            for_flag = [s for s in a.split("=", 1)[1].split(",") if s]
+        elif a.startswith("--"):
+            print(f"Unknown flag: {a}")
+            return 1
+        else:
+            positional.append(a)
+    if not positional:
+        print(f"Usage: {c('cyan', 'swe mcp enable NAME [--for=h1,h2]')}")
+        return 1
+    name = positional[0]
+
+    registry = load_registry()
+    mcp_tools = get_mcp_tools(registry)
+    disabled = disabled_map()
+    fallback = [t for t, names in disabled.items() if name in names]
+    targets = _enable_disable_targets(registry, mcp_tools, for_flag, fallback)
+    if targets is None:
+        return 1
+    if not targets:
+        print(f"{name} is not disabled anywhere.")
+        return 1
+
+    hub = get_hub_servers()
+    if name not in hub:
+        for target in targets:
+            _set_disabled(target, name, off=False)
+        print(f"The hub has no copy of {name} to restore — "
+              f"cleared the disabled mark. Re-add it with `swe mcp add`.")
+        return 1
+
+    turned_on: list[str] = []
+    for target in targets:
+        # Clear the mark first: sync honours it, so it must be gone before
+        # the restore runs. A failed sync puts it back.
+        _set_disabled(target, name, off=False)
+        # --json's stdout is one document: the inner sync reports to stderr.
+        with redirect_stdout(sys.stderr if json_view else sys.stdout):
+            code = _sync([HUB_LABEL, target, f"--only={name}",
+                          "--no-interactive", "--force"], None)
+        if code == 0:
+            turned_on.append(target)
+        else:
+            _set_disabled(target, name, off=True)
+    if json_view:
+        return emit({"name": name, "enabled_in": turned_on})
+    return 0 if turned_on else 1
+
+
 def cmd_gateway(args):
     from swe.mcp.gateway_commands import cmd_gateway as run
 
@@ -2581,6 +2801,8 @@ COMMANDS = {
     "validate": cmd_validate,
     "add": cmd_add,
     "remove": cmd_remove,
+    "enable": cmd_enable,
+    "disable": cmd_disable,
     "secret": cmd_secret,
     "doctor": cmd_doctor,
     "gateway": cmd_gateway,

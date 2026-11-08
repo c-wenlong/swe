@@ -36,6 +36,9 @@ class ServerRow:
     # reached at a URL. ``transport`` is the first definition's; a sync
     # copies one place's, so it asks this.
     remote_in: list = field(default_factory=list)
+    # Harnesses the server is toggled off for — the entry left their file
+    # and the hub keeps the copy ``swe mcp enable`` restores.
+    disabled_in: list = field(default_factory=list)
 
     def to_json(self) -> dict:
         return {
@@ -52,6 +55,7 @@ class ServerRow:
             "secrets_missing": self.secrets_missing,
             "in_hub": self.in_hub,
             "remote_in": self.remote_in,
+            "disabled_in": self.disabled_in,
         }
 
 
