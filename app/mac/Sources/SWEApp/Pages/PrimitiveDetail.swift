@@ -1064,16 +1064,18 @@ private struct PluginInfoCard: View {
                                 }
                                 if !server.envKeys.isEmpty || !server.headerKeys.isEmpty {
                                     VStack(alignment: .leading, spacing: 4) {
-                                        ForEach(server.envKeys, id: \.self) { key in
-                                            KeyRow(server: server.name, name: key, kind: "env",
-                                                   missing: server.secretsMissing.contains(key),
-                                                   editable: server.inHub,
-                                                   editingKey: $editingKey, drafts: $keyDrafts,
-                                                   saving: savingKey, save: saveSecret)
+                                        if !server.envKeys.isEmpty {
+                                            Text("env " + server.envKeys.joined(separator: ", "))
+                                                .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                                                .lineLimit(1)
                                         }
-                                        ForEach(server.headerKeys, id: \.self) { key in
-                                            KeyRow(server: server.name, name: key, kind: "header",
-                                                   missing: server.secretsMissing.contains(key),
+                                        if !server.headerKeys.isEmpty {
+                                            Text("headers " + server.headerKeys.joined(separator: ", "))
+                                                .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                                                .lineLimit(1)
+                                        }
+                                        ForEach(server.secretsMissing, id: \.self) { name in
+                                            KeyRow(server: server.name, name: name,
                                                    editable: server.inHub,
                                                    editingKey: $editingKey, drafts: $keyDrafts,
                                                    saving: savingKey, save: saveSecret)
@@ -1081,15 +1083,16 @@ private struct PluginInfoCard: View {
                                         if let keyError {
                                             Text(keyError).font(Theme.caption).foregroundStyle(Theme.dangerText)
                                         }
-                                        Text(server.inHub
-                                             ? "Saved to ~/.swe/secrets/mcp/.api_keys, never shown after saving. "
-                                               + "Sync fills a ${NAME} reference when it writes a harness config; "
-                                               + "a literal value in a harness's own file stays put."
-                                             : "This server is declared in a harness's own config, so its "
-                                               + "values live in that file: swe's secrets store does not "
-                                               + "reach it. Set the key where the plugin is declared.")
-                                            .font(Theme.caption).foregroundStyle(Theme.textMuted)
-                                            .fixedSize(horizontal: false, vertical: true)
+                                        if !server.secretsMissing.isEmpty {
+                                            Text(server.inHub
+                                                 ? "Saved to ~/.swe/secrets/mcp/.api_keys, never shown after saving. "
+                                                   + "Sync fills a ${NAME} reference when it writes a harness config."
+                                                 : "This server is declared in a harness's own config, so its "
+                                                   + "values live in that file: swe's secrets store does not "
+                                                   + "reach it. Set the key where the plugin is declared.")
+                                                .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
                                     }
                                 }
                             }
@@ -1197,17 +1200,15 @@ private struct PluginInfoCard: View {
         }
     }
 
-    /// One declared key: the name, its kind, whether a value is on file,
-    /// and a Set/Rotate button opening a write-only field for it. A
-    /// declared-only server (`editable: false`) keeps its values in the
-    /// harness's own file, so the button stays hidden.
+    /// One unresolved `${NAME}` a server declares: the name, its missing
+    /// state, and a Set button opening a write-only field for it. Only a
+    /// hub-managed server gets the button (`editable`): a declared-only
+    /// server's values live in the harness's own file.
     private struct KeyRow: View {
-        /// The server declaring it, so two servers' same-named keys get
+        /// The server declaring it, so two servers' same-named refs get
         /// their own editor state.
         var server: String
         var name: String
-        var kind: String
-        var missing: Bool
         /// True when swe manages the server (it is in the hub): only
         /// then does its store reach the harness files.
         var editable: Bool
@@ -1216,7 +1217,7 @@ private struct PluginInfoCard: View {
         var saving: Bool
         var save: (String) async -> Void
 
-        private var id: String { "\(server)/\(kind)/\(name)" }
+        private var id: String { "\(server)/\(name)" }
         private var editing: Bool { editable && editingKey == id }
 
         var body: some View {
@@ -1224,17 +1225,14 @@ private struct PluginInfoCard: View {
                 HStack(spacing: 8) {
                     Text(name)
                         .font(Theme.font(size: 11, design: .monospaced))
-                        .foregroundStyle(missing ? Theme.warningText : Theme.textPrimary)
+                        .foregroundStyle(Theme.warningText)
                         .lineLimit(1)
-                    Text(kind)
-                        .font(Theme.font(size: 9, weight: .semibold))
-                        .foregroundStyle(Theme.textMuted)
-                    Spacer(minLength: 4)
-                    Text(missing ? "missing" : "set · hidden")
+                    Text("missing")
                         .font(Theme.caption)
-                        .foregroundStyle(missing ? Theme.warningText : Theme.textMuted)
+                        .foregroundStyle(Theme.warningText)
+                    Spacer(minLength: 4)
                     if editable {
-                        Button(editing ? "Cancel" : (missing ? "Set value" : "Rotate")) {
+                        Button(editing ? "Cancel" : "Set value") {
                             withAnimation(.easeOut(duration: Theme.fadeDuration)) {
                                 editingKey = editing ? nil : id
                             }

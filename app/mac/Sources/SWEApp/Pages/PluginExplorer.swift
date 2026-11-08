@@ -633,7 +633,7 @@ private struct PluginGridRow: View {
 }
 
 /// One plugin in one harness: the state mark, a menu of what swe can do
-/// there where actions exist, and an em dash where the plugin is absent.
+/// there where actions exist, and a minus mark where the plugin is absent.
 /// Unlike the skills cells these open a menu rather than toggle
 /// directly, since a plugin's change is an install or a write to the
 /// harness's config, never a silent flip.
@@ -673,7 +673,7 @@ private struct PluginCell: View {
                 .hoverTip(help(for: state) + " Click for actions.", pinsOnClick: false)
             }
         } else {
-            Text("—").foregroundStyle(Theme.borderStrong)
+            Image(systemName: "minus").foregroundStyle(Theme.borderStrong)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .hoverTip("Not in \(name)", pinsOnClick: false)
         }
@@ -699,7 +699,7 @@ private struct PluginCell: View {
             Circle().strokeBorder(Theme.textMuted, style: StrokeStyle(lineWidth: 1.2, dash: [2, 2]))
                 .frame(width: Theme.statusDot, height: Theme.statusDot)
         case .absent:
-            Text("—").foregroundStyle(Theme.borderStrong)
+            Image(systemName: "minus").foregroundStyle(Theme.borderStrong)
         }
     }
 

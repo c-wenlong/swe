@@ -750,7 +750,7 @@ private struct Cell: View {
 
     /// A click anywhere in the cell switches it: on pulls the entry out
     /// of the harness (the hub keeps a copy to restore), off puts it
-    /// back. The em dash means absent, nothing to switch.
+    /// back. The minus mark means absent, nothing to switch.
     var body: some View {
         if busy {
             ProgressView().controlSize(.mini)
@@ -779,7 +779,7 @@ private struct Cell: View {
             .buttonStyle(.plain)
             .hoverTip("Off for \(name). Click to turn it back on.", pinsOnClick: false)
         } else {
-            Text("—").foregroundStyle(Theme.borderStrong)
+            Image(systemName: "minus").foregroundStyle(Theme.borderStrong)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .hoverTip("Not in \(name)", pinsOnClick: false)
         }
@@ -1406,12 +1406,12 @@ private struct FolderRow: View {
             columnSeparator()
             // A folder has no type and no harness: a dash per fixed
             // column, like any server a harness lacks.
-            Text("—").foregroundStyle(Theme.borderStrong)
+            Image(systemName: "minus").foregroundStyle(Theme.borderStrong)
                 .hoverTip("Folders have no type")
                 .frame(width: ServerTable.typeWidth)
             ForEach(harnesses, id: \.self) { harness in
                 columnSeparator()
-                Text("—").foregroundStyle(Theme.borderStrong)
+                Image(systemName: "minus").foregroundStyle(Theme.borderStrong)
                     .hoverTip("Not in \(HarnessMark(harness).name)")
                     .frame(width: ServerTable.cellWidth)
             }

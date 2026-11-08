@@ -792,10 +792,12 @@ private struct SkillGridRow: View {
 
     /// Flip every folder where a click could change the state: `enable`
     /// where the skill is out, `disable` where it is in. One serialized
-    /// call per folder, the same path a single cell takes.
+    /// call per folder, the same path a single cell takes; a failure
+    /// stops the batch so its `actionError` is the one still showing.
     private func flip(on: Bool) async {
         for chip in model.chips(for: skill) where chip.toggleable && chip.on != on {
             await model.setSkill(skill, on: chip.root, enabled: on)
+            if model.actionError != nil { break }
         }
     }
 
@@ -860,8 +862,8 @@ private struct SkillGridRow: View {
 
 /// One skill in one folder: a check it can click off, a power mark it
 /// can click on, a "P" where the folder keeps its own private copy, an
-/// amber mark where the folder's state can't be switched, and an em
-/// dash where the skill isn't seen at all.
+/// amber mark where the folder's state can't be switched, and a minus
+/// mark where the skill isn't seen at all.
 private struct SkillCell: View {
     var skill: Skill
     var root: SkillRoot
@@ -872,7 +874,9 @@ private struct SkillCell: View {
     private var name: String { HarnessMark(root.name).name }
 
     var body: some View {
-        if busy {
+        // model.busy carries the folder's change whatever cell began it,
+        // so a second tap in the same folder is never silently dropped.
+        if busy || model.busy.contains(root.path) {
             ProgressView().controlSize(.mini)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let chip {
@@ -890,7 +894,7 @@ private struct SkillCell: View {
                 blocked
             }
         } else {
-            Text("—").foregroundStyle(Theme.borderStrong)
+            Image(systemName: "minus").foregroundStyle(Theme.borderStrong)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .hoverTip("Not seen by \(name)", pinsOnClick: false)
         }
