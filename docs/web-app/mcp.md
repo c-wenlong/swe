@@ -301,7 +301,9 @@ store), and bad shapes are 422. The answer is swe's `--json` report, `{"name", "
   value only; the web sheet also shows set values masked, with reveal,
   copy and Replace.
 - **Remove's confirm is inline** and names the command; the app's is a
-  dialog. The web page also says what it removed after the sheet closes.
+  dialog. Both say what was removed on success, and on a `failed` place
+  both keep the sheet open naming the copy that is still there — it would
+  adopt back into the hub on the next sync.
 - **Preview says more.** The Mac app's Preview is swe's one sentence; the
   web page adds the per-harness plan (files, command line, key names
   gained, lost or changed), since the confirm has to name the files.

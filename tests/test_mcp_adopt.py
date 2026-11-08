@@ -437,5 +437,94 @@ class McpAdoptTest(unittest.TestCase):
         self.assertNotIn("extra", json.dumps(state.get("disabled", {})))
 
 
+class ShieldCredentialsTest(unittest.TestCase):
+    """In-process coverage of ``shield_credentials``'s args/url reach —
+    the subprocess tests above exercise the same paths through sync, but
+    these pin the per-shape outcomes.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = pathlib.Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def shield(self, server):
+        from swe.mcp.secrets import shield_credentials
+        return shield_credentials(dict(server), self.home)
+
+    def test_credential_named_flags_and_env_assignments_store(self):
+        shielded, _ = self.shield({
+            "command": "x",
+            "args": ["--token", "abc123", "--api-key=def456",
+                     "API_KEY=ghi789", "-v", "plain", "--token=",
+                     "API_KEY=${API_KEY}"]})
+        # ${API_KEY} already referenced reserves the name, so the two new
+        # literals land under API_KEY_2 and API_KEY_3 — resolve() still
+        # reproduces every original value.
+        self.assertEqual(
+            shielded["args"],
+            ["--token", "${TOKEN}", "--api-key=${API_KEY_2}",
+             "API_KEY=${API_KEY_3}", "-v", "plain", "--token=",
+             "API_KEY=${API_KEY}"])
+
+    def test_header_arguments_shield_only_credential_values(self):
+        shielded, _ = self.shield({
+            "command": "x",
+            "args": ["--header", "Authorization: Bearer tok1",
+                     "--header=X-Api-Key: k2",
+                     "-H", "Accept: text/html",
+                     "--header=bare"]})
+        self.assertEqual(
+            shielded["args"],
+            ["--header", "Authorization: Bearer ${AUTHORIZATION}",
+             "--header=X-Api-Key: ${X_API_KEY}",
+             "-H", "Accept: text/html",
+             "--header=${HEADER}"])
+
+    def test_url_arguments_and_the_url_field_shield_every_part(self):
+        shielded, _ = self.shield({
+            "command": "x",
+            "args": ["https://u2:p2@x/mcp?plain=1",
+                     "--url=https://h/?key=k3&v=2"],
+            "url": "https://user:p4ss@h.example.com/"
+                   "s/Abcd1234efgh5678ijkl9012mnop/mcp?token=q1"
+                   "#access_token=f1"})
+        # The url field shields before args, so its password takes
+        # URL_PASSWORD and the arg's lands on URL_PASSWORD_2.
+        args = shielded["args"]
+        self.assertIn("${URL_PASSWORD_2}", args[0])
+        self.assertIn("plain=1", args[0])
+        self.assertIn("key=${KEY}", args[1])
+        self.assertIn("v=2", args[1])
+        url = shielded["url"]
+        self.assertIn("${URL_PASSWORD}", url)
+        self.assertIn("${URL_PATH}", url)
+        self.assertIn("token=${TOKEN}", url)
+        self.assertIn("access_token=${ACCESS_TOKEN}", url)
+
+    def test_a_partial_literal_beside_a_reference_blocks_the_server(self):
+        for server in (
+            {"command": "x", "args": ["--token", "lit${A}"]},
+            {"command": "x", "args": ["--header", "Auth: Bearer lit${A}"]},
+            {"url": "https://u:lit${A}@h/"},
+        ):
+            shielded, _ = self.shield(server)
+            self.assertIsNone(shielded, server)
+
+    def test_reference_only_values_and_odd_urls_survive(self):
+        shielded, _ = self.shield({
+            "command": "x",
+            "args": ["--token", "${T}", "--header", "Auth: Bearer ${B}",
+                     "https://user@h/", "http://[bad"],
+            "url": "${MCP_URL}"})
+        self.assertEqual(
+            shielded["args"],
+            ["--token", "${T}", "--header", "Auth: Bearer ${B}",
+             "https://user@h/", "http://[bad"])
+        self.assertEqual(shielded["url"], "${MCP_URL}")
+
+
 if __name__ == "__main__":
     unittest.main()
