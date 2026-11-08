@@ -4,6 +4,7 @@ aider	mono	https://raw.githubusercontent.com/Aider-AI/aider/main/aider/website/a
 antgroup	color	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/antgroup-color.svg	MIT (LobeHub icons); Ant Group trademark	Ant Group mark, for InclusionAI's Ling and Ring models
 antigravity	color	TokenTracker dashboard/public/brand-logos/antigravity.svg	MIT (TokenTracker)	Google Antigravity mark
 anyscale	mono	https://unpkg.com/@lobehub/icons-static-svg@1.101.0/icons/anyscale.svg	MIT (LobeHub icons); Anyscale trademark	Anyscale mark, for its status page
+apify	color	https://apify.com/icon0.svg	trademark, no licence stated	Apify mark, the site favicon
 arcade	color	https://www.arcade.dev/favicon.svg	trademark, no licence stated	Arcade 'A' tile, site favicon
 ark	color	TokenTracker dashboard/public/brand-logos/volcano-ark.svg	MIT (TokenTracker)	Volcano Engine Ark mark, used for both Ark plans
 artificial-analysis	mono	https://artificialanalysis.ai/ (inline header SVG)	trademark, no licence stated	geometric mark, verbatim from the site's inline header SVG (white on the dark header)
@@ -18,6 +19,7 @@ bitbucket	mono	https://unpkg.com/simple-icons@16.34.0/icons/bitbucket.svg	CC0-1.
 blackbox	mono	https://docs.blackbox.ai/favicon.svg	trademark, no licence stated	cube mark in white on black rounded square; same mark inline on blackbox.ai/brand
 bolt	mono	https://unpkg.com/simple-icons@16.36.0/icons/stackblitz.svg	CC0-1.0 (Simple Icons); StackBlitz trademark	StackBlitz bolt, the parent mark Bolt.new uses, for its status page
 braintrust	mono	https://unpkg.com/simple-icons@16.36.0/icons/braintrust.svg	CC0-1.0 (Simple Icons); Braintrust trademark	Braintrust mark, for its status page
+brave	color	https://unpkg.com/@lobehub/icons-static-svg@1.102.0/icons/brave-color.svg	MIT (LobeHub icons); Brave trademark	Brave lion-head mark
 browserbase	color	https://www.browserbase.com/favicon.svg	trademark, no licence stated	Browserbase mark tile, site favicon
 browseruse	mono	https://www.browser-use.com/ (inline header SVG)	trademark, no licence stated	Browser Use mark, verbatim from the site's inline header logo; currentColor painted black
 buildkite	mono	https://unpkg.com/simple-icons@16.34.0/icons/buildkite.svg	CC0-1.0 (Simple Icons); Buildkite trademark	Buildkite mark, for its status page
@@ -132,6 +134,7 @@ qoder-cn	color	TokenTracker dashboard/public/brand-logos/qoder-cn.svg	MIT (Token
 qwen-code	color	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/qwen-color.svg	MIT (LobeHub icons); Qwen mark is Alibaba trademark	Qwen colour mark
 railway	mono	https://cdn.simpleicons.org/railway	CC0-1.0 (Simple Icons); Railway trademark	Railway mark
 render	mono	https://unpkg.com/simple-icons@16.34.0/icons/render.svg	CC0-1.0 (Simple Icons); Render trademark	Render mark
+replicate	mono	https://unpkg.com/simple-icons@16.36.0/icons/replicate.svg	CC0-1.0 (Simple Icons); Replicate trademark	Replicate mark
 replit	mono	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/replit.svg	MIT (LobeHub icons); Replit trademark	Replit mark, for its status page
 revenuecat	mono	https://unpkg.com/simple-icons@16.34.0/icons/revenuecat.svg	CC0-1.0 (Simple Icons); RevenueCat trademark	RevenueCat mark, for its status page
 routing-run	mono	https://unpkg.com/@phosphor-icons/core@2.1.1/assets/bold/planet-bold.svg	MIT (Phosphor Icons)	Phosphor planet (bold); the same mark as routing.run's logo, which the site only publishes as a PNG (/logo_trans_black.png)

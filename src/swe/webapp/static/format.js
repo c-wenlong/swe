@@ -77,14 +77,14 @@ const Fmt = (() => {
   /* HarnessIcons: every harness-<id>.svg shipped beside the page. Colour ones
    * are drawn as they are (harness-<id>-color.svg), mono ones inverted in
    * dark mode. Keep in step with the files beside this script. */
-  const COLOR_LOGOS = new Set(("antgroup arcade browserbase cartesia claude cloudflare codex cohere deepseek exa "
+  const COLOR_LOGOS = new Set(("antgroup apify arcade brave browserbase cartesia claude cloudflare codex cohere deepseek exa "
     + "firecrawl fireworks gemini honeycomb meta minimax mistral-vibe nvidia opencode perplexity qwen-code sourcegraph "
     + "statsig stepfun tinyfish upstage workos zapier").split(" "));
   const MONO_LOGOS = new Set(("ai21 anyscale assemblyai astronomer atlassian augment baseten bitbucket blackbox bolt braintrust browseruse buildkite "
     + "cerebras circleci clerk cline clickhouse cockroach codecov contentful convex copilot crates cursor datadog deepgram devin "
     + "digitalocean discord docker droid e2b elevenlabs expo figma flyio freebuff grafana grok groq hashicorp heroku "
     + "incidentio inngest kilo kimi lambda langfuse launchdarkly linear linode loom lovable mailgun make manus maven mongodb morph "
-    + "nebius neon netlify newrelic ngrok notion npm ona openai parallel pi pinecone planetscale poe postman prefect prisma pypi railway render replit "
+    + "nebius neon netlify newrelic ngrok notion npm ona openai parallel pi pinecone planetscale poe postman prefect prisma pypi railway render replicate replit "
     + "revenuecat rubygems runloop sambanova sanity semaphore sentry snowflake snyk sonatype stability supermemory supabase tailscale tavily "
     + "temporal travisci turso twilio upstash v0 vercel warp windsurf writer xiaomimimo yi zai").split(" "));
   // HarnessIcons.aliases: other names the same harness goes by.

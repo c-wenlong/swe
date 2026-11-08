@@ -502,7 +502,9 @@ class TestGet(_Settings):
             {"name": "OPENAI_API_KEY", "provider": "OpenAI", "has_value": True, "masked": "sk-proj-••••••••9876"},
             {"name": "EMPTY_KEY", "provider": "OpenAI", "has_value": False, "masked": ""},
         ])
-        self.assertNotIn("SECRET", json.dumps(body))
+        # "SECRET" alone can't be the needle: LANGFUSE_SECRET_KEY is an
+        # env var name, not a value. SECRETSECRET only lives in the key.
+        self.assertNotIn("SECRETSECRET", json.dumps(body))
         self.assertEqual(body["providers"]["path"], "~/.swe/secrets/providers/.api_keys")
         self.assertRegex(body["providers"]["stamp"], r"^[0-9a-f]{64}$")
         self.assertFalse((self.home / ".swe" / "config" / "providers.json").exists())
@@ -721,7 +723,9 @@ class TestKeys(_Settings):
     def test_add_files_a_new_key_under_its_provider_and_answers_no_value(self):
         reply = self.call("key_set", name="ANTHROPIC_API_KEY", value=f"  {self.SECRET}\n",
                           provider="anthropic", stamp=self.stamp())
-        self.assertNotIn("SECRET", json.dumps(reply))
+        # The catalog in the reply names LANGFUSE_SECRET_KEY, so the
+        # needle is the doubled run only the written value carries.
+        self.assertNotIn("SECRETSECRET", json.dumps(reply))
         self.assertEqual(self.keys.read_text(), "# OpenAI\nexport OPENAI_API_KEY=sk-proj-OLDOLDOLDOLDOLD0000\n"
                          f'\n# Anthropic\nexport ANTHROPIC_API_KEY="{self.SECRET}"\n')
         self.assertEqual(self.keys.stat().st_mode & 0o777, 0o600)
@@ -794,10 +798,10 @@ class TestKeys(_Settings):
         self.assertEqual(status, 403)
         status, data = self.post("key_set", body, cred)
         self.assertEqual(status, 200, data)
-        self.assertNotIn("SECRET", json.dumps(data))
+        self.assertNotIn("SECRETSECRET", json.dumps(data))
         _, page = self.srv.request("GET", "/v1/app/settings", headers={
             "Authorization": f"Bearer {cred['credential']}", "Origin": self.origin()})
-        self.assertNotIn(b"SECRET", page)
+        self.assertNotIn(b"SECRETSECRET", page)
         status, data = self.post("key_value", {"name": "ANTHROPIC_API_KEY"}, cred)
         self.assertEqual((status, data["value"]), (200, self.SECRET))
 
