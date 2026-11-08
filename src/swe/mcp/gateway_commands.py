@@ -310,6 +310,8 @@ def _status(args: list[str]) -> int:
         colour = {"running": "green", "error": "red", "down": "yellow"}.get(state, "dim")
         detail = (f"pid {row['pid']}, up {row['uptime_s']}s" if state == "running"
                   else row.get("error") or "")
+        if row.get("calls"):
+            detail = f"{detail}, {row['calls']} calls" if detail else f"{row['calls']} calls"
         print(f"  {row['name']:<24} {cpad(colour, state, 9)} {c('dim', detail)}")
     print()
     return 0

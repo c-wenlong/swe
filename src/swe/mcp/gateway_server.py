@@ -51,6 +51,7 @@ from typing import Callable
 
 from swe import __version__
 from swe.mcp.gateway import HOST, PATH_PREFIX
+from swe.paths import atomic_write_text
 
 # The handshake can include a build (`go run`) or a dependency sync
 # (`uv run`) on a cold start.
@@ -220,15 +221,72 @@ class _Child:
             waiter.event.set()
 
 
+class GatewayStats:
+    """Per-server tool-call counters, persisted beside the gateway logs.
+
+    Counts outlive restarts through ``stats.json`` in the log dir. They
+    are telemetry, not state: a corrupt file starts the count over, and
+    a write failure is swallowed so stats can never break proxying.
+    """
+
+    def __init__(self, path: Path | None = None):
+        self._path = path
+        self._lock = threading.Lock()
+        self._servers: dict[str, dict] = {}
+        if path is not None:
+            try:
+                data = json.loads(path.read_text())
+                for name, row in (data.get("servers") or {}).items():
+                    if isinstance(row, dict):
+                        self._servers[str(name)] = {
+                            "calls": int(row.get("calls") or 0),
+                            "calls_by_tool": {str(k): int(v) for k, v in
+                                              (row.get("calls_by_tool") or {}).items()
+                                              if isinstance(v, int)},
+                            "call_errors": int(row.get("call_errors") or 0),
+                            "last_call": row.get("last_call"),
+                        }
+            except (OSError, ValueError, TypeError):
+                pass
+
+    def record(self, server: str, tool: str | None, is_error: bool) -> None:
+        with self._lock:
+            row = self._servers.setdefault(server, {"calls": 0, "calls_by_tool": {},
+                                                    "call_errors": 0, "last_call": None})
+            row["calls"] += 1
+            if tool:
+                row["calls_by_tool"][tool] = row["calls_by_tool"].get(tool, 0) + 1
+            if is_error:
+                row["call_errors"] += 1
+            row["last_call"] = datetime.now().isoformat(timespec="seconds")
+            if self._path is not None:
+                try:
+                    atomic_write_text(self._path, json.dumps(
+                        {"servers": self._servers}, indent=1))
+                except OSError:
+                    pass
+
+    def row(self, server: str) -> dict:
+        with self._lock:
+            row = self._servers.get(server)
+            if not row:
+                return {"calls": 0, "calls_by_tool": {}, "call_errors": 0,
+                        "last_call": None}
+            return {"calls": row["calls"], "calls_by_tool": dict(row["calls_by_tool"]),
+                    "call_errors": row["call_errors"], "last_call": row["last_call"]}
+
+
 class Backend:
     """One shared server: started on first use, restarted after it exits."""
 
     def __init__(self, name: str, spec: dict, log_dir: Path,
-                 popen: Callable[..., subprocess.Popen] = subprocess.Popen):
+                 popen: Callable[..., subprocess.Popen] = subprocess.Popen,
+                 stats: GatewayStats | None = None):
         self.name = name
         self.spec = spec
         self.log_dir = log_dir
         self._popen = popen
+        self._stats = stats if stats is not None else GatewayStats()
         self._ids = itertools.count(1)
         self._ids_lock = threading.Lock()
         self._start_lock = threading.Lock()
@@ -477,6 +535,11 @@ class Backend:
             return _error(message.get("id"), INTERNAL_ERROR,
                           f"{self.name} did not answer in {timeout:.0f}s")
         response = dict(waiter.response or {})
+        if message.get("method") == "tools/call":
+            params = message.get("params")
+            tool = params.get("name") if isinstance(params, dict) else None
+            self._stats.record(self.name, tool if isinstance(tool, str) else None,
+                               "error" in response)
         response["id"] = message.get("id")
         return response
 
@@ -499,6 +562,7 @@ class Backend:
             "uptime_s": round(time.monotonic() - child.started) if running else None,
             "starts": self.starts,
             "error": self.last_error or None,
+            **self._stats.row(self.name),
         }
 
 
@@ -546,11 +610,13 @@ class Gateway:
 
     def __init__(self, log_dir: Path, load: SpecLoader = load_hub_specs,
                  watched: Callable[[], list[Path]] = _watched_files,
-                 popen: Callable[..., subprocess.Popen] = subprocess.Popen):
+                 popen: Callable[..., subprocess.Popen] = subprocess.Popen,
+                 stats: GatewayStats | None = None):
         self.log_dir = log_dir
         self._load = load
         self._watched = watched
         self._popen = popen
+        self._stats = stats if stats is not None else GatewayStats(log_dir / "stats.json")
         self._lock = threading.Lock()
         self.backends: dict[str, Backend] = {}
         self.problems: dict[str, str] = {}
@@ -599,7 +665,8 @@ class Gateway:
                     stale.append(self.backends.pop(name))
             for name, spec in specs.items():
                 if name not in self.backends:
-                    self.backends[name] = Backend(name, spec, self.log_dir, popen=self._popen)
+                    self.backends[name] = Backend(name, spec, self.log_dir, popen=self._popen,
+                                                  stats=self._stats)
         for backend in stale:
             backend.stop()
 
@@ -620,7 +687,8 @@ class Gateway:
             problems = dict(self.problems)
         rows = [b.status() for b in backends]
         rows += [{"name": n, "state": "error", "pid": None, "uptime_s": None,
-                  "starts": 0, "error": why} for n, why in sorted(problems.items())]
+                  "starts": 0, "error": why, **self._stats.row(n)}
+                 for n, why in sorted(problems.items())]
         return {"version": __version__, "pid": os.getpid(), "servers": rows,
                 "error": self.load_error}
 

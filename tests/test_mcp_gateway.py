@@ -73,6 +73,34 @@ class GatewayHelpersTest(unittest.TestCase):
         self.assertFalse(gateway.looks_stateful("dv__linear", {"command": "node", "args": ["l.js"]}))
 
 
+class GatewayStatsTest(unittest.TestCase):
+    def test_record_counts_calls_tools_and_errors(self):
+        stats = gateway_server.GatewayStats()
+        stats.record("srv", "echo", False)
+        stats.record("srv", "echo", False)
+        stats.record("srv", None, True)
+        row = stats.row("srv")
+        self.assertEqual(row["calls"], 3)
+        self.assertEqual(row["calls_by_tool"], {"echo": 2})
+        self.assertEqual(row["call_errors"], 1)
+        self.assertTrue(row["last_call"])
+
+    def test_counts_survive_a_restart_and_a_broken_file_starts_over(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "stats.json"
+            gateway_server.GatewayStats(path).record("srv", "echo", False)
+            row = gateway_server.GatewayStats(path).row("srv")
+            self.assertEqual(row["calls"], 1)
+            self.assertEqual(row["calls_by_tool"], {"echo": 1})
+            path.write_text("not json")
+            self.assertEqual(gateway_server.GatewayStats(path).row("srv")["calls"], 0)
+
+    def test_a_server_with_no_calls_reads_as_zero(self):
+        self.assertEqual(gateway_server.GatewayStats().row("nope"),
+                         {"calls": 0, "calls_by_tool": {}, "call_errors": 0,
+                          "last_call": None})
+
+
 class _GatewayServerCase(unittest.TestCase):
     """A live gateway on localhost and the helpers to talk to it.
 
@@ -263,6 +291,17 @@ class GatewayServerTest(_GatewayServerCase):
         rows = {r["name"]: r for r in self.gateway.status()["servers"]}
         self.assertEqual(rows["broken"]["error"], "no value for TOKEN")
         self.assertEqual(rows["fake"]["state"], "idle")
+
+    def test_status_counts_tool_calls_only(self):
+        self.call("echo")
+        self.call("echo")
+        self.request({"jsonrpc": "2.0", "id": 8, "method": "tools/list"})
+        row = {r["name"]: r for r in self.gateway.status()["servers"]}["fake"]
+        self.assertEqual(row["calls"], 2)
+        self.assertEqual(row["calls_by_tool"], {"echo": 2})
+        self.assertEqual(row["call_errors"], 0)
+        self.assertTrue(row["last_call"])
+        self.assertTrue((pathlib.Path(self.tmp.name) / "stats.json").exists())
 
 
 class GatewayHardeningTest(_GatewayServerCase):

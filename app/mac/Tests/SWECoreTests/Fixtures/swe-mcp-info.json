@@ -44,7 +44,11 @@
       "pid": 4123,
       "uptime_s": 10800,
       "starts": 2,
-      "error": null
+      "error": null,
+      "calls": 42,
+      "calls_by_tool": {"read_file": 30, "list_dir": 12},
+      "call_errors": 1,
+      "last_call": "2026-11-03T11:19:55"
     }
   }
 }

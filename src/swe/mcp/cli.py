@@ -2597,7 +2597,8 @@ MCP_HELP = {
   Adds to the ``mcp list`` row: ``shared``, ``places`` (place, path,
   state on/off/hub, updated), ``health``, ``health_detail``, ``updated``
   (the newest file mtime) and ``gateway`` (state, pid, uptime_s, starts,
-  error — null when the gateway is not running).
+  error, calls, calls_by_tool, call_errors, last_call — null when the
+  gateway is not running).
 
 {c('bold', 'Examples')}
   swe mcp info github
@@ -3157,6 +3158,11 @@ def cmd_info(args):
             bits.append(f"up {gw['uptime_s']}s")
         if gw.get("starts") is not None:
             bits.append(f"starts {gw['starts']}")
+        if gw.get("calls"):
+            bits.append(f"{gw['calls']} calls" +
+                        (f" ({gw['call_errors']} errors)" if gw.get("call_errors") else ""))
+        if gw.get("last_call"):
+            bits.append(f"last {gw['last_call']}")
         if gw.get("error"):
             bits.append(f"error: {gw['error']}")
         print(f"Gateway     {' · '.join(bits)}")
