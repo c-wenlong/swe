@@ -335,6 +335,7 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
         ("--force", "Overwrite conflicting servers"),
         ("--skip-conflicts", "Leave conflicting servers alone"),
         ("--no-interactive", "Never prompt"),
+        ("--no-adopt", "Skip pulling harness-only servers into the hub"),
         ("--dry-run", "Show what would change"),
         ("--strict", "Exit nonzero on any conflict"),
         ("--prune", "Delete target servers not in the selection"),
@@ -365,7 +366,7 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
         ("--json", "Machine-readable output"),
     ],
     "mcp remove": [
-        ("--from=", "Where to remove from (required)"),
+        ("--from=", "Where to remove from (default: everywhere it is)"),
         ("--json", "Machine-readable output"),
     ],
     "mcp disable": [

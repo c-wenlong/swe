@@ -206,7 +206,8 @@ lock. `from` is what the confirm listed: every place must still hold the
 server (409 `state_changed` otherwise), and a place it has reached since
 is left alone, because the confirm didn't name it. 404 `unknown_server`,
 422 `bad_server` / `bad_from` for bad shapes. The answer is `{"server",
-"removed", "absent", "page"}`, `page` being the list after the write.
+"removed", "absent", "failed", "page"}` — `failed` names the places whose
+config could not be written — `page` being the list after the write.
 
 ### Secrets
 
