@@ -56,6 +56,28 @@ class CounterTests(unittest.TestCase):
         self.assertEqual(m.n_tool_errors, 5)
         self.assertEqual(m.n_tool_calls, 0)
 
+    def test_a_call_whose_argument_has_an_error_phrase_is_a_call(self):
+        m = compute([
+            R("tool", None, tool_text="Bash: grep -rn 'not found' src/"),
+            R("tool", None, tool_text="exec: timeout 30 make test"),
+            R("tool", None, tool_text="Bash: python3 -c 'print(\"error: x\")'"),
+        ])
+        self.assertEqual(m.n_tool_calls, 3)
+        self.assertEqual(m.n_tool_errors, 0)
+        self.assertEqual(m.n_timeouts, 0)
+
+    def test_a_prefixed_result_with_a_strong_signature_still_errors(self):
+        # devin results carry the tool name: "exec: Output from command
+        # in shell X:..." — call-shaped, but a real failure inside.
+        m = compute([
+            R("tool", None, tool_text="exec: Output from command in shell a1:\n"
+                                      "Exit code 1\nmake: *** failed"),
+            R("tool", None, tool_text="exec: Output from command in shell b2:\n"
+                                      "Traceback (most recent call last):"),
+        ])
+        self.assertEqual(m.n_tool_errors, 2)
+        self.assertEqual(m.n_tool_calls, 0)
+
     def test_plain_output_with_error_words_is_not_an_error(self):
         m = compute([
             R("tool", None, tool_text="grep found 3 matches for error handling"),
@@ -89,6 +111,30 @@ class CounterTests(unittest.TestCase):
     def test_no_user_rows_leaves_machine_share_null(self):
         m = compute([R("assistant", None, assistant_text="hi")])
         self.assertIsNone(m.machine_share)
+
+    def test_a_machine_messages_later_chunks_stay_machine(self):
+        # the indexer splits a long message into rows sharing one ts;
+        # only the first chunk carries the leading tag.
+        ts = "2026-10-01T10:00:00.000Z"
+        m = compute([
+            R("user", ts, user_text="<task-notification>\n" + "x" * 100),
+            R("user", ts, user_text="continuation with no tag at all"),
+            R("user", "2026-10-01T10:00:01.000Z", user_text="fix the bug"),
+        ])
+        self.assertAlmostEqual(m.machine_share, 2 / 3)
+        # the untagged chunk is not a real prompt, so the session is dead
+        # only on the human line, not the notification tail.
+        self.assertEqual(m.is_dead, 1)
+
+    def test_a_newer_ts_breaks_the_machine_chunk_chain(self):
+        ts = "2026-10-01T10:00:00.000Z"
+        m = compute([
+            R("user", ts, user_text="<task-notification>\n" + "x" * 100),
+            R("user", ts, user_text="continuation with no tag at all"),
+            R("user", "2026-10-01T10:00:01.000Z",
+              user_text="plain prompt, a new second"),
+        ])
+        self.assertAlmostEqual(m.machine_share, 2 / 3)
 
 
 class GuardAndFailureTests(unittest.TestCase):

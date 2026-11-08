@@ -2,16 +2,22 @@
 
 One writer: swe (Python). The app reads the file for its Insights tab;
 it does not write it, so there is no fencing protocol like the search
-index's. The file is rebuildable from the search index, so a schema bump
-may delete and recreate it — but a store at a *newer* version than this
-swe understands is still refused, so an older build never tramples a
-newer one's rows.
+index's. The counters are rebuildable from the search index, but scores
+are T2 output, so a schema bump migrates in place rather than deleting
+the file — a store at a *newer* version than this swe understands is
+still refused, so an older build never tramples a newer one's rows.
 
 ``session_metrics`` has two writers at different cadences: the T0 pass
 owns the counter columns and must not clobber a score the T2 pass
 already wrote, and the scoring pass owns the ``outcome*`` columns and
 must not clobber newer counters. ``upsert_counters`` and
 ``upsert_score`` update only their half, via ``ON CONFLICT`` clauses.
+
+``source_rev`` is the T0 pass's staleness probe: a fingerprint of the
+message rows the counters were computed from (the chosen index copy's
+message ids, roles and timestamps). Same fingerprint, same counters —
+a rewritten file lands under new message ids even when its row count
+does not move.
 """
 
 from __future__ import annotations
@@ -22,7 +28,7 @@ from pathlib import Path
 
 from ..paths import insights_db_for
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -38,6 +44,7 @@ CREATE TABLE IF NOT EXISTS session_metrics(
   is_probe INTEGER NOT NULL DEFAULT 0,
   is_dead INTEGER NOT NULL DEFAULT 0,
   machine_share REAL,
+  source_rev INTEGER NOT NULL DEFAULT 0,
   outcome INTEGER, first_pass INTEGER,
   causes TEXT, score_confidence TEXT);
 CREATE TABLE IF NOT EXISTS daily_rollup(
@@ -60,7 +67,7 @@ _PRAGMAS = (
 _COUNTER_COLUMNS = (
     "session_id", "harness", "first_ts", "n_messages", "n_tool_calls",
     "n_tool_errors", "n_ack_unblocks", "n_guard_refusals", "n_timeouts",
-    "n_mcp_errors", "is_probe", "is_dead", "machine_share",
+    "n_mcp_errors", "is_probe", "is_dead", "machine_share", "source_rev",
 )
 _SCORE_COLUMNS = ("outcome", "first_pass", "causes", "score_confidence")
 
@@ -68,6 +75,21 @@ _SCORE_COLUMNS = ("outcome", "first_pass", "causes", "score_confidence")
 class InsightsUnavailable(Exception):
     """The store can't be written here: a newer schema version, or an
     unreadable file. The message says which, for a person."""
+
+
+def _migrate_v1(conn: sqlite3.Connection) -> None:
+    """v1 → v2: the ``source_rev`` column lands. Rows already written get
+    the default 0, which matches no real fingerprint — their first pass
+    under v2 simply re-measures them once."""
+    cols = {row[1] for row in conn.execute(
+        "PRAGMA table_info(session_metrics)")}
+    if "source_rev" not in cols:
+        conn.execute(
+            "ALTER TABLE session_metrics ADD COLUMN source_rev "
+            "INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        "INSERT OR REPLACE INTO meta(key, value) "
+        "VALUES('schema_version', ?)", (str(SCHEMA_VERSION),))
 
 
 def db_path(home: Path | None = None) -> Path:
@@ -99,7 +121,7 @@ def open_store(path: Path | str) -> sqlite3.Connection:
         # writes to the file, and a foreign-version store must stay
         # byte-for-byte untouched.
         version = _stored_version(conn)
-        if version not in ("", str(SCHEMA_VERSION), None):
+        if version not in ("", "1", str(SCHEMA_VERSION), None):
             raise InsightsUnavailable(
                 f"{path} holds schema version {version}, "
                 f"and this swe writes version {SCHEMA_VERSION}; update swe "
@@ -116,11 +138,19 @@ def open_store(path: Path | str) -> sqlite3.Connection:
     except Exception:
         conn.close()
         raise
-    conn.executescript(TABLES_SQL)
-    conn.execute(
-        "INSERT OR IGNORE INTO meta(key, value) VALUES('schema_version', ?)",
-        (str(SCHEMA_VERSION),))
-    conn.commit()
+    # A migration failure must propagate — it is not the torn-file case
+    # above, and recreating would throw away scored rows.
+    try:
+        if version == "1":
+            _migrate_v1(conn)
+        conn.executescript(TABLES_SQL)
+        conn.execute(
+            "INSERT OR IGNORE INTO meta(key, value) "
+            "VALUES('schema_version', ?)", (str(SCHEMA_VERSION),))
+        conn.commit()
+    except Exception:
+        conn.close()
+        raise
     return conn
 
 
@@ -142,6 +172,7 @@ class SessionMetrics:
     is_probe: int = 0
     is_dead: int = 0
     machine_share: float | None = None
+    source_rev: int = 0
 
     def counter_values(self) -> tuple:
         return tuple(getattr(self, name) for name in _COUNTER_COLUMNS)

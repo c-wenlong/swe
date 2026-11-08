@@ -11,7 +11,10 @@ flags, so two approximations are baked in:
   with the name too, so its call count runs high; every harness's real
   result rows land as plain text.
 - ``n_tool_errors`` and its sub-counters are text signatures over
-  ``tool_text`` — a matched row is a failure, whatever emitted it.
+  ``tool_text``. Harness-emitted wrappers (``<tool_use_error>``, ``Exit
+  code N``, refusals, timeouts) count on every row, while ordinary
+  output vocabulary (``error:``, ``not found``) counts only on rows
+  that are not call-shaped — a call's own argument is not an error.
 
 The patterns are ports of the ``agent-audit-2026-11-07`` scripts,
 validated over ~1,200 sessions: ``refine.py``'s machine-prompt list,
@@ -81,35 +84,46 @@ _MACHINE = re.compile(
 # follow the first token.
 _CALL = re.compile(r"^[A-Za-z_][\w.-]*(?:: |\s*$)")
 
+# Failure signatures come in two strengths, split because a *call* row
+# carries the argument the agent typed: ``Bash: grep -rn 'not found'
+# src/`` is a successful invocation, not an error.
+#
+# Strong signatures are harness-emitted wrappers no argument produces:
+# guard refusals, ``<tool_use_error>``, ``Exit code N``, hook and
+# validation errors, timeouts, denials. They apply to every tool row, so
+# Devin's ``name: <result>`` rows — result text behind a call-shaped
+# prefix — still count. Weak signatures are ordinary output vocabulary
+# (``error:``, ``not found``, ``failed to``) that an argument plausibly
+# contains; they apply only to rows that are not call-shaped.
+_ERROR_STRONG = re.compile(
+    r"(<tool_use_error>|exit code:? [1-9]\d*\b|"
+    r"tool ['\"\w-]+ (validation )?failed|validation failed|hook error|"
+    r"the user doesn't want to proceed|returned an error|"
+    r"traceback \(most recent|mcp error|concurrent .* limit reached|"
+    r"command timed out|deadline exceeded|cancell?ed due to)", re.I)
+_ERROR_WEAK = re.compile(
+    r"(\berror:|\bfailed:|denied by|permission denied|"
+    r"does not exist|no such (file|tool|command|directory)|not found\b|"
+    r"unable to access|failed to \w+|too many requests|rate.?limit\b|"
+    r"limit reached|unauthorized|forbidden|econn(refused|reset)|"
+    r"fetch failed|command (failed|not found))", re.I)
+
 # Path/worktree guard refusals in tool output: Devin's worktree isolation
 # ("This agent is isolated in the worktree … Refusing to run it —") and
 # the filesystem guards ("Refusing to write through symlink"). The audit's
-# ~1,700-count corpus was dominated by these two shapes.
+# ~1,700-count corpus was dominated by these two shapes. Strong: a call's
+# argument never emits a refusal.
 _GUARD_REFUSAL = re.compile(
     r"\brefusing to\b|\bisolated in the worktree\b|\bworktree-isolated\b",
     re.I)
 
-# tool_reliability.py's timeout class, verbatim. A command that only
-# mentions a ``--timeout`` flag can false-positive here; that is the
-# documented price of text-only detection.
-_TIMEOUT = re.compile(r"timed? ?out|timeout|deadline", re.I)
-
-# Failure signatures over tool output, from the audit's failure corpus:
-# the frequent heads were worktree refusals, ``PreToolUse:* hook error``,
-# ``Tool 'x' validation failed``, permission denials, ``Exit code N``,
-# ``<tool_use_error>``, ``Command timed out``, ``MCP error -NNNNN`` and
-# user interrupts. Deliberately anchored (``error:`` with a colon, never
-# a bare ``error``) so ordinary output — source being read, test names —
-# does not count.
-_TOOL_ERROR = re.compile(
-    r"(<tool_use_error>|exit code:? [1-9]\d*\b|\berror:|\bfailed:|"
-    r"tool ['\"\w-]+ (validation )?failed|validation failed|hook error|"
-    r"denied by|permission denied|the user doesn't want to proceed|"
-    r"does not exist|no such (file|tool|command|directory)|not found\b|"
-    r"unable to access|failed to \w+|returned an error|traceback \(most recent|"
-    r"too many requests|rate.?limit\b|mcp error|limit reached|"
-    r"unauthorized|forbidden|econn(refused|reset)|fetch failed|"
-    r"command (failed|not found)|cancell?ed due to)", re.I)
+# tool_reliability.py's timeout class, split the same way: ``Command
+# timed out`` and ``deadline exceeded`` are emitted results (strong,
+# repeated inside ``_ERROR_STRONG``), while bare ``timeout``/``timed
+# out`` also appears inside commands (``timeout 30 make test``), so the
+# loose form is weak.
+_TIMEOUT_STRONG = re.compile(r"command timed out|deadline exceeded", re.I)
+_TIMEOUT_WEAK = re.compile(r"timed? ?out|timeout|deadline", re.I)
 
 # An errored tool row that names an MCP server — ``MCP error -32602``,
 # ``mcp__notion__*`` in a ``<tool_use_error>``, ``tabs_context_mcp
@@ -163,6 +177,12 @@ def compute(session_id: str, harness: str,
     # real prompt. A prompt with nothing after it is a dead session; a
     # live one looks dead until the next index pass recomputes it.
     answered = True
+    # The indexer chunks a long message into consecutive rows sharing its
+    # ts; a machine message's later chunks carry no leading tag, so they
+    # inherit the first chunk's class while the ts stays the same.
+    prev_role = ""
+    prev_machine = False
+    prev_ts: str | None = None
     for row in rows:
         stamp = decode.stamp_ms(row.ts)
         if stamp is not None and (first_ms is None or stamp < first_ms):
@@ -170,7 +190,10 @@ def compute(session_id: str, harness: str,
         if row.role == "user":
             n_user += 1
             text = row.user_text.strip()
-            if _MACHINE.search(text):
+            machine = _MACHINE.search(text) is not None or (
+                prev_machine and prev_role == "user"
+                and row.ts is not None and row.ts == prev_ts)
+            if machine:
                 n_machine += 1
             else:
                 n_real_user += 1
@@ -179,6 +202,7 @@ def compute(session_id: str, harness: str,
             if ack_armed and _ACK.match(text):
                 n_acks += 1
                 ack_armed = False
+            prev_machine = machine
         elif row.role == "assistant":
             ack_armed = True
             answered = True
@@ -186,15 +210,23 @@ def compute(session_id: str, harness: str,
             answered = True
             text = row.tool_text
             refused = _GUARD_REFUSAL.search(text) is not None
-            timed_out = _TIMEOUT.search(text) is not None
-            if refused or timed_out or _TOOL_ERROR.search(text) is not None:
+            call_shaped = _CALL.match(text) is not None
+            timed_out = _TIMEOUT_STRONG.search(text) is not None or (
+                not call_shaped and _TIMEOUT_WEAK.search(text) is not None)
+            errored = refused or timed_out or (
+                _ERROR_STRONG.search(text) is not None
+                or (not call_shaped
+                    and _ERROR_WEAK.search(text) is not None))
+            if errored:
                 n_refusals += refused
                 n_timeouts += timed_out
                 n_tool_errors += 1
                 if _MCP.search(text) is not None:
                     n_mcp += 1
-            elif _CALL.match(text):
+            elif call_shaped:
                 n_tool_calls += 1
+        prev_role = row.role
+        prev_ts = row.ts
     is_probe = (
         n_real_user == 1 and n_tool_calls == 0 and sole_real_text is not None
         and _PING.match(sole_real_text) is not None)

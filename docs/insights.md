@@ -62,6 +62,7 @@ session_metrics(            -- one row per indexed session
   n_messages INT, n_tool_calls INT, n_tool_errors INT,
   n_ack_unblocks INT, n_guard_refusals INT, n_timeouts INT, n_mcp_errors INT,
   is_probe INT, is_dead INT, machine_share REAL,
+  source_rev INT,         -- fingerprint of the rows the counters came from
   outcome INT,            -- NULL until a T2 pass scores it
   first_pass INT, causes TEXT, score_confidence TEXT)
 

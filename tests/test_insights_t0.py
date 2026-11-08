@@ -1,7 +1,8 @@
 """The T0 backlog pass in ``insights/t0.py``: sessions the search index
-holds but ``session_metrics`` doesn't (or whose row count moved) get
-measured and upserted — counters only, so a T2 score on the row survives.
-Every test builds its index and store in a throwaway HOME."""
+holds but ``session_metrics`` doesn't (or whose ``source_rev`` moved —
+an append or a file rewrite) get measured and upserted — counters only,
+so a T2 score on the row survives. Every test builds its index and store
+in a throwaway HOME."""
 
 import sqlite3
 import tempfile
@@ -32,8 +33,8 @@ def _session(conn, agent, session_id, rows, file_path=None):
             " tool_text) VALUES (?, ?, ?, ?)",
             (cur.lastrowid, user_text, assistant_text, tool_text))
     conn.execute(
-        "INSERT INTO files(path, byte_offset, mtime_ms, session_row_id)"
-        " VALUES (?, 0, 1, ?)", (file_path, row_id))
+        "INSERT OR REPLACE INTO files(path, byte_offset, mtime_ms,"
+        " session_row_id) VALUES (?, 0, 1, ?)", (file_path, row_id))
     return row_id
 
 
@@ -130,6 +131,56 @@ class _Home(unittest.TestCase):
         self.assertEqual(stats["measured"], 0)
         self.assertEqual(stats["current"], 1)
         self.assertEqual(self.metrics("s1")["n_messages"], 2)
+
+    def test_duplicate_copies_measure_the_owning_file_only(self):
+        conn = self.index()
+        # an ssh-style directory: the session's own file plus agent side
+        # files sharing its session_id.
+        _session(conn, "claude", "s1", [
+            ("user", None, "fix the bug", "", ""),
+            ("assistant", None, "", "on it", ""),
+        ], file_path="/t/ssh-s1/s1.jsonl")
+        _session(conn, "claude", "s1", [
+            ("user", None, "side agent prompt one", "", ""),
+            ("user", None, "side agent prompt two", "", ""),
+            ("tool", None, "", "", "Bash: ls"),
+            ("tool", None, "", "", "Exit code 1"),
+        ], file_path="/t/ssh-s1/agent-aaa.jsonl")
+        _session(conn, "claude", "s1", [
+            ("user", None, "side agent prompt three", "", ""),
+        ], file_path="/t/ssh-s1/agent-bbb.jsonl")
+        conn.commit()
+        t0.run_pass(self.home)
+        s1 = self.metrics("s1")
+        self.assertEqual(s1["n_messages"], 2)
+        self.assertEqual(s1["n_tool_calls"], 0)
+        self.assertEqual(s1["n_tool_errors"], 0)
+
+    def test_a_same_count_rewrite_is_still_stale(self):
+        conn = self.index()
+        old_id = _session(conn, "claude", "s1", [
+            ("user", None, "fix it", "", ""),
+            ("assistant", None, "", "ok", ""),
+        ])
+        conn.commit()
+        t0.run_pass(self.home)
+        self.assertEqual(self.metrics("s1")["n_guard_refusals"], 0)
+        # The writer's REPLACE: mint a fresh sessions row (fresh message
+        # ids — the old ones are still in the table as orphans) and cut
+        # the old sessions row loose. Same session_id, same row count,
+        # different rows.
+        _session(conn, "claude", "s1", [
+            ("tool", None, "", "",
+             "This agent is isolated in the worktree /w. Refusing to run it."),
+            ("user", None, "again", "", ""),
+        ])
+        conn.execute("DELETE FROM sessions WHERE id = ?", (old_id,))
+        conn.commit()
+        stats = t0.run_pass(self.home)
+        self.assertEqual(stats["measured"], 1)
+        s1 = self.metrics("s1")
+        self.assertEqual(s1["n_messages"], 2)
+        self.assertEqual(s1["n_guard_refusals"], 1)
 
     def test_new_rows_make_a_session_stale(self):
         conn = self.index()
