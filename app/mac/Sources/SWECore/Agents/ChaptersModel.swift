@@ -99,6 +99,19 @@ public enum ChapterIndex {
         return lines.joined(separator: "\n")
     }
 
+    /// `text` without every slot naming a member of `names` — an active
+    /// entry or its `# name` off-comment alike. Deleting the files leaves
+    /// no slot to keep, unlike unlisting one, which keeps the comment.
+    public static func removingSlots(_ text: String, names: Set<String>) -> String {
+        let wanted = Set(names.map(normalize))
+        var lines = lines(text)
+        lines.removeAll { line in
+            guard let slot = slotName(line) else { return false }
+            return wanted.contains(normalize(slot))
+        }
+        return lines.joined(separator: "\n")
+    }
+
     /// `text` with `name` appended, adding the newline a file without one
     /// needs first.
     public static func appending(_ text: String, name: String) -> String {
@@ -198,6 +211,19 @@ public enum ChapterIndex {
     /// says nothing about which folder the file is really in.
     public static func climbs(_ name: String) -> Bool {
         normalize(name).split(separator: "/").contains("..")
+    }
+
+    /// `name` with `.` and `..` resolved the way a path parser reads
+    /// them, so `a/../b.md` reads as `b.md`. Purely lexical: a link in a
+    /// component would send `..` somewhere else, which is why paths with
+    /// `..` are refused rather than trusted where links can hide.
+    public static func collapse(_ name: String) -> String {
+        var parts: [String] = []
+        for part in normalize(name).split(separator: "/") {
+            if part == ".." { _ = parts.popLast() }
+            else if part != "." { parts.append(String(part)) }
+        }
+        return parts.joined(separator: "/")
     }
 
     /// Whether `name` sits somewhere under `folder` (not the folder
@@ -1688,6 +1714,150 @@ public final class ChaptersModel {
             selected = ChapterIndex.entries(text).first
         }
         await build(swe: swe)
+    }
+
+    /// Move file `name` to the Trash: its index slot — active or off —
+    /// and targets rule drop first so a build between the writes never
+    /// compiles a chapter whose file is already gone; the file lands in
+    /// the Trash last, recoverable from Finder like any trashed file.
+    /// `remove(chapter:)` is the unlist — this is the file itself.
+    /// Refuses a path climbing out of AGENTS_MD and a draft holding
+    /// unsaved text, which deleting the file would discard.
+    @discardableResult
+    public func delete(file name: String, swe: SweClient) async -> String? {
+        await applyDelete(name, isFolder: false, swe: swe)
+    }
+
+    /// Move folder `path` and everything under it to the Trash, in the
+    /// same order as a file delete. Refuses the same, plus a slot or rule
+    /// under it that climbs (`devin/../shared.md` names a file the folder
+    /// does not own).
+    @discardableResult
+    public func delete(folder path: String, swe: SweClient) async -> String? {
+        await applyDelete(path, isFolder: true, swe: swe)
+    }
+
+    /// The delete both context menus run: the narrowing writes through
+    /// `applyCompile` first — a slot or rule gone is never a broader
+    /// intermediate state — then the entry into the Trash. A refused
+    /// Trash after the saves leaves the file on disk as an unlisted row.
+    private func applyDelete(_ rawPath: String, isFolder: Bool, swe: SweClient) async -> String? {
+        guard case .loaded(let check) = status else {
+            return "The chapters aren't loaded yet."
+        }
+        let path = ChapterIndex.normalize(rawPath)
+        func covered(_ name: String) -> Bool {
+            isFolder ? ChapterIndex.isUnder(name, folder: path)
+                     : ChapterIndex.normalize(name) == path
+        }
+        func dirtyDraft() -> String? {
+            self.documents.keys.filter(covered)
+                .first { self.documents[$0]?.isDirty == true }
+        }
+        if let draft = dirtyDraft() {
+            return "Save or revert \(draft) before deleting it."
+        }
+        // The entry itself is never resolved: a linked chapter deletes
+        // the link, not its target. Its parent folder is resolved through
+        // inside() — `alias/x.md` through a link out of AGENTS_MD would
+        // otherwise trash the outside file under its index name.
+        let root = URL(fileURLWithPath: check.directory).standardizedFileURL
+        let url = root.appending(path: path)
+        let parentInside = await offMain {
+            Self.inside((path as NSString).deletingLastPathComponent,
+                        under: check.directory) != nil
+        }
+        guard !ChapterIndex.climbs(path), parentInside else {
+            return "The path cannot leave AGENTS_MD."
+        }
+        return await queuedCompile { () -> String? in
+            // Checked again inside the queue, like the moves: a draft may
+            // have gone dirty while earlier work ran.
+            if let draft = dirtyDraft() {
+                return "Save or revert \(draft) before deleting it."
+            }
+            guard let index = await self.readyIndex(),
+                  let targetsDocument = await self.readyTargets() else {
+                return "The chapter files haven't been read."
+            }
+            let rules: [String: [String: [String]]]
+            if targetsDocument.existsOnDisk {
+                guard let parsed = try? ChapterTargets.parse(targetsDocument.text) else {
+                    return self.targetsParseProblem ?? "targets.json can't be edited."
+                }
+                rules = parsed.rules
+            } else {
+                rules = [:]
+            }
+            let slots = ChapterIndex.slots(index.text)
+            if isFolder,
+               let climbing = (slots + rules.keys.sorted())
+                   .first(where: { ChapterIndex.isUnder($0, folder: path)
+                                   && ChapterIndex.climbs($0) }) {
+                return "\(climbing) climbs out with ..; fix its path by hand first."
+            }
+            // A slot or rule that reaches the entry through ".." never
+            // matches the text compare, but it names the same file:
+            // dropping the file would leave it pointing at a gap. Which
+            // file it really names depends on links the index can't see.
+            if let alias = (slots + rules.keys.sorted()).first(where: {
+                let collapsed = ChapterIndex.collapse($0)
+                let reached = isFolder
+                    ? ChapterIndex.isUnder(collapsed, folder: path)
+                    : collapsed == path
+                return reached && !covered($0)
+            }) {
+                return "\(alias) reaches \(path) through ..; fix its path by hand first."
+            }
+            let nextIndex = ChapterIndex.removingSlots(
+                index.text, names: Set(slots.filter(covered)))
+            var nextRules = rules
+            var droppedRule = false
+            for key in rules.keys where covered(key) {
+                nextRules[key] = nil
+                droppedRule = true
+            }
+            var writes: [CompileWrite] = []
+            if nextIndex != index.text { writes.append(.index(nextIndex)) }
+            // targets.json is only written when a rule actually went:
+            // encoding an absent file's empty rules would create it.
+            if droppedRule {
+                writes.append(.targets(ChapterTargets(rules: nextRules).encoded()))
+            }
+            if !writes.isEmpty,
+               let problem = await self.applyCompile(writes: writes, swe: swe) {
+                return problem
+            }
+            // An entry already gone from disk just gets its slot and rule
+            // dropped. fileExists follows the last link, so a broken link
+            // counts as here through destinationOfSymbolicLink instead.
+            let entryExists = await offMain {
+                FileManager.default.fileExists(atPath: url.path)
+                    || (try? FileManager.default.destinationOfSymbolicLink(
+                        atPath: url.path)) != nil
+            }
+            if entryExists {
+                let trashed = await offMain {
+                    (try? FileManager.default.trashItem(at: url,
+                                                        resultingItemURL: nil)) != nil
+                }
+                guard trashed else { return "Couldn't move \(path) to the Trash." }
+            }
+            // A draft that went dirty during the saves keeps its document:
+            // its file is gone, so the rail shows it as a ghost whose text
+            // stays reachable instead of being dropped unsaved.
+            for key in self.documents.keys.filter(covered)
+                where self.documents[key]?.isDirty != true {
+                self.documents[key] = nil
+            }
+            if let selected = self.selected, covered(selected),
+               self.documents[selected] == nil {
+                self.selected = ChapterIndex.entries(nextIndex).first
+            }
+            await self.refreshTree(under: check.directory,
+                                   order: ChapterIndex.entries(index.text))
+            return nil
+        }
     }
 
     /// Compiles the chapters into the shared AGENTS.md and refreshes the

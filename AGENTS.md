@@ -146,7 +146,7 @@ Each entry records a trap that already shipped as a bug or cost a long debug. Be
 - **Web ledger reads** (`ledger/store.py`): commit after any write on the read connection, roll back on `sqlite3.Error`.
 - **The app ignores `$HOME`**: point app data at scratch with the per-store env overrides, or test through a unit test.
 - **Keychain**: never probe a keychain read by hand on a desktop someone is using; the dialog steals focus.
-- **App UI**: fonts through `Theme`, hover text through `.hoverTip` (not `.help`), brand names and colours only in `ModelBrands.swift` / `HarnessColor.fixed`, every account card the same history section.
+- **App UI**: fonts through `Theme`, no custom hover pop-ups (`.hoverTip` only feeds VoiceOver; `.help` for a plain hint), brand names and colours only in `ModelBrands.swift` / `HarnessColor.fixed`, every account card the same history section.
 - **App performance**: no filesystem calls on the main actor for Plugins and Skills (`LatestBuild`), slow ledger reads off the `Ledger` actor, timers scan through `backgroundScan` (never `load`), and the window shell never measures a page (`PanelFrame`).
 - **Scratch app builds** register with LaunchServices: unregister them with `lsregister -u` after testing, or widgets break.
 - **Managed shell rc** (`APIKeys/ShellStartup.swift`): a home-manager `.zshrc` resolves into a read-only store; `writable()` gates the button and the write, and `sources()` follows drop-in globs.

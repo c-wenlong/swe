@@ -511,6 +511,15 @@ private struct CompileView: View {
                 .padding(.trailing, 8).padding(.vertical, 4)
                 .contentShape(.rect)
                 .onTapGesture { toggle() }
+                .contextMenu {
+                    Button("Move to Trash", role: .destructive) {
+                        Task {
+                            onError(node.isFolder
+                                ? await app.chapters.delete(folder: node.path, swe: app.swe)
+                                : await app.chapters.delete(file: node.path, swe: app.swe))
+                        }
+                    }
+                }
                 if node.isFolder && expanded {
                     ForEach(node.children) { child in
                         IncludeNode(node: child, depth: depth + 1, check: check,
@@ -638,6 +647,14 @@ private struct CompileView: View {
             .hoverTip(harness == nil ? "Drag to reorder; click a chip to toggle that harness"
                       : "Drag to reorder; the checkbox toggles this harness",
                       replacesLabel: false)
+            .contextMenu {
+                Button("Move to Trash", role: .destructive) {
+                    Task {
+                        onError(await app.chapters.delete(
+                            file: chapter.name, swe: app.swe))
+                    }
+                }
+            }
         }
 
         private func toggleHarness(_ name: String) {
@@ -1026,7 +1043,8 @@ private struct ChaptersEditor: View {
                                     onNewChapter: { folder in
                                         creating = NewChapterSheet.Initial(folder: folder)
                                     },
-                                    onDrop: finishDrop)
+                                    onDrop: finishDrop,
+                                    onDelete: delete)
                     }
                     // Dirty drafts whose files vanished: their text is
                     // still in the editor, so the row stays selectable.
@@ -1133,6 +1151,15 @@ private struct ChaptersEditor: View {
         }
     }
 
+    /// The row's Move to Trash; the model drops its slot and rule first.
+    private func delete(_ node: ChapterNode) {
+        Task {
+            moveError = node.isFolder
+                ? await app.chapters.delete(folder: node.path, swe: app.swe)
+                : await app.chapters.delete(file: node.path, swe: app.swe)
+        }
+    }
+
     /// A rail row for a dirty draft whose file is gone: the unsaved text
     /// stays reachable so Save/Revert keep working.
     private struct GhostRow: View {
@@ -1200,6 +1227,8 @@ private struct ChaptersEditor: View {
         var onNewChapter: (String) -> Void
         /// The drop ended; the rail's `target` says what it meant.
         var onDrop: () -> Void
+        /// The context menu's Move to Trash; the node says file or folder.
+        var onDelete: (ChapterNode) -> Void
 
         @Environment(AppModel.self) private var app
         @State private var hovering = false
@@ -1208,13 +1237,15 @@ private struct ChaptersEditor: View {
         init(node: ChapterNode, depth: Int, compiled: Set<String>,
              rail: ChapterRailDrag,
              onNewChapter: @escaping (String) -> Void,
-             onDrop: @escaping () -> Void) {
+             onDrop: @escaping () -> Void,
+             onDelete: @escaping (ChapterNode) -> Void) {
             self.node = node
             self.depth = depth
             self.compiled = compiled
             self.rail = rail
             self.onNewChapter = onNewChapter
             self.onDrop = onDrop
+            self.onDelete = onDelete
             // Expanded by default; each folder's state is its own key.
             _expanded = AppStorage(wrappedValue: true,
                                    ChapterFolderState.outlinePrefix + node.path)
@@ -1230,7 +1261,7 @@ private struct ChaptersEditor: View {
                         OutlineNode(node: child, depth: depth + 1,
                                     compiled: compiled, rail: rail,
                                     onNewChapter: onNewChapter,
-                                    onDrop: onDrop)
+                                    onDrop: onDrop, onDelete: onDelete)
                     }
                 }
             }
@@ -1319,6 +1350,10 @@ private struct ChaptersEditor: View {
                 Button("Reveal in Finder") {
                     reveal(node)
                 }
+                Divider()
+                Button("Move to Trash", role: .destructive) {
+                    onDelete(node)
+                }
             }
         }
 
@@ -1380,6 +1415,10 @@ private struct ChaptersEditor: View {
                 Button("Reveal in Finder") { reveal(node) }
                 Button("Copy path") {
                     copyToPasteboard(absolutePath(node))
+                }
+                Divider()
+                Button("Move to Trash", role: .destructive) {
+                    onDelete(node)
                 }
             }
         }

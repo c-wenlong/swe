@@ -1444,4 +1444,159 @@ import Testing
         #expect(defaults.object(forKey: rail + "harnesses/devin/sub") == nil)
         #expect(defaults.object(forKey: rail + "devinish") as? Bool == false)
     }
+
+    // MARK: - deleting chapters and folders
+
+    @Test func removingSlotsDropsEntriesAndOffComments() {
+        #expect(ChapterIndex.removingSlots("# c\na.md\n# off.md\nb.md\n",
+                                           names: ["a.md", "off.md"])
+                == "# c\nb.md\n")
+        // A comment naming no deleted file isn't a slot; it stays.
+        #expect(ChapterIndex.removingSlots("# notes\na.md\n", names: ["x.md"])
+                == "# notes\na.md\n")
+    }
+
+    @Test func deleteFileDropsItsSlotTrashesItAndRebuilds() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        #expect(await model.delete(file: "a.md", swe: SweClient(runner: runner)) == nil)
+        #expect(try dir.read("index.txt") == "# in order\nb.md\n")
+        #expect(!exists(dir, "a.md"))
+        #expect(runner.builds == 1)
+    }
+
+    @Test func deleteFileSelectsAnotherChapter() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        model.selected = "a.md"
+        #expect(await model.delete(file: "a.md", swe: SweClient(runner: runner)) == nil)
+        #expect(model.selected == "b.md")
+    }
+
+    @Test func deleteFileDropsAnOffSlotAndItsRule() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await folderModel(
+            dir, runner: runner,
+            index: "# in order\na.md\n# eng/one.md\nb.md\n",
+            targets: #"{"version":1,"chapters":{"eng/one.md":{"only":["claude"]},"a.md":{"except":["devin"]}}}"#)
+        #expect(await model.delete(file: "eng/one.md", swe: SweClient(runner: runner)) == nil)
+        #expect(try dir.read("index.txt") == "# in order\na.md\nb.md\n")
+        #expect(!exists(dir, "eng/one.md"))
+        let rules = try ChapterTargets.parse(dir.read("targets.json")).rules
+        #expect(rules["eng/one.md"] == nil)
+        // A rule on a surviving chapter is untouched.
+        #expect(rules["a.md"] == ["except": ["devin"]])
+    }
+
+    @Test func deleteFolderDropsItsSlotsRulesAndDirectory() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(
+            dir, runner: runner,
+            targets: #"{"version":1,"chapters":{"devin/x.md":{"only":["claude"]}}}"#)
+        #expect(await model.delete(folder: "devin", swe: SweClient(runner: runner)) == nil)
+        #expect(try dir.read("index.txt") == "# in order\na.md\nb.md\n")
+        #expect(!exists(dir, "devin"))
+        let rules = try ChapterTargets.parse(dir.read("targets.json")).rules
+        #expect(rules["devin/x.md"] == nil)
+    }
+
+    @Test func deleteRefusesUnsavedTextInside() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(dir, runner: runner)
+        let chapter = InstructionsCheck.Chapter(
+            name: "devin/x.md", path: dir.path("devin/x.md").path, exists: true)
+        let document = try #require(model.document(for: chapter))
+        await document.load()
+        document.text = "# Draft\n"
+        #expect(await model.delete(folder: "devin", swe: SweClient(runner: runner)) != nil)
+        #expect(exists(dir, "devin/x.md"))
+        #expect(try dir.read("index.txt").contains("devin/x.md"))
+        #expect(model.document(for: chapter)?.isDirty == true)
+    }
+
+    @Test func deleteRefusesTheLastChapter() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await folderModel(dir, runner: runner, index: "# order\na.md\n")
+        #expect(await model.delete(file: "a.md", swe: SweClient(runner: runner)) != nil)
+        #expect(exists(dir, "a.md"))
+        #expect(try dir.read("index.txt") == "# order\na.md\n")
+    }
+
+    @Test func deleteFolderRefusesASlotThatClimbsOut() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(dir, runner: runner)
+        try dir.write("index.txt", "a.md\ndevin/x.md\ndevin/../b.md\n")
+        await model.checkDisk()
+        let problem = await model.delete(folder: "devin", swe: SweClient(runner: runner))
+        #expect(problem?.contains("devin/../b.md") == true, "\(problem ?? "nil")")
+        #expect(exists(dir, "devin/x.md"))
+        #expect(try dir.read("index.txt") == "a.md\ndevin/x.md\ndevin/../b.md\n")
+    }
+
+    @Test func deleteAnUnlistedFileSkipsTheIndex() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        try dir.write("notes.md", "# Notes\n")
+        // No slot and no rule: nothing to save, so nothing to build.
+        #expect(await model.delete(file: "notes.md", swe: SweClient(runner: runner)) == nil)
+        #expect(try dir.read("index.txt") == "# in order\na.md\nb.md\n")
+        #expect(!exists(dir, "notes.md"))
+        #expect(runner.builds == 0)
+    }
+
+    @Test func collapseReadsDotAndDotDotLexically() {
+        #expect(ChapterIndex.collapse("other/../devin/x.md") == "devin/x.md")
+        #expect(ChapterIndex.collapse("./a.md") == "a.md")
+        #expect(ChapterIndex.collapse("a/../..") == "")
+    }
+
+    @Test func deleteRefusesAFileThroughALinkedFolder() async throws {
+        let dir = try TempDir()
+        let outside = try TempDir()
+        try outside.write("x.md", "# Outside\n")
+        let runner = Runner([check(dir.url)])
+        let model = try await folderModel(
+            dir, runner: runner, index: "# in order\na.md\nalias/x.md\nb.md\n")
+        try dir.link("alias", to: outside.url.path)
+        #expect(await model.delete(file: "alias/x.md", swe: SweClient(runner: runner)) != nil)
+        // The outside file under its index name was never touched.
+        #expect(try outside.read("x.md") == "# Outside\n")
+        #expect(try dir.read("index.txt").contains("alias/x.md"))
+    }
+
+    @Test func deleteFolderRefusesAnEntryReachedThroughDotDot() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await nestModel(dir, runner: runner)
+        try FileManager.default.createDirectory(
+            at: dir.path("other"), withIntermediateDirectories: true)
+        try dir.write("index.txt", "a.md\ndevin/x.md\nother/../devin/x.md\nb.md\n")
+        await model.checkDisk()
+        let problem = await model.delete(folder: "devin", swe: SweClient(runner: runner))
+        #expect(problem?.contains("other/../devin/x.md") == true, "\(problem ?? "nil")")
+        #expect(exists(dir, "devin/x.md"))
+        #expect(try dir.read("index.txt").contains("other/../devin/x.md"))
+    }
+
+    @Test func deleteFileTrashesABrokenLink() async throws {
+        let dir = try TempDir()
+        let runner = Runner([check(dir.url)])
+        let model = try await model(dir, runner: runner)
+        try dir.write("index.txt", "# in order\na.md\nbroken.md\nb.md\n")
+        await model.checkDisk()
+        // A .md link whose target is gone still counts as an entry.
+        try dir.link("broken.md", to: dir.path("gone.md").path)
+        #expect(await model.delete(file: "broken.md", swe: SweClient(runner: runner)) == nil)
+        #expect(try dir.read("index.txt") == "# in order\na.md\nb.md\n")
+        // fileExists can't see a broken link; the link itself is gone.
+        #expect(!dir.isLink("broken.md"))
+    }
 }
