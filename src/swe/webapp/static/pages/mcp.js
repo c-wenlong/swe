@@ -740,11 +740,23 @@ async function mcpRemove(s) {
     if (status) mcpLoad(mcpHasHealth());
     return;
   }
+  mcpAdopt(data.page);
+  const failed = (data.failed || []).map(mcpSourceName);
+  if (failed.length) {
+    // Part or all of the delete could not be written: a copy left in a
+    // file comes back through adoption on the next sync, so say what is
+    // still there instead of closing the sheet on a quiet success.
+    const removedTxt = data.removed.map(mcpSourceName).join(", ");
+    mcpPage.notice = removedTxt ? `Removed ${s.name} from ${removedTxt}.` : "";
+    st.error = `${s.name} could not be removed from ${failed.join(", ")} — the file is still there.`;
+    mcpRepaintSheet(s);
+    if (mcpOnPage()) paintMcp();
+    return;
+  }
   const sheet = document.getElementById("mcp-sheet");
   if (sheet && sheet.open && sheet.dataset.server === s.name) sheet.close();
   if (mcpPage.sheet === st) mcpPage.sheet = null;
   mcpPage.notice = `Removed ${s.name} from ${data.removed.map(mcpSourceName).join(", ")}.`;
-  mcpAdopt(data.page);
   if (mcpOnPage()) paintMcp();
 }
 

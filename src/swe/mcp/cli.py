@@ -894,7 +894,8 @@ def _purge_server_state(name: str) -> None:
         _save_swe_state(state)
 
 
-def adopt_harness_servers(mcp_tools: dict, *, dry_run: bool = False) -> list[str]:
+def adopt_harness_servers(mcp_tools: dict, *, dry_run: bool = False,
+                          post_state: dict | None = None) -> list[str]:
     """Pull harness-only servers into the hub, scoped to where they live.
 
     The hub is the source of truth, so a server a harness config holds but
@@ -909,13 +910,19 @@ def adopt_harness_servers(mcp_tools: dict, *, dry_run: bool = False) -> list[str
     new; ``mcp enable`` is how one deliberately leaves its scope.
 
     ``dry_run`` writes nothing — secrets included — but still says what
-    it would adopt. Returns the adopted names, sorted.
+    it would adopt, computed from ``post_state`` (``{tool: servers}`` the
+    run plans to leave behind) so a preview agrees with the real run — a
+    server the same run would prune never counts as held. Returns the
+    adopted names, sorted.
     """
     found_in: dict[str, dict] = {}
     for tool in sorted(mcp_tools):
         if is_hub(tool):
             continue
-        found_in[tool] = get_tool_servers(tool)
+        if post_state is not None and tool in post_state:
+            found_in[tool] = post_state[tool]
+        else:
+            found_in[tool] = get_tool_servers(tool)
 
     try:
         data = load_json(MCP_SOURCE_FILE) or {}
@@ -924,8 +931,19 @@ def adopt_harness_servers(mcp_tools: dict, *, dry_run: bool = False) -> list[str
         print(c("yellow", f"  adoption skipped: {exc}"), file=sys.stderr)
         return []
     hub = data.get(MCP_SOURCE_KEY)
-    if not isinstance(hub, dict):
+    if isinstance(hub, dict):
+        hub = dict(hub)
+    else:
         hub = {}
+        if MCP_SOURCE_KEY not in data:
+            # A legacy flat hub keeps its servers at the top level. Once a
+            # real ``mcpServers`` map exists every reader prefers it, so
+            # writing one without folding the flat entries in would make
+            # them disappear: keep them by moving them into the map.
+            skip = {"swe", "updated", gateway_defaults.GATEWAY_KEY}
+            for key, value in data.items():
+                if key not in skip and isinstance(value, dict):
+                    hub[key] = value
 
     donors: dict[str, str] = {}
     for tool, servers in found_in.items():
@@ -952,7 +970,16 @@ def adopt_harness_servers(mcp_tools: dict, *, dry_run: bool = False) -> list[str
         if dry_run:
             adopted.append(name)
             continue
-        shielded = _shielded_copy(redact_secrets(canonical, secrets))
+        try:
+            shielded = _shielded_copy(redact_secrets(canonical, secrets))
+        except (OSError, ValueError) as exc:
+            # Housekeeping never fails the sync it rode on: a secrets
+            # store that cannot take the credential just leaves this
+            # server out, rather than crash after the requested writes.
+            print(c("yellow", f"  {name}: could not shield its credentials "
+                            f"({exc.__class__.__name__}: {exc}) — left out "
+                            "of the hub"), file=sys.stderr)
+            continue
         if shielded is None:
             # A credential the secrets file cannot hold stays out of the
             # versioned hub entirely rather than land in plaintext.
@@ -1545,12 +1572,18 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
     strict = "--strict" in args
     prune = "--prune" in args
     adopt = "--no-adopt" not in args
+    # A dry run's planned post-sync contents per target, so adoption's
+    # preview counts holders the way the real run's rescan would — a
+    # server the same pass would prune never counts as held.
+    planned_servers: dict[str, dict] = {}
 
     def _finish(code: int) -> int:
         """Adoption is a sync's last act; every successful exit funnels here."""
         adopted: list[str] = []
         if code == 0 and adopt:
-            adopted = adopt_harness_servers(mcp_tools, dry_run=dry_run)
+            adopted = adopt_harness_servers(
+                mcp_tools, dry_run=dry_run,
+                post_state=planned_servers if dry_run else None)
             if adopted:
                 verb = "Would adopt" if dry_run else "Adopted"
                 print(f"\n  {verb} {len(adopted)} server(s) into the hub: "
@@ -1861,7 +1894,11 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
                                       "via_gateway": via_gateway,
                                       "disabled": held_off})
 
-        if (added or updated or pruned) and not dry_run:
+        if dry_run:
+            # The in-memory map already holds adds, skips and prunes —
+            # adoption's preview reads it instead of the untouched file.
+            planned_servers[target] = dict(target_servers)
+        elif added or updated or pruned:
             saver = get_tool_saver(target)
             if saver is not None:
                 saver(target_servers, target_cfg["path"])
@@ -2203,9 +2240,20 @@ def remove_server(name: str, places: list[str]) -> tuple[list[str], list[str], l
                     del hub[name]
                     save_hub_servers(hub)
                     removed.append(HUB_LABEL)
-                    _purge_server_state(name)
                 else:
                     absent.append(HUB_LABEL)
+                # The hub was asked either way: state left from an older
+                # removal or a hand edit — a kept disabled copy, an
+                # adoption record — still names this server, and mcp
+                # enable could resurrect it from the kept copy. A purge
+                # failure is only warned about: the entry itself is gone
+                # or was never there, so the remove still stands.
+                try:
+                    _purge_server_state(name)
+                except (OSError, ConfigurationError) as exc:
+                    print(c("yellow", f"  {place}: {name} is out but its "
+                                    f"state could not be cleaned ({exc})"),
+                          file=sys.stderr)
                 continue
             servers = get_tool_servers(place)
             if name not in servers:
@@ -2236,10 +2284,12 @@ def cmd_remove(args):
 
     positional: list[str] = []
     from_names: list[str] = []
+    from_seen = False
     i = 0
     while i < len(args):
         arg = args[i]
         if arg == "--from":
+            from_seen = True
             from_names += [s for s in args[i + 1].split(",") if s]
             i += 2
         elif arg.startswith("--"):
@@ -2256,7 +2306,13 @@ def cmd_remove(args):
               file=refusal)
         return 1
     name = positional[0]
-    if not from_names:
+    if from_seen and not from_names:
+        # An empty --from asked for nowhere, not everywhere — a script
+        # expanding an empty list must not delete every copy.
+        print(c("red", "--from needs at least one place; "
+                        "drop it to remove everywhere"), file=refusal)
+        return 1
+    if not from_seen:
         # Gone everywhere is the default: a copy left in a harness file is
         # adopted straight back into the hub by the next sync.
         from_names = ["all"]

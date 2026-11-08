@@ -228,6 +228,82 @@ class McpAdoptTest(unittest.TestCase):
         secrets = (self.home / ".swe" / "secrets" / "mcp" / ".api_keys")
         self.assertIn("sk-literal-0123456789", secrets.read_text())
 
+    def test_adoption_shields_args_and_url_parts(self):
+        # env is not the only place a literal credential can sit: flags,
+        # header arguments, env-wrapper assignments and URL parts get the
+        # same store-and-reference treatment before the hub write.
+        self.claude_write({
+            "argcred": {"command": "x",
+                        "args": ["--token", "lit-token-999",
+                                 "--header", "Authorization: Bearer hdr-lit",
+                                 "API_KEY=env-lit"]},
+            "urlcred": {"url": "https://u:p4ssw0rd@h.example.com/mcp"
+                               "?token=q-lit&v=2"},
+        })
+        r = self.run_mcp("sync", "swe", "cursor", "--no-interactive")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        raw = self.hub_file.read_text()
+        for lit in ("lit-token-999", "hdr-lit", "env-lit",
+                    "p4ssw0rd", "q-lit"):
+            self.assertNotIn(lit, raw)
+        hub = self.hub()
+        self.assertEqual(hub["argcred"]["args"],
+                         ["--token", "${TOKEN}",
+                          "--header", "Authorization: Bearer ${AUTHORIZATION}",
+                          "API_KEY=${API_KEY}"])
+        url = hub["urlcred"]["url"]
+        self.assertIn("${URL_PASSWORD}", url)
+        self.assertIn("v=2", url)  # non-credential query pair untouched
+        # Resolving reproduces the original literals for harness writes.
+        secrets = (self.home / ".swe" / "secrets" / "mcp" / ".api_keys")
+        text = secrets.read_text()
+        for lit in ("lit-token-999", "hdr-lit", "env-lit", "p4ssw0rd"):
+            self.assertIn(lit, text)
+
+    def test_an_unwritable_secrets_store_skips_the_server_not_the_sync(self):
+        # A store that cannot take a literal leaves the server out and
+        # warns; the sync it rode on still stands and exits clean.
+        self.hub_write({"github": self.GITHUB})
+        self.claude_write({"sk": {"command": "x",
+                                  "env": {"API_KEY": "sk-blocked"}}})
+        # _rewrite_store re-chmods its own dir, so the only block a test
+        # can lay is making the secrets path a file instead of a dir.
+        secrets_dir = self.home / ".swe" / "secrets"
+        secrets_dir.mkdir(parents=True)
+        (secrets_dir / "mcp").write_text("not a dir\n")
+        r = self.run_mcp("sync", "swe", "cursor", "--no-interactive")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn("github", self.cursor())  # requested write landed
+        self.assertNotIn("sk", self.hub())
+        self.assertIn("sk", self.claude())  # still the harness's own
+
+    def test_a_legacy_flat_hub_keeps_its_entries(self):
+        # A hub from before the mcpServers key holds servers at the top
+        # level; adoption writes the map without making them disappear.
+        self.hub_file.write_text(
+            json.dumps({"oldsrv": {"command": "old"}}) + "\n")
+        self.claude_write({"extra": dict(self.EXTRA)})
+        r = self.run_mcp("sync", "swe", "cursor", "--no-interactive")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        hub = self.hub()
+        self.assertEqual(hub["oldsrv"], {"command": "old"})
+        self.assertIn("extra", hub)
+
+    def test_a_dry_run_never_reports_adopting_what_it_would_prune(self):
+        # stray only lives in cursor: a real `sync swe cursor --prune`
+        # deletes it before adoption ever scans, so the preview must not
+        # promise an adoption the run will not do.
+        self.hub_write({"github": self.GITHUB})
+        self.claude_write({"github": self.GITHUB})
+        self.cursor_write({"github": self.GITHUB,
+                           "stray": {"command": "s"}})
+        r = self.run_mcp("sync", "swe", "cursor", "--prune", "--dry-run",
+                         "--no-interactive")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn("would prune", r.stdout)
+        self.assertNotIn("adopt", r.stdout.lower())
+        self.assertIn("stray", self.cursor())  # untouched: dry run
+
     def test_disable_stash_scopes_the_hub_copy_like_an_adoption(self):
         # extra only lives in claude; disabling it stashes a hub copy —
         # scoped so a later hub sync does not spread it to cursor/codex.
@@ -331,6 +407,34 @@ class McpAdoptTest(unittest.TestCase):
         r = self.run_mcp("remove", "ghost")
         self.assertEqual(r.returncode, 1)
         self.assertIn("ghost not in: swe", r.stdout)
+
+    def test_an_empty_from_is_refused_not_everywhere(self):
+        # `remove x --from="$places"` with an empty expansion must not
+        # read as "everywhere" — before the default existed it was a
+        # refusal, and deleting every copy on a script slip is worse.
+        self.seed()
+        r = self.run_mcp("remove", "github", "--from=")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("--from needs at least one place", r.stdout)
+        self.assertIn("github", self.hub())
+        self.assertIn("github", self.claude())
+
+    def test_remove_purges_state_even_when_the_hub_entry_is_gone(self):
+        # State left from an older partial removal or a hand edit still
+        # names the server — an adoption record or a kept disabled copy
+        # could resurrect it on `mcp enable`. Asking the hub cleans it.
+        self.seed()
+        self.run_mcp("sync", "swe", "cursor", "--no-interactive")
+        data = self.hub_data()
+        del data["mcpServers"]["extra"]
+        self.hub_file.write_text(json.dumps(data) + "\n")
+        r = self.run_mcp("remove", "extra")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertNotIn("extra", self.claude())
+        self.assertIn("extra not in: swe", r.stdout)
+        state = self.swe_state()
+        self.assertNotIn("adopted_from", state)
+        self.assertNotIn("extra", json.dumps(state.get("disabled", {})))
 
 
 if __name__ == "__main__":

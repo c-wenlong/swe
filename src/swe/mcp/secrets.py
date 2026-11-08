@@ -365,12 +365,16 @@ def shield_credentials(server: dict, home: Path | None = None) -> tuple[dict | N
     would still leak the failing literal, so the caller must leave the
     server out of the hub entirely.
 
-    ``swe mcp discover --apply`` copies harness values into the versioned
-    hub file. ``redact()`` only substitutes values already in the store, so
-    a literal ``env.API_KEY = "sk-live"`` — the common case — landed in
-    ``mcp.json`` in plaintext, one ``git add`` from a commit. Fields named
-    like credentials that are not already ``${NAME}`` references are moved
-    into the store and replaced by the reference. Shielding is
+    ``swe mcp discover --apply`` and sync's adoption pass copy harness
+    values into the versioned hub file. ``redact()`` only substitutes
+    values already in the store, so a literal ``env.API_KEY = "sk-live"``
+    — the common case — landed in ``mcp.json`` in plaintext, one ``git
+    add`` from a commit. Fields named like credentials that are not
+    already ``${NAME}`` references are moved into the store and replaced
+    by the reference — env values, header values, credential-named args
+    (``--token lit``, ``--header "Auth: Bearer lit"``, ``KEY=lit`` wrapper
+    assignments) and URL userinfo passwords, opaque path segments and
+    credential-named query/fragment values. Shielding is
     output-equivalent: ``resolve()`` reproduces the same value in every
     harness config a sync writes.
     """
@@ -399,15 +403,142 @@ def shield_credentials(server: dict, home: Path | None = None) -> tuple[dict | N
     def stash(hint: str, value: str) -> str | None:
         try:
             ref = _store_literal(hint, value, secrets, home, frozenset(reserved))
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             # A value the store can't represent (multiline PEM, both quote
-            # kinds) must not abort the whole apply — and must not land in
-            # the hub either. The server is skipped wholesale below.
+            # kinds) or can't write (unwritable secrets dir) must not
+            # abort the whole apply — and must not land in the hub either.
+            # The server is skipped wholesale below.
             blocked.append(f"{hint}: {exc}")
             return None
         notes.append(
             f"{hint}: plaintext credential moved to the secrets store ({ref})")
         return ref
+
+    def shield_one(hint: str, value: str) -> str | None:
+        """One credential slot's literal → ``${NAME}``, or None (blocked).
+
+        A value that is nothing but ``${NAME}`` references keeps them; one
+        mixing a literal with a reference cannot be stored safely —
+        keeping it would write the literal to the hub, storing it whole
+        would leave the inner reference unexpanded.
+        """
+        if not value:
+            return value
+        if _REF_ONLY_RE.fullmatch(value):
+            return value
+        if _REF_RE.search(value):
+            blocked.append(
+                f"{hint}: credential literal mixed with a "
+                "${NAME} reference cannot be stored safely")
+            return None
+        return stash(hint, value)
+
+    def shield_header_token(key: str, value: str) -> str | None:
+        """A header value like ``Bearer lit`` or a bare literal → shielded.
+
+        Mirrors the ``headers`` dict handling: the scheme word stays, the
+        token stores.
+        """
+        scheme = _SCHEME_VALUE_RE.fullmatch(value)
+        if scheme:
+            token = scheme.group(1)
+            if _REF_ONLY_RE.fullmatch(token):
+                return value
+            if _REF_RE.search(token):
+                new_token = shield_embedded(key, token)
+                if new_token is None or new_token == token:
+                    # Nothing stashed while a literal still sits next to a
+                    # reference — the literal would land in the hub.
+                    blocked.append(
+                        f"{key}: credential literal mixed with a "
+                        "${NAME} reference cannot be stored safely")
+                    return None
+                return f"{value[: -len(token)]}{new_token}"
+            ref = stash(key, token)
+            return None if ref is None else f"{value[: -len(token)]}{ref}"
+        return shield_one(key, value)
+
+    def shield_header_value(value: str) -> str | None:
+        """A ``--header`` argument's ``Name: value`` → ``Name: ${NAME}``.
+
+        Only credential-named headers and auth-scheme values store — an
+        ``Accept: application/json`` stays a plain argument.
+        """
+        name, colon, rest = value.partition(":")
+        if not colon:
+            return shield_one("header", value)
+        rest = rest.strip()
+        if not (_SECRET_FLAG_RE.search(name) or _SCHEME_VALUE_RE.fullmatch(rest)):
+            return value
+        new_rest = shield_header_token(name.strip(), rest)
+        return None if new_rest is None else f"{name}: {new_rest}"
+
+    def shield_url(url: str) -> str | None:
+        """A URL's credential parts → ``${NAME}`` references.
+
+        userinfo passwords, opaque path segments (webhook-style tokens —
+        the same detector ``scrub_url`` hides for display), credential-
+        named query values and credential-named fragment pairs store; a
+        part already a reference keeps it.
+        """
+        from urllib.parse import urlsplit, urlunsplit
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            # Unparseable stays as typed — display layers mask it whole.
+            return url
+        netloc = parts.netloc
+        userinfo, at, hostport = netloc.rpartition("@")
+        if at:
+            user, colon, password = userinfo.partition(":")
+            if colon:
+                new_pass = shield_one("URL password", password)
+                if new_pass is None:
+                    return None
+                userinfo = f"{user}:{new_pass}"
+            # A bare userinfo (no colon) is an account name, left as is.
+            netloc = f"{userinfo}@{hostport}"
+        path_segs = []
+        for seg in parts.path.split("/"):
+            if _looks_opaque(seg):
+                new_seg = shield_one("URL path", seg)
+                if new_seg is None:
+                    return None
+                path_segs.append(new_seg)
+            else:
+                path_segs.append(seg)
+        path = "/".join(path_segs)
+
+        def shield_pairs(raw: str) -> str | None:
+            pairs = []
+            for pair in raw.split("&"):
+                if not pair:
+                    continue
+                key, eq, value = pair.partition("=")
+                if eq and value and _SECRET_FLAG_RE.search(key):
+                    if _REF_RE.search(value):
+                        new_value = shield_embedded(key, value)
+                        if new_value is None:
+                            blocked.append(
+                                f"{key}: credential literal mixed with a "
+                                "${NAME} reference cannot be stored safely")
+                            return None
+                        value = new_value
+                    else:
+                        ref = stash(key, value)
+                        if ref is None:
+                            return None
+                        value = ref
+                pairs.append(key + eq + value)
+            return "&".join(pairs)
+
+        query = shield_pairs(parts.query) if parts.query else parts.query
+        if query is None:
+            return None
+        fragment = shield_pairs(parts.fragment) if parts.fragment else parts.fragment
+        if fragment is None:
+            return None
+        return urlunsplit((parts.scheme, netloc, path, query, fragment))
 
     def shield_embedded(hint: str, value: str) -> str | None:
         """Shield literal credentials mixed into a value holding ``${NAME}``.
@@ -499,40 +630,79 @@ def shield_credentials(server: dict, home: Path | None = None) -> tuple[dict | N
         out["headers"] = shielded
 
     url = out.get("url")
-    if isinstance(url, str) and url:
-        from urllib.parse import urlsplit, urlunsplit
+    if isinstance(url, str) and url and not _REF_ONLY_RE.fullmatch(url):
+        new_url = shield_url(url)
+        if new_url is None:
+            return None, notes + blocked
+        out["url"] = new_url
 
-        try:
-            parts = urlsplit(url)
-        except ValueError:
-            parts = None
-        if parts and parts.query:
-            pairs = []
-            touched = False
-            for pair in parts.query.split("&"):
-                if not pair:
-                    continue
-                key, eq, value = pair.partition("=")
-                if eq and value and _SECRET_FLAG_RE.search(key):
-                    if not _REF_RE.search(value):
-                        ref = stash(key, value)
-                        if ref is not None:
-                            value = ref
-                            touched = True
-                    else:
-                        new_value = shield_embedded(key, value)
+    args = out.get("args")
+    if isinstance(args, list):
+        # The same credential shapes scrub_args hides for display are
+        # moved into the store here: a harness config's literal --token,
+        # --header value, KEY=… wrapper or credential-bearing URL must not
+        # reach the versioned hub either.
+        shielded_args: list[str] = []
+        pending = None  # "secret" or "header": the next bare arg is its value
+        broke = False
+        for arg in (str(a) for a in args):
+            if pending and not arg.startswith("-"):
+                if pending == "header":
+                    new_arg = shield_header_value(arg)
+                else:
+                    new_arg = shield_one(pending, arg)
+                if new_arg is None:
+                    broke = True
+                    break
+                shielded_args.append(new_arg)
+                pending = None
+                continue
+            pending = None
+            if arg.startswith("-"):
+                flag, eq, value = arg.partition("=")
+                if flag in _HEADER_FLAGS:
+                    if eq:
+                        new_value = shield_header_value(value)
                         if new_value is None:
-                            blocked.append(
-                                f"{key}: credential literal mixed with a "
-                                "${NAME} reference cannot be stored safely")
-                        elif new_value != value:
-                            value = new_value
-                            touched = True
-                pairs.append(key + eq + value)
-            if touched:
-                out["url"] = urlunsplit(
-                    (parts.scheme, parts.netloc, parts.path,
-                     "&".join(pairs), parts.fragment))
+                            broke = True
+                            break
+                        arg = f"{flag}={new_value}"
+                    else:
+                        pending = "header"
+                elif _SECRET_FLAG_RE.search(flag):
+                    if eq:
+                        new_value = shield_one(flag.lstrip("-"), value)
+                        if new_value is None:
+                            broke = True
+                            break
+                        arg = f"{flag}={new_value}"
+                    else:
+                        pending = flag.lstrip("-") or "arg"
+                elif eq and "://" in value:
+                    # `--url=https://host/mcp?token=...`
+                    new_value = shield_url(value)
+                    if new_value is None:
+                        broke = True
+                        break
+                    arg = f"{flag}={new_value}"
+            elif "://" in arg:
+                new_arg = shield_url(arg)
+                if new_arg is None:
+                    broke = True
+                    break
+                arg = new_arg
+            elif (assign := _ENV_ASSIGN_RE.fullmatch(arg)) and _SECRET_FLAG_RE.search(
+                    assign.group(1)):
+                # `env API_KEY=... npx server`, a common wrapper in configs.
+                new_value = shield_one(assign.group(1), assign.group(2))
+                if new_value is None:
+                    broke = True
+                    break
+                arg = f"{assign.group(1)}={new_value}"
+            shielded_args.append(arg)
+        if broke:
+            return None, notes + blocked
+        out["args"] = shielded_args
     if blocked:
         # Any field that failed to store leaves the literal out of the hub
         # AND keeps the whole server out: a half-shielded entry could still

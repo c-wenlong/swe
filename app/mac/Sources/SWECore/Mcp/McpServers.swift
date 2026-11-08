@@ -870,6 +870,20 @@ public struct McpRemoveResult: Decodable, Sendable, Equatable {
     public let name: String
     public let removed: [String]
     public let absent: [String]
+    /// Places whose config could not be written — the server still sits
+    /// there, and a harness copy adopts back into the hub on the next
+    /// sync. Absent from a swe before `failed` existed.
+    public let failed: [String]
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        removed = try container.decode([String].self, forKey: .removed)
+        absent = try container.decode([String].self, forKey: .absent)
+        failed = try container.decodeIfPresent([String].self, forKey: .failed) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, removed, absent, failed }
 }
 
 /// A typed MCP command line as command + args, split like a shell: quotes
