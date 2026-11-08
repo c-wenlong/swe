@@ -517,22 +517,27 @@ struct Badge: View {
 
 /// Devin's switch: accent blue when on (a selected control), tinted track
 /// when off, the same whether or not the window is focused, unlike the
-/// system switch. 36x20 as `core.size.control.switch`.
+/// system switch. 36x20 as `core.size.control.switch`. `tint` replaces
+/// the blue where the track itself carries a state colour, such as an
+/// MCP server row's health.
 struct AccentSwitchStyle: ToggleStyle {
+    var tint: Color = Theme.interactive
+
     func makeBody(configuration: Configuration) -> some View {
-        AccentSwitch(configuration: configuration)
+        AccentSwitch(configuration: configuration, tint: tint)
     }
 }
 
 private struct AccentSwitch: View {
     let configuration: ToggleStyleConfiguration
+    var tint: Color = Theme.interactive
 
     var body: some View {
         Button {
             configuration.isOn.toggle()
         } label: {
             ZStack(alignment: configuration.isOn ? .trailing : .leading) {
-                Capsule().fill(configuration.isOn ? Theme.interactive : Theme.usageTrack)
+                Capsule().fill(configuration.isOn ? tint : Theme.usageTrack)
                     .overlay(Capsule().strokeBorder(Theme.border, lineWidth: configuration.isOn ? 0 : 1))
                 // A fixed knob, so the alignment moves it end to end.
                 Circle().fill(.white).frame(width: 14, height: 14).padding(3)

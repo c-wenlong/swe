@@ -98,6 +98,7 @@ every key below is live.
 | `popupShowIncidents`, `popupShowStats`, `popupHiddenSources`, `popupHiddenSourceWindows`, `popupSourceOrder` | menu bar popup content and order |
 | `popupHiddenHarnesses`, `popupHiddenWindows`, `popupHarnessOrder` | legacy popup keys, read-only migration fallbacks; keep until the new keys have covered every install |
 | `mcpHiddenHarnesses` | harness columns hidden on the MCP page |
+| `mcpColumnOrder` | harness column order on the MCP page's table |
 | `providerOrder`, `providerDisabled` | provider list order and switches |
 | `inferenceOrder`, `infraOrder`, `servicesOrder` | row order on the Providers page's Inference, Infra and Services tabs |
 | `infraKeys`, `servicesKeys` | variables filed to the Infra or Services tab that no catalogue claims |

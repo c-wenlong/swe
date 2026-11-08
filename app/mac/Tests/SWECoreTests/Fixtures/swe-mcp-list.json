@@ -27,7 +27,8 @@
           ]
         ],
         "secrets_missing": [],
-        "in_hub": true
+        "in_hub": true,
+        "type": "search"
       },
       {
         "name": "fixture-hub-only",
@@ -83,7 +84,8 @@
         "secrets_missing": [
           "SECRET_TOKEN"
         ],
-        "in_hub": true
+        "in_hub": true,
+        "type": "dev"
       }
     ]
   }
