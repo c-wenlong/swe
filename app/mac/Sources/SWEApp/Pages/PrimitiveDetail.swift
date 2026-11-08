@@ -832,6 +832,7 @@ struct PluginDetailView: View {
             }
             if folders != nil, !editable { lockNote }
             header
+            PluginInfoCard(ref: plugin.ref, refresh: refresh)
             if folders == nil {
                 SkeletonRows(rows: 5, shape: .file, label: "Reading the plugin's folder…")
             } else {
@@ -1016,6 +1017,156 @@ struct PluginDetailView: View {
         Task {
             await app.pluginCatalog.load(swe: app.swe, for: app.swePath)
             await app.skills.load(for: app.swePath)
+        }
+    }
+}
+
+/// `swe plugins info`: the declared MCP servers (key names only, never
+/// values), per-skill and MCP call counts from the session index, and
+/// the newest file change. Hidden entirely while the call runs and when
+/// the swe predates `info` — the catalog row already says the rest.
+private struct PluginInfoCard: View {
+    var ref: String
+    /// The sheet's reload count; a refresh keeps `ref` while the plugin's
+    /// files and index counts move on, so it keys the fetch.
+    var refresh: Int
+    @Environment(AppModel.self) private var app
+    /// nil until the swe call lands; a failed call stays nil forever.
+    @State private var info: PluginInfo?
+    /// Servers before the list folds behind a Show more row.
+    private static let foldLimit = 8
+    @State private var showsAll = false
+
+    var body: some View {
+        Group {
+            if let info {
+                Card {
+                VStack(alignment: .leading, spacing: 10) {
+                    if !info.mcpServers.isEmpty {
+                        Text("MCP servers").font(Theme.font(size: 12, weight: .semibold))
+                        ForEach(RowFold.visible(info.mcpServers, limit: Self.foldLimit,
+                                                expanded: showsAll), id: \.name) { server in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text(server.name)
+                                        .font(Theme.font(size: 12, design: .monospaced))
+                                    ServerStateView(server: server)
+                                    Spacer()
+                                    if let usage = server.usage, usage.tracked, usage.calls > 0 {
+                                        Text("\(usage.calls) calls")
+                                            .font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                                    }
+                                }
+                                if !server.envKeys.isEmpty || !server.headerKeys.isEmpty {
+                                    FlowLayout(spacing: 4, lineSpacing: 4) {
+                                        ForEach(server.envKeys, id: \.self) { key in
+                                            KeyChip(name: key, kind: "env",
+                                                    missing: server.secretsMissing.contains(key))
+                                        }
+                                        ForEach(server.headerKeys, id: \.self) { key in
+                                            KeyChip(name: key, kind: "header", missing: false)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if RowFold.hiddenCount(total: info.mcpServers.count, limit: Self.foldLimit) > 0 {
+                            ExpandRow(isExpanded: showsAll,
+                                      hidden: RowFold.hiddenCount(total: info.mcpServers.count,
+                                                                  limit: Self.foldLimit),
+                                      help: (expand: "Show every declared server",
+                                             collapse: "Show the first \(Self.foldLimit) servers"),
+                                      edge: .inset) {
+                                withAnimation(.easeOut(duration: Theme.fadeDuration)) { showsAll.toggle() }
+                            }
+                        }
+                    }
+                    if !info.mcpServers.isEmpty, usageLine != nil { Divider() }
+                    if let line = usageLine {
+                        Text(line).font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let updated = info.updated {
+                        Text("Last change \(updated.prefix(10))")
+                            .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    }
+                }
+                }
+            }
+        }
+        .task(id: [ref, String(refresh)]) {
+            // A swe from before `info` fails the call; the card stays
+            // hidden rather than blank.
+            info = try? await app.swe.pluginInfo(ref)
+        }
+    }
+
+    /// Where a declared server stands: its swe hub flag and each harness
+    /// it is installed in or switched off for, names through
+    /// HarnessMarkView like every harness mention.
+    private struct ServerStateView: View {
+        var server: PluginInfo.DeclaredServer
+
+        var body: some View {
+            if server.harnesses.isEmpty && server.disabledIn.isEmpty && !server.inHub {
+                Text("declared only").font(Theme.caption).foregroundStyle(Theme.textMuted)
+            } else {
+                HStack(spacing: 4) {
+                    if server.inHub {
+                        Text("in hub").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    }
+                    if !server.harnesses.isEmpty {
+                        Text("in").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                        ForEach(server.harnesses, id: \.self) { harness in
+                            HarnessMarkView(harness: harness, size: 12)
+                        }
+                    }
+                    if !server.disabledIn.isEmpty {
+                        Text("off in").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                        ForEach(server.disabledIn, id: \.self) { harness in
+                            HarnessMarkView(harness: harness, size: 12)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// One line for the usage rollup, or nil when the index is off or
+    /// nothing was ever called.
+    private var usageLine: String? {
+        guard let usage = info?.usage, usage.tracked else { return nil }
+        let skillRows = info?.skills ?? []
+        let called = skillRows.filter { ($0.usage?.calls ?? 0) > 0 }
+        var line: String
+        if usage.calls == 0 {
+            line = "No calls indexed yet: the index scans existing sessions too."
+        } else {
+            line = "\(usage.calls) calls across \(usage.sessions) sessions"
+            if let last = usage.lastUsed { line += " · last \(last.prefix(10))" }
+            if let skillCalls = usage.skillCalls, let mcpCalls = usage.mcpCalls {
+                line += " (\(skillCalls) skill, \(mcpCalls) mcp)"
+            }
+        }
+        if !called.isEmpty {
+            line += "\n" + called.map { "\($0.name) \($0.usage?.calls ?? 0)" }.joined(separator: " · ")
+        }
+        return line
+    }
+
+    private struct KeyChip: View {
+        var name: String
+        var kind: String
+        var missing: Bool
+
+        var body: some View {
+            Text("\(kind) \(name)")
+                .font(Theme.font(size: 11, design: .monospaced))
+                .foregroundStyle(missing ? Theme.warningText : Theme.textSecondary)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Theme.subtle, in: .capsule)
+                .overlay(Capsule().strokeBorder(missing ? Theme.warning : Theme.borderStrong, lineWidth: 1))
+                .hoverTip(missing ? "\(name) is declared but unset" : "\(kind) key \(name)")
         }
     }
 }

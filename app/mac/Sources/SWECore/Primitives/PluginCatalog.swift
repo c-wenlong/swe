@@ -527,6 +527,99 @@ extension SweClient {
                         "--harness=\(harnesses.joined(separator: ","))", "--json"],
                        allowFailure: true)
     }
+
+    /// `swe plugins info <ref> --json`: the detail sheet's declared MCP
+    /// servers and index usage. Absent on a swe from before `info`.
+    public func pluginInfo(_ ref: String) async throws -> PluginInfo {
+        try await call(["plugins", "info", ref, "--json"])
+    }
+}
+
+/// `swe plugins info`: only the parts the catalog row cannot say — the
+/// plugin itself the card already has. Every field tolerant: a swe from
+/// before `info` ships none of it.
+public struct PluginInfo: Decodable, Sendable {
+    public let ref: String
+    /// Newest mtime under the plugin folder, ISO.
+    public let updated: String?
+    public let mcpServers: [DeclaredServer]
+    public let skills: [SkillRow]
+    public let usage: Rollup?
+
+    /// A server the plugin's `.mcp.json` or manifest declares, joined
+    /// with `swe mcp` state. Key names only — never values.
+    public struct DeclaredServer: Decodable, Sendable {
+        public let name: String
+        public let envKeys: [String]
+        public let headerKeys: [String]
+        /// Harnesses the swe inventory has it in, or [] for declared-only.
+        public let harnesses: [String]
+        public let disabledIn: [String]
+        public let inHub: Bool
+        /// Env keys swe knows are required but unset.
+        public let secretsMissing: [String]
+        public let usage: SkillUsage?
+
+        enum CodingKeys: String, CodingKey {
+            case name, envKeys, headerKeys, harnesses, disabledIn, inHub, secretsMissing, usage
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = try c.decode(String.self, forKey: .name)
+            envKeys = try c.decodeIfPresent([String].self, forKey: .envKeys) ?? []
+            headerKeys = try c.decodeIfPresent([String].self, forKey: .headerKeys) ?? []
+            harnesses = try c.decodeIfPresent([String].self, forKey: .harnesses) ?? []
+            disabledIn = try c.decodeIfPresent([String].self, forKey: .disabledIn) ?? []
+            inHub = try c.decodeIfPresent(Bool.self, forKey: .inHub) ?? false
+            secretsMissing = try c.decodeIfPresent([String].self, forKey: .secretsMissing) ?? []
+            usage = try c.decodeIfPresent(SkillUsage.self, forKey: .usage)
+        }
+    }
+
+    /// A skill the plugin ships, with its call counts.
+    public struct SkillRow: Decodable, Sendable {
+        public let name: String
+        public let harnesses: [String]
+        public let usage: SkillUsage?
+
+        enum CodingKeys: String, CodingKey { case name, harnesses, usage }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = try c.decode(String.self, forKey: .name)
+            harnesses = try c.decodeIfPresent([String].self, forKey: .harnesses) ?? []
+            usage = try c.decodeIfPresent(SkillUsage.self, forKey: .usage)
+        }
+    }
+
+    /// One rollup over every `Skill:` and `mcp__*__` call the plugin's
+    /// surface could have made.
+    public struct Rollup: Decodable, Sendable {
+        public let tracked: Bool
+        public let calls: Int
+        public let sessions: Int
+        public let lastUsed: String?
+        public let byHarness: [String: Int]
+        /// The split: calls through shipped skills vs MCP servers.
+        public let skillCalls: Int?
+        public let mcpCalls: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case tracked, calls, sessions, lastUsed, byHarness, skillCalls, mcpCalls
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            tracked = try c.decodeIfPresent(Bool.self, forKey: .tracked) ?? false
+            calls = try c.decodeIfPresent(Int.self, forKey: .calls) ?? 0
+            sessions = try c.decodeIfPresent(Int.self, forKey: .sessions) ?? 0
+            lastUsed = try c.decodeIfPresent(String.self, forKey: .lastUsed)
+            byHarness = try c.decodeIfPresent([String: Int].self, forKey: .byHarness) ?? [:]
+            skillCalls = try c.decodeIfPresent(Int.self, forKey: .skillCalls)
+            mcpCalls = try c.decodeIfPresent(Int.self, forKey: .mcpCalls)
+        }
+    }
 }
 
 /// `swe plugins marketplace add --json`: one result per harness asked.

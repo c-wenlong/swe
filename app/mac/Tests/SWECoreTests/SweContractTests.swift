@@ -124,6 +124,33 @@ import Testing
                                       state: "linked"))
     }
 
+    @Test func pluginsInfoDecodesServersSkillsAndUsage() async throws {
+        let (swe, _) = try client("swe-plugins-info")
+        let info = try await swe.pluginInfo("fixture-plugin@fixture-market")
+        #expect(info.ref == "fixture-plugin@fixture-market")
+        #expect(info.updated == "2026-11-05T09:30:00+00:00")
+
+        let server = try #require(info.mcpServers.first)
+        #expect(server.name == "fixture-mcp")
+        #expect(server.envKeys == ["TOKEN", "GONE"])
+        #expect(server.headerKeys == ["X-Api"])
+        #expect(server.inHub)
+        #expect(server.disabledIn == ["codex"])
+        #expect(server.secretsMissing == ["GONE"])
+        #expect(server.usage?.calls == 7)
+        #expect(info.mcpServers[1].harnesses.isEmpty)
+
+        let skill = try #require(info.skills.first)
+        #expect(skill.name == "fixture-skill")
+        #expect(skill.usage?.calls == 4)
+
+        let usage = try #require(info.usage)
+        #expect(usage.calls == 11)
+        #expect(usage.skillCalls == 4)
+        #expect(usage.mcpCalls == 7)
+        #expect(usage.lastUsed == "2026-11-06T12:00:00Z")
+    }
+
     @Test func mcpListDecodesServersWithoutHealth() async throws {
         let (swe, _) = try client("swe-mcp-list")
         let inventory = try await swe.mcpServers(health: false)
