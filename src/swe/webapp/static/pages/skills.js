@@ -719,7 +719,13 @@ function skillChips(skill, roots) {
   const seeing = new Set(skill.harnesses);
   if (skill.source !== "shared") return roots.filter((r) => seeing.has(r.name)).map((r) => [r, "linked", true, false]);
   return roots.map((r) => {
-    const on = seeing.has(r.name), link = rootLink(r);
+    // `on` is this folder's state, not the harness name's: two folders
+    // can share a label, so linked always loads a shared skill and a
+    // selection answers from its own `enabled` list.
+    const on = rootLink(r) === "linked" ? true
+      : rootLink(r) === "selection" ? (r.enabled || []).includes(skill.name)
+      : seeing.has(r.name);
+    const link = rootLink(r);
     if (link === "linked") return [r, "linked", on, true];
     if (link === "selection") return [r, on ? "linked" : "selection", on, true];
     if (link === "notLinked")
