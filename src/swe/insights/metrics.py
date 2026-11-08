@@ -102,7 +102,8 @@ _ERROR_STRONG = re.compile(
     r"tool ['\"\w-]+ (validation )?failed|validation failed|hook error|"
     r"the user doesn't want to proceed|returned an error|"
     r"traceback \(most recent|mcp error|concurrent .* limit reached|"
-    r"command timed out|deadline exceeded|cancell?ed due to)", re.I)
+    r"command timed out|deadline exceeded|did not complete within its|"
+    r"cancell?ed due to)", re.I)
 _ERROR_WEAK = re.compile(
     r"(\berror:|\bfailed:|denied by|permission denied|"
     r"does not exist|no such (file|tool|command|directory)|not found\b|"
@@ -119,13 +120,18 @@ _GUARD_REFUSAL = re.compile(
     r"\brefusing to\b|\bisolated in the worktree\b|\bworktree-isolated\b",
     re.I)
 
-# tool_reliability.py's timeout class, split the same way: ``Command
-# timed out`` and ``deadline exceeded`` are emitted results (strong,
-# repeated inside ``_ERROR_STRONG``), while bare ``timeout``/``timed
-# out`` also appears inside commands (``timeout 30 make test``), so the
-# loose form is weak.
-_TIMEOUT_STRONG = re.compile(r"command timed out|deadline exceeded", re.I)
-_TIMEOUT_WEAK = re.compile(r"timed? ?out|timeout|deadline", re.I)
+# tool_reliability.py's timeout class, retightened for text-only rows:
+# ``Command timed out``, ``deadline exceeded`` and ``did not complete
+# within its NNNs timeout`` are emitted results (strong, the first two
+# repeated inside ``_ERROR_STRONG``). The loose ``timed out`` forms are
+# weak. Bare ``timeout`` and ``deadline`` are config vocabulary — a read
+# of ``timeout = 30`` or a ``timeout 30 make`` argument — and never mean
+# a failure on their own.
+_TIMEOUT_STRONG = re.compile(
+    r"command timed out|deadline exceeded|did not complete within its",
+    re.I)
+_TIMEOUT_WEAK = re.compile(
+    r"timed[- ]?out|timeout (exceeded|expired)|timeout ?error\b", re.I)
 
 # An errored tool row that names an MCP server — ``MCP error -32602``,
 # ``mcp__notion__*`` in a ``<tool_use_error>``, ``tabs_context_mcp
@@ -219,9 +225,11 @@ def compute(session_id: str, harness: str,
             # Weak signatures skip a call's own argument — but a
             # call-shaped row can still carry a result: opencode writes
             # ``name: args\nresult`` as one row, so they scan the text
-            # after the first line. A multi-line argument (a heredoc, an
-            # inline script) can trip them there; that is the price of
-            # seeing the merged rows at all.
+            # after the first line. A multi-line argument or a read
+            # file's contents can trip them there; that is the price of
+            # seeing the merged rows at all, and the timeout class keeps
+            # its own tighter list because ``timeout`` is config
+            # vocabulary far above ``error:`` in file text.
             weak_zone = (text.split("\n", 1)[1] if "\n" in text else "") \
                 if call_shaped else text
             timed_out = _TIMEOUT_STRONG.search(text) is not None or (

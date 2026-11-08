@@ -169,9 +169,22 @@ class GuardAndFailureTests(unittest.TestCase):
             R("tool", None, tool_text="Exit code 143\nCommand timed out after 2m 0s"),
             R("tool", None, tool_text="the request timed out"),
             R("tool", None, tool_text="deadline exceeded while waiting"),
+            R("tool", None, tool_text="Command did not complete within "
+                                      "its 120s timeout"),
         ])
-        self.assertEqual(m.n_timeouts, 3)
-        self.assertEqual(m.n_tool_errors, 3)
+        self.assertEqual(m.n_timeouts, 4)
+        self.assertEqual(m.n_tool_errors, 4)
+
+    def test_a_file_full_of_timeout_words_is_not_a_timeout(self):
+        # a successful read/result whose payload mentions the word
+        m = compute([
+            R("tool", None, tool_text="read: /repo/cfg.yml\n"
+                                      "timeout = 30\ndeadline: friday"),
+            R("tool", None, tool_text="--timeout <n>  set the timeout"),
+        ])
+        self.assertEqual(m.n_timeouts, 0)
+        self.assertEqual(m.n_tool_errors, 0)
+        self.assertEqual(m.n_tool_calls, 1)
 
     def test_mcp_errors(self):
         m = compute([
