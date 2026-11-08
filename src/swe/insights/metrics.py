@@ -94,7 +94,9 @@ _CALL = re.compile(r"^[A-Za-z_][\w.-]*(?:: |\s*$)")
 # Devin's ``name: <result>`` rows — result text behind a call-shaped
 # prefix — still count. Weak signatures are ordinary output vocabulary
 # (``error:``, ``not found``, ``failed to``) that an argument plausibly
-# contains; they apply only to rows that are not call-shaped.
+# contains; they apply to result rows and, because opencode writes
+# ``name: args\nresult`` as a single row, to the tail of a call-shaped
+# row — never to its first line, which is the call itself.
 _ERROR_STRONG = re.compile(
     r"(<tool_use_error>|exit code:? [1-9]\d*\b|"
     r"tool ['\"\w-]+ (validation )?failed|validation failed|hook error|"
@@ -214,12 +216,19 @@ def compute(session_id: str, harness: str,
             text = row.tool_text
             refused = _GUARD_REFUSAL.search(text) is not None
             call_shaped = _CALL.match(text) is not None
+            # Weak signatures skip a call's own argument — but a
+            # call-shaped row can still carry a result: opencode writes
+            # ``name: args\nresult`` as one row, so they scan the text
+            # after the first line. A multi-line argument (a heredoc, an
+            # inline script) can trip them there; that is the price of
+            # seeing the merged rows at all.
+            weak_zone = (text.split("\n", 1)[1] if "\n" in text else "") \
+                if call_shaped else text
             timed_out = _TIMEOUT_STRONG.search(text) is not None or (
-                not call_shaped and _TIMEOUT_WEAK.search(text) is not None)
+                _TIMEOUT_WEAK.search(weak_zone) is not None)
             errored = refused or timed_out or (
                 _ERROR_STRONG.search(text) is not None
-                or (not call_shaped
-                    and _ERROR_WEAK.search(text) is not None))
+                or _ERROR_WEAK.search(weak_zone) is not None)
             if errored:
                 n_refusals += refused
                 n_timeouts += timed_out

@@ -66,6 +66,19 @@ class CounterTests(unittest.TestCase):
         self.assertEqual(m.n_tool_errors, 0)
         self.assertEqual(m.n_timeouts, 0)
 
+    def test_a_merged_call_and_result_row_counts_the_failure(self):
+        # opencode writes "name: args\nresult" as one indexed row; the
+        # call-shaped first line must not hide the failed result.
+        m = compute([
+            R("tool", None, tool_text="read: /repo/x.yml\n"
+                                      "Error: File not found"),
+            R("tool", None, tool_text="rf__yt_getTranscript\n"
+                                      "Error: Resume token is not valid"),
+        ])
+        self.assertEqual(m.n_tool_errors, 2)
+        self.assertEqual(m.n_tool_calls, 0)
+        self.assertEqual(m.n_mcp_errors, 0)
+
     def test_a_prefixed_result_with_a_strong_signature_still_errors(self):
         # devin results carry the tool name: "exec: Output from command
         # in shell X:..." — call-shaped, but a real failure inside.
