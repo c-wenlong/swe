@@ -378,10 +378,10 @@ let inventoryJSON = #"""
         #expect(model.visibleSkills.map(\.name) == ["hammer"])
     }
 
-    @Test func aSelectionRootIsNotOfferedAsALinkChip() async throws {
-        // A skill switched off in a selection shows the root as blocked:
-        // tapping "link" there would relink the whole folder and flatten
-        // the picks it holds.
+    @Test func aSelectionRootTogglesOneSkillWithoutFlattening() async throws {
+        // A skill switched off in a selection still gets a chip: the
+        // toggle works inside the selection, so tapping it links only
+        // that skill and leaves the other picks alone.
         let json = #"""
         {"shared_dir": "/h/.swe/skills",
          "harnesses": [
@@ -399,9 +399,11 @@ let inventoryJSON = #"""
         let (model, _) = model([(["skills", "--json"], ok(json))])
         await model.load()
         let alpha = try #require(model.allSkills.first { $0.name == "alpha" })
-        #expect(model.chips(for: alpha).map(\.link) == [.linked])
+        #expect(model.chips(for: alpha).map { ($0.link, $0.on, $0.toggleable) }
+            .map { "\($0.0)|\($0.1)|\($0.2)" } == ["linked|true|true"])
         let beta = try #require(model.allSkills.first { $0.name == "beta" })
-        #expect(model.chips(for: beta).map(\.link) == [.blocked])
+        #expect(model.chips(for: beta).map { ($0.link, $0.on, $0.toggleable) }
+            .map { "\($0.0)|\($0.1)|\($0.2)" } == ["selection|false|true"])
         // A selection folder can still be relinked as a whole or detached.
         let codex = try #require(model.roots.first)
         #expect(codex.mode == "except")
@@ -412,11 +414,55 @@ let inventoryJSON = #"""
         let (model, _) = model([(["skills", "--json"], ok(inventoryJSON))])
         await model.load()
         let alpha = try #require(model.allSkills.first { $0.name == "alpha" })
-        let chips = model.chips(for: alpha).map { "\($0.root.name):\($0.link)" }
-        #expect(chips == ["claude:linked", "codex:blocked", "hermes:notLinked", "droid:notLinked"])
+        let chips = model.chips(for: alpha).map { "\($0.root.name):\($0.link):\($0.toggleable)" }
+        // codex keeps private skills but can still take alpha's link.
+        #expect(chips == ["claude:linked:true", "codex:notLinked:true", "hermes:notLinked:true", "droid:notLinked:true"])
         // A plugin skill belongs to its harness alone; linking cannot reach it.
         let hammer = try #require(model.allSkills.first { $0.name == "hammer" })
-        #expect(model.chips(for: hammer).map(\.root.name) == ["claude"])
+        #expect(model.chips(for: hammer).map { "\($0.root.name):\($0.toggleable)" } == ["claude:false"])
+    }
+
+    @Test func untoggleableRootsStayChipsNotButtons() async throws {
+        // A folder pointing elsewhere, an ignored folder and an
+        // uninstalled harness show the skill's state but take no tap.
+        let json = #"""
+        {"shared_dir": "/h/.swe/skills",
+         "harnesses": [
+          {"name": "codex", "label": "codex", "path": "/h/.codex/skills",
+           "state": "relink", "detail": "points at /h/skills"},
+          {"name": "cursor", "label": "cursor", "path": "/h/.cursor/skills",
+           "state": "ignored", "detail": ".linkignore"},
+          {"name": "gemini", "label": "gemini", "path": "/h/.gemini/skills",
+           "state": "skipped", "detail": "not installed"}
+         ],
+         "skills": [
+          {"name": "alpha", "path": "/h/.swe/skills/alpha",
+           "root": "shared", "source": "shared", "harnesses": []}
+         ]}
+        """#
+        let (model, _) = model([(["skills", "--json"], ok(json))])
+        await model.load()
+        let alpha = try #require(model.allSkills.first)
+        #expect(model.chips(for: alpha).map { "\($0.root.name):\($0.link):\($0.toggleable)" }
+            == ["codex:blocked:false", "cursor:blocked:false", "gemini:blocked:false"])
+    }
+
+    @Test func togglingRunsEnableOrDisableWithTheRootPath() async throws {
+        let (model, runner) = model([
+            (["skills", "--json"], ok(inventoryJSON)),
+            (["skills", "enable"], ok(#"{"action": "enable", "changed": true}"#)),
+            (["skills", "disable"], ok(#"{"action": "disable", "changed": true}"#)),
+        ])
+        await model.load()
+        let alpha = try #require(model.allSkills.first { $0.name == "alpha" })
+        let codex = try #require(model.roots.first { $0.name == "codex" })
+        let claude = try #require(model.roots.first { $0.name == "claude" })
+        await model.setSkill(alpha, on: codex, enabled: true)
+        await model.setSkill(alpha, on: claude, enabled: false)
+        #expect(runner.calls.contains(
+            ["skills", "enable", "alpha", "--harness=/h/.codex/skills", "--json"]))
+        #expect(runner.calls.contains(
+            ["skills", "disable", "alpha", "--harness=/h/.claude/skills", "--json"]))
     }
 
     @Test func leavingThePageMidLoadKeepsItLoadingForTheNextVisit() async {

@@ -1,0 +1,6 @@
+{"schema": 1, "data":
+ {"action": "usage", "skill": "fixture-skill", "tracked": true,
+  "calls": 14, "sessions": 3,
+  "last_used": "2026-11-07T10:15:00+00:00",
+  "by_harness": {"claude": 9, "codex": 5},
+  "unattributed": 2}}
