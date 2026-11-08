@@ -179,7 +179,10 @@ def compute(session_id: str, harness: str,
     answered = True
     # The indexer chunks a long message into consecutive rows sharing its
     # ts; a machine message's later chunks carry no leading tag, so they
-    # inherit the first chunk's class while the ts stays the same.
+    # inherit the first chunk's class while the ts stays the same. Two
+    # different prompts can share a ts too — a real one right behind a
+    # machine message gets misread as a continuation — priced far below
+    # the unmarked-chunk flood the rule exists for.
     prev_role = ""
     prev_machine = False
     prev_ts: str | None = None
