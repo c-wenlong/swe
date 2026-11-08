@@ -95,12 +95,16 @@ function skillsLinkDot(link) {
   return `<span class="sk-dot ${link}" aria-hidden="true"></span>`;
 }
 
-function skillsChip(name, link, { compact = false, root = "", busy = false } = {}) {
-  const tag = root ? "button" : "span";
+function skillsChip(name, link, { compact = false, root = "", toggle = "", on = false, busy = false } = {}) {
+  const tag = root || toggle ? "button" : "span";
   const data = root ? ` data-root="${esc(root)}" type="button"` : "";
+  const flip = toggle ? ` data-sk-toggle="${esc(toggle)}" data-sk-on="${on ? 1 : 0}" type="button" aria-pressed="${on}"` : "";
   const dot = busy ? '<span class="spinner sm" aria-label="Working"></span>' : skillsLinkDot(link);
-  return `<${tag} class="sk-chip ${link}${compact ? " compact" : ""}"${data}
-    title="${esc(Fmt.harnessName(name))}: ${LINK_TITLE[link].toLowerCase()}">${dot}${skillsMark(name, compact ? "logo logo-sm" : "logo")}</${tag}>`;
+  const title = toggle
+    ? `${Fmt.harnessName(name)}: ${on ? "on" : "off"} — click to ${on ? "disable" : "enable"}`
+    : `${Fmt.harnessName(name)}: ${LINK_TITLE[link].toLowerCase()}`;
+  return `<${tag} class="sk-chip ${link}${compact ? " compact" : ""}"${data}${flip}
+    title="${esc(title)}">${dot}${skillsMark(name, compact ? "logo logo-sm" : "logo")}</${tag}>`;
 }
 
 /* SkillRoot.linkNeedsForce */
@@ -442,6 +446,15 @@ async function skillsWrite(c) {
     paths = c.paths;
     action = "link_all";
     body = { harnesses: paths };
+  } else if (c.kind === "toggle") {
+    // A shared skill's chip switches it inside one folder; the folder's
+    // own state rides along so a stale page can't flip a moved link.
+    const root = d.harnesses.find((r) => r.path === c.path);
+    if (!root) return;
+    paths = [root.path];
+    action = "toggle";
+    body = { harness: root.path, skill: c.skill, enabled: c.enabled,
+             expect: root.state, expect_detail: root.detail || "" };
   } else {
     const root = d.harnesses.find((r) => r.path === c.path);
     if (!root) return;
@@ -697,12 +710,41 @@ function skillsBack() {
   return `<a class="sk-back" href="#/skills">‹ Skills</a>`;
 }
 
-/* SkillsModel.chips: each harness folder and whether it loads the skill.
- * Only a shared skill can be reached by linking. */
+/* SkillsModel.chips: each harness folder, whether it loads the skill
+ * (`on`) and whether a tap flips it (`toggleable`). Only a shared skill
+ * can be toggled; a selection root's off skill switches inside the
+ * selection, never flattens it; a keep dir takes the link beside its
+ * private skills. relink, ignored, skipped and conflict take nothing. */
 function skillChips(skill, roots) {
   const seeing = new Set(skill.harnesses);
-  if (skill.source !== "shared") return roots.filter((r) => seeing.has(r.name)).map((r) => [r, "linked"]);
-  return roots.map((r) => [r, seeing.has(r.name) ? "linked" : rootLink(r) === "blocked" ? "blocked" : "notLinked"]);
+  if (skill.source !== "shared") return roots.filter((r) => seeing.has(r.name)).map((r) => [r, "linked", true, false]);
+  return roots.map((r) => {
+    // `on` is this folder's state, not the harness name's: two folders
+    // can share a label, so linked always loads a shared skill and a
+    // selection answers from its own `enabled` list.
+    const on = rootLink(r) === "linked" ? true
+      : rootLink(r) === "selection" ? (r.enabled || []).includes(skill.name)
+      : seeing.has(r.name);
+    const link = rootLink(r);
+    if (link === "linked") return [r, "linked", on, true];
+    if (link === "selection") return [r, on ? "linked" : "selection", on, true];
+    if (link === "notLinked")
+      return r.state === "relink" ? [r, "blocked", on, false] : [r, on ? "linked" : "notLinked", on, true];
+    return r.state === "keep" ? [r, on ? "linked" : "notLinked", on, true] : [r, on ? "linked" : "blocked", on, false];
+  });
+}
+
+/* The usage lines under the chips, from `swe skills usage`. */
+function skillUsageBlock(usage) {
+  if (!usage) return "";
+  if (!usage.tracked) return `<p class="caption">Usage isn't tracked — turn on the session index (swe session index --on) to count calls.</p>`;
+  if (!usage.calls) return `<p class="caption">No calls indexed for this skill yet — the index scans existing sessions too, but calls written before the skill input key tally as unattributed.</p>`;
+  const lines = [`${usage.calls} ${usage.calls === 1 ? "call" : "calls"} across ${usage.sessions} ${usage.sessions === 1 ? "session" : "sessions"}`
+    + (usage.last_used ? ` · last used ${String(usage.last_used).slice(0, 10)}` : "")];
+  const byHarness = Object.entries(usage.by_harness || {}).map(([h, n]) => `${Fmt.harnessName(h)} ${n}`).join(" · ");
+  if (byHarness) lines.push(byHarness);
+  if (usage.unattributed) lines.push(`+${usage.unattributed} Skill call${usage.unattributed === 1 ? "" : "s"} indexed without a skill name`);
+  return `<p class="caption">${lines.map(esc).join("<br>")}</p>`;
 }
 
 /* SkillLinksBlock's note. */
@@ -722,7 +764,10 @@ function skillNote(skill) {
 
 function paintSkillDetail(d) {
   const p = skillsPage, s = d.skill, home = d.home;
-  const chips = skillChips(s, d.harnesses).map(([r, link]) => skillsChip(r.name, link, { compact: true })).join("");
+  const chips = skillChips(s, d.harnesses).map(([r, link, on, toggleable]) =>
+    toggleable
+      ? skillsChip(r.name, link, { compact: true, toggle: r.path, on, busy: p.busy.has(r.path) })
+      : skillsChip(r.name, link, { compact: true })).join("");
   const lock = d.editable
     ? `The web app shows skills read only. Edit ${s.name} in the Mac app, or its files on the hub.`
     : `Only skills that live under ~/.swe can be edited, so ${s.name} is read-only.`;
@@ -731,7 +776,8 @@ function paintSkillDetail(d) {
     <code class="sk-mono">${esc(skillsPath(s.path, home))}</code>
     ${s.description ? `<p class="sk-body muted-2">${esc(s.description)}</p>` : ""}
     <div class="sk-links-block"><p class="caption">${esc(skillNote(s))}</p>
-      ${chips ? `<div class="sk-chips">${chips}</div>` : ""}</div>
+      ${chips ? `<div class="sk-chips">${chips}</div>` : ""}
+      ${skillUsageBlock(d.usage)}</div>
   </div>`;
   let fm = "";
   if (d.skill_file) {
@@ -770,6 +816,13 @@ function paintSkillDetail(d) {
   }
   for (const row of document.querySelectorAll("[data-file]")) {
     row.onclick = () => openSkillFile(d, row.dataset.file);
+  }
+  for (const chip of document.querySelectorAll("[data-sk-toggle]")) {
+    chip.onclick = () => {
+      const root = d.harnesses.find((r) => r.path === chip.dataset.skToggle);
+      if (root) skillsWrite({ kind: "toggle", path: root.path,
+        skill: s.path, enabled: chip.dataset.skOn !== "1" });
+    };
   }
 }
 

@@ -261,6 +261,7 @@ def detail(skill: dict, home: Path) -> dict:
     root = Path(skill["path"])
     skill_md = root / "SKILL.md"
     text = read_text(skill_md) if _inside(skill_md, root) else None
+    from swe.skills.usage import skill_usage
     return {
         "skill": skill,
         "home": str(home),
@@ -269,6 +270,7 @@ def detail(skill: dict, home: Path) -> dict:
         "skill_md": text,
         "frontmatter": frontmatter(text) if text is not None else None,
         "tree": tree(root),
+        "usage": skill_usage(skill["name"], home),
     }
 
 
@@ -330,7 +332,7 @@ def file_view(skill: dict, name: str) -> dict:
 #   plus ``action`` and ``created``: the new SKILL.md's path and its row
 #   (``skill``) when the inventory lists it.
 
-ACTIONS = ("link", "unlink", "link_all", "new")
+ACTIONS = ("link", "unlink", "link_all", "toggle", "new")
 TEXT_MAX = 2048
 REF_MAX = 4096
 
@@ -424,6 +426,12 @@ def post(ctx, action: str, body: dict) -> dict:
         if action == "link_all":
             root = None
             result = _link_all(inventory["harnesses"], home, _named(body))
+        elif action == "toggle":
+            root = _root(inventory["harnesses"], _ref(body, "harness"))
+            _expect(root, body.get("expect"), body.get("expect_detail"))
+            skill_row = _find(inventory, _ref(body, "skill"))
+            skill_ref = skill_row["path"]
+            result = _toggle(skill_row, root, body.get("enabled"), home)
         else:
             root = _root(inventory["harnesses"], _ref(body, "harness"))
             _expect(root, body.get("expect"), body.get("expect_detail"))
@@ -568,6 +576,37 @@ def _unlink(root: dict, home: Path) -> dict:
     except (SkillLayoutError, ConfigurationError) as exc:
         raise PageError(409, "unlink_failed", str(exc)) from exc
     return UnlinkReply(label, str(path), False).to_json()
+
+
+def toggleable(root: dict) -> bool:
+    """SkillsModel.chips' ``toggleable``: a folder swe can attach one
+    skill's link into. relink points at another tree; ignored, skipped
+    and conflict take nothing. Everything else — the whole-folder link,
+    a selection, a missing or absorb folder, a keep dir whose private
+    skills sit beside the link — toggles."""
+    return root["state"] in ("linked", "selection", "create", "absorb", "keep")
+
+
+def _toggle(skill: dict, root: dict, enabled, home: Path) -> dict:
+    """``swe skills enable|disable <name> --harness=<folder>``: the per
+    skill switch a detail chip carries, on a shared skill only."""
+    from swe.configuration import ConfigurationError
+    from swe.skills.link_ops import SkillLayoutError, set_skill_enabled
+
+    if not isinstance(enabled, bool):
+        raise PageError(422, "bad_enabled", "enabled must be true or false.")
+    if skill.get("source") != "shared":
+        raise PageError(409, "not_shared",
+                        f"{skill['name']} isn't in the shared library; only shared skills toggle.")
+    if not toggleable(root):
+        raise PageError(409, root["state"],
+                        f"SWE won't toggle skills in {root['name']}. {explanation(root)}")
+    _same_folder(root, home)
+    try:
+        return set_skill_enabled(skill["name"], root["path"], enabled=enabled,
+                                 home=home, cwd=Path(os.sep))
+    except (SkillLayoutError, ConfigurationError) as exc:
+        raise PageError(409, "toggle_failed", str(exc)) from exc
 
 
 def _link_all(roots: list[dict], home: Path, named: set[str] | None) -> dict:

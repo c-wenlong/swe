@@ -155,3 +155,7 @@
 .pl-act-buttons { display: flex; justify-content: flex-end; gap: 8px; }
 .pl-acts .error, .pl-act-done { margin: 0; font-size: 12px; }
 .pl-pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.pl-keys { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.pl-key { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-secondary);
+  padding: 1px 7px; border-radius: 999px; background: var(--subtle); border: 1px solid var(--border-strong); }
+.pl-key.missing { color: var(--warning-text); border-color: var(--warning); }
