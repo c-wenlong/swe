@@ -48,13 +48,13 @@ struct McpServersPage: View {
         }
     }
 
-    /// The same switch for every harness the server is in (off) or
-    /// marked off for (on) — the row's batch action.
+    /// The same switch for every harness the server touches: a bare
+    /// `swe mcp disable`/`enable`, so the CLI's `master_off` record picks
+    /// the restore set and a harness switched off by hand stays off.
     private func toggleAll(_ server: McpServer, on: Bool) async {
         toggleError = nil
         do {
-            let result = try await app.swe.mcpSetEnabled(on, server: server.name,
-                                                         in: on ? server.disabledIn : server.harnesses)
+            let result = try await app.swe.mcpSetEnabled(on, server: server.name, in: [])
             await model.load(swe: app.swe, for: app.swePath, health: model.hasHealth)
             if !result.failedIn.isEmpty {
                 toggleError = "\(server.name) stayed off for \(result.failedIn.joined(separator: ", "))"
@@ -883,17 +883,16 @@ private struct ServerSheet: View {
         }
     }
 
-    /// The header's batch switch: off pulls the entry from every harness
-    /// (`swe mcp disable` for the whole set), on restores exactly the
-    /// harnesses marked off, like the table row's master switch.
+    /// The header's batch switch: a bare `swe mcp disable`/`enable` — no
+    /// `--for` — so the CLI's `master_off` record drives the restore set
+    /// and a harness the user switched off by hand is never resurrected.
     private func setEverywhere(_ on: Bool) async {
         masterBusy = true
         defer { masterBusy = false }
         error = nil
         do {
             let result = try await app.swe.mcpSetEnabled(
-                on, server: server.name,
-                in: on ? server.disabledIn : server.harnesses)
+                on, server: server.name, in: [])
             await reload()
             await loadInfo()
             if !result.failedIn.isEmpty {
@@ -912,7 +911,7 @@ private struct ServerSheet: View {
         defer { typeBusy = false }
         error = nil
         do {
-            try await app.swe.mcpSetType(type, server: server.name)
+            _ = try await app.swe.mcpSetType(type, server: server.name)
             await reload()
             await loadInfo()
         } catch {
@@ -1159,9 +1158,15 @@ private struct ServerSheet: View {
     }
 
     /// The hub entry's `type` label as a dropdown once the entry exists;
-    /// until the server adopts into the hub the tag is read-only.
+    /// until the server adopts into the hub the tag is read-only, and an
+    /// `sse` entry's tag always is — there `type` is the connection
+    /// marker, not a label, so `set-type` leaves it alone.
     @ViewBuilder private var typeControl: some View {
-        if server.inHub {
+        if server.transport == "sse" {
+            TypeTag(tag: server.typeTag)
+                .hoverTip("This entry's type field is the sse connection marker, not a label — swe leaves it alone.",
+                          pinsOnClick: false)
+        } else if server.inHub {
             SelectMenu(options: typeOptions,
                        selection: Binding(
                            get: { currentType },
