@@ -1,0 +1,28 @@
+{"schema": 1, "data":
+ {"action": "info", "ref": "fixture-plugin@fixture-market",
+  "updated": "2026-11-05T09:30:00+00:00",
+  "plugin": {"name": "fixture-plugin", "version": "1.0.0",
+             "description": "Fixture plugin", "harnesses": {}},
+  "mcp_servers": [
+   {"name": "fixture-mcp", "command": "fixture-mcp",
+    "env_keys": ["TOKEN", "GONE"], "header_keys": ["X-Api"],
+    "harnesses": ["claude"], "disabled_in": ["codex"],
+    "in_hub": true, "secrets_missing": ["GONE"],
+    "usage": {"tracked": true, "calls": 7, "sessions": 2,
+              "last_used": "2026-11-06T12:00:00Z",
+              "by_harness": {"claude": 7}}},
+   {"name": "declared-only", "command": "gone",
+    "env_keys": [], "header_keys": [],
+    "harnesses": [], "disabled_in": [], "in_hub": false,
+    "secrets_missing": [],
+    "usage": {"tracked": true, "calls": 0, "sessions": 0,
+              "last_used": null, "by_harness": {}}}],
+  "skills": [
+   {"name": "fixture-skill", "harnesses": ["claude"],
+    "usage": {"tracked": true, "calls": 4, "sessions": 2,
+              "last_used": "2026-11-04T08:00:00Z",
+              "by_harness": {"claude": 4}, "unattributed": 0}}],
+  "usage": {"tracked": true, "calls": 11, "sessions": 3,
+            "last_used": "2026-11-06T12:00:00Z",
+            "by_harness": {"claude": 11},
+            "skill_calls": 4, "mcp_calls": 7}}}

@@ -24,7 +24,10 @@ public final class SnapshotLoader<Value: SnapshotValue> {
     /// reopens waits for it instead of starting another.
     private var inflight: (source: String, task: Task<Bool, Never>)?
     /// Only the newest load writes the value.
-    private var generation = 0
+    /// Bumped by each fetch, so a view reloading detail alongside the
+    /// value can key its task on the fetch count; a `loadIfStale` that
+    /// finds the value fresh does not bump it. Public for `.task` keys.
+    public private(set) var generation = 0
 
     /// - Parameters:
     ///   - snapshots: where the last value is kept between launches.

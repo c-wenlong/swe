@@ -554,7 +554,7 @@ private struct SkillLinksBlock: View {
 
     @ViewBuilder private func chipView(_ chip: (root: SkillRoot, link: SkillRoot.Link, on: Bool, toggleable: Bool)) -> some View {
         let tip = "\(HarnessMark(chip.root.name).name): \(chip.on ? "on" : "off")"
-            + (chip.toggleable ? " — click to \(chip.on ? "disable" : "enable")" : "")
+            + (chip.toggleable ? ": click to \(chip.on ? "disable" : "enable")" : "")
         if chip.toggleable {
             Button {
                 Task { await model.setSkill(skill, on: chip.root, enabled: !chip.on) }
@@ -602,7 +602,7 @@ private struct SkillUsageBlock: View {
         VStack(alignment: .leading, spacing: 4) {
             if let usage, usage.tracked {
                 if usage.calls == 0 {
-                    Text("No calls indexed yet — the index counts sessions built after it switched on.")
+                    Text("No calls indexed for this skill yet: the index scans existing sessions too, but calls written before the skill input key count as unattributed.")
                 } else {
                     Text("\(usage.calls) \(usage.calls == 1 ? "call" : "calls") across \(usage.sessions) \(usage.sessions == 1 ? "session" : "sessions")"
                         + (usage.lastUsed.map { " · last used \($0.prefix(10))" } ?? ""))
@@ -622,7 +622,7 @@ private struct SkillUsageBlock: View {
                     }
                 }
             } else if usage != nil {
-                Text("Usage isn't tracked — turn on the session index (`swe session index --on`) to count calls.")
+                Text("Usage isn't tracked. Turn on the session index (`swe session index --on`) to count calls.")
             } else {
                 // The call failed (a swe from before `usage` existed);
                 // an empty block reads better than a wrong hint.
@@ -630,9 +630,11 @@ private struct SkillUsageBlock: View {
             }
         }
         .font(Theme.caption).foregroundStyle(Theme.textSecondary)
-        .task(id: skill.name) {
+        .task(id: [skill.name, String(model.loadCount)]) {
             // A swe from before `usage` fails the call; the block just
-            // stays empty rather than fail the card.
+            // stays empty rather than fail the card. `loadCount` is in
+            // the key because Refresh can leave the skill row as it was
+            // while the index counted new calls.
             usage = try? await model.swe.skillUsage(skill.name)
         }
     }
