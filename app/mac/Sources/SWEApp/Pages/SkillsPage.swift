@@ -148,7 +148,8 @@ private struct InstalledSkills: View {
             let skill = model.allSkills.first { $0.path == opened.path } ?? opened
             SkillDetailView(skill: skill, home: FileManager.default.homeDirectoryForCurrentUser,
                             onBack: { self.opened = nil },
-                            links: AnyView(SkillLinksBlock(skill: skill, model: model)))
+                            links: AnyView(SkillLinksBlock(skill: skill, model: model)),
+                            usage: AnyView(SkillUsageBlock(skill: skill, model: model)))
         } else {
             switch model.inventory {
             case .idle, .loading:
@@ -539,11 +540,33 @@ private struct SkillLinksBlock: View {
             if !chips.isEmpty {
                 FlowLayout(spacing: 6, lineSpacing: 6) {
                     ForEach(chips, id: \.root.id) { chip in
-                        LinkChipLabel(name: chip.root.name, link: chip.link, compact: true)
-                            .hoverTip("\(HarnessMark(chip.root.name).name): \(chip.link.title.lowercased())")
+                        chipView(chip)
                     }
                 }
             }
+            // A refused toggle lands in actionError; without this the
+            // chip just stays put with no reason shown.
+            if let error = model.actionError {
+                Text(error).font(Theme.caption).foregroundStyle(Theme.warning)
+            }
+        }
+    }
+
+    @ViewBuilder private func chipView(_ chip: (root: SkillRoot, link: SkillRoot.Link, on: Bool, toggleable: Bool)) -> some View {
+        let tip = "\(HarnessMark(chip.root.name).name): \(chip.on ? "on" : "off")"
+            + (chip.toggleable ? " — click to \(chip.on ? "disable" : "enable")" : "")
+        if chip.toggleable {
+            Button {
+                Task { await model.setSkill(skill, on: chip.root, enabled: !chip.on) }
+            } label: {
+                LinkChipLabel(name: chip.root.name, link: chip.link,
+                              busy: model.busy.contains(chip.root.path), compact: true)
+            }
+            .plainButton(cornerRadius: 999)
+            .hoverTip(tip)
+        } else {
+            LinkChipLabel(name: chip.root.name, link: chip.link, compact: true)
+                .hoverTip(tip)
         }
     }
 
@@ -563,6 +586,54 @@ private struct SkillLinksBlock: View {
             "In the \(skill.root) catalog. Harnesses load it only once it is moved or linked into a skills folder."
         case .project:
             "In a project's own skills folder."
+        }
+    }
+}
+
+/// `swe skills usage` for the detail card: call counts from the session
+/// index, per harness, or a note when the index is off.
+private struct SkillUsageBlock: View {
+    var skill: Skill
+    var model: SkillsModel
+    /// nil while the swe call is in flight, double-nil meaning "never got one".
+    @State private var usage: SkillUsage?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let usage, usage.tracked {
+                if usage.calls == 0 {
+                    Text("No calls indexed yet — the index counts sessions built after it switched on.")
+                } else {
+                    Text("\(usage.calls) \(usage.calls == 1 ? "call" : "calls") across \(usage.sessions) \(usage.sessions == 1 ? "session" : "sessions")"
+                        + (usage.lastUsed.map { " · last used \($0.prefix(10))" } ?? ""))
+                    if !usage.byHarness.isEmpty {
+                        HStack(spacing: 10) {
+                            ForEach(usage.byHarness.sorted(by: { $0.key < $1.key }), id: \.key) { harness, n in
+                                HStack(spacing: 4) {
+                                    HarnessMarkView(harness: harness, size: 12)
+                                    Text("\(n)")
+                                }
+                            }
+                        }
+                    }
+                    if let unattributed = usage.unattributed, unattributed > 0 {
+                        Text("+\(unattributed) `Skill` call\(unattributed == 1 ? "" : "s") indexed without a skill name")
+                            .foregroundStyle(Theme.textMuted)
+                    }
+                }
+            } else if usage != nil {
+                Text("Usage isn't tracked — turn on the session index (`swe session index --on`) to count calls.")
+            } else {
+                // The call failed (a swe from before `usage` existed);
+                // an empty block reads better than a wrong hint.
+                EmptyView()
+            }
+        }
+        .font(Theme.caption).foregroundStyle(Theme.textSecondary)
+        .task(id: skill.name) {
+            // A swe from before `usage` fails the call; the block just
+            // stays empty rather than fail the card.
+            usage = try? await model.swe.skillUsage(skill.name)
         }
     }
 }

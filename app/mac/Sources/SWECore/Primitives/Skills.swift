@@ -199,6 +199,12 @@ extension SweClient {
         ])
     }
 
+    /// `swe skills usage <name> --json`: call counts from the session
+    /// index; `tracked` false when the index is off rather than a zero.
+    public func skillUsage(_ name: String) async throws -> SkillUsage {
+        try await call(["skills", "usage", name, "--json"])
+    }
+
     /// Writes ~/.swe/skills/<name>/SKILL.md. No force flag: an existing
     /// name refuses.
     public func newSkill(name: String, description: String) async throws -> NewSkillReply {
@@ -222,6 +228,38 @@ struct ToggleReply: Decodable {
 public struct NewSkillReply: Decodable {
     public let name: String
     public let path: String
+}
+
+/// `swe skills usage <name> --json`. Every count is optional-tolerant:
+/// a swe from before `usage` exists has none of it, and `tracked` false
+/// ships only the flag.
+public struct SkillUsage: Decodable, Sendable, Equatable {
+    public let tracked: Bool
+    public let calls: Int
+    public let sessions: Int
+    /// ISO timestamp of the newest matching call.
+    public let lastUsed: String?
+    /// `{harness: calls}` for calls whose name matches.
+    public let byHarness: [String: Int]
+    /// `Skill` calls indexed before the `skill` input key existed — they
+    /// carry no name and cannot be credited to a skill.
+    public let unattributed: Int?
+
+    enum CodingKeys: String, CodingKey {
+        // The decoder's convertFromSnakeCase already maps last_used and
+        // by_harness onto the camelCase cases.
+        case tracked, calls, sessions, lastUsed, byHarness, unattributed
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tracked = try c.decodeIfPresent(Bool.self, forKey: .tracked) ?? false
+        calls = try c.decodeIfPresent(Int.self, forKey: .calls) ?? 0
+        sessions = try c.decodeIfPresent(Int.self, forKey: .sessions) ?? 0
+        lastUsed = try c.decodeIfPresent(String.self, forKey: .lastUsed)
+        byHarness = try c.decodeIfPresent([String: Int].self, forKey: .byHarness) ?? [:]
+        unattributed = try c.decodeIfPresent(Int.self, forKey: .unattributed)
+    }
 }
 
 /// The Skills page: the skills that stand alone, and the per-harness links.
@@ -367,6 +405,12 @@ public final class SkillsModel {
         _ = await change(root) { try await $0.unlink(root) }
     }
 
+    /// The detail card's per-skill switch: `swe skills enable|disable`
+    /// through the same serialized, reloading path as a folder link.
+    public func setSkill(_ skill: Skill, on root: SkillRoot, enabled: Bool) async {
+        _ = await change(root) { try await $0.setSkill(skill, on: root, enabled: enabled) }
+    }
+
     /// What "Link all" can safely take on: loose folders that cost nothing
     /// to point at the shared root. `skipped` holds the ones a person
     /// should look at (a folder with unique skills, an explicit keep, a
@@ -505,20 +549,49 @@ public final class SkillsModel {
         .map(\.element)
     }
 
-    /// For one skill, each harness folder and whether it loads the skill.
-    /// Only a shared skill can be reached by linking; anything else belongs
-    /// to the harnesses that already see it.
-    public func chips(for skill: Skill) -> [(root: SkillRoot, link: SkillRoot.Link)] {
+    /// For one skill, each harness folder, whether it loads the skill,
+    /// and whether a tap can flip it. Only a shared skill can be toggled;
+    /// anything else belongs to the harnesses that already see it. `on`
+    /// is the skill's own state, not the folder's: a selection root can
+    /// hold the skill out while it links others.
+    public func chips(for skill: Skill) -> [(root: SkillRoot, link: SkillRoot.Link, on: Bool, toggleable: Bool)] {
         let seeing = Set(skill.harnesses)
         if skill.source != .shared {
-            return roots.filter { seeing.contains($0.name) }.map { ($0, .linked) }
+            return roots.filter { seeing.contains($0.name) }.map { ($0, .linked, true, false) }
         }
         return roots.map { root in
-            if seeing.contains(root.name) { return (root, .linked) }
-            // A selection the skill is off in stays unoffered: linking
-            // the whole folder would also flatten the picks it holds.
-            if root.link == .selection { return (root, .blocked) }
-            return (root, root.link == .blocked ? .blocked : .notLinked)
+            // `on` is this folder's state, not the harness name's: two
+            // folders can share a label (both read "foo"), so a linked
+            // root always loads a shared skill and a selection root
+            // answers from its own `enabled` list. For states the model
+            // has no per-folder data for, the name set is the only
+            // signal — good enough, since those chips can't flip anyway.
+            let on: Bool
+            switch root.link {
+            case .linked: on = true
+            case .selection: on = root.enabled.contains(skill.name)
+            case .notLinked, .blocked: on = seeing.contains(root.name)
+            }
+            switch root.link {
+            case .linked:
+                // Off converts the whole-folder link to an except selection.
+                return (root, .linked, on, true)
+            case .selection:
+                // The per-skill toggle works inside the selection — no
+                // flattening either way.
+                return (root, on ? .linked : .selection, on, true)
+            case .notLinked:
+                // `create` and `absorb` take the skill's link; a folder
+                // pointing elsewhere (`relink`) has to be pointed at
+                // shared first.
+                if root.state == "relink" { return (root, .blocked, on, false) }
+                return (root, on ? .linked : .notLinked, on, true)
+            case .blocked:
+                // `keep` holds private skills but can take a link next to
+                // them; ignored, skipped and conflicted folders cannot.
+                if root.state == "keep" { return (root, on ? .linked : .notLinked, on, true) }
+                return (root, on ? .linked : .blocked, on, false)
+            }
         }
     }
 }

@@ -97,6 +97,24 @@ import Testing
         #expect(skill.harnesses == ["claude"])
     }
 
+    @Test func skillsUsageDecodesCountsAndUntracked() async throws {
+        let (swe, _) = try client("swe-skills-usage")
+        let usage = try await swe.skillUsage("fixture-skill")
+        #expect(usage.tracked)
+        #expect(usage.calls == 14)
+        #expect(usage.sessions == 3)
+        #expect(usage.lastUsed == "2026-11-07T10:15:00+00:00")
+        #expect(usage.byHarness == ["claude": 9, "codex": 5])
+        #expect(usage.unattributed == 2)
+
+        // With the index off the payload ships only the flag.
+        let (swe2, _) = try client("swe-skills-usage-off")
+        let off = try await swe2.skillUsage("fixture-skill")
+        #expect(!off.tracked)
+        #expect(off.calls == 0)
+        #expect(off.byHarness.isEmpty)
+    }
+
     @Test func skillsLinkRepliesDecode() async throws {
         let (swe, _) = try client("swe-skills-link")
         try await swe.link(SkillRoot(name: "claude", path: "/tmp/swe-fixture-home/.claude/skills",

@@ -1031,6 +1031,8 @@ struct SkillDetailView: View {
     var onBack: () -> Void
     /// The link chips a shared skill carries, from the Skills page.
     var links: AnyView?
+    /// The call-count block from the session index, same source.
+    var usage: AnyView?
 
     @State private var drafts = PrimitiveDrafts()
     @State private var leaving = false
@@ -1076,6 +1078,7 @@ struct SkillDetailView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if let links { links }
+                    if let usage { usage }
                 }
             }
             if let folders {
