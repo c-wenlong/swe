@@ -18,7 +18,7 @@ be rebuilt; deleting them loses user state.
 | `config/harness.json` | swe | JSON object keyed by harness name | registry: state (`active`/`starred`/`archived`), install evidence, capabilities, order | `harness/registry.py` only; versioned in the hub, and `swe sync` merges two machines' copies with `registry.merge_registries` | every swe command, the app via `swe list` |
 | `config/config.json` | swe | JSON object | `swe config` values (report settings etc.), secret keys rejected | `configuration.save_config` | `configuration.load_config` |
 | `mcp.json` | swe | JSON | hub MCP server definitions, `${NAME}` secret refs | `swe mcp` commands | `swe mcp`, app via `swe mcp list` |
-| `config/providers.json` | swe | JSON | provider registry, seeded from built-ins (`kind`: `inference` or `infra`), `_removed` list blocks re-merge | `providers/registry.py` | `swe providers`, doctor |
+| `config/providers.json` | swe | JSON | provider registry, seeded from built-ins (`kind`: `inference`, `infra` or `services`), `_removed` list blocks re-merge | `providers/registry.py` | `swe providers`, doctor |
 | `config/skill_catalogs.json` | swe | JSON list | extra skill catalog paths | `swe skills catalog` | `skills/discovery.py` |
 | `config/skill_links.json` | swe | JSON `{links, updated}` | recorded harness skill symlinks | `skills` link ops | `swe skills`, `init --check` |
 | `config/plugin-display-names.json` | app | JSON object | marketplace display-name overrides | `PluginDisplayNames` (SWECore) | plugin explorer, skill detail |
@@ -98,8 +98,8 @@ every key below is live.
 | `popupHiddenHarnesses`, `popupHiddenWindows`, `popupHarnessOrder` | legacy popup keys, read-only migration fallbacks; keep until the new keys have covered every install |
 | `mcpHiddenHarnesses` | harness columns hidden on the MCP page |
 | `providerOrder`, `providerDisabled` | provider list order and switches |
-| `inferenceOrder`, `infraOrder` | row order on the Providers page's Inference and Infra tabs |
-| `infraKeys` | variables filed to the Infra tab that no catalogue claims |
+| `inferenceOrder`, `infraOrder`, `servicesOrder` | row order on the Providers page's Inference, Infra and Services tabs |
+| `infraKeys`, `servicesKeys` | variables filed to the Infra or Services tab that no catalogue claims |
 | `computeTrendInterval`, `computeTrendTab`, `computeMemoryLimitGB`, `computeOrphanAgeMinutes`, `fanManualLevel`, `fanThresholdEnabled`, `fanThresholdCelsius`, `fanReleaseBelowCelsius`, `computeTemperatureLines` | Compute page preferences (`computeTrendTab` also takes `temperature`; `computeTemperatureLines` lists the Temperature tab's switched-on lines, default `cpu`, `gpu`, `ssd`, `battery`) |
 | `refreshFreshMinutes` | the "Refresh only what failed for" window (default 5, clamped to 1..120) |
 | `customStatusServices` | user-added status services |

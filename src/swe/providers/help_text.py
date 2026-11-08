@@ -10,15 +10,17 @@ def print_providers_help() -> None:
 
   {c('cyan', 'swe providers list [-d] [--api-keys-dir=DIR] [<filter>]')}
       List registered providers + masked key status (``-`` = no key file),
-      AI providers first and infra providers (deploy/platform keys) under
-      their own heading. A filter matches the kind too: ``list infra``.
+      AI providers first, then infra providers (deploy/platform keys) and
+      service providers (search/scraping/browser APIs), each under their
+      own heading. A filter matches the kind too: ``list infra``.
 
   {c('cyan', 'swe providers info <name|alias> [--api-keys-dir=DIR]')}
       Show full details for one provider, including key status + path
 
-  {c('cyan', 'swe providers add <name> [desc] [--url=URL] [--env=ENV] [--file=NAME] [--kind=inference|infra]')}
+  {c('cyan', 'swe providers add <name> [desc] [--url=URL] [--env=ENV] [--file=NAME] [--kind=inference|infra|services]')}
       Register a provider in {c('bold', '~/.swe/config/providers.json')}.
-      ``--kind=infra`` files it with the deploy/platform providers.
+      ``--kind=infra`` files it with the deploy/platform providers,
+      ``--kind=services`` with the agent-facing API services.
       Does not create or touch any key file.
 
   {c('cyan', 'swe providers remove <name>')}

@@ -41,8 +41,13 @@ struct InferenceSection: View {
 
     var body: some View {
         let model = app.apiKeys
-        // Infra-classified keys live on the Infra tab, not here.
-        let keys = model.rows.filter { !InfraList.isInfra($0, marked: app.infraMarks.names) }
+        // Keys an Infra/Services catalogue or mark claims live on their
+        // own tab, not here.
+        let keys = model.rows.filter { row in
+            !KeysSection.allCases.contains {
+                $0.contains(row, marked: app.marks(for: $0).names)
+            }
+        }
         let all = app.inferenceOrder.sorted(InferenceList.items(keys: keys))
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 8) {
@@ -277,9 +282,9 @@ struct InferenceSection: View {
             },
             // Only a name no provider claims can move: a catalogue
             // variable sorts by its own table whatever the mark says.
-            moveToInfra: item.plan == nil && item.key != nil
+            move: item.plan == nil && item.key != nil
                 && APIKeyProviders.provider(forVariable: item.id) == nil
-                ? { app.infraMarks.mark(item.id) } : nil)
+                ? { section in app.marks(for: section).mark(item.id) } : nil)
     }
 
     private func open(_ item: InferenceItem) {
@@ -308,8 +313,8 @@ private struct InferenceRow: View {
     var open: () -> Void
     /// Set on a key under a heading of its own, to rename that heading.
     var renameProvider: (() -> Void)?
-    /// Set on a key no catalogue names, to file it on the Infra tab.
-    var moveToInfra: (() -> Void)? = nil
+    /// Set on a key no catalogue names, to file it on another tab.
+    var move: ((KeysSection) -> Void)? = nil
     @State private var hovering = false
 
     private var logo: String? {
@@ -381,7 +386,11 @@ private struct InferenceRow: View {
         .contextMenu {
             Button(item.hasKey ? "Edit…" : "Add key…", action: open)
             if let renameProvider { Button("Rename provider…", action: renameProvider) }
-            if let moveToInfra { Button("Move to Infra", action: moveToInfra) }
+            if let move {
+                ForEach(KeysSection.allCases, id: \.self) { section in
+                    Button("Move to \(section.title)") { move(section) }
+                }
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: item.hasKey ? "Edit" : "Add key", open)

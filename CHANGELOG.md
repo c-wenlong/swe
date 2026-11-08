@@ -276,6 +276,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its JSONL row, and one the account-wide usage feed reports but no local
   machine holds stays details-only.
 
+- **A Services tab under Settings › Providers.** Provider kinds are
+  now three: `inference` for the AI providers, `infra` for deploy and
+  platform keys, and the new `services` for the agent-facing APIs a
+  tool calls rather than deploys onto: search, scraping, research and
+  browser services. `DEFAULT_SERVICES` ships five — Parallel,
+  Firecrawl, TinyFish, Browser Use and Exa — seeded into providers.json
+  like the other built-ins, so `swe providers list` prints a Service
+  Providers table after the AI and Infra sections, a `services` filter,
+  a slug or an env var narrows to it, and `swe providers add
+  --kind=services` registers one (existing custom kinds still file
+  under AI Providers). The setup wizard's LLM providers stage leaves
+  both non-inference kinds out. On the Mac the Providers page gains a
+  Services tab beside Infra sharing its catalogue browsing, filters,
+  drag order, marks and add/edit/remove/check flow under its own
+  `servicesOrder` and `servicesKeys` stores — inference claims a
+  variable or heading first, then infra, then services — with a Move to
+  Services action on the Inference tab to match Move to Infra. Each
+  service's Check button probes a cheap authenticated endpoint. The web
+  app reads the same merged registry, so service keys keep their names,
+  env vars and key URLs in its provider data; it has an Infra tab but
+  no Services tab yet.
 
 - **Remote sessions can run over the Agent Client Protocol.** `swe
   remote attach` (and the apps' Attach) now picks a harness's ACP mode

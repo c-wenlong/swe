@@ -324,6 +324,48 @@ DEFAULT_INFRA = {
     },
 }
 
-# Every built-in, inference and infra: what the registry seed, the
-# default merge and ``providers add``'s re-seed lookup all read.
-DEFAULT_ALL = {**DEFAULT_PROVIDERS, **DEFAULT_INFRA}
+# Keys for APIs an agent calls rather than deploys onto: search, scraping,
+# research and browser services such as Firecrawl or Exa. Same shape as
+# DEFAULT_INFRA; ``kind`` is ``services`` and they file under the providers
+# page's Services tab.
+DEFAULT_SERVICES = {
+    "parallel": {
+        "kind": "services",
+        "description": "Parallel web data API (Search, Task, Extract)",
+        "url": "https://platform.parallel.ai/settings?tab=api-keys",
+        "key_filename": "parallel",
+        "env_vars": ["PARALLEL_API_KEY"],
+    },
+    "firecrawl": {
+        "kind": "services",
+        "description": "Firecrawl web scraping API",
+        "url": "https://www.firecrawl.dev/app/api-keys",
+        "key_filename": "firecrawl",
+        "env_vars": ["FIRECRAWL_API_KEY"],
+    },
+    "tinyfish": {
+        "kind": "services",
+        "description": "TinyFish web-agent browser API",
+        "url": "https://agent.tinyfish.ai/api-keys",
+        "key_filename": "tinyfish",
+        "env_vars": ["TINYFISH_API_KEY"],
+    },
+    "browser_use": {
+        "kind": "services",
+        "description": "Browser Use cloud browser API",
+        "url": "https://cloud.browser-use.com/settings?tab=api-keys",
+        "key_filename": "browser_use",
+        "env_vars": ["BROWSER_USE_API_KEY"],
+    },
+    "exa": {
+        "kind": "services",
+        "description": "Exa AI search API",
+        "url": "https://dashboard.exa.ai/api-keys",
+        "key_filename": "exa",
+        "env_vars": ["EXA_API_KEY"],
+    },
+}
+
+# Every built-in, inference, infra and services: what the registry seed,
+# the default merge and ``providers add``'s re-seed lookup all read.
+DEFAULT_ALL = {**DEFAULT_PROVIDERS, **DEFAULT_INFRA, **DEFAULT_SERVICES}

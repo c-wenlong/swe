@@ -11,10 +11,11 @@ and :func:`swe.providers.defaults.derived_alias`) at hydration time
 inside :func:`load_registry`. The persisted ``providers.json`` may
 carry either derived or omitted values — the loader recomputes them so
 that the API_KEY env var stays the single source of truth. ``kind``
-(``inference`` or ``infra``) is persisted data, not derived; an absent
-or empty one hydrates to ``inference``.
+(``inference``, ``infra`` or ``services``) is persisted data, not derived;
+an absent or empty one hydrates to ``inference``.
 
-When ``DEFAULT_PROVIDERS`` or ``DEFAULT_INFRA`` gains a new built-in
+When ``DEFAULT_PROVIDERS``, ``DEFAULT_INFRA`` or ``DEFAULT_SERVICES``
+gains a new built-in
 (e.g. we ship ``minimax`` in 0.2.7), a user who already has a
 ``providers.json`` will see the new entry merged in automatically on
 the next ``swe`` invocation. User-added entries, edits to description / url /

@@ -268,11 +268,12 @@ def _stage_harnesses(
 
 def _llm_providers() -> dict:
     """The registry's inference providers: this stage is "LLM providers",
-    so infra keys (Vercel and friends) stay out of its counts."""
+    so infra keys (Vercel and friends) and service keys (Firecrawl and
+    friends) stay out of its counts."""
     return {
         name: info
         for name, info in load_provider_registry().items()
-        if (info or {}).get("kind") != "infra"
+        if (info or {}).get("kind") not in ("infra", "services")
     }
 
 

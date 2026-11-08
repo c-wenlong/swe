@@ -218,9 +218,10 @@ class SetupWizardTest(unittest.TestCase):
             "openai": {},
             "anthropic": {"kind": "inference"},
             "vercel": {"kind": "infra"},
+            "firecrawl": {"kind": "services"},
         },
     )
-    def test_provider_stage_leaves_infra_keys_out(self, _registry, discover):
+    def test_provider_stage_leaves_non_inference_keys_out(self, _registry, discover):
         _stage_providers(
             1, 1, input_fn=lambda _prompt: "", home=Path("/tmp/home"), quick=False
         )

@@ -10,6 +10,7 @@ from swe.providers.defaults import (
     DEFAULT_ALL,
     DEFAULT_INFRA,
     DEFAULT_PROVIDERS,
+    DEFAULT_SERVICES,
     derived_alias,
     display_name,
 )
@@ -117,10 +118,13 @@ class RegistryLoadSeedingTest(unittest.TestCase):
                 self.assertIn("anthropic", providers)
                 self.assertTrue(registry_file.exists())
                 self.assertEqual(providers["openai"]["key_filename"], "openai")
-                # Inference entries hydrate kind; infra entries carry it.
+                # Inference entries hydrate kind; infra and services
+                # entries carry it.
                 self.assertEqual(providers["openai"]["kind"], "inference")
                 for name in DEFAULT_INFRA:
                     self.assertEqual(providers[name]["kind"], "infra")
+                for name in DEFAULT_SERVICES:
+                    self.assertEqual(providers[name]["kind"], "services")
 
     def test_persisted_registry_loads_without_seeding(self):
         with TemporaryDirectory() as tmp:
@@ -425,6 +429,9 @@ class KindHydrationTest(unittest.TestCase):
             for name in DEFAULT_INFRA:
                 self.assertIn(name, loaded)
                 self.assertEqual(loaded[name]["kind"], "infra")
+            for name in DEFAULT_SERVICES:
+                self.assertIn(name, loaded)
+                self.assertEqual(loaded[name]["kind"], "services")
 
     def test_removed_infra_default_stays_removed(self):
         with TemporaryDirectory() as tmp:
