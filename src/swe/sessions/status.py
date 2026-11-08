@@ -365,14 +365,28 @@ def _cursor_store_verdict(path: str):
     The store has no ``turn_ended`` record: a landed reply's last blob is
     the assistant text itself, and anything else at the tail — a user
     prompt, a tool result, a reasoning-only assistant — means the turn is
-    still open. There is no error or abort signal.
+    still open. An assistant message carrying a ``tool-call`` block is
+    waiting on its result, whatever text it also holds. There is no error
+    or abort signal.
     """
     message = cursor_store.last_message(path)
     if message is None:
         return None, ""
     if message.get("role") != "assistant":
         return "midturn", ""
-    text = _blocks_text(message.get("content") or [])
+    content = message.get("content")
+    blocks = content if isinstance(content, list) else []
+    if any(
+        isinstance(b, dict)
+        and str(b.get("type") or "").lower() in {"tool-call", "tool_call", "tool_use"}
+        for b in blocks
+    ):
+        return "midturn", ""
+    text = (
+        _blocks_text(blocks)
+        if isinstance(content, list)
+        else str(content or "")
+    )
     if text:
         return "finished", text
     return "midturn", ""

@@ -84,7 +84,9 @@ class _CursorHome(unittest.TestCase):
 
     def _write_store(self, session_dir, messages, *, base=(), manifest=None,
                      meta_json=None, uri=None) -> Path:
-        """A ``store.db``: ``base`` compacted into a chunk chain, ``messages`` live.
+        """A ``store.db``: ``messages`` in the root's live segment, ``base`` a
+        list of message lists compacted into a field-13 chunk chain (one
+        chunk per inner list, linked forward by field 4).
 
         ``meta_json`` writes the ``meta.json`` sidecar; ``manifest`` adds keys
         (``name``, ``createdAt``) to the db's own manifest row.
@@ -94,25 +96,32 @@ class _CursorHome(unittest.TestCase):
         conn = sqlite3.connect(session_dir / "store.db")
         conn.execute("CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)")
         conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
-        ids = []
-        for message in list(base) + list(messages):
-            data = json.dumps(message).encode()
+
+        def insert(data: bytes) -> str:
             bid = _blob_id(data)
             conn.execute("INSERT INTO blobs VALUES (?, ?)", (bid, data))
-            ids.append(bid)
+            return bid
+
+        def blob_ids(msgs) -> list[str]:
+            return [insert(json.dumps(m).encode()) for m in msgs]
+
         root = b""
         if base:
-            chunk = b"".join(
-                _field(1, bytes.fromhex(bid)) for bid in ids[: len(base)]
-            )
-            # Real chains end in an empty newer segment.
-            tail = _blob_id(b"")
-            conn.execute("INSERT INTO blobs VALUES (?, ?)", (tail, b""))
-            chunk += _field(4, bytes.fromhex(tail))
-            chunk_id = _blob_id(chunk)
-            conn.execute("INSERT INTO blobs VALUES (?, ?)", (chunk_id, chunk))
-            root += _field(13, bytes.fromhex(chunk_id))
-        for bid in ids[len(base):]:
+            # ``base`` is one message list per chained chunk, oldest first.
+            # Each chunk's field 4 holds the *stored* id of the next chunk —
+            # which itself carries a field 4 — so links are laid down
+            # newest-first and real chains end in an empty newer segment.
+            next_id = insert(b"")
+            head = ""
+            for chunk_msgs in reversed(list(base)):
+                chunk = b"".join(
+                    _field(1, bytes.fromhex(bid))
+                    for bid in blob_ids(chunk_msgs))
+                head = insert(chunk + _field(4, bytes.fromhex(next_id)))
+                next_id = head
+            root += _field(13, bytes.fromhex(head))
+        ids = blob_ids(messages)
+        for bid in ids:
             root += _field(1, bytes.fromhex(bid))
         if uri:
             root += _field(9, uri.encode())
@@ -169,8 +178,10 @@ class StoreDiscoveryTest(_CursorHome):
 class StoreReadTest(_CursorHome):
     def test_messages_follow_manifest_order(self):
         # Blob rows carry no order; the base chain's ids come first, then
-        # the root's live segment.
-        store = self._acp("sid", MESSAGES[2:], base=MESSAGES[:2])
+        # the root's live segment. Two populated chunks prove the field-4
+        # hop is followed, not just the chain head.
+        store = self._acp(
+            "sid", MESSAGES[2:], base=[[MESSAGES[0]], [MESSAGES[1]]])
         got = cursor_store.read_messages(str(store))
         self.assertEqual(
             [m["role"] for m in got],
@@ -328,6 +339,19 @@ class StatusTest(_CursorHome):
 
     def test_tool_tail_is_interrupted_when_stale(self):
         self.assertEqual(self._status(MESSAGES[:-1]), "interrupted")
+
+    def test_text_plus_pending_tool_call_is_midturn(self):
+        # An assistant blob may hold text AND the call it just made: text
+        # alone must not read the turn finished while the tool is out.
+        messages = MESSAGES[:1] + [{
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "Running the tests."},
+                {"type": "tool-call", "toolName": "Shell",
+                 "args": {"command": "pytest"}},
+            ],
+        }]
+        self.assertEqual(self._status(messages), "interrupted")
 
     def test_tool_tail_is_active_when_fresh(self):
         status = self._status(MESSAGES[:-1], timestamp=time.time() * 1000)

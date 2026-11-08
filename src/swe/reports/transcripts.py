@@ -509,19 +509,28 @@ def _read_cursor(session: Session) -> NormalizedTranscript:
     file; ``cursor_store`` decodes their manifest-ordered message blobs.
     """
     home = session.account_home or os.path.expanduser("~/.cursor")
-    path = _find_session_file(
-        Path(os.path.join(home, "projects")), session.session_id, ("*.jsonl",)
-    )
+    projects = Path(os.path.join(home, "projects"))
+    sid = Path(session.session_id).stem if session.session_id else ""
+    if sid and projects.exists():
+        path = _session_file_index(projects, ("*.jsonl",)).get(sid)
+        if path is not None and os.path.lexists(path):
+            transcript = _new(session, [path])
+            transcript.messages = _read_jsonl(path)
+            return transcript
+    store = cursor_store.find_store(session.session_id, home)
+    if store:
+        transcript = _new(session, [Path(store)])
+        transcript.messages = _read_cursor_store(store)
+        return transcript
+    # Neither the cached index nor a store knows it: fall back to the full
+    # resolver, which re-walks so a transcript written after the last index
+    # is still found before answering "not found".
+    path = _find_session_file(projects, session.session_id, ("*.jsonl",))
     if path is not None:
         transcript = _new(session, [path])
         transcript.messages = _read_jsonl(path)
         return transcript
-    store = cursor_store.find_store(session.session_id, home)
-    if not store:
-        return _unreadable(session, "transcript file not found")
-    transcript = _new(session, [Path(store)])
-    transcript.messages = _read_cursor_store(store)
-    return transcript
+    return _unreadable(session, "transcript file not found")
 
 
 @register_reader("codex")
