@@ -51,6 +51,8 @@ CONFIG_SUBDIR = "config"
 DATA_SUBDIR = "data"
 SEARCH_SUBDIR = "search"
 SEARCH_INDEX_BASENAME = "search.sqlite"
+INSIGHTS_SUBDIR = "insights"
+INSIGHTS_BASENAME = "insights.sqlite"
 GITHUB_SUBDIR = "github"
 GITHUB_CATALOG_BASENAME = "catalog.sqlite"
 REMOTE_SUBDIR = "remote"
@@ -359,6 +361,11 @@ def data_dir_for(home: Path | None = None) -> Path:
 def search_index_for(home: Path | None = None) -> Path:
     """The FTS5 transcript-search index the app and ``swe session index`` share."""
     return data_dir_for(home) / SEARCH_SUBDIR / SEARCH_INDEX_BASENAME
+
+
+def insights_db_for(home: Path | None = None) -> Path:
+    """The workflow-metrics store ``swe insights`` derives from the index."""
+    return data_dir_for(home) / INSIGHTS_SUBDIR / INSIGHTS_BASENAME
 
 
 def issues_file_for(home: Path | None = None) -> Path:
