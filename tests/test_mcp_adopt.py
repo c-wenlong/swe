@@ -509,6 +509,14 @@ class ShieldCredentialsTest(unittest.TestCase):
             {"command": "x", "args": ["--token", "lit${A}"]},
             {"command": "x", "args": ["--header", "Auth: Bearer lit${A}"]},
             {"url": "https://u:lit${A}@h/"},
+            # The same block applies to the '=' flag form, a credential
+            # URL as a bare arg or --flag value, and a KEY=value arg.
+            {"command": "x", "args": ["--api-key=lit${A}"]},
+            {"command": "x",
+             "args": ["--header=Authorization: Bearer lit${A}"]},
+            {"command": "x", "args": ["--url=https://u:lit${A}@h/"]},
+            {"command": "x", "args": ["https://u:lit${A}@h/"]},
+            {"command": "x", "args": ["API_KEY=lit${A}"]},
         ):
             shielded, _ = self.shield(server)
             self.assertIsNone(shielded, server)
