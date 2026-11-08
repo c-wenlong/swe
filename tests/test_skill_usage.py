@@ -143,6 +143,61 @@ class TestUntracked(unittest.TestCase):
         self.assertEqual(usage.skill_usage("pdf", home), {"tracked": False})
 
 
+class TestEdgeCases(unittest.TestCase):
+    """Timestamps and replies that share a call's name shape."""
+
+    def _home(self, messages):
+        home = temp_dir(self)
+        path = search_index.index_path(home)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(path)
+        try:
+            conn.executescript(_DDL)
+            conn.execute("INSERT INTO meta VALUES ('schema_version', '1')")
+            conn.execute("INSERT INTO sessions(id, agent, session_id, file_path)"
+                         " VALUES (1, 'devin', 's-1', ?)", (str(home / "s-1"),))
+            for msg_id, ts, text in messages:
+                conn.execute("INSERT INTO messages VALUES (?, 1, 'tool', ?)",
+                             (msg_id, ts))
+                conn.execute("INSERT INTO messages_fts(rowid, tool_text)"
+                             " VALUES (?, ?)", (msg_id, text))
+            conn.commit()
+        finally:
+            conn.close()
+        return home
+
+    def test_a_missing_timestamp_counts_but_never_wins_last_used(self):
+        home = self._home([
+            (1, "2026-10-01T10:00:00Z", "mcp__github__create_issue"),
+            (2, None, "mcp__github__create_issue"),
+        ])
+        got = usage.mcp_usage("github", home)
+        self.assertEqual((got["calls"], got["last_used"]),
+                         (2, "2026-10-01T10:00:00Z"))
+        home = self._home([(1, None, "mcp__github__create_issue")])
+        self.assertEqual(usage.mcp_usage("github", home)["last_used"], None)
+
+    def test_last_used_compares_parsed_times_not_strings(self):
+        home = self._home([
+            (1, "2026-10-01T10:00:00Z", "mcp__github__create_issue"),
+            (2, "2026-10-01T10:00:00.500Z", "mcp__github__create_issue"),
+        ])
+        # "…00Z" sorts after "…00.500Z" as text; parsed it is the earlier call.
+        self.assertEqual(usage.mcp_usage("github", home)["last_used"],
+                         "2026-10-01T10:00:00.500Z")
+
+    def test_a_named_reply_is_not_a_call(self):
+        # Devin chat / pi toolResult rows write `→ name: result`; only the
+        # call starts with the name.
+        home = self._home([
+            (1, "2026-10-01T10:00:00Z", "mcp__github__create_issue: url=x"),
+            (2, "2026-10-02T10:00:00Z", "→ mcp__github__create_issue: #12 opened"),
+        ])
+        got = usage.mcp_usage("github", home)
+        self.assertEqual((got["calls"], got["last_used"]),
+                         (1, "2026-10-01T10:00:00Z"))
+
+
 class TestDecode(unittest.TestCase):
     def test_skill_key_reaches_tool_text(self):
         self.assertEqual(tool_call_text("Skill", {"skill": "pdf"}), "Skill: pdf")
@@ -245,7 +300,7 @@ class UsageCommandInProcessTest(unittest.TestCase):
             ["pdf"], {"tracked": True, "calls": 0, "sessions": 0,
                       "last_used": None, "by_harness": {}, "unattributed": 0})
         self.assertEqual(code, 0)
-        self.assertIn("No calls recorded yet", out)
+        self.assertIn("No calls indexed for this skill yet", out)
         code, out, _ = self._run(["pdf"], {"tracked": False})
         self.assertEqual(code, 0)
         self.assertIn("not tracked", out)

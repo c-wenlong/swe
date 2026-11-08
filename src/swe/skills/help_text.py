@@ -216,8 +216,8 @@ def print_skills_usage_help():
   {c('cyan', 'swe skills usage my-skill --json')}  Machine-readable
 
   {c('dim', 'Needs the index: `swe session index --on`, or it stays on while the')}
-  {c('dim', 'app runs. Only calls indexed since it switched on are counted;')}
-  {c('dim', 'older `Skill` calls carry no name and tally under "unattributed".')}
+  {c('dim', 'app runs. Its first scan reads existing sessions too; `Skill` calls')}
+  {c('dim', 'written before the `skill` input key tally under "unattributed".')}
 """
     )
 

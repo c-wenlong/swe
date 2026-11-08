@@ -163,7 +163,7 @@ class DevinTest(unittest.TestCase):
         [session] = containers.devin_sessions(self.conn)
         read = containers.devin_read(self.conn, session, first.mark)
         self.assertTrue(read.appended)
-        self.assertEqual(_texts(read.messages), [(decode.TOOL, "exec: a.py"), (decode.TOOL, "b.py")])
+        self.assertEqual(_texts(read.messages), [(decode.TOOL, "→ exec: a.py"), (decode.TOOL, "b.py")])
 
 
 if __name__ == "__main__":

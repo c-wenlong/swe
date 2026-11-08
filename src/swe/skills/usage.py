@@ -4,10 +4,14 @@ The index is opt-in (``swe session index --on``), so every answer is either
 ``tracked: false`` when no index exists or a count drawn from ``tool_text``
 rows. ``Skill: <name>`` calls land in ``tool_text`` through the ``skill``
 input key; ``mcp__<server>__<tool>`` calls arrive whole because ``_`` is a
-token character.
+token character. Named tool *replies* are written ``→ <name>: <result>`` —
+the arrow keeps the name out of position 0 so ``startswith`` counts calls
+only (older indexes still carry ``<name>: <result>`` replies).
 """
 
 from __future__ import annotations
+
+from datetime import datetime
 
 
 def index_rows(home=None) -> list[tuple] | None:
@@ -23,6 +27,27 @@ def index_rows(home=None) -> list[tuple] | None:
     if not available(home):
         return None
     return tool_text_rows(home, "tool_text : (skill OR mcp__*)")
+
+
+def _parse_ts(ts: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(ts)
+    except ValueError:
+        return None
+
+
+def _later_ts(a: str | None, b: str | None) -> str | None:
+    """The later timestamp string. Rows can carry no ts (Kiro), and the
+    verbatim strings do not sort chronologically (``…00Z`` > ``…00.500Z``
+    as text), so parse both when both parse and compare raw otherwise."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    pa, pb = _parse_ts(a), _parse_ts(b)
+    if pa is not None and pb is not None:
+        return a if pa >= pb else b
+    return max(a, b)
 
 
 def _summarise(rows, matched) -> dict:
@@ -41,8 +66,8 @@ def _summarise(rows, matched) -> dict:
             continue
         calls += 1
         sessions.add(session_row_id)
-        if last_used is None or ts > last_used:
-            last_used = ts
+        if ts is not None:
+            last_used = _later_ts(last_used, ts)
         by_harness[agent or "?"] = by_harness.get(agent or "?", 0) + 1
     return {
         "calls": calls,

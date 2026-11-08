@@ -554,7 +554,9 @@ def _devin_chat_message(state: _DevinState, record: dict) -> list[Message]:
         call_id = json_string(record.get("tool_call_id"))
         name = state.call_names.get(call_id) if call_id is not None else None
         messages = []
-        append_tool(messages, f"{name}: {text}" if name else text, ts)
+        # A named reply leads with `→` so the call's `name:` prefix shape
+        # stays unambiguous for `swe skills usage` counting.
+        append_tool(messages, f"→ {name}: {text}" if name else text, ts)
         return messages
     return []
 
@@ -586,7 +588,9 @@ def _pi(obj: dict) -> tuple[list[Message], Hints]:
                 return [], hints
             name = json_string(message.get("toolName"))
             messages: list[Message] = []
-            append_tool(messages, f"{name}: {text}" if name else text, ts)
+            # Same `→` reply lead as Devin's named replies: the name stays
+            # searchable but the row can never read as a call.
+            append_tool(messages, f"→ {name}: {text}" if name else text, ts)
             return messages, hints
         return content_messages(_role(message.get("role")), message.get("content"), ts), hints
     return [], hints

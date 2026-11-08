@@ -264,6 +264,9 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
     "plugins catalog": [
         ("--json", "Every marketplace and plugin as JSON"),
     ],
+    "plugins info": [
+        ("--json", "Print the detail sheet as JSON"),
+    ],
     "plugins install": [
         ("--harness=claude", "Act in Claude Code"),
         ("--harness=codex", "Act in Codex"),

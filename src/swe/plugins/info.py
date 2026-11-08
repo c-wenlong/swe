@@ -13,7 +13,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from swe.plugins.catalog import build_catalog, mcp_server_details
+from swe.plugins.catalog import build_catalog, mcp_server_details, newest
 
 
 def _latest_mtime(folder: Path | None, cap: int = 5000) -> float | None:
@@ -83,11 +83,15 @@ def plugin_info(ref: str, home: Path | None = None) -> dict | None:
         return None
 
     # Declared servers come from the folder the catalog calls primary:
-    # the loaded copy when one is on, else the source folder.
+    # the loaded copy when one is on, else the source folder, else the
+    # newest cached copy (a plugin only in a harness cache still has one).
     folder = next((Path(s["path"]) for s in plugin["harnesses"].values()
                    if s.get("path")), None)
     if folder is None and plugin.get("source_path"):
         folder = Path(plugin["source_path"])
+    if folder is None:
+        folder = newest([Path(c) for s in plugin["harnesses"].values()
+                         for c in s.get("copies") or []])
     declared = mcp_server_details(folder)
 
     # Join declared servers with the swe-side inventory for state and

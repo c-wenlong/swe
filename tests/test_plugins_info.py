@@ -230,8 +230,8 @@ class TestRenderInfo(unittest.TestCase):
         for needle in ("lsp@official", "v1.2.3", "updated 2026-11-01",
                        "Language smarts", "2 skills", "1 mcp servers",
                        "hover", "5 calls", "untracked", "in hub", "in claude",
-                       "off in codex", "TOKEN", "(missing)", "X-Key", "3 calls",
-                       "declared only", "8 calls across 2 sessions"):
+                       "off in codex", "TOKEN", "missing", "GONE", "X-Key",
+                       "3 calls", "declared only", "8 calls across 2 sessions"):
             self.assertIn(needle, out)
 
     def test_bare_minimum(self):
@@ -262,6 +262,32 @@ class TestRenderInfo(unittest.TestCase):
         with redirect_stdout(out):
             self.assertEqual(_info(["a", "b"], False, fail), 1)
         self.assertIn("Usage:", out.getvalue())
+
+
+class TestCopyFallback(unittest.TestCase):
+    def test_folder_falls_back_to_the_newest_cached_copy(self):
+        # A plugin whose install record points nowhere and whose
+        # marketplace is gone still has its cached copies to read.
+        import swe.plugins.info as info_mod
+
+        with tempfile.TemporaryDirectory() as td:
+            old = Path(td) / "cache" / "gone" / "plug" / "1.0.0"
+            new = Path(td) / "cache" / "gone" / "plug" / "2.0.0"
+            old.mkdir(parents=True)
+            (new / ".mcp.json").parent.mkdir(parents=True)
+            (new / ".mcp.json").write_text(
+                '{"mcpServers": {"srv": {"env": {"KEY": "v"}}}}')
+            catalog = {"harnesses": ["claude"], "errors": [], "marketplaces": [{
+                "name": "gone", "harnesses": {}, "plugins": [{
+                    "name": "plug", "ref": "plug@gone", "source_path": None,
+                    "harnesses": {"claude": {"installed": None, "path": None,
+                                             "copies": [str(old), str(new)]}},
+                    "skills": []}]}]}
+            with patch.object(info_mod, "build_catalog", return_value=catalog):
+                data = plugin_info("plug@gone")
+        self.assertIsNotNone(data)
+        self.assertEqual([s["name"] for s in data["mcp_servers"]], ["srv"])
+        self.assertEqual(data["mcp_servers"][0]["env_keys"], ["KEY"])
 
 
 class TestSourcePathFallback(unittest.TestCase):

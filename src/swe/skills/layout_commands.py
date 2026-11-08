@@ -215,7 +215,9 @@ def cmd_skills_usage(args):
         print(c("red", "  Usage: swe skills usage <name>"),
               file=error_stream(json_view))
         return 1
-    reply = {"action": "usage", "skill": rest[0], **skill_usage(rest[0])}
+    from swe.skills.models import UsageReply
+
+    reply = UsageReply(rest[0], skill_usage(rest[0])).to_json()
     if json_view:
         return emit(reply)
     if not reply["tracked"]:
@@ -233,8 +235,9 @@ def cmd_skills_usage(args):
         print(c("dim", f"  + {reply['unattributed']} `Skill` call{'s' if reply['unattributed'] != 1 else ''}"
                        " indexed without a skill name"))
     if not calls:
-        print(c("dim", "  No calls recorded yet — the index only counts sessions"
-                       " built after it switched on."))
+        print(c("dim", "  No calls indexed for this skill yet. The index scans"
+                       " existing sessions too, but calls written before the"
+                       " `skill` input key tally under \"without a skill name\"."))
     print()
     return 0
 

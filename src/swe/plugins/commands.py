@@ -249,7 +249,7 @@ def _render_info(data: dict) -> None:
     plugin = data["plugin"]
     meta = []
     if plugin.get("version"):
-        meta.append(f"v{plugin['version']}")
+        meta.append(f"v{sanitize(plugin['version'])}")
     if data.get("updated"):
         meta.append(f"updated {data['updated'][:10]}")
     if plugin.get("source_path"):
@@ -291,11 +291,14 @@ def _render_info(data: dict) -> None:
                 bits.append("off in " + ", ".join(server["disabled_in"]))
             print(f"    {sanitize(server['name']).ljust(24)}{c('dim', '; '.join(bits) or 'declared only')}")
             for key in server.get("env_keys") or []:
-                missing = key in (server.get("secrets_missing") or [])
-                mark = c("yellow", " (missing)") if missing else ""
-                print(f"      {c('dim', 'env')} {sanitize(key)}{mark}")
+                print(f"      {c('dim', 'env')} {sanitize(key)}")
             for key in server.get("header_keys") or []:
                 print(f"      {c('dim', 'hdr')} {sanitize(key)}")
+            # secrets_missing holds the placeholder names inside ${…},
+            # not env keys — a missing secret can sit in a header, an
+            # argument or the URL too, so it lists on its own.
+            for name in server.get("secrets_missing") or []:
+                print(f"      {c('yellow', 'missing')} {sanitize(name)}")
             calls = server["usage"].get("calls")
             if server["usage"].get("tracked") and calls:
                 print(f"      {c('dim', f'{calls} calls')}")

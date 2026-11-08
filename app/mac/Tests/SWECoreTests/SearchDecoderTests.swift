@@ -257,7 +257,7 @@ import Testing
 
         let result = decoder.decode(line: line(
             #"{"type": "message", "timestamp": "t3", "message": {"role": "toolResult", "toolCallId": "call_1", "toolName": "bash", "content": [{"type": "text", "text": "AGENTS.md\nREADME.md"}], "isError": false}}"#))
-        #expect(result.messages == [SearchMessage(role: .tool, text: "bash: AGENTS.md\nREADME.md", ts: "t3")])
+        #expect(result.messages == [SearchMessage(role: .tool, text: "→ bash: AGENTS.md\nREADME.md", ts: "t3")])
     }
 
     @Test func piSkipsNonMessageLinesAndReadsSessionInfo() {
@@ -285,7 +285,7 @@ import Testing
         // A tool row is labelled with the call it answers, joined by id.
         let result = decoder.decode(line: line(
             #"{"message_id":"m3","role":"tool","content":"output here","tool_call_id":"c1","metadata":{"created_at":"2026-09-15T15:48:57Z"}}"#))
-        #expect(result.messages == [SearchMessage(role: .tool, text: "exec: output here", ts: "2026-09-15T15:48:57Z")])
+        #expect(result.messages == [SearchMessage(role: .tool, text: "→ exec: output here", ts: "2026-09-15T15:48:57Z")])
 
         #expect(decoder.decode(line: line(
             #"{"message_id":"m0","role":"system","content":"<system_info>x</system_info>"}"#)).messages.isEmpty)
