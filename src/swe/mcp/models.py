@@ -42,6 +42,9 @@ class ServerRow:
     # The hub entry's ``type`` label (``swe mcp set-type``); None when the
     # hub does not hold the server or its ``type`` is a transport marker.
     type: str | None = None
+    # The harness a sync adopted the hub entry from (``swe.adopted_from``);
+    # None for a server added straight to the hub or not in it.
+    adopted_from: str | None = None
 
     def to_json(self) -> dict:
         return {
@@ -60,6 +63,7 @@ class ServerRow:
             "remote_in": self.remote_in,
             "disabled_in": self.disabled_in,
             "type": self.type,
+            "adopted_from": self.adopted_from,
         }
 
 
@@ -155,6 +159,9 @@ class InfoReply:
     updated: str | None
     # The hub entry's ``type`` label (``swe mcp set-type``), or None.
     type: str | None = None
+    # The harness the hub entry was adopted from, or None — same field as
+    # ``ServerRow.adopted_from``.
+    adopted_from: str | None = None
     gateway: dict | None = None
 
     def to_json(self) -> dict:
@@ -171,6 +178,7 @@ class InfoReply:
             "harnesses": self.harnesses,
             "shared": self.shared,
             "type": self.type,
+            "adopted_from": self.adopted_from,
             "conflict": self.conflict,
             "variants": self.variants,
             "disabled_in": self.disabled_in,

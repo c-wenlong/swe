@@ -12,7 +12,7 @@ Commands:
   edit <tool> <name>             Edit one server config in one tool
   validate [tool...]             Validate MCP config shape for one/all tools
   add <name> ...                 Add a server to the hub (and harnesses)
-  remove <name> --from=...       Remove a server from the hub or harnesses
+  remove <name> [--from=...]     Remove a server everywhere, or from given places
   enable/disable <name>          Switch a server on/off per harness
   set-type <name> TYPE           Label a hub server
   info <name>                    One server's full detail
@@ -813,6 +813,197 @@ def _drop_master_off(name: str, harnesses: list[str] | None = None) -> None:
     _save_swe_state(state)
 
 
+def adopted_map() -> dict[str, str]:
+    """``{server: harness}`` — where each hub entry was adopted from.
+
+    Sync (and ``discover --apply``, and a ``disable`` that has to stash a
+    hub copy) records the harness a pulled definition came from, so the
+    provenance survives the canonicalisation the hub applies.
+    """
+    raw = _swe_state().get("adopted_from")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items()}
+
+
+def _record_adopted(state: dict, name: str, donor: str,
+                    holders: set, mcp_tools: dict) -> None:
+    """One adoption's bookkeeping inside mcp.json's ``swe`` block.
+
+    ``adopted_from`` remembers the harness the definition came from, and a
+    disabled mark for every registry harness outside ``holders`` keeps a
+    later sync from pushing the server anywhere it never was — the hub
+    holds it, but it stays scoped to where it already lived. The caller
+    saves ``state``.
+    """
+    state.setdefault("adopted_from", {})[name] = donor
+    disabled = state.setdefault("disabled", {})
+    for tool in mcp_tools:
+        if is_hub(tool) or tool in holders:
+            continue
+        names = disabled.setdefault(tool, [])
+        if name not in names:
+            names.append(name)
+
+
+def _purge_server_state(name: str) -> None:
+    """Drop every trace of ``name`` from mcp.json's ``swe`` block.
+
+    ``mcp remove`` takes the hub entry away, and the disabled marks, kept
+    raw copies, master-off restore set and adoption provenance all refer
+    to a hub entry that no longer exists — left behind, ``mcp enable``
+    could resurrect a removed server from a kept copy. Purging also means
+    nothing stale steers the adoption the next sync would run should the
+    server still sit in a harness file.
+    """
+    state = _swe_state()
+    changed = False
+    disabled = state.get("disabled")
+    if isinstance(disabled, dict):
+        for harness in [h for h, names in disabled.items()
+                        if isinstance(names, list) and name in names]:
+            left = [n for n in disabled[harness] if n != name]
+            if left:
+                disabled[harness] = left
+            else:
+                del disabled[harness]
+            changed = True
+        if not disabled:
+            state.pop("disabled", None)
+    defs_ = state.get("disabled_defs")
+    if isinstance(defs_, dict):
+        for harness in [h for h, entries in defs_.items()
+                        if isinstance(entries, dict) and name in entries]:
+            del defs_[harness][name]
+            if not defs_[harness]:
+                del defs_[harness]
+            changed = True
+        if not defs_:
+            state.pop("disabled_defs", None)
+    master = state.get("master_off")
+    if isinstance(master, dict) and master.pop(name, None) is not None:
+        changed = True
+        if not master:
+            state.pop("master_off", None)
+    provenance = state.get("adopted_from")
+    if isinstance(provenance, dict) and provenance.pop(name, None) is not None:
+        changed = True
+        if not provenance:
+            state.pop("adopted_from", None)
+    if changed:
+        _save_swe_state(state)
+
+
+def adopt_harness_servers(mcp_tools: dict, *, dry_run: bool = False,
+                          post_state: dict | None = None) -> list[str]:
+    """Pull harness-only servers into the hub, scoped to where they live.
+
+    The hub is the source of truth, so a server a harness config holds but
+    ``mcp.json`` does not is adopted at the end of a sync — after the
+    writes, so a server the run just copied counts as held in its new
+    home. The first holder's definition in sorted harness order goes in
+    canonicalised and shielded like ``discover --apply`` (deterministic
+    when harnesses disagree — the inventory's conflict/variants still
+    reports the split), provenance lands in ``swe.adopted_from``, and the
+    server is marked disabled for every registry harness not already
+    holding it. Sync therefore never spreads an adopted server anywhere
+    new; ``mcp enable`` is how one deliberately leaves its scope.
+
+    ``dry_run`` writes nothing — secrets included — but still says what
+    it would adopt, computed from ``post_state`` (``{tool: servers}`` the
+    run plans to leave behind) so a preview agrees with the real run — a
+    server the same run would prune never counts as held. Returns the
+    adopted names, sorted.
+    """
+    found_in: dict[str, dict] = {}
+    for tool in sorted(mcp_tools):
+        if is_hub(tool):
+            continue
+        if post_state is not None and tool in post_state:
+            found_in[tool] = post_state[tool]
+        else:
+            found_in[tool] = get_tool_servers(tool)
+
+    try:
+        data = load_json(MCP_SOURCE_FILE) or {}
+    except CorruptConfigurationError as exc:
+        # Never overwrite the malformed hub for housekeeping's sake.
+        print(c("yellow", f"  adoption skipped: {exc}"), file=sys.stderr)
+        return []
+    hub = data.get(MCP_SOURCE_KEY)
+    if isinstance(hub, dict):
+        hub = dict(hub)
+    else:
+        hub = {}
+        if MCP_SOURCE_KEY not in data:
+            # A legacy flat hub keeps its servers at the top level. Once a
+            # real ``mcpServers`` map exists every reader prefers it, so
+            # writing one without folding the flat entries in would make
+            # them disappear: keep them by moving them into the map.
+            skip = {"swe", "updated", gateway_defaults.GATEWAY_KEY}
+            for key, value in data.items():
+                if key not in skip and isinstance(value, dict):
+                    hub[key] = value
+
+    donors: dict[str, str] = {}
+    for tool, servers in found_in.items():
+        for name in servers:
+            if name not in hub and name not in donors:
+                donors[name] = tool
+    if not donors:
+        return []
+
+    adopted: list[str] = []
+    state = data.get("swe")
+    if not isinstance(state, dict):
+        state = {}
+        data["swe"] = state
+    secrets = None if dry_run else load_secrets()
+    wrote = False
+    for name in sorted(donors):
+        donor = donors[name]
+        canonical = get_mcp_handler(donor).parse(found_in[donor][name])
+        if not canonical:
+            # An entry the donor's own parser cannot read stays the
+            # harness's private business.
+            continue
+        if dry_run:
+            adopted.append(name)
+            continue
+        try:
+            shielded = _shielded_copy(redact_secrets(canonical, secrets))
+        except (OSError, ValueError) as exc:
+            # Housekeeping never fails the sync it rode on: a secrets
+            # store that cannot take the credential just leaves this
+            # server out, rather than crash after the requested writes.
+            print(c("yellow", f"  {name}: could not shield its credentials "
+                            f"({exc.__class__.__name__}: {exc}) — left out "
+                            "of the hub"), file=sys.stderr)
+            continue
+        if shielded is None:
+            # A credential the secrets file cannot hold stays out of the
+            # versioned hub entirely rather than land in plaintext.
+            continue
+        hub[name] = shielded
+        holders = {t for t, servers in found_in.items() if name in servers}
+        _record_adopted(state, name, donor, holders, mcp_tools)
+        adopted.append(name)
+        wrote = True
+    if wrote:
+        data[MCP_SOURCE_KEY] = hub
+        data["swe"] = state
+        data["updated"] = datetime.now().isoformat()
+        try:
+            save_json(MCP_SOURCE_FILE, data)
+        except OSError as exc:
+            # Housekeeping never fails the sync it rode on: say so and
+            # report nothing adopted, since none of it persisted.
+            print(c("yellow", f"  adoption could not write "
+                            f"{MCP_SOURCE_FILE}: {exc}"), file=sys.stderr)
+            return []
+    return adopted
+
+
 def servers_for_source(name: str) -> dict:
     """Servers to sync FROM, in that source's own on-disk shape.
 
@@ -1353,8 +1544,12 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
     ``swe setup --hub`` runs, never a flag) leaves just those servers out
     instead and names them in ``report["missing"]`` as ``{server:
     [NAME, ...]}``.
+
+    A successful run ends by adopting harness-only servers into the hub
+    (see ``adopt_harness_servers``); ``report["adopted"]`` lists them and
+    ``--no-adopt`` skips the pass.
     """
-    allowed_flags = {"--force", "--skip-conflicts", "--all", "--no-interactive", "--dry-run", "--strict", "--prune"}
+    allowed_flags = {"--force", "--skip-conflicts", "--all", "--no-interactive", "--dry-run", "--strict", "--prune", "--no-adopt"}
     unknown_flags = [
         a for a in args
         if a.startswith("--")
@@ -1376,6 +1571,27 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
     dry_run = "--dry-run" in args
     strict = "--strict" in args
     prune = "--prune" in args
+    adopt = "--no-adopt" not in args
+    # A dry run's planned post-sync contents per target, so adoption's
+    # preview counts holders the way the real run's rescan would — a
+    # server the same pass would prune never counts as held.
+    planned_servers: dict[str, dict] = {}
+
+    def _finish(code: int) -> int:
+        """Adoption is a sync's last act; every successful exit funnels here."""
+        adopted: list[str] = []
+        if code == 0 and adopt:
+            adopted = adopt_harness_servers(
+                mcp_tools, dry_run=dry_run,
+                post_state=planned_servers if dry_run else None)
+            if adopted:
+                verb = "Would adopt" if dry_run else "Adopted"
+                print(f"\n  {verb} {len(adopted)} server(s) into the hub: "
+                      f"{', '.join(adopted)}")
+                print(f"    {c('dim', 'marked off for every harness not already holding them')}")
+        if report is not None:
+            report["adopted"] = adopted
+        return code
 
     only_flag = None
     except_flag = None
@@ -1401,8 +1617,10 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
         print(f"Unknown source tool: {positional[0]}")
         return 1
     if report is not None:
-        # Set before any early return, so a no-op run still names its source.
+        # Set before any early return, so a no-op run still names its source
+        # and the adopted list reads as empty rather than missing.
         report["source"] = source
+        report["adopted"] = []
 
     targets: list[str] = []
     seen: set[str] = set()
@@ -1429,12 +1647,13 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
                 print(f"Unknown target tool: {a}")
                 return 1
             if is_hub(resolved):
-                # Data flows harness -> hub via discover, hub -> harness via
-                # sync. Writing tool-shaped configs into the canonical file
-                # would corrupt the one thing everything else reads.
+                # Data flows harness -> hub by sync's adoption pass (or
+                # `discover --apply` for a scanned config), hub -> harness
+                # via sync. Writing tool-shaped configs into the canonical
+                # file would corrupt the one thing everything else reads.
                 print(
-                    f"{HUB_LABEL} is the hub, not a sync target. "
-                    "Use `swe mcp discover --apply` to pull into it."
+                    f"{HUB_LABEL} is the hub, not a sync target — a sync "
+                    "adopts harness-only servers into it on its own."
                 )
                 return 1
             candidates.append(resolved)
@@ -1454,7 +1673,7 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
             print(f"{MCP_SOURCE_FILE} has no servers. Run `swe mcp discover --apply` first.")
         else:
             print(f"{source} has no MCP servers.")
-        return 0
+        return _finish(0)
 
     disabled = disabled_map()
 
@@ -1469,7 +1688,7 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
             print(c("yellow", f"  --only matched nothing: {', '.join(unmatched)}"))
         if not source_servers:
             print(f"No matching servers found in {source}.")
-            return 0
+            return _finish(0)
 
     if except_flag:
         excluded, unmatched = _filter_by_patterns(source_servers, except_flag)
@@ -1500,7 +1719,7 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
 
     if not selected:
         print("Nothing selected.")
-        return 0
+        return _finish(0)
     if report is not None:
         report["selected"] = list(selected)
 
@@ -1536,7 +1755,7 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
             if report is not None:
                 report["selected"] = list(selected)
             if not selected:
-                return 0
+                return _finish(0)
         elif missing:
             for var in sorted(missing):
                 used_by = ", ".join(missing[var])
@@ -1675,7 +1894,11 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
                                       "via_gateway": via_gateway,
                                       "disabled": held_off})
 
-        if (added or updated or pruned) and not dry_run:
+        if dry_run:
+            # The in-memory map already holds adds, skips and prunes —
+            # adoption's preview reads it instead of the untouched file.
+            planned_servers[target] = dict(target_servers)
+        elif added or updated or pruned:
             saver = get_tool_saver(target)
             if saver is not None:
                 saver(target_servers, target_cfg["path"])
@@ -1708,7 +1931,7 @@ def _sync(args, report: dict | None, skip_missing: bool = False):
         else:
             print(f"\n  {target}: nothing changed")
 
-    return 0
+    return _finish(0)
 
 
 def sync_hub_to(target: str) -> dict:
@@ -1995,30 +2218,56 @@ def remove_places(registry: dict, name: str, from_names: list[str]) -> list[str]
     return places
 
 
-def remove_server(name: str, places: list[str]) -> tuple[list[str], list[str]]:
+def remove_server(name: str, places: list[str]) -> tuple[list[str], list[str], list[str]]:
     """Delete ``name`` from each place's config; the body of ``swe mcp
-    remove``. Returns (removed, absent): where it was taken out, and where
-    it wasn't to begin with."""
+    remove``. Returns (removed, absent, failed): where it was taken out,
+    where it wasn't to begin with, and where the delete could not be
+    written — a config swe cannot save stops nothing else, it is warned
+    about and the rest still go.
+
+    Taking the hub entry away also drops the server's ``swe``-block state:
+    disabled marks, kept copies and provenance refer to a hub entry that
+    is gone, and a kept copy could resurrect it on ``mcp enable``.
+    """
     removed: list[str] = []
     absent: list[str] = []
+    failed: list[str] = []
     for place in places:
-        if place == HUB_LABEL:
-            hub = get_hub_servers()
-            if name in hub:
-                del hub[name]
-                save_hub_servers(hub)
-                removed.append(HUB_LABEL)
-            else:
-                absent.append(HUB_LABEL)
-            continue
-        servers = get_tool_servers(place)
-        if name not in servers:
-            absent.append(place)
-            continue
-        del servers[name]
-        get_tool_saver(place)(servers, get_tool_config(place)["path"])
-        removed.append(place)
-    return removed, absent
+        try:
+            if place == HUB_LABEL:
+                hub = get_hub_servers()
+                if name in hub:
+                    del hub[name]
+                    save_hub_servers(hub)
+                    removed.append(HUB_LABEL)
+                else:
+                    absent.append(HUB_LABEL)
+                # The hub was asked either way: state left from an older
+                # removal or a hand edit — a kept disabled copy, an
+                # adoption record — still names this server, and mcp
+                # enable could resurrect it from the kept copy. A purge
+                # failure is only warned about: the entry itself is gone
+                # or was never there, so the remove still stands.
+                try:
+                    _purge_server_state(name)
+                except (OSError, ConfigurationError) as exc:
+                    print(c("yellow", f"  {place}: {name} is out but its "
+                                    f"state could not be cleaned ({exc})"),
+                          file=sys.stderr)
+                continue
+            servers = get_tool_servers(place)
+            if name not in servers:
+                absent.append(place)
+                continue
+            del servers[name]
+            get_tool_saver(place)(servers, get_tool_config(place)["path"])
+            removed.append(place)
+        except Exception as exc:
+            failed.append(place)
+            print(c("yellow", f"  {place}: could not remove {name} "
+                            f"({exc.__class__.__name__}: {exc})"),
+                  file=sys.stderr)
+    return removed, absent, failed
 
 
 def cmd_remove(args):
@@ -2035,10 +2284,12 @@ def cmd_remove(args):
 
     positional: list[str] = []
     from_names: list[str] = []
+    from_seen = False
     i = 0
     while i < len(args):
         arg = args[i]
         if arg == "--from":
+            from_seen = True
             from_names += [s for s in args[i + 1].split(",") if s]
             i += 2
         elif arg.startswith("--"):
@@ -2050,21 +2301,43 @@ def cmd_remove(args):
 
     # Remove accepts any existing key: names like "my server" or "_local"
     # are legal in a config even though `add` wouldn't mint them.
-    if len(positional) != 1 or not positional[0] or not from_names:
-        print(f"Usage: {c('cyan', 'swe mcp remove <name> --from=<place>[,<place>…]')}",
+    if len(positional) != 1 or not positional[0]:
+        print(f"Usage: {c('cyan', 'swe mcp remove <name> [--from=<place>[,<place>…]]')}",
               file=refusal)
         return 1
     name = positional[0]
+    if from_seen and not from_names:
+        # An empty --from asked for nowhere, not everywhere — a script
+        # expanding an empty list must not delete every copy.
+        print(c("red", "--from needs at least one place; "
+                        "drop it to remove everywhere"), file=refusal)
+        return 1
+    if not from_seen:
+        # Gone everywhere is the default: a copy left in a harness file is
+        # adopted straight back into the hub by the next sync.
+        from_names = ["all"]
 
+    registry = load_registry()
     try:
-        places = remove_places(load_registry(), name, from_names)
+        places = remove_places(registry, name, from_names)
     except RemoveRefused as exc:
         print(c("red", str(exc)) if exc.alarming else str(exc), file=refusal)
         return 1
-    removed, absent = remove_server(name, places)
+    removed, absent, failed = remove_server(name, places)
+
+    if HUB_LABEL in removed:
+        # The hub entry is gone; anything still sitting in a harness file
+        # comes back at the next sync's adoption pass, so say so.
+        still = [t for t in get_mcp_tools(registry)
+                 if name in get_tool_servers(t)]
+        if still:
+            print(c("yellow", f"  {name} is still in {', '.join(still)} — "
+                              "the next sync will adopt it back into the hub"),
+                  file=refusal)
 
     if json_view:
-        code = emit({"name": name, "removed": removed, "absent": absent})
+        code = emit({"name": name, "removed": removed, "absent": absent,
+                     "failed": failed})
     else:
         if removed:
             print(f"Removed {name} from: {', '.join(removed)}")
@@ -2366,6 +2639,7 @@ def cmd_doctor(args):
     print("MCP Doctor — diagnosing all configured servers\n")
 
     failures = []
+    seen: dict[str, str] = {}
 
     for tool_name, tool_cfg in mcp_tools.items():
         if not tool_cfg["path"].exists():
@@ -2379,11 +2653,21 @@ def cmd_doctor(args):
             st = server_type(server_cfg)
             summary = server_summary(server_cfg)
             print(f"  {health} {sanitize(name)} ({st}): {summary}")
+            seen.setdefault(name, tool_name)
 
             plain_health = strip_ansi(health).strip()
             if plain_health != "✓":
                 failures.append((tool_name, name, plain_health))
         print()
+
+    # Harness-only servers the next sync adopts into the hub — said here
+    # because the mark that scopes them lands silently otherwise.
+    pending = sorted(n for n in seen if n not in get_hub_servers())
+    if pending:
+        print(c("dim", f"{len(pending)} server(s) not in the hub — the next "
+                      f"`swe mcp sync` adopts them, held off where they are "
+                      f"absent: {', '.join(pending[:8])}"
+                      f"{'…' if len(pending) > 8 else ''}"))
 
     if strict and failures:
         print(c("red", f"Doctor strict failed: {len(failures)} unhealthy server(s)."))
@@ -2403,6 +2687,11 @@ MCP_HELP = {
   {c('cyan', 'swe mcp discover --json')}       Machine-readable output
   {c('cyan', 'swe mcp discover --all')}        Include servers already in source-of-truth
   {c('cyan', 'swe mcp discover --prune')}      Also remove hub servers no harness configures
+
+  A new pull is adopted scoped: swe.adopted_from records where it came
+  from, and it is marked off for every harness not already holding it,
+  so a later hub sync does not spread it. A sync's adoption pass keeps
+  mcp.json current the same way, without --apply.
 
 {c('bold', 'Examples')}
   swe mcp discover
@@ -2456,14 +2745,22 @@ MCP_HELP = {
 {c('bold', 'The hub')}
   ~/.swe/mcp.json is the middleman. Everything flows through it:
 
-    harness configs  --( swe mcp discover --apply )-->  mcp.json
-    mcp.json         --( swe mcp sync swe ... )     -->  harness configs
+    harness configs  --( sync's adoption / discover --apply )-->  mcp.json
+    mcp.json         --( swe mcp sync swe ... )                -->  harness configs
 
   It stores canonical shape, so it converts cleanly to any tool format.
   Names: {c('cyan', 'swe')}, {c('cyan', 'hub')}, {c('cyan', 'mcp.json')}, {c('cyan', '.')}
   ({c('cyan', 'quiver')} still works from before the rename.)
-  Source only. Pulling into it is discover's job, so naming it as a
-  target is refused.
+  Source only — a sync already pulls harness-only servers into it,
+  so naming it as a target is refused.
+
+{c('bold', 'Adoption')}
+  At the end of a run, any server a harness config holds but the hub does
+  not is adopted into mcp.json — first holder in sorted harness order is
+  the donor when definitions disagree, provenance lands in swe.adopted_from,
+  and the server is marked off for every harness not already holding it,
+  so a later hub sync never pushes it anywhere it never lived. Enable it
+  for a harness deliberately with: swe mcp enable NAME --for=<harness>
 
 {c('bold', 'Flags')}
   --only=a,b,...      Copy only servers matching these names or globs
@@ -2471,6 +2768,7 @@ MCP_HELP = {
   --force             Overwrite existing servers without prompting
   --skip-conflicts    Keep existing target servers on conflict
   --no-interactive    Disable interactive picker (select all)
+  --no-adopt          Skip the harness-only-server adoption pass
   --dry-run           Preview changes without writing files
   --strict            Fail if conversion would be lossy
   --prune             Also delete target servers outside the selection.
@@ -2580,21 +2878,27 @@ MCP_HELP = {
       --header='Authorization=Bearer ${'{'}MCP_TOKEN{'}'}' --to=claude,codex""",
 
     "remove": f"""\
-  {c('cyan', 'swe mcp remove <name> --from=<place>[,<place>…]')}   Remove a server
+  {c('cyan', 'swe mcp remove <name>')}                          Remove a server everywhere
+  {c('cyan', 'swe mcp remove <name> --from=<place>[,<place>…]')}   Remove from given places
+
+  With no --from, the server goes from the hub and every harness file
+  holding it — the only shape that stays gone, since a copy left in a
+  file is adopted straight back into the hub by the next sync. Its
+  disabled marks and kept copies go with the hub entry.
 
   Places are harness names, the hub (~/.swe/mcp.json), or
   {c('cyan', 'all')} (the hub plus every harness whose config names the server).
-  Places that don't have the server are reported absent; removing
-  nothing exits 1.
+  Places that don't have the server are reported absent; a file swe
+  cannot write is warned about and skipped. Removing nothing exits 1.
 
 {c('bold', 'Flags')}
-  --from=a,b          Required: where to remove from
+  --from=a,b          Where to remove from (default: all)
   --json              Print the result as one JSON document
 
 {c('bold', 'Examples')}
-  swe mcp remove github --from=swe
-  swe mcp remove github --from=claude,codex
-  swe mcp remove github --from=all""",
+  swe mcp remove github                 # gone from the hub and every file
+  swe mcp remove github --from=swe      # hub only — warns what stays
+  swe mcp remove github --from=claude,codex""",
 
     "disable": f"""\
   {c('cyan', 'swe mcp disable <name> [--for=h1,h2]')}   Switch a server off per harness
@@ -2940,6 +3244,12 @@ def cmd_disable(args):
         hub = get_hub_servers()
         hub[name] = shielded
         save_hub_servers(hub)
+        # The stash is an adoption too: scoped to the harnesses the server
+        # was found in, or a later hub sync would spread it to ones it
+        # never lived in.
+        state = _swe_state()
+        _record_adopted(state, name, first, set(holding_names), mcp_tools)
+        _save_swe_state(state)
 
     turned_off: list[str] = []
     for target in targets:
@@ -3297,6 +3607,7 @@ def cmd_info(args):
         health_detail=health_detail,
         updated=updated,
         type=gateway_defaults.label_of(hub.get(name)),
+        adopted_from=adopted_map().get(name),
         gateway=_gateway_row(name),
     )
     if json_view:
@@ -3320,6 +3631,8 @@ def cmd_info(args):
     if shared:
         hub_line += " · shared through the gateway"
     print(f"Hub         {hub_line}")
+    if reply.adopted_from:
+        print(f"Adopted     from {reply.adopted_from}")
     if reply.type:
         print(f"Type        {reply.type}")
     if row["conflict"]:

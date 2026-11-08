@@ -285,7 +285,8 @@ def _remove(ctx, body: dict) -> dict:
     listed ("swe" for the hub; "quiver", its name before the rename, reads
     the same). Every one must hold the server now; a
     place it has since spread to is left alone, since the confirm didn't
-    name it. The reply is ``{"removed", "absent", "page"}``."""
+    name it. The reply is ``{"removed", "absent", "failed", "page"}`` —
+    ``failed`` names places whose config could not be written."""
     from swe.harness.registry import load_registry_readonly
     from swe.mcp.cli import RemoveRefused, remove_places, remove_server
 
@@ -310,12 +311,13 @@ def _remove(ctx, body: dict) -> dict:
                             f"{name} is no longer in {', '.join(gone)}. Refresh and try again.")
         try:
             targets = remove_places(load_registry_readonly(), name, list(dict.fromkeys(places)))
-            removed, absent = remove_server(name, targets)
+            removed, absent, failed = remove_server(name, targets)
         except RemoveRefused as exc:
             raise PageError(422, "remove_refused", str(exc)) from exc
         except (OSError, ValueError) as exc:
             raise PageError(409, "remove_failed", str(exc) or exc.__class__.__name__) from exc
-    return {"server": name, "removed": removed, "absent": absent, "page": get(ctx, {})}
+    return {"server": name, "removed": removed, "absent": absent,
+            "failed": failed, "page": get(ctx, {})}
 
 
 # ------------------------------------------------------------------- add

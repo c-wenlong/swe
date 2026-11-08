@@ -8,6 +8,7 @@ from pathlib import Path
 from swe.configuration import CorruptConfigurationError
 from swe.console import c
 from swe.mcp.cli import (
+    _record_adopted,
     disabled_map,
     get_mcp_tools,
     get_tool_config,
@@ -280,9 +281,12 @@ def apply_mcp_findings(findings: list[McpFinding], prune: bool = False) -> Merge
     """Merge findings into the hub at ~/.swe/mcp.json.
 
     Adds servers the hub has not seen and updates ones a harness has since
-    edited. Orphans are reported, and only removed when ``prune`` is set: a
-    harness config that failed to parse looks identical to a deliberate
-    deletion, and silently dropping a server would lose its credentials.
+    edited. A "new" pull is an adoption: its provenance and the marks that
+    keep it scoped to the harnesses it was found in are recorded in the
+    ``swe`` block, the same as a sync's adoption pass writes. Orphans are
+    reported, and only removed when ``prune`` is set: a harness config
+    that failed to parse looks identical to a deliberate deletion, and
+    silently dropping a server would lose its credentials.
     """
     source_data = load_json(MCP_SOURCE_FILE)
     servers = dict(_load_source_servers())
@@ -290,6 +294,7 @@ def apply_mcp_findings(findings: list[McpFinding], prune: bool = False) -> Merge
     updated: list[str] = []
     orphaned: list[str] = []
     pruned: list[str] = []
+    mcp_tools: dict | None = None
 
     for finding in findings:
         if finding.status == "new":
@@ -298,6 +303,13 @@ def apply_mcp_findings(findings: list[McpFinding], prune: bool = False) -> Merge
                 if shielded is not None:
                     servers[finding.name] = shielded
                     added.append(finding.name)
+                    if mcp_tools is None:
+                        mcp_tools = get_mcp_tools(load_registry())
+                    state = source_data.setdefault("swe", {})
+                    if not isinstance(state, dict):
+                        state = source_data["swe"] = {}
+                    _record_adopted(state, finding.name, finding.source_tool,
+                                    set(finding.tools), mcp_tools)
         elif finding.status == "changed":
             shielded = _shielded(finding.server)
             if shielded is not None:

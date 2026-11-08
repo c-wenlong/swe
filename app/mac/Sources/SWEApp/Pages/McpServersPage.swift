@@ -1429,11 +1429,18 @@ private struct ServerSheet: View {
         error = nil
         defer { removing = false }
         do {
-            _ = try await app.swe.mcpRemove(
+            let result = try await app.swe.mcpRemove(
                 name: server.name,
                 from: server.harnesses + (server.inHub ? [McpServer.hubSource] : []))
             await reload()
-            dismiss()
+            if result.failed.isEmpty {
+                dismiss()
+            } else {
+                // A copy left in a file adopts back into the hub on the
+                // next sync, so keep the sheet open and say where it is.
+                error = "\(server.name) could not be removed from "
+                    + result.failed.map { HarnessMark($0).name }.joined(separator: ", ")
+            }
         } catch {
             self.error = error.localizedDescription
         }

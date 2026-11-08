@@ -206,7 +206,8 @@ lock. `from` is what the confirm listed: every place must still hold the
 server (409 `state_changed` otherwise), and a place it has reached since
 is left alone, because the confirm didn't name it. 404 `unknown_server`,
 422 `bad_server` / `bad_from` for bad shapes. The answer is `{"server",
-"removed", "absent", "page"}`, `page` being the list after the write.
+"removed", "absent", "failed", "page"}` — `failed` names the places whose
+config could not be written — `page` being the list after the write.
 
 ### Secrets
 
@@ -300,7 +301,9 @@ store), and bad shapes are 422. The answer is swe's `--json` report, `{"name", "
   value only; the web sheet also shows set values masked, with reveal,
   copy and Replace.
 - **Remove's confirm is inline** and names the command; the app's is a
-  dialog. The web page also says what it removed after the sheet closes.
+  dialog. Both say what was removed on success, and on a `failed` place
+  both keep the sheet open naming the copy that is still there — it would
+  adopt back into the hub on the next sync.
 - **Preview says more.** The Mac app's Preview is swe's one sentence; the
   web page adds the per-harness plan (files, command line, key names
   gained, lost or changed), since the confirm has to name the files.

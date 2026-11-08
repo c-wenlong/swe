@@ -369,6 +369,23 @@ thread moves its rollout there, and an archived session still ran.</p>
 </ul>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
+<li><p><strong>MCP auto-adoption and remove-everywhere.</strong> <code>swe mcp sync</code> now ends a
+successful run by adopting every harness-only server into the hub:
+the first holder's definition in sorted harness order lands in
+<code>mcp.json</code> canonicalised and credential-shielded, <code>swe.adopted_from</code>
+records the donor, and a disabled mark for every registry harness not
+already holding the server keeps later hub syncs from pushing it
+anywhere it never lived — <code>swe mcp enable NAME --for=&lt;h&gt;</code> is how one
+deliberately leaves its scope. The same scoping applies to a
+<code>discover --apply</code> pull and to the hub copy a <code>disable</code> stashes.
+<code>--no-adopt</code> skips the pass, <code>--json</code> reports the names under
+<code>adopted</code>, <code>list</code>/<code>info --json</code> rows carry <code>adopted_from</code>, and <code>mcp doctor</code> names what the next sync will adopt. And <code>swe mcp remove NAME</code> no longer needs <code>--from</code>: it deletes the server from the hub
+and every harness file holding it — the only shape that stays gone,
+since a leftover file copy would be adopted back — purging its
+disabled marks and provenance, warning on any file it cannot write,
+and warning when a hub-only removal leaves file copies the next sync
+would pull back.</p>
+</li>
 <li><p><strong>Skill and plugin usage: <code>swe skills usage</code>, <code>swe plugins info</code>.</strong>
 <code>swe skills usage &lt;name&gt;</code> counts <code>Skill: &lt;name&gt;</code> tool calls in the
 session search index — calls, sessions, last used, split by harness,

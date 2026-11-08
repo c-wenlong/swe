@@ -263,6 +263,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **MCP auto-adoption and remove-everywhere.** `swe mcp sync` now ends a
+  successful run by adopting every harness-only server into the hub:
+  the first holder's definition in sorted harness order lands in
+  `mcp.json` canonicalised and credential-shielded, `swe.adopted_from`
+  records the donor, and a disabled mark for every registry harness not
+  already holding the server keeps later hub syncs from pushing it
+  anywhere it never lived — `swe mcp enable NAME --for=<h>` is how one
+  deliberately leaves its scope. The same scoping applies to a
+  `discover --apply` pull and to the hub copy a `disable` stashes.
+  `--no-adopt` skips the pass, `--json` reports the names under
+  `adopted`, `list`/`info --json` rows carry `adopted_from`, and `mcp
+  doctor` names what the next sync will adopt. And `swe mcp remove
+  NAME` no longer needs `--from`: it deletes the server from the hub
+  and every harness file holding it — the only shape that stays gone,
+  since a leftover file copy would be adopted back — purging its
+  disabled marks and provenance, warning on any file it cannot write,
+  and warning when a hub-only removal leaves file copies the next sync
+  would pull back.
+
 - **Skill and plugin usage: `swe skills usage`, `swe plugins info`.**
   `swe skills usage <name>` counts `Skill: <name>` tool calls in the
   session search index — calls, sessions, last used, split by harness,
