@@ -579,6 +579,7 @@ private struct ServerSheet: View {
         do {
             let result = try await app.swe.mcpSetEnabled(on, server: server.name, in: [harness])
             await reload()
+            await loadInfo()
             if !result.failedIn.isEmpty {
                 error = "\(HarnessMark(harness).name): \(server.name) stayed off"
             }
@@ -705,10 +706,13 @@ private struct ServerSheet: View {
     }
 
     /// "3h ago"-style stamp from an ISO mtime; nil when it won't parse.
+    /// `swe mcp info` emits local times without a zone ("2026-11-03T11:20:00"),
+    /// so the zone-aware formatters are only part of the answer.
     private func relativeStamp(_ iso: String?) -> String? {
         guard let iso else { return nil }
         let parsed = ISO8601DateFormatter().date(from: iso)
             ?? ServerSheet.fractionalISO.date(from: iso)
+            ?? ServerSheet.localISO.date(from: iso)
         guard let date = parsed else { return nil }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
@@ -718,6 +722,14 @@ private struct ServerSheet: View {
     private static let fractionalISO: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    /// The zone-naive local time `_mtime_iso` writes.
+    private static let localISO: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         return formatter
     }()
 
@@ -853,6 +865,7 @@ private struct ServerSheet: View {
             try await app.swe.mcpSecretSet(name: name, value: value)
             secretDrafts[name] = ""
             await reload()
+            await loadInfo()
         } catch {
             self.error = error.localizedDescription
         }
@@ -990,6 +1003,7 @@ private struct ServerSheet: View {
             } else {
                 done = report
                 await reload()
+                await loadInfo()
             }
         } catch let partial as McpPartialSync {
             self.error = partial.message
@@ -998,6 +1012,7 @@ private struct ServerSheet: View {
             } else {
                 done = partial.report
                 await reload()
+                await loadInfo()
             }
         } catch {
             self.error = error.localizedDescription
