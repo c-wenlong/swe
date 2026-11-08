@@ -85,6 +85,109 @@ class ToggleReply:
 
 
 @dataclass(frozen=True)
+class PlaceRow:
+    """One place ``swe mcp info`` found a server: a harness file or the hub.
+
+    ``state`` is ``on`` (the file defines it), ``off`` (swe-disabled
+    there — the hub keeps the copy) or ``absent`` for harnesses asked
+    about that do not define it. ``updated`` is the file's mtime, ISO;
+    None when the file does not exist.
+    """
+
+    place: str
+    path: str
+    state: str
+    updated: str | None
+
+    def to_json(self) -> dict:
+        return {"place": self.place, "path": self.path,
+                "state": self.state, "updated": self.updated}
+
+
+@dataclass(frozen=True)
+class InfoReply:
+    """``swe mcp info NAME --json``: one server's full detail.
+
+    Identity fields mirror ``ServerRow`` (scrubbed command/args/url, key
+    names only). ``places`` lists every file that does or did define it
+    with each file's mtime; ``updated`` is the newest of those. ``health``
+    is the shallow probe (binary/URL/env) ``mcp status`` uses; ``gateway``
+    is the live gateway's row for a shared server, or None.
+    """
+
+    name: str
+    transport: str
+    command: str | None
+    args: list
+    url: str | None
+    env_keys: list
+    header_keys: list
+    secrets_missing: list
+    in_hub: bool
+    shared: bool
+    harnesses: list
+    conflict: bool
+    variants: list
+    disabled_in: list
+    places: list
+    health: str
+    health_detail: str | None
+    updated: str | None
+    gateway: dict | None = None
+
+    def to_json(self) -> dict:
+        return {
+            "name": self.name,
+            "transport": self.transport,
+            "command": self.command,
+            "args": self.args,
+            "url": self.url,
+            "env_keys": self.env_keys,
+            "header_keys": self.header_keys,
+            "secrets_missing": self.secrets_missing,
+            "in_hub": self.in_hub,
+            "harnesses": self.harnesses,
+            "shared": self.shared,
+            "conflict": self.conflict,
+            "variants": self.variants,
+            "disabled_in": self.disabled_in,
+            "places": [p.to_json() for p in self.places],
+            "health": self.health,
+            "health_detail": self.health_detail,
+            "updated": self.updated,
+            "gateway": self.gateway,
+        }
+
+
+@dataclass(frozen=True)
+class ToolsReply:
+    """``swe mcp tools NAME --json``: what a live handshake reported.
+
+    ``server`` is the initialize result's ``serverInfo`` (name/version);
+    ``tools`` are name + description pairs — input schemas stay out, they
+    dwarf a listing. ``error`` is set instead of the probe fields when the
+    handshake failed.
+    """
+
+    name: str
+    transport: str
+    tools: list = field(default_factory=list)
+    server: dict | None = None
+    protocol_version: str | None = None
+    error: str | None = None
+
+    def to_json(self) -> dict:
+        return {
+            "name": self.name,
+            "transport": self.transport,
+            "server": self.server,
+            "protocol_version": self.protocol_version,
+            "tools": self.tools,
+            "error": self.error,
+        }
+
+
+@dataclass(frozen=True)
 class DiscoveryRow:
     """One ``swe mcp discover --json`` row (a bare list, no envelope)."""
 

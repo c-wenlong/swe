@@ -13,7 +13,11 @@ Commands:
   validate [tool...]             Validate MCP config shape for one/all tools
   add <name> ...                 Add a server to the hub (and harnesses)
   remove <name> --from=...       Remove a server from the hub or harnesses
+  enable/disable <name>          Switch a server on/off per harness
+  info <name>                    One server's full detail
+  tools <name>                   List a server's tools by handshake
   doctor                         Deep diagnostics
+  gateway                        Run shared servers once for every session
   secret set NAME                Store a ${NAME} value in the secrets file
 
 Run 'swe mcp <command> help' for detailed help on each command.
@@ -47,6 +51,7 @@ from swe.mcp.inventory import server_inventory
 from swe.mcp import gateway as gateway_defaults
 from swe.flags import expand_value_flags
 from swe.mcp.models import ToggleReply
+from swe.mcp.models import InfoReply, PlaceRow, ToolsReply
 from swe.mcp.secrets import _SECRET_FLAG_RE
 from swe.mcp.secrets import load_secrets
 from swe.mcp.secrets import redact as redact_secrets
@@ -2577,6 +2582,48 @@ MCP_HELP = {
   swe mcp enable github
   swe mcp enable github --for=cursor,codex""",
 
+    "info": f"""\
+  {c('cyan', 'swe mcp info <name>')}           One server's full detail
+  {c('cyan', 'swe mcp info <name> --json')}    Machine-readable detail
+
+  Everything swe knows about one server: its scrubbed definition
+  (command, args, url, env and header key names — never values), which
+  harnesses hold it, where it is switched off, the files that define it
+  with each file's last-modified time, missing ${'{'}NAME{'}'} secrets,
+  the health check ``mcp status`` runs, and the live gateway's row when
+  the server is shared.
+
+{c('bold', 'JSON')}
+  Adds to the ``mcp list`` row: ``shared``, ``places`` (place, path,
+  state on/off/hub, updated), ``health``, ``health_detail``, ``updated``
+  (the newest file mtime) and ``gateway`` (state, pid, uptime_s, starts,
+  error — null when the gateway is not running).
+
+{c('bold', 'Examples')}
+  swe mcp info github
+  swe mcp info github --json""",
+
+    "tools": f"""\
+  {c('cyan', 'swe mcp tools <name>')}          List a server's tools by live handshake
+  {c('cyan', 'swe mcp tools <name> --json')}   Machine-readable tool list
+
+  Spawns the configured command, runs the MCP initialize + tools/list
+  exchange, prints what the server offers, and kills it. The definition
+  the probe runs is the hub's when the hub holds one — a shared server's
+  harness entry points at the gateway, not the server itself — with
+  ${'{'}NAME{'}'} secrets resolved into the child environment.
+
+{c('bold', 'Flags')}
+  --timeout=N         Seconds to wait for initialize and for tools/list
+  --json              Print the result as one JSON document
+
+  Stdio servers only; a remote server's tools come from whoever serves
+  its URL.
+
+{c('bold', 'Examples')}
+  swe mcp tools github
+  swe mcp tools github --json""",
+
     "secret": f"""\
   {c('cyan', 'swe mcp secret set NAME')}       Store a ${'{'}NAME{'}'} value in ~/.swe/secrets/mcp/.api_keys
   {c('cyan', 'swe mcp secret remove NAME')}    Drop a stored value
@@ -2934,6 +2981,260 @@ def cmd_mcp_discover(args):
     return cmd_discover(args)
 
 
+# -- info / tools -----------------------------------------------------
+
+
+def _server_lookup(name: str) -> tuple[dict, dict] | None:
+    """``(row, raw)`` for one server across every harness and the hub.
+
+    The hub is always read so a server switched off everywhere still
+    resolves — disabling leaves its copy there.
+    """
+    registry = load_registry()
+    tool_data = {t: get_tool_servers(t)
+                 for t in _display_tools(get_mcp_tools(registry))}
+    for row, raw in server_inventory(tool_data, include_hub=True):
+        if row["name"] == name:
+            return row, raw
+    return None
+
+
+def _places_for(name: str) -> list[PlaceRow]:
+    """Every file that does or did define ``name``, with its mtime.
+
+    Harnesses that never held the server stay out — "missing from" is the
+    matrix's job, not a file relationship. ``off`` is swe's disable mark.
+    """
+    disabled = disabled_map()
+    hub = get_hub_servers()
+    registry = load_registry()
+    places = []
+    for tool in sorted(_display_tools(get_mcp_tools(registry))):
+        servers = get_tool_servers(tool)
+        if name in servers:
+            state = "on"
+        elif name in (disabled.get(tool) or []):
+            state = "off"
+        else:
+            continue
+        cfg = get_tool_config(tool) or {}
+        path = cfg.get("path")
+        places.append(PlaceRow(tool, str(path) if path else "", state,
+                               _mtime_iso(path)))
+    if name in hub:
+        places.append(PlaceRow(HUB_LABEL, str(MCP_SOURCE_FILE), "hub",
+                               _mtime_iso(MCP_SOURCE_FILE)))
+    return places
+
+
+def _mtime_iso(path) -> str | None:
+    try:
+        mtime = Path(os.path.expanduser(str(path))).stat().st_mtime
+    except (OSError, TypeError, ValueError):
+        return None
+    return datetime.fromtimestamp(mtime).isoformat(timespec="seconds")
+
+
+def _gateway_row(name: str) -> dict | None:
+    """The live gateway's ``/status`` row for ``name``, when reachable."""
+    try:
+        from swe.mcp.gateway_commands import gateway_status
+        status = gateway_status()
+    except Exception:
+        return None
+    if not status.get("reachable"):
+        return None
+    for row in status.get("servers") or []:
+        if isinstance(row, dict) and row.get("name") == name:
+            return row
+    return None
+
+
+def _canonical_for_probe(name: str, raw: dict,
+                         row: dict) -> tuple[str, dict] | None:
+    """The definition a probe should run: hub first, first harness else.
+
+    A shared server's harness entry points at the gateway URL, so probing
+    it would test the gateway, not the server — the hub keeps the real
+    command. Secrets resolve into the copy the child process sees.
+    """
+    hub = get_hub_servers()
+    secrets = load_secrets()
+    if name in hub:
+        canonical = normalize_server(resolve_secrets(hub[name], secrets))
+        return "swe", canonical
+    for tool in row.get("harnesses") or []:
+        handler = get_mcp_handler(tool)
+        raw_entry = (get_tool_servers(tool) or {}).get(name)
+        if isinstance(raw_entry, dict):
+            canonical = normalize_server(
+                resolve_secrets(handler.parse(raw_entry), secrets))
+            return tool, canonical
+    handler = get_mcp_handler("swe")
+    return None, normalize_server(resolve_secrets(handler.parse(raw), secrets))
+
+
+def cmd_info(args):
+    if args and args[0] in ("-h", "--help", "help"):
+        print(MCP_HELP["info"])
+        return 0
+    args, json_view = take_json_flag(list(args))
+    refusal = error_stream(json_view)
+    positional = [a for a in args if not a.startswith("-")]
+    if not positional:
+        print(f"Usage: {c('cyan', 'swe mcp info NAME')}", file=refusal)
+        return 1
+    name = positional[0]
+    found = _server_lookup(name)
+    if found is None:
+        print(f"Unknown server: {name}", file=refusal)
+        print("Run `swe mcp list` for the names swe knows.", file=refusal)
+        return 1
+    row, raw = found
+
+    hub = get_hub_servers()
+    places = _places_for(name)
+    health, health_detail = probe_server_health(name, raw)
+    shared = gateway_defaults.is_shared(hub.get(name))
+    updated = max((p.updated for p in places if p.updated), default=None)
+    reply = InfoReply(
+        name=name,
+        transport=row["transport"],
+        command=row["command"],
+        args=row["args"],
+        url=row["url"],
+        env_keys=row["env_keys"],
+        header_keys=row["header_keys"],
+        secrets_missing=row["secrets_missing"],
+        in_hub=row["in_hub"],
+        shared=shared,
+        harnesses=row["harnesses"],
+        conflict=row["conflict"],
+        variants=row["variants"],
+        disabled_in=row["disabled_in"],
+        places=places,
+        health=health,
+        health_detail=health_detail,
+        updated=updated,
+        gateway=_gateway_row(name),
+    )
+    if json_view:
+        return emit(reply.to_json())
+
+    print(f"{c('bold', name)}  {row['transport']}  {_health_badge(health)}")
+    if row["command"]:
+        args_str = " ".join(row["args"])
+        print(f"  command   {row['command']}" + (f" {args_str}" if args_str else ""))
+    if row["url"]:
+        print(f"  url       {row['url']}")
+    if row["env_keys"]:
+        print(f"  env       {', '.join(row['env_keys'])}")
+    if row["header_keys"]:
+        print(f"  headers   {', '.join(row['header_keys'])}")
+    if row["harnesses"]:
+        print(f"In          {', '.join(row['harnesses'])}")
+    if row["disabled_in"]:
+        print(f"Off in      {', '.join(row['disabled_in'])}")
+    hub_line = "yes" if row["in_hub"] else "no"
+    if shared:
+        hub_line += " · shared through the gateway"
+    print(f"Hub         {hub_line}")
+    if row["conflict"]:
+        print("Variants    " + " | ".join("+".join(v) for v in row["variants"]))
+    if row["secrets_missing"]:
+        print(f"Missing     {', '.join(row['secrets_missing'])} in secrets")
+    if health_detail:
+        print(f"Health      {health_detail}")
+    for place in places:
+        stamp = f"  {place.updated}" if place.updated else ""
+        print(f"  {place.place:<10}  {place.state:<4} {place.path}{stamp}")
+    gw = reply.gateway
+    if gw:
+        bits = [gw.get("state") or "?"]
+        if gw.get("pid"):
+            bits.append(f"pid {gw['pid']}")
+        if gw.get("uptime_s") is not None:
+            bits.append(f"up {gw['uptime_s']}s")
+        if gw.get("starts") is not None:
+            bits.append(f"starts {gw['starts']}")
+        if gw.get("error"):
+            bits.append(f"error: {gw['error']}")
+        print(f"Gateway     {' · '.join(bits)}")
+    return 0
+
+
+def _health_badge(health: str) -> str:
+    if health == "ok":
+        return c("green", "✓")
+    if health == "error":
+        return c("red", "✗")
+    return c("yellow", "?")
+
+
+def cmd_tools(args):
+    if args and args[0] in ("-h", "--help", "help"):
+        print(MCP_HELP["tools"])
+        return 0
+    args, json_view = take_json_flag(list(args))
+    refusal = error_stream(json_view)
+    timeout = None
+    positional = []
+    for a in args:
+        if a.startswith("--timeout="):
+            try:
+                timeout = float(a.split("=", 1)[1])
+            except ValueError:
+                print(f"Bad --timeout: {a}", file=refusal)
+                return 1
+        elif not a.startswith("-"):
+            positional.append(a)
+    if not positional:
+        print(f"Usage: {c('cyan', 'swe mcp tools NAME')}", file=refusal)
+        return 1
+    name = positional[0]
+    found = _server_lookup(name)
+    if found is None:
+        print(f"Unknown server: {name}", file=refusal)
+        return 1
+    row, raw = found
+    _source, canonical = _canonical_for_probe(name, raw, row)
+    st = server_type(canonical)
+
+    def fail(msg: str) -> int:
+        if json_view:
+            emit(ToolsReply(name, st, error=msg).to_json())
+        else:
+            print(f"{name}: {msg}", file=refusal)
+        return 1
+
+    if st != "stdio":
+        return fail(f"the tools probe speaks stdio only; this server is {st}")
+    from swe.mcp.probe import ProbeError, inspect_stdio
+    try:
+        result = inspect_stdio(str(canonical.get("command") or ""),
+                               canonical.get("args") or [],
+                               canonical.get("env") or {},
+                               timeout_s=timeout)
+    except ProbeError as exc:
+        # Server stderr lands in the message; a child that logs a token
+        # must not hand it back through our output.
+        return fail(redact_secrets(sanitize(str(exc)), load_secrets()))
+    reply = ToolsReply(name, st,
+                       tools=result["tools"],
+                       server=result["server"],
+                       protocol_version=result["protocol_version"])
+    if json_view:
+        return emit(reply.to_json())
+
+    server = result["server"] or {}
+    via = f" ({server.get('name', '')} {server.get('version', '')})".rstrip()
+    print(f"{c('bold', name)}{via} — {len(result['tools'])} tool(s)")
+    for tool in result["tools"]:
+        desc = f"  {tool['description']}" if tool["description"] else ""
+        print(f"  {c('cyan', tool['name'])}{desc}")
+    return 0
+
+
 COMMANDS = {
     "discover": cmd_mcp_discover,
     "list": cmd_list,
@@ -2947,6 +3248,8 @@ COMMANDS = {
     "remove": cmd_remove,
     "enable": cmd_enable,
     "disable": cmd_disable,
+    "info": cmd_info,
+    "tools": cmd_tools,
     "secret": cmd_secret,
     "doctor": cmd_doctor,
     "gateway": cmd_gateway,

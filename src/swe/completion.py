@@ -359,6 +359,13 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
         ("--for=", "Only these harnesses"),
         ("--json", "Machine-readable output"),
     ],
+    "mcp info": [
+        ("--json", "Machine-readable output"),
+    ],
+    "mcp tools": [
+        ("--timeout=", "Seconds to wait for initialize and tools/list"),
+        ("--json", "Machine-readable output"),
+    ],
     "mcp gateway status": [
         ("--json", "Machine-readable output"),
     ],
@@ -532,6 +539,7 @@ _NESTED_FLAGS: dict[str, dict[str, str]] = {
         "secret remove": "mcp secret remove",
         "add": "mcp add", "remove": "mcp remove",
         "disable": "mcp disable", "enable": "mcp enable",
+        "info": "mcp info", "tools": "mcp tools",
         "gateway": "mcp gateway status", "gateway status": "mcp gateway status",
         "gateway install": "mcp gateway install", "gateway serve": "mcp gateway serve",
         "gateway share": "mcp gateway share",
@@ -754,6 +762,8 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("remove", "Remove a server"),
         ("disable", "Switch a server off per harness"),
         ("enable", "Switch a server back on"),
+        ("info", "One server's full detail"),
+        ("tools", "List a server's tools by handshake"),
         ("secret", "Store a ${NAME} value"),
         ("doctor", "Deep diagnostics"),
         ("gateway", "Run shared servers once for every session"),
@@ -945,6 +955,11 @@ def get_completions(words: list[str]) -> list[tuple[str, str]]:
     if cmd == "mcp" and len(rest) == 2 and rest[0] == "edit":
         return _mcp_server_completions(rest[1], partial)
 
+    # `swe mcp info|tools|enable|disable <server>` — every name swe knows.
+    if (cmd == "mcp" and len(rest) == 1
+            and rest[0] in ("info", "tools", "enable", "disable")):
+        return _mcp_all_server_completions(partial)
+
     # `swe providers info <name>` — provider names from the registry.
     ptargets = _NESTED_PROVIDER_TARGETS.get(cmd)
     if ptargets and len(rest) == 1 and rest[0] in ptargets:
@@ -1045,6 +1060,24 @@ def _mcp_server_completions(tool: str, partial: str = "") -> list[tuple[str, str
     except Exception:
         return []
     return _filter_by_prefix([(n, f"server in {resolved}") for n in names], partial)
+
+
+def _mcp_all_server_completions(partial: str = "") -> list[tuple[str, str]]:
+    """Every MCP server name across harnesses, the hub and disabled marks."""
+    try:
+        from swe.mcp.cli import (disabled_map, get_hub_servers,
+                                 get_mcp_tools, get_tool_servers,
+                                 load_registry as mcp_tools)
+
+        names: set[str] = set(get_hub_servers())
+        registry = mcp_tools()
+        for tool in get_mcp_tools(registry):
+            names.update(get_tool_servers(tool))
+        for held in disabled_map().values():
+            names.update(held)
+    except Exception:
+        return []
+    return _filter_by_prefix([(n, "server") for n in sorted(names)], partial)
 
 
 def _tag_completions(partial: str = "") -> list[tuple[str, str]]:
