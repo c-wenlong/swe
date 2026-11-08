@@ -276,12 +276,6 @@ private struct HarnessChips: View {
     }
 }
 
-/// The hairline at a column's edge, drawn inside each row of the table so
-/// the pieces stack into one ruled edge through header and body alike.
-private func columnSeparator() -> some View {
-    Rectangle().fill(Theme.rowDivider).frame(width: 1)
-}
-
 private struct ServerTable: View {
     var harnesses: [String]
     /// The flat filtered list: server rows and unused folder rows.

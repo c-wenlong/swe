@@ -138,9 +138,6 @@ private struct InstalledSkills: View {
     var openPlugins: () -> Void
     /// The skill open in its detail page, nil while the list shows.
     @State private var opened: Skill?
-    /// Rows before the list folds behind a Show more row.
-    private static let foldLimit = 15
-    @State private var showsAll = false
 
     var body: some View {
         if let opened {
@@ -178,24 +175,10 @@ private struct InstalledSkills: View {
                       icon: "sparkles",
                       actionTitle: empty ? "New skill" : nil, action: empty ? newSkill : nil)
         } else {
-            // Straight on the panel, like TokenTracker's lists: hairlines
-            // between rows, no card around them.
-            let shown = RowFold.visible(skills, limit: Self.foldLimit, expanded: showsAll)
-            LazyVStack(spacing: 0) {
-                ForEach(shown) { skill in
-                    SkillRow(skill: skill, model: model) { opened = skill }
-                    if skill.id != shown.last?.id { Rectangle().fill(Theme.border).frame(height: Theme.hairline) }
-                }
-                if RowFold.hiddenCount(total: skills.count, limit: Self.foldLimit) > 0 {
-                    if !shown.isEmpty { Rectangle().fill(Theme.border).frame(height: Theme.hairline) }
-                    ExpandRow(isExpanded: showsAll,
-                              hidden: RowFold.hiddenCount(total: skills.count, limit: Self.foldLimit),
-                              help: (expand: "Show every skill", collapse: "Show only the first \(Self.foldLimit)"),
-                              edge: .inset) {
-                        withAnimation(.easeOut(duration: Theme.fadeDuration)) { showsAll.toggle() }
-                    }
-                }
-            }
+            // One row per skill, one column per folder a click can change:
+            // the same grid the MCP servers page uses.
+            Card { SkillTable(skills: skills, roots: model.tableRoots,
+                              model: model) { opened = $0 } }
         }
     }
 
@@ -478,52 +461,492 @@ private struct LinkLegend: View {
     }
 }
 
-private struct SkillRow: View {
-    var skill: Skill
+/// The skills grid: one row per skill, one column per skills folder a
+/// click could still change (skipped and ignored folders stay out). The
+/// same mechanics as the MCP servers table: column order is a
+/// preference, dragging a header moves the column, a master switch
+/// flips a shared skill in every folder at once.
+private struct SkillTable: View {
+    var skills: [Skill]
+    var roots: [SkillRoot]
     var model: SkillsModel
-    /// A click opens the skill's detail page.
+    var open: (Skill) -> Void
+
+    static let nameMinWidth: CGFloat = 220
+    static let sourceWidth: CGFloat = 96
+    static let cellWidth: CGFloat = 84
+    /// One column's footprint for the reorder maths: separator plus cell.
+    static let pitch: CGFloat = 1 + cellWidth
+    /// Rows the table shows before folding behind a Show more row.
+    private static let foldLimit = 20
+    /// The UserDefaults key the folder column order persists under.
+    static let orderKey = "skillsColumnOrder"
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The folder columns in display order, remembered as a list of
+    /// paths (the root id): a dragged column rewrites it, a folder the
+    /// save predates appends, and one the model dropped falls away.
+    @State private var order = UserDefaults.standard.stringArray(forKey: SkillTable.orderKey) ?? []
+    @State private var showAll = false
+    /// The card's inner width: the table fills it, and scrolls only past it.
+    @State private var available: CGFloat = 0
+    /// The header mid-drag and how far the pointer has carried it.
+    @State private var dragging: String?
+    @State private var translation: CGFloat = 0
+
+    /// The columns in display order: the saved order, then any folder
+    /// the save predates, and none the model no longer lists.
+    private var ordered: [SkillRoot] {
+        let byId = Dictionary(roots.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return order.compactMap { byId[$0] } + roots.filter { !order.contains($0.id) }
+    }
+
+    private var orderedIds: [String] { ordered.map(\.id) }
+
+    /// The widths RowReorder works on: a uniform `pitch` per column.
+    private var pitches: [CGFloat] { Array(repeating: Self.pitch, count: ordered.count) }
+
+    /// Everything after the name column: its separator, the Source
+    /// column, and every folder column's separator and cell.
+    static func fixedTail(columns: Int) -> CGFloat {
+        1 + sourceWidth + CGFloat(columns) * pitch
+    }
+
+    private var nameWidth: CGFloat {
+        max(available - Self.fixedTail(columns: ordered.count), Self.nameMinWidth)
+    }
+
+    private var totalWidth: CGFloat { nameWidth + Self.fixedTail(columns: ordered.count) }
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                Divider().overlay(Theme.border)
+                let shown = RowFold.visible(skills, limit: Self.foldLimit, expanded: showAll)
+                ForEach(Array(shown.enumerated()), id: \.element.id) { index, skill in
+                    SkillGridRow(skill: skill, roots: ordered, model: model) { open(skill) }
+                    if index < shown.count - 1 { Divider().overlay(Theme.border) }
+                }
+                if RowFold.hiddenCount(total: skills.count, limit: Self.foldLimit) > 0 {
+                    Divider().overlay(Theme.border)
+                    ExpandRow(isExpanded: showAll,
+                              hidden: RowFold.hiddenCount(total: skills.count, limit: Self.foldLimit),
+                              help: (expand: "Show every row",
+                                     collapse: "Show only the first \(Self.foldLimit)"),
+                              edge: .inset) {
+                        withAnimation(.easeOut(duration: Theme.fadeDuration)) { showAll.toggle() }
+                    }
+                }
+            }
+            // Exactly the card's width, or the columns' minimum if wider.
+            .frame(width: max(available, Self.nameMinWidth + Self.fixedTail(columns: ordered.count)),
+                   alignment: .leading)
+            .overlay(alignment: .topLeading) { dropMarker }
+        }
+        .scrollIndicators(.automatic)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
+        .onChange(of: order) { UserDefaults.standard.set(order, forKey: Self.orderKey) }
+    }
+
+    /// "Skill" over the flexible name column, "Source" over the tag
+    /// column, then a draggable header centred over each folder column.
+    /// Each separator reaches through the row's bottom padding to the
+    /// divider, so the column edges read as one line top to bottom.
+    private var header: some View {
+        HStack(spacing: 0) {
+            Text("Skill")
+                .frame(minWidth: Self.nameMinWidth, maxWidth: .infinity, alignment: .leading)
+            columnSeparator().padding(.bottom, -8)
+            Text("Source").frame(width: Self.sourceWidth)
+            ForEach(ordered) { root in
+                columnSeparator().padding(.bottom, -8)
+                let index = orderedIds.firstIndex(of: root.id) ?? 0
+                SkillRootHeader(root: root, width: Self.cellWidth, model: model,
+                                carriedBy: dragging == root.id
+                                    ? RowReorder.clamped(translation, heights: pitches, dragged: index)
+                                    : nil,
+                                drag: { dragChanged(root.id, $0) },
+                                drop: { finish(move: true) },
+                                cancel: { finish(move: false) },
+                                move: { moveColumn(root.id, $0) })
+            }
+        }
+        .font(Theme.tableHeader)
+        .tracking(0.12)
+        .foregroundStyle(Theme.tableHeaderText)
+        .padding(.bottom, 8)
+    }
+
+    /// The accent bar at the slot a dragged column would land in.
+    @ViewBuilder private var dropMarker: some View {
+        if let x = dropEdge {
+            Rectangle().fill(Theme.interactive)
+                .frame(width: 2)
+                .offset(x: x)
+        }
+    }
+
+    private var dropEdge: CGFloat? {
+        guard let id = dragging, let from = orderedIds.firstIndex(of: id) else { return nil }
+        let target = RowReorder.targetIndex(heights: pitches, dragged: from, translation: translation)
+        if target >= ordered.count - 1 { return totalWidth - 2 }
+        let slot = target < from ? target : target + 1
+        return nameWidth + Self.sourceWidth + CGFloat(slot) * Self.pitch
+    }
+
+    private func dragChanged(_ id: String, _ translation: CGFloat) {
+        dragging = id
+        self.translation = translation
+    }
+
+    /// The VoiceOver and keyboard reorder the grip does by pointer: move
+    /// the column one slot left or right.
+    private func moveColumn(_ id: String, _ direction: Int) {
+        guard let from = orderedIds.firstIndex(of: id) else { return }
+        let target = from + direction
+        guard target >= 0, target <= ordered.count - 1 else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: Theme.fadeDuration)) {
+            var next = orderedIds
+            next.remove(at: from)
+            next.insert(id, at: target)
+            order = next
+        }
+    }
+
+    /// Drop the dragged column at the slot the pointer left it over.
+    private func finish(move: Bool) {
+        guard let id = dragging else { return }
+        defer { dragging = nil; translation = 0 }
+        guard move, let from = orderedIds.firstIndex(of: id) else { return }
+        let target = RowReorder.targetIndex(heights: pitches, dragged: from, translation: translation)
+        guard target != from else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: Theme.fadeDuration)) {
+            var next = orderedIds
+            next.remove(at: from)
+            next.insert(id, at: target)
+            order = next
+        }
+    }
+}
+
+/// One folder column's header: a drag grip at the leading edge and the
+/// mark centred over the column. A click opens the folder's menu, a
+/// right click the same one, and only a drag started on the grip moves
+/// the column. Two folders can share a harness label, so the tip names
+/// the path to keep them apart.
+private struct SkillRootHeader: View {
+    var root: SkillRoot
+    var width: CGFloat
+    var model: SkillsModel
+    /// The pointer offset while this is the header being carried, or nil.
+    var carriedBy: CGFloat?
+    var drag: (CGFloat) -> Void
+    var drop: () -> Void
+    /// The drag ended without reaching `onEnded`: slide everything back.
+    var cancel: () -> Void
+    /// VoiceOver and keyboard reorder, one slot in a direction (-1, +1).
+    var move: (Int) -> Void
+    @State private var hovering = false
+    /// True only while the grip's gesture is live: resets on cancel.
+    @GestureState private var down = false
+
+    private var name: String { HarnessMark(root.name).name }
+    private var busy: Bool { model.busy.contains(root.path) }
+
+    /// The folder-level actions the root's link state allows, the same
+    /// ones RootDetail offers in the harness links popover.
+    @ViewBuilder private var columnMenu: some View {
+        switch root.link {
+        case .linked:
+            Button("Unlink \(name)") { Task { await model.unlink(root) } }
+        case .selection:
+            Button("Unlink all from \(name)") { Task { await model.unlink(root) } }
+            Button("Link all skills into \(name)") { Task { await model.link(root) } }
+        case .notLinked:
+            Button("Link \(name) to shared skills") { Task { await model.link(root) } }
+        case .blocked:
+            EmptyView()
+        }
+        Button("Show in Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: root.path)])
+        }
+    }
+
+    var body: some View {
+        Menu { columnMenu } label: {
+            HStack(spacing: 4) {
+                if busy { ProgressView().controlSize(.mini) }
+                HarnessMarkView(harness: root.name)
+            }
+            .frame(width: width)
+            .contentShape(.rect)
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .hoverTip("\(name), \(displayPath(root.path)). \(root.explanation)", pinsOnClick: false)
+        .contextMenu { columnMenu }
+        .overlay(alignment: .leading) {
+            Image(systemName: "line.3.horizontal")
+                .font(Theme.font(size: 9, weight: .bold))
+                .foregroundStyle(Theme.textMuted)
+                .frame(width: 14, height: 20)
+                .opacity(hovering || carriedBy != nil ? 0.9 : 0.3)
+                .contentShape(.rect)
+                .hoverTip("Drag to move the \(name) column", pinsOnClick: false)
+                .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .local)
+                    .updating($down) { _, state, _ in state = true }
+                    .onChanged { drag($0.translation.width) }
+                    .onEnded { _ in drop() })
+        }
+        .offset(x: carriedBy ?? 0)
+        .zIndex(carriedBy == nil ? 0 : 1)
+        .opacity(carriedBy == nil ? 1 : 0.85)
+        .onHover { hovering = $0 }
+        .onChange(of: down) { _, isDown in
+            guard !isDown else { return }
+            Task { await Task.yield(); cancel() }
+        }
+        .accessibilityAction(named: "Move left") { move(-1) }
+        .accessibilityAction(named: "Move right") { move(1) }
+    }
+}
+
+/// A skill in the grid: a master switch, the name and description, the
+/// source tag, then a cell per folder. The row opens the detail page.
+private struct SkillGridRow: View {
+    var skill: Skill
+    var roots: [SkillRoot]
+    var model: SkillsModel
     var open: () -> Void
     @State private var hovering = false
+    /// The per-folder enables/disables of a master flip, mid-flight.
+    @State private var masterBusy = false
+
+    /// Every column's chip for this skill, keyed by root id (its path)
+    /// so the cells can ask for their own.
+    private var chips: [String: (link: SkillRoot.Link, on: Bool, toggleable: Bool)] {
+        Dictionary(model.chips(for: skill).map { ($0.root.id, ($0.link, $0.on, $0.toggleable)) },
+                   uniquingKeysWith: { a, _ in a })
+    }
+
+    /// The description first, the folder only when it is all the row has.
+    private var secondary: String {
+        skill.description.isEmpty ? displayPath(skill.path) : skill.description
+    }
 
     var body: some View {
         Button(action: open) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(skill.name).font(Theme.rowTitle).foregroundStyle(Theme.textPrimary)
-                    if !skill.description.isEmpty {
-                        Text(skill.description)
-                            .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
-                            .lineLimit(1)
-                            .multilineTextAlignment(.leading)
+            HStack(spacing: 0) {
+                HStack(alignment: .top, spacing: 8) {
+                    master
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(skill.name).font(Theme.rowTitle).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                        Text(secondary).font(Theme.caption).foregroundStyle(Theme.textMuted).lineLimit(1)
                     }
-                    Text(displayPath(skill.path))
-                        .font(Theme.caption).foregroundStyle(Theme.textMuted)
-                        .lineLimit(1).truncationMode(.middle)
+                    .padding(.trailing, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Spacer(minLength: 12)
-                HStack(spacing: 10) {
-                    Badge(skill.source.title)
-                    SeenBy(harnesses: skill.harnesses)
-                        .font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                        .monospacedDigit()
-                        .frame(minWidth: 86, alignment: .trailing)
-                    Image(systemName: "chevron.right")
-                        .font(Theme.font(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.textMuted)
+                .frame(minWidth: SkillTable.nameMinWidth, maxWidth: .infinity, alignment: .leading)
+                columnSeparator()
+                Badge(skill.source.title)
+                    .frame(width: SkillTable.sourceWidth)
+                ForEach(roots) { root in
+                    columnSeparator()
+                    SkillCell(skill: skill, root: root, chip: chips[root.id], model: model)
+                        .frame(width: SkillTable.cellWidth)
                 }
             }
+            .padding(.vertical, 8)
+            .background(hovering ? Theme.rowHover : .clear)
             .contentShape(.rect)
         }
-        .plainButton(cornerRadius: Theme.controlRadius)
-        .padding(.vertical, 12)
-        // The fill reaches past the text so the row reads as one target.
-        .background {
-            RoundedRectangle(cornerRadius: Theme.controlRadius)
-                .fill(hovering ? Theme.panelHover : .clear)
-                .padding(.horizontal, -8)
-        }
+        .plainButton(cornerRadius: Theme.smallRadius)
         .onHover { hovering = $0 }
+        .accessibilityLabel(skill.harnesses.isEmpty
+            ? "\(skill.name), \(skill.source.title)"
+            : "\(skill.name), \(skill.source.title), in \(harnessNames(skill.harnesses))")
         .help("Open \(skill.name)")
+        .contextMenu { rowMenu }
+    }
+
+    /// The row's right click: the master switch's two directions as menu
+    /// items, and the move a private skill can make into shared.
+    @ViewBuilder private var rowMenu: some View {
+        if skill.source == .shared {
+            Button("Turn off everywhere") { Task { await flip(on: false) } }
+                .disabled(!model.chips(for: skill).contains { $0.on && $0.toggleable })
+            Button("Turn on everywhere") { Task { await flip(on: true) } }
+                .disabled(!model.chips(for: skill).contains { !$0.on && $0.toggleable })
+        }
+        if skill.source == .harness, let root = model.rootHolding(skill) {
+            Button("Move to shared library") {
+                Task { await model.moveToShared(skill, from: root) }
+            }
+        }
+        Button("Show in Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: skill.path)])
+        }
+    }
+
+    /// Flip every folder where a click could change the state: `enable`
+    /// where the skill is out, `disable` where it is in. One serialized
+    /// call per folder, the same path a single cell takes.
+    private func flip(on: Bool) async {
+        for chip in model.chips(for: skill) where chip.toggleable && chip.on != on {
+            await model.setSkill(skill, on: chip.root, enabled: on)
+        }
+    }
+
+    /// The master switch left of the name. Only a shared skill answers
+    /// per folder; a private or harness-owned copy sits under its own
+    /// manager, so its switch stays put and explains itself on hover.
+    @ViewBuilder private var master: some View {
+        if skill.source == .shared {
+            let chips = model.chips(for: skill)
+            let on = chips.contains { $0.on }
+            Group {
+                if masterBusy {
+                    ProgressView().controlSize(.mini)
+                        .frame(width: 36, height: 20)
+                } else {
+                    Toggle(skill.name, isOn: Binding(
+                        get: { on },
+                        set: { value in
+                            masterBusy = true
+                            Task { await flip(on: value); masterBusy = false }
+                        }))
+                    .labelsHidden()
+                    .toggleStyle(AccentSwitchStyle(tint: on ? Theme.success : Theme.interactive))
+                    .disabled(!chips.contains { $0.toggleable && $0.on == on })
+                }
+            }
+            .padding(.top, 2)
+            .hoverTip(masterTip(on: on), pinsOnClick: false)
+        } else {
+            Toggle(skill.name, isOn: .constant(true))
+                .labelsHidden()
+                .toggleStyle(AccentSwitchStyle(tint: Theme.textMuted))
+                .disabled(true)
+                .padding(.top, 2)
+                .hoverTip(privateTip, pinsOnClick: false)
+        }
+    }
+
+    private var privateTip: String {
+        switch skill.source {
+        case .harness:
+            "A private copy \(HarnessMark(skill.root).name) manages, outside the shared library. Right-click the row to move it to shared and switch it per folder."
+        case .builtin:
+            "Built into the harness itself, so nothing here can switch it."
+        default:
+            "Lives outside the shared library at \(displayPath(skill.path))."
+        }
+    }
+
+    private func masterTip(on: Bool) -> String {
+        let chips = model.chips(for: skill)
+        let onNames = chips.filter { $0.on }.map { HarnessMark($0.root.name).name }
+        if on {
+            return "On for \(onNames.joined(separator: ", ")). Turn off everywhere."
+        }
+        let blocked = chips.filter { !$0.toggleable }.count
+        return blocked > 0
+            ? "Off where a folder allows it; \(blocked) can't be switched. Turn it on."
+            : "Off everywhere. Turn it on where a folder allows it."
+    }
+}
+
+/// One skill in one folder: a check it can click off, a power mark it
+/// can click on, a "P" where the folder keeps its own private copy, an
+/// amber mark where the folder's state can't be switched, and an em
+/// dash where the skill isn't seen at all.
+private struct SkillCell: View {
+    var skill: Skill
+    var root: SkillRoot
+    var chip: (link: SkillRoot.Link, on: Bool, toggleable: Bool)?
+    var model: SkillsModel
+    @State private var busy = false
+
+    private var name: String { HarnessMark(root.name).name }
+
+    var body: some View {
+        if busy {
+            ProgressView().controlSize(.mini)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let chip {
+            if chip.on && skill.source == .shared && chip.toggleable {
+                toggleButton(to: false,
+                             label: AnyView(check),
+                             tip: "On for \(name). Click to turn it off.")
+            } else if !chip.on && chip.toggleable {
+                toggleButton(to: true,
+                             label: AnyView(power),
+                             tip: "Off for \(name). Click to turn it on.")
+            } else if chip.on {
+                staticMark
+            } else {
+                blocked
+            }
+        } else {
+            Text("—").foregroundStyle(Theme.borderStrong)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .hoverTip("Not seen by \(name)", pinsOnClick: false)
+        }
+    }
+
+    /// A private copy or a harness-owned skill a folder sees: no per
+    /// skill switch exists for those, so the mark only reports.
+    @ViewBuilder private var staticMark: some View {
+        if skill.source == .harness, model.rootHolding(skill) == root {
+            Text("P")
+                .font(Theme.font(size: 10, weight: .bold))
+                .foregroundStyle(Theme.accent)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Theme.accentTint, in: .rect(cornerRadius: 5))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .hoverTip("Private copy in \(name) at \(displayPath(skill.path)). Move it to the shared library to switch it per folder.",
+                          pinsOnClick: false)
+        } else {
+            check
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .hoverTip("On for \(name); this folder's state can't be switched per skill.",
+                          pinsOnClick: false)
+        }
+    }
+
+    /// A folder the skill can't enter or leave from a click: relink and
+    /// conflicted folders land here. The tip names the fix.
+    private var blocked: some View {
+        Image(systemName: "exclamationmark.triangle.fill")
+            .font(Theme.font(size: 10))
+            .foregroundStyle(Theme.warningText)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .hoverTip("\(root.explanation) Folder: \(displayPath(root.path))", pinsOnClick: false)
+    }
+
+    private func toggleButton(to value: Bool, label: AnyView, tip: String) -> some View {
+        Button {
+            busy = true
+            Task { await model.setSkill(skill, on: root, enabled: value); busy = false }
+        } label: {
+            label
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .hoverTip(tip, pinsOnClick: false)
+    }
+
+    private var check: some View {
+        Image(systemName: "checkmark").font(Theme.font(size: 12, weight: .semibold))
+            .foregroundStyle(Theme.textPrimary)
+    }
+
+    private var power: some View {
+        Image(systemName: "power").font(Theme.font(size: 11, weight: .semibold))
+            .foregroundStyle(Theme.textMuted)
     }
 }
 
@@ -637,41 +1060,6 @@ private struct SkillUsageBlock: View {
             // while the index counted new calls.
             usage = try? await model.swe.skillUsage(skill.name)
         }
-    }
-}
-
-/// Which harnesses load a skill: one harness as its mark, several as up to
-/// three logos and the count. The names are the tooltip and what VoiceOver
-/// reads.
-private struct SeenBy: View {
-    var harnesses: [String]
-
-    var body: some View {
-        switch harnesses.count {
-        case 0:
-            Text("No harness")
-        case 1:
-            HarnessMarkView(harness: harnesses[0], size: 14)
-        default:
-            HStack(spacing: 6) {
-                HStack(spacing: 3) {
-                    ForEach(logos, id: \.self) { HarnessIcon(harness: $0, size: 14) }
-                }
-                Text("\(harnesses.count) harnesses")
-            }
-            .hoverTip(harnessNames(harnesses))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(harnesses.count) harnesses: \(harnessNames(harnesses))")
-        }
-    }
-
-    /// The first three distinct logos: Claude Code and Claude Desktop share one.
-    private var logos: [String] {
-        var seen = Set<URL>()
-        return Array(harnesses.filter { harness in
-            guard let url = HarnessIcons.logo(for: harness)?.url else { return false }
-            return seen.insert(url).inserted
-        }.prefix(3))
     }
 }
 

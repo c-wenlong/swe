@@ -1036,6 +1036,11 @@ private struct PluginInfoCard: View {
     /// Servers before the list folds behind a Show more row.
     private static let foldLimit = 8
     @State private var showsAll = false
+    /// The `<server>/<key>` whose value field is open, and its drafts.
+    @State private var editingKey: String?
+    @State private var keyDrafts: [String: String] = [:]
+    @State private var savingKey = false
+    @State private var keyError: String?
 
     var body: some View {
         Group {
@@ -1058,14 +1063,33 @@ private struct PluginInfoCard: View {
                                     }
                                 }
                                 if !server.envKeys.isEmpty || !server.headerKeys.isEmpty {
-                                    FlowLayout(spacing: 4, lineSpacing: 4) {
+                                    VStack(alignment: .leading, spacing: 4) {
                                         ForEach(server.envKeys, id: \.self) { key in
-                                            KeyChip(name: key, kind: "env",
-                                                    missing: server.secretsMissing.contains(key))
+                                            KeyRow(server: server.name, name: key, kind: "env",
+                                                   missing: server.secretsMissing.contains(key),
+                                                   editable: server.inHub,
+                                                   editingKey: $editingKey, drafts: $keyDrafts,
+                                                   saving: savingKey, save: saveSecret)
                                         }
                                         ForEach(server.headerKeys, id: \.self) { key in
-                                            KeyChip(name: key, kind: "header", missing: false)
+                                            KeyRow(server: server.name, name: key, kind: "header",
+                                                   missing: server.secretsMissing.contains(key),
+                                                   editable: server.inHub,
+                                                   editingKey: $editingKey, drafts: $keyDrafts,
+                                                   saving: savingKey, save: saveSecret)
                                         }
+                                        if let keyError {
+                                            Text(keyError).font(Theme.caption).foregroundStyle(Theme.dangerText)
+                                        }
+                                        Text(server.inHub
+                                             ? "Saved to ~/.swe/secrets/mcp/.api_keys, never shown after saving. "
+                                               + "Sync fills a ${NAME} reference when it writes a harness config; "
+                                               + "a literal value in a harness's own file stays put."
+                                             : "This server is declared in a harness's own config, so its "
+                                               + "values live in that file: swe's secrets store does not "
+                                               + "reach it. Set the key where the plugin is declared.")
+                                            .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                                            .fixedSize(horizontal: false, vertical: true)
                                     }
                                 }
                             }
@@ -1154,19 +1178,85 @@ private struct PluginInfoCard: View {
         return line
     }
 
-    private struct KeyChip: View {
+    /// Writes one key's value to the secrets store through `swe mcp
+    /// secret set`, then reads `info` again so the key's missing flag
+    /// clears. The value itself never comes back: it is write-only.
+    private func saveSecret(_ name: String) async {
+        let value = keyDrafts[name] ?? ""
+        guard !value.isEmpty else { return }
+        savingKey = true
+        keyError = nil
+        defer { savingKey = false }
+        do {
+            try await app.swe.mcpSecretSet(name: name, value: value)
+            keyDrafts[name] = ""
+            editingKey = nil
+            info = try? await app.swe.pluginInfo(ref)
+        } catch {
+            keyError = error.localizedDescription
+        }
+    }
+
+    /// One declared key: the name, its kind, whether a value is on file,
+    /// and a Set/Rotate button opening a write-only field for it. A
+    /// declared-only server (`editable: false`) keeps its values in the
+    /// harness's own file, so the button stays hidden.
+    private struct KeyRow: View {
+        /// The server declaring it, so two servers' same-named keys get
+        /// their own editor state.
+        var server: String
         var name: String
         var kind: String
         var missing: Bool
+        /// True when swe manages the server (it is in the hub): only
+        /// then does its store reach the harness files.
+        var editable: Bool
+        @Binding var editingKey: String?
+        @Binding var drafts: [String: String]
+        var saving: Bool
+        var save: (String) async -> Void
+
+        private var id: String { "\(server)/\(kind)/\(name)" }
+        private var editing: Bool { editable && editingKey == id }
 
         var body: some View {
-            Text("\(kind) \(name)")
-                .font(Theme.font(size: 11, design: .monospaced))
-                .foregroundStyle(missing ? Theme.warningText : Theme.textSecondary)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Theme.subtle, in: .capsule)
-                .overlay(Capsule().strokeBorder(missing ? Theme.warning : Theme.borderStrong, lineWidth: 1))
-                .hoverTip(missing ? "\(name) is declared but unset" : "\(kind) key \(name)")
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(name)
+                        .font(Theme.font(size: 11, design: .monospaced))
+                        .foregroundStyle(missing ? Theme.warningText : Theme.textPrimary)
+                        .lineLimit(1)
+                    Text(kind)
+                        .font(Theme.font(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.textMuted)
+                    Spacer(minLength: 4)
+                    Text(missing ? "missing" : "set · hidden")
+                        .font(Theme.caption)
+                        .foregroundStyle(missing ? Theme.warningText : Theme.textMuted)
+                    if editable {
+                        Button(editing ? "Cancel" : (missing ? "Set value" : "Rotate")) {
+                            withAnimation(.easeOut(duration: Theme.fadeDuration)) {
+                                editingKey = editing ? nil : id
+                            }
+                        }
+                        .font(Theme.font(size: 11, weight: .medium))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.interactive)
+                    }
+                }
+                if editing {
+                    HStack(spacing: 8) {
+                        SecureField("Paste the value, it is never shown again",
+                                    text: Binding(get: { drafts[name] ?? "" },
+                                                  set: { drafts[name] = $0 }))
+                            .sweField(monospaced: true)
+                        Button(saving ? "Saving…" : "Save") { Task { await save(name) } }
+                            .secondaryButton()
+                            .disabled(saving || (drafts[name] ?? "").isEmpty)
+                    }
+                }
+            }
+            .padding(.vertical, 2)
         }
     }
 }

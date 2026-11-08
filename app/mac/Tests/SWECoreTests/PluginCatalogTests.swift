@@ -565,6 +565,60 @@ func decodedInventory() throws -> [Skill] {
         #expect(index.sources(harness: "codex").first { $0.id == "local" }?.marketplaces[0].installed == 2)
     }
 
+    @Test func theTableFlattensSourcesToOneRowPerPlugin() async throws {
+        let model = PluginCatalogModel(home: fixtureHome)
+        await model.load(swe: SweClient(runner: catalogRunner()))
+        let index = try #require(model.index)
+        let entries = index.tableEntries()
+        // Nine plugins, each once: vercel sits under Claude and Codex both.
+        #expect(entries.count == index.total)
+        #expect(Set(entries.map(\.row.id)).count == entries.count)
+        // Each row names the first source that lists it, like `entry(for:)`.
+        #expect(entries.map(\.row.id) == [
+            "drawer@kit", "toolkit@kit",
+            "bundle@official", "linter@official", "nested@official", "vercel@official",
+            "tool@official", "cursor-thing@cursor-public", "canva@openai-curated",
+        ])
+        #expect(entries.map(\.source) == [
+            "local", "local", "claude", "claude", "claude", "claude",
+            "codex", "cursor", "unregistered",
+        ])
+        // A harness keeps only the rows it has a cell for; a row absent
+        // there shows no chip and earns no column entry.
+        #expect(index.tableEntries(harness: "codex").map(\.row.id) ==
+            ["drawer@kit", "toolkit@kit", "linter@official", "tool@official",
+             "vercel@official", "canva@openai-curated"])
+        for entry in index.tableEntries(harness: "codex") {
+            #expect((entry.row.plugin.harnesses["codex"]?.status ?? .absent) != .absent)
+        }
+        // Search narrows the same rows.
+        #expect(index.tableEntries(query: "vercel").map(\.row.id) == ["vercel@official"])
+        #expect(index.tableEntries(query: "nothing like it").isEmpty)
+    }
+
+    @Test func theTableColumnsFollowTheCatalogPlusWhereCopiesLive() {
+        let catalog = PluginCatalog(harnesses: ["claude"], actions: ["claude"], marketplaces: [
+            PluginMarketplace(name: "split", harnesses: ["claude": .init(sourceType: "github")], plugins: [
+                CatalogPlugin(name: "p", marketplace: "split", harnesses: [
+                    "claude": PluginHarnessState(available: true, installed: false),
+                    // A copy sits where swe has no harness of its own.
+                    "amp": PluginHarnessState(available: false, installed: true)]),
+            ]),
+        ])
+        let index = PluginExploreIndex(catalog: catalog, skills: [])
+        // The declared harnesses first, then any a copy reports, by name.
+        #expect(index.tableHarnesses == ["claude", "amp"])
+        let known = PluginExploreIndex(
+            catalog: PluginCatalog(harnesses: ["claude"], actions: ["claude"], marketplaces: [
+                PluginMarketplace(name: "m", harnesses: ["claude": .init(sourceType: "github")], plugins: [
+                    CatalogPlugin(name: "p", marketplace: "m", harnesses: [
+                        "claude": PluginHarnessState(available: true, installed: true)]),
+                ]),
+            ]),
+            skills: [])
+        #expect(known.tableHarnesses == ["claude"])
+    }
+
     @Test func marketplacesStartClosedAndOpenPerToggle() async throws {
         let model = PluginCatalogModel(home: fixtureHome)
         await model.load(swe: SweClient(runner: catalogRunner()))
