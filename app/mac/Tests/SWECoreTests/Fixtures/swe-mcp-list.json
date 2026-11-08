@@ -47,7 +47,10 @@
         "secrets_missing": [
           "HUB_TOKEN"
         ],
-        "in_hub": true
+        "in_hub": true,
+        "disabled_in": [
+          "claude"
+        ]
       },
       {
         "name": "fixture-stdio",

@@ -26,6 +26,65 @@ struct McpServersPage: View {
     /// The folder the folder scan reads, from the Paths setting.
     private var repoRoot: URL { AppModel.mcpServersFolder(path: app.mcpServersPath) }
 
+    /// A toggle's failure, named under the grid.
+    @State private var toggleError: String?
+
+    /// `swe mcp enable`/`disable` for one server in one harness, then a
+    /// reload so the cell's new state renders.
+    private func toggle(_ server: McpServer, in harness: String, on: Bool) async {
+        toggleError = nil
+        do {
+            let result = try await app.swe.mcpSetEnabled(on, server: server.name, in: [harness])
+            await model.load(swe: app.swe, for: app.swePath, health: model.hasHealth)
+            if !result.failedIn.isEmpty {
+                toggleError = "\(HarnessMark(harness).name): \(server.name) stayed off"
+            }
+        } catch {
+            toggleError = "\(HarnessMark(harness).name): \(error.localizedDescription)"
+        }
+    }
+
+    /// The same switch for every harness the server is in (off) or
+    /// marked off for (on) — the row's batch action.
+    private func toggleAll(_ server: McpServer, on: Bool) async {
+        toggleError = nil
+        do {
+            let result = try await app.swe.mcpSetEnabled(on, server: server.name,
+                                                         in: on ? server.disabledIn : server.harnesses)
+            await model.load(swe: app.swe, for: app.swePath, health: model.hasHealth)
+            if !result.failedIn.isEmpty {
+                toggleError = "\(server.name) stayed off for \(result.failedIn.joined(separator: ", "))"
+            }
+        } catch {
+            toggleError = error.localizedDescription
+        }
+    }
+
+    /// One harness's whole column: every server it defines off, or every
+    /// server marked off in it back on. A single failure stops neither the
+    /// rest of the batch nor the reload that repaints the cells that moved.
+    private func toggleColumn(_ harness: String, on: Bool,
+                              servers: [McpServer]) async {
+        toggleError = nil
+        let names = servers.filter {
+            on ? $0.disabledIn.contains(harness) : $0.harnesses.contains(harness)
+        }.map(\.name)
+        guard !names.isEmpty else { return }
+        var failed = Set<String>()
+        for name in names {
+            do {
+                let result = try await app.swe.mcpSetEnabled(on, server: name, in: [harness])
+                failed.formUnion(result.failedIn)
+            } catch {
+                failed.insert(name)
+            }
+        }
+        await model.load(swe: app.swe, for: app.swePath, health: model.hasHealth)
+        if !failed.isEmpty {
+            toggleError = "\(HarnessMark(harness).name): \(failed.sorted().joined(separator: ", ")) stayed put"
+        }
+    }
+
     /// The columns the loading shimmer draws: the harnesses the install
     /// check knows, minus any the user hid. Before the check runs it is
     /// empty, which leaves the grid with only its name column.
@@ -102,7 +161,14 @@ struct McpServersPage: View {
                 } else {
                     Card {
                         ServerGrid(harnesses: compared, local: grouped.local, remote: grouped.remote,
-                                   showHealth: model.hasHealth, editor: app.editor) { selected = $0 }
+                                   showHealth: model.hasHealth, editor: app.editor,
+                                   toggle: { server, harness, on in await toggle(server, in: harness, on: on) },
+                                   batchServers: inventory.servers,
+                                   toggleAll: { harness, on, servers in await toggleColumn(harness, on: on, servers: servers) },
+                                   toggleRow: { server, on in await toggleAll(server, on: on) }) { selected = $0 }
+                    }
+                    if let toggleError {
+                        Text(toggleError).font(Theme.caption).foregroundStyle(Theme.dangerText)
                     }
                 }
                 VStack(alignment: .leading, spacing: 4) {
@@ -180,6 +246,16 @@ private struct ServerGrid: View {
     /// cannot claim "Not in the hub", so its caption hides.
     var hubKnown = true
     var editor: CodeEditor?
+    /// Switch one server in one harness (the new state, then a reload).
+    var toggle: (McpServer, String, Bool) async -> Void = { _, _, _ in }
+    /// The full inventory, not the filtered rows: a column's batch switch
+    /// and its counts must see the servers the filter hides.
+    var batchServers: [McpServer] = []
+    /// Switch every server in one harness column (name list supplied by
+    /// the grid, which knows the rows).
+    var toggleAll: (String, Bool, [McpServer]) async -> Void = { _, _, _ in }
+    /// Switch one server in every place it is defined or marked off.
+    var toggleRow: (McpServer, Bool) async -> Void = { _, _ in }
     var open: (McpServer) -> Void
 
     /// The groups in display order, skipping empty ones. Local names the
@@ -223,6 +299,19 @@ private struct ServerGrid: View {
                     ForEach(harnesses, id: \.self) { harness in
                         HarnessMarkView(harness: harness)
                             .frame(width: Self.columnWidth(harness))
+                            .contextMenu {
+                                let servers = batchServers
+                                let on = servers.filter { $0.harnesses.contains(harness) }.count
+                                let off = servers.filter { $0.disabledIn.contains(harness) }.count
+                                Button("Turn off all servers in \(HarnessMark(harness).name)") {
+                                    Task { await toggleAll(harness, false, servers) }
+                                }
+                                .disabled(on == 0)
+                                Button("Turn on all servers in \(HarnessMark(harness).name)") {
+                                    Task { await toggleAll(harness, true, servers) }
+                                }
+                                .disabled(off == 0)
+                            }
                     }
                 }
                 .font(Theme.tableHeader)
@@ -240,7 +329,8 @@ private struct ServerGrid: View {
                         switch row {
                         case .server(let server, let folders):
                             ServerRow(server: server, folders: folders, harnesses: harnesses,
-                                      showHealth: showHealth, editor: editor) { open(server) }
+                                      showHealth: showHealth, editor: editor,
+                                      toggle: toggle, toggleRow: toggleRow) { open(server) }
                         case .folder(let folder):
                             FolderRow(folder: folder, harnesses: harnesses,
                                       hubKnown: hubKnown, editor: editor)
@@ -280,6 +370,8 @@ private struct ServerRow: View {
     var harnesses: [String]
     var showHealth: Bool
     var editor: CodeEditor?
+    var toggle: (McpServer, String, Bool) async -> Void = { _, _, _ in }
+    var toggleRow: (McpServer, Bool) async -> Void = { _, _ in }
     var open: () -> Void
     @State private var hovering = false
 
@@ -320,7 +412,8 @@ private struct ServerRow: View {
                 .frame(minWidth: ServerGrid.nameMinWidth, maxWidth: .infinity, alignment: .leading)
                 let differs = server.conflicts(among: harnesses)
                 ForEach(harnesses, id: \.self) { harness in
-                    Cell(server: server, harness: harness, differs: differs).frame(width: ServerGrid.columnWidth(harness))
+                    Cell(server: server, harness: harness, differs: differs,
+                         toggle: toggle).frame(width: ServerGrid.columnWidth(harness))
                 }
             }
             .padding(.vertical, 8)
@@ -330,6 +423,12 @@ private struct ServerRow: View {
         .plainButton(cornerRadius: Theme.smallRadius)
         .onHover { hovering = $0 }
         .accessibilityLabel("\(server.name), in \(harnessNames(server.harnesses))")
+        .contextMenu {
+            Button("Turn off everywhere") { Task { await toggleRow(server, false) } }
+                .disabled(server.harnesses.isEmpty)
+            Button("Turn on everywhere") { Task { await toggleRow(server, true) } }
+                .disabled(server.disabledIn.isEmpty)
+        }
         // The Finder/editor buttons sit on the open button, above it in
         // hit order, so they stay clickable without breaking the cells'
         // alignment or losing the row's click to open.
@@ -375,23 +474,49 @@ private struct Cell: View {
     var harness: String
     /// Whether the compared harnesses disagree; letters show only then.
     var differs: Bool
+    /// Switch the server in this harness (the new state, then a reload).
+    var toggle: (McpServer, String, Bool) async -> Void
+    @State private var busy = false
 
+    private var name: String { HarnessMark(harness).name }
+
+    /// A click switches the cell: on pulls the entry out of the harness
+    /// (the hub keeps a copy to restore), off puts it back. The em dash
+    /// means absent — nothing to switch.
     var body: some View {
-        if let group = server.group(of: harness) {
-            if differs {
-                Text(variantLetter(group))
-                    .font(Theme.font(size: 11, weight: .semibold))
-                    .foregroundStyle(group == 0 ? Theme.textPrimary : Theme.warningText)
-                    .frame(width: 20, height: 20)
-                    .background(Theme.subtle, in: .rect(cornerRadius: 5))
-                    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border, lineWidth: 1))
-                    .hoverTip("Definition \(variantLetter(group))")
-            } else {
-                Image(systemName: "checkmark").font(Theme.font(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
+        if busy {
+            ProgressView().controlSize(.mini).frame(width: 20, height: 20)
+        } else if let group = server.group(of: harness) {
+            Button {
+                busy = true
+                Task { await toggle(server, harness, false); busy = false }
+            } label: {
+                if differs {
+                    Text(variantLetter(group))
+                        .font(Theme.font(size: 11, weight: .semibold))
+                        .foregroundStyle(group == 0 ? Theme.textPrimary : Theme.warningText)
+                        .frame(width: 20, height: 20)
+                        .background(Theme.subtle, in: .rect(cornerRadius: 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border, lineWidth: 1))
+                } else {
+                    Image(systemName: "checkmark").font(Theme.font(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                }
             }
+            .buttonStyle(.plain)
+            .hoverTip("On for \(name). Click to turn it off.", pinsOnClick: false)
+        } else if server.disabledIn.contains(harness) {
+            Button {
+                busy = true
+                Task { await toggle(server, harness, true); busy = false }
+            } label: {
+                Image(systemName: "power").font(Theme.font(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.textMuted)
+            }
+            .buttonStyle(.plain)
+            .hoverTip("Off for \(name). Click to turn it back on.", pinsOnClick: false)
         } else {
-            Text("—").foregroundStyle(Theme.borderStrong).hoverTip("Not in \(HarnessMark(harness).name)")
+            Text("—").foregroundStyle(Theme.borderStrong).hoverTip("Not in \(name)", pinsOnClick: false)
         }
     }
 }
@@ -436,6 +561,25 @@ private struct ServerSheet: View {
     @State private var secretDrafts: [String: String] = [:]
     @State private var savingSecret: String?
     @State private var confirmingRemove = false
+    /// Harnesses whose switch is mid-flight on `swe mcp enable/disable`.
+    @State private var toggling: Set<String> = []
+
+    /// `swe mcp enable`/`disable` for this one harness, then a reload so
+    /// the sheet and the grid behind it show the new state.
+    private func setEnabled(_ harness: String, on: Bool) async {
+        toggling.insert(harness)
+        defer { toggling.remove(harness) }
+        error = nil
+        do {
+            let result = try await app.swe.mcpSetEnabled(on, server: server.name, in: [harness])
+            await reload()
+            if !result.failedIn.isEmpty {
+                error = "\(HarnessMark(harness).name): \(server.name) stayed off"
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
 
     /// The server as the latest load has it, so a finished sync shows its effect.
     var server: McpServer { model.server(named: initial.name) ?? initial }
@@ -476,6 +620,29 @@ private struct ServerSheet: View {
                 }
                 let missing = server.missing(from: active)
                 if !missing.isEmpty { HarnessFacts(label: "Missing from", harnesses: missing) }
+            }
+            let switchable = server.harnesses + server.disabledIn.filter { !server.harnesses.contains($0) }
+            if !switchable.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("On for").font(Theme.cardTitle)
+                    ForEach(switchable, id: \.self) { harness in
+                        HStack(spacing: 10) {
+                            HarnessMarkView(harness: harness, size: 16)
+                            Text(HarnessMark(harness).name)
+                                .font(Theme.bodySmall).foregroundStyle(Theme.textPrimary)
+                            Spacer(minLength: 8)
+                            if toggling.contains(harness) { ProgressView().controlSize(.mini) }
+                            Toggle(HarnessMark(harness).name, isOn: Binding(
+                                get: { server.harnesses.contains(harness) },
+                                set: { on in Task { await setEnabled(harness, on: on) } }))
+                                .labelsHidden()
+                                .toggleStyle(AccentSwitchStyle())
+                                .disabled(toggling.contains(harness))
+                        }
+                    }
+                    Text("Off leaves the harness's file; the hub keeps the definition.")
+                        .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                }
             }
             if !server.secretsMissing.isEmpty {
                 Divider().overlay(Theme.border)

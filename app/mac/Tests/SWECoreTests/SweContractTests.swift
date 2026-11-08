@@ -127,7 +127,20 @@ import Testing
         #expect(hubOnly.command == "hub-only-bin")
         #expect(hubOnly.envKeys == ["HUB_TOKEN"])
         #expect(hubOnly.secretsMissing == ["HUB_TOKEN"])
+        #expect(hubOnly.disabledIn == ["claude"])
         #expect(stdio.inHub)
+        #expect(stdio.disabledIn == [])
+    }
+
+    /// Built to the shape `swe mcp disable fixture-stdio --for=claude
+    /// --json` emits (an enable replies `enabled_in` in place of
+    /// `disabled_in`).
+    @Test func mcpSetEnabledSendsTheVerbAndDecodesThePlaces() async throws {
+        let (swe, runner) = try client("swe-mcp-disable")
+        let result = try await swe.mcpSetEnabled(false, server: "fixture-stdio", in: ["claude"])
+        #expect(result.name == "fixture-stdio")
+        #expect(result.places == ["claude"])
+        #expect(runner.calls.last == ["mcp", "disable", "fixture-stdio", "--json", "--for=claude"])
     }
 
     @Test func mcpStatusAddsHealthAndDetail() async throws {
