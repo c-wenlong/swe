@@ -47,6 +47,21 @@ final class AppModel {
         }
     }
 
+    /// The ⌘K global search card over the window.
+    var showsSearch = false
+
+    /// A session `harness:id` the Sessions page opens like a row click,
+    /// then clears. Set by the ⌘K search.
+    var pendingSession: String?
+    /// A task id the Tasks page's detail opens on, then clears.
+    var pendingTask: String?
+    /// The Harnesses page's filter text set by the ⌘K search, then
+    /// cleared once the page's model is up.
+    var pendingHarnessQuery: String?
+    /// A hook's `harness|source` row key the Hooks page opens in its
+    /// panel, then clears.
+    var pendingHook: String?
+
     /// A hub session key whose chat the Sessions page opens next, then
     /// clears. Set through `openSessionChat(key:)`.
     var pendingChat: String?
@@ -58,6 +73,13 @@ final class AppModel {
     func openSessionChat(key: String) {
         pendingChat = key
         whenUncovered { [weak self] in self?.selection = .sessions }
+    }
+
+    /// The ⌘K search's pick: close the card, then apply the target once
+    /// the window is uncovered — `selection` stands down under a card.
+    func open(_ target: GlobalSearchItem.Target) {
+        showsSearch = false
+        whenUncovered { [weak self] in self?.routeSearchTarget(target) }
     }
 
     private func whenUncovered(_ action: @escaping @MainActor () -> Void) {

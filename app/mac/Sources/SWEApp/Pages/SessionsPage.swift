@@ -110,6 +110,19 @@ private struct SessionsContent: View {
             await openChat(key: key)
             if app.pendingChat == key { app.pendingChat = nil }
         }
+        // The ⌘K search's session pick opens like a row click: the chat
+        // when the hub can show it, the details otherwise.
+        .task(id: app.pendingSession) {
+            guard let key = app.pendingSession else { return }
+            if let row = model.rows.first(where: {
+                HubSessionRow.key(harness: $0.session.harness, id: $0.session.id) == key
+            }) {
+                open(row)
+            } else {
+                await openChat(key: key)
+            }
+            if app.pendingSession == key { app.pendingSession = nil }
+        }
     }
 
     /// Opens `key`'s chat directly. The ledger may not list a session

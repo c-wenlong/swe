@@ -24,8 +24,20 @@ struct HarnessesPage: View {
         }
         .task(id: app.swePath) {
             let harnesses = HarnessesModel(swe: app.swe)
+            // The ⌘K search's harness pick can land before the model
+            // exists; the other task covers the model already being up.
+            if let query = app.pendingHarnessQuery {
+                harnesses.query = query
+                app.pendingHarnessQuery = nil
+            }
             model = harnesses
             await harnesses.load()
+        }
+        // The ⌘K search's harness pick filters the list to its name.
+        .task(id: app.pendingHarnessQuery) {
+            guard let query = app.pendingHarnessQuery, let model else { return }
+            model.query = query
+            app.pendingHarnessQuery = nil
         }
         .cardSheet(isPresented: $detecting) {
             if let model { DetectSheet(model: model, reload: { await reload() }) }

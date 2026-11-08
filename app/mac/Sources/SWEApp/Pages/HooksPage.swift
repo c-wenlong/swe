@@ -46,6 +46,10 @@ struct HooksPage: View {
             list
         }
         .task(id: app.swePath) { await model.loadIfStale(swe: app.swe, for: app.swePath) }
+        // The ⌘K search's hook pick opens its panel. Retried on each
+        // load: the pick can land before the inventory does.
+        .task(id: app.pendingHook) { applyPendingHook() }
+        .onChange(of: model.hooks) { _, _ in applyPendingHook() }
         // Modal: a dismiss mid-create would still write the script but
         // lose the stanza the reply carries, so only its buttons close it.
         .cardSheet(isPresented: $adding, modal: true) {
@@ -80,6 +84,15 @@ struct HooksPage: View {
                 board(inventory.hooks)
             }
         }
+    }
+
+    /// The ⌘K search's pick: open its row's panel, and clear the pending
+    /// key only once a loaded inventory holds the hook.
+    private func applyPendingHook() {
+        guard let key = app.pendingHook,
+              let hook = model.hooks.first(where: { $0.rowKey == key }) else { return }
+        opened = hook
+        app.pendingHook = nil
     }
 
     /// The harness tabs and its timeline, the scripts nothing fires, and

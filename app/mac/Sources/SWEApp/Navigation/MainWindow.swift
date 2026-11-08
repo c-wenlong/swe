@@ -127,6 +127,12 @@ struct MainWindow: View {
             set: { if !$0 { model.closeFirstRunSetup() } }), modal: true) {
             FirstRunSetupSheet()
         }
+        // The ⌘K global search, a card over the whole window.
+        .cardSheet(isPresented: Binding(
+            get: { model.showsSearch },
+            set: { model.showsSearch = $0 })) {
+            SearchPalette()
+        }
         .overlay(alignment: .topLeading) {
             // A hub's web app is the whole window; the sidebar, and the
             // way back to This Mac's pages through it, returns when the

@@ -7,7 +7,18 @@ import SwiftUI
 /// resources; Services is the agent-facing APIs — search, scraping and
 /// browser services. The last three share the same `.api_keys` file.
 struct ProvidersSection: View {
-    enum Tab: String { case harnesses, inference, infra, services }
+    enum Tab: String, CaseIterable {
+        case harnesses, inference, infra, services
+
+        var title: String {
+            switch self {
+            case .harnesses: "Harnesses"
+            case .inference: "Inference"
+            case .infra: "Infra"
+            case .services: "Services"
+            }
+        }
+    }
 
     @Environment(AppModel.self) private var app
     @AppStorage("providersTab") private var saved = Tab.harnesses.rawValue
@@ -18,9 +29,7 @@ struct ProvidersSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Tabs(options: [(Tab.harnesses, "Harnesses"), (.inference, "Inference"),
-                           (.infra, "Infra"), (.services, "Services")],
-                 selection: tab)
+            Tabs(options: Tab.allCases.map { ($0, $0.title) }, selection: tab)
                 .fixedSize()
             switch tab.wrappedValue {
             case .harnesses:

@@ -185,9 +185,9 @@ struct RepositoriesPage: View {
                          selection: $model.tab, style: .underline)
                         .layoutPriority(1)
                     SearchField(prompt: "Search", text: $model.filter,
-                                focusShortcut: KeyboardShortcut("k", modifiers: .command))
+                                focusShortcut: KeyboardShortcut("f", modifiers: .command))
                         .frame(minWidth: 120, maxWidth: 260)
-                        .help("Search titles, branches, authors and states like failing or draft (⌘K)")
+                        .help("Search titles, branches, authors and states like failing or draft (⌘F)")
                         .padding(.bottom, 4)
                 }
                 if model.tab == .pulls, !model.pullFilters.isEmpty {

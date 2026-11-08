@@ -22,6 +22,16 @@ struct SWEApp: App {
         .defaultSize(width: 1180, height: 800)
         .commands {
             CommandGroup(after: .sidebar) {
+                Button("Search…") {
+                    NSApp.activate()
+                    model.openMainWindow?()
+                    model.showsSearch = true
+                }
+                .keyboardShortcut("k", modifiers: .command)
+                // A card over the window belongs to the page under it;
+                // the search waits for it to close first.
+                .disabled(SheetOverlayRegistry.shared.anyCovered)
+                Divider()
                 Button("Toggle Sidebar") {
                     model.sidebarCollapsed.toggle()
                 }
