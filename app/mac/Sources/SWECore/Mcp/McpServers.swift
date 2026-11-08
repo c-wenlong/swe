@@ -132,6 +132,10 @@ public struct McpServer: Codable, Sendable, Equatable, Identifiable {
     /// The places (harnesses, "swe" and "quiver" for the hub) whose definition is at
     /// a URL. Absent from an older swe, which leaves `transport` to say.
     public let remoteIn: [String]?
+    /// Harnesses the server is switched off for: the entry left their
+    /// config and the hub keeps the copy `swe mcp enable` restores.
+    /// Absent from an older swe, which decodes as nothing disabled.
+    public let disabledIn: [String]
     /// Set only on a saved server, which keeps `summary` in place of the
     /// command line or URL.
     let savedSummary: String?
@@ -140,7 +144,8 @@ public struct McpServer: Codable, Sendable, Equatable, Identifiable {
                 url: String? = nil, envKeys: [String] = [], headerKeys: [String] = [],
                 harnesses: [String], conflict: Bool = false, variants: [[String]]? = nil,
                 health: String? = nil, detail: String? = nil, secretsMissing: [String] = [],
-                inHub: Bool = false, savedSummary: String? = nil, remoteIn: [String]? = nil) {
+                inHub: Bool = false, savedSummary: String? = nil, remoteIn: [String]? = nil,
+                disabledIn: [String] = []) {
         self.name = name
         self.transport = transport
         self.command = command
@@ -157,12 +162,13 @@ public struct McpServer: Codable, Sendable, Equatable, Identifiable {
         self.inHub = inHub
         self.savedSummary = savedSummary
         self.remoteIn = remoteIn
+        self.disabledIn = disabledIn
     }
 
     private enum CodingKeys: String, CodingKey {
         case name, transport, command, args, url, envKeys, headerKeys
         case harnesses, conflict, variants, health, detail
-        case secretsMissing, inHub, savedSummary, remoteIn
+        case secretsMissing, inHub, savedSummary, remoteIn, disabledIn
     }
 
     public init(from decoder: Decoder) throws {
@@ -183,6 +189,7 @@ public struct McpServer: Codable, Sendable, Equatable, Identifiable {
         inHub = try container.decodeIfPresent(Bool.self, forKey: .inHub) ?? false
         savedSummary = try container.decodeIfPresent(String.self, forKey: .savedSummary)
         remoteIn = try container.decodeIfPresent([String].self, forKey: .remoteIn)
+        disabledIn = try container.decodeIfPresent([String].self, forKey: .disabledIn) ?? []
     }
 
     /// The server as it may be written to disk. No command line or URL:
@@ -557,6 +564,33 @@ extension SweClient {
     /// Removes `name` from each place; swe reports `swe` for the hub.
     public func mcpRemove(name: String, from places: [String]) async throws -> McpRemoveResult {
         try await call(["mcp", "remove", name, "--from=" + places.joined(separator: ","), "--json"])
+    }
+
+    /// `swe mcp enable`/`disable NAME --for=...`: a per-harness switch.
+    /// `on` false pulls the entry out of the harnesses' configs (the hub
+    /// keeps the copy), true restores it. Empty `harnesses` means every
+    /// place the server is defined (off) or marked off (on).
+    public func mcpSetEnabled(_ on: Bool, server name: String,
+                            in harnesses: [String]) async throws -> McpToggleResult {
+        var args = ["mcp", on ? "enable" : "disable", name, "--json"]
+        if !harnesses.isEmpty { args.append("--for=" + harnesses.joined(separator: ",")) }
+        return try await call(args)
+    }
+}
+
+/// `swe mcp enable/disable --json`: the harnesses the call switched.
+public struct McpToggleResult: Decodable, Sendable, Equatable {
+    public let name: String
+    /// Harnesses a disable wrote off, or an enable restored.
+    public let places: [String]
+
+    private enum CodingKeys: String, CodingKey { case name, disabledIn, enabledIn }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        places = try container.decodeIfPresent([String].self, forKey: .disabledIn)
+            ?? container.decodeIfPresent([String].self, forKey: .enabledIn) ?? []
     }
 }
 
