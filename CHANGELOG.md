@@ -263,6 +263,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Skill and plugin usage: `swe skills usage`, `swe plugins info`.**
+  `swe skills usage <name>` counts `Skill: <name>` tool calls in the
+  session search index — calls, sessions, last used, split by harness,
+  with `Skill` calls indexed before the `skill` input key tallied as
+  `unattributed` since they carry no name. `swe plugins info
+  <plugin>@<marketplace>` is the detail sheet the catalog table cannot
+  hold: the plugin's declared MCP servers with env and header key names
+  (values are never read) joined with `swe mcp list`'s state, hub
+  membership and missing-secret names, its shipped skills, when its
+  files last changed, and one usage rollup over `Skill: <name>` and
+  `mcp__<server>__*` calls. Both answer `tracked: false` under `--json`
+  when the index is off (`swe session index --on`). The `skill` input
+  key joined the search writers' argument keys in Python and Swift, so
+  calls indexed from now on carry the skill's name.
+
 - **Per-harness skill selections: `swe skills enable|disable|sync`.** A
   harness's skills folder no longer has to be the whole shared tree or
   nothing: it can be a directory of one link per shared skill it keeps.

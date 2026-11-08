@@ -16,7 +16,7 @@ from swe.plugins.actions import ACTIONS, ActionError, plugin_action
 from swe.plugins.catalog import ACTIONABLE, build_catalog
 from swe.table import Table
 
-SUBCOMMANDS = ("catalog", "marketplace", *ACTIONS)
+SUBCOMMANDS = ("catalog", "marketplace", "info", *ACTIONS)
 _DONE = {"install": "installed", "uninstall": "uninstalled",
          "enable": "enabled", "disable": "disabled"}
 
@@ -48,6 +48,8 @@ def cmd_plugins(args) -> int:
         return _catalog(rest, json_view, fail)
     if sub == "marketplace":
         return _marketplace(rest, json_view, fail)
+    if sub == "info":
+        return _info(rest, json_view, fail)
     if sub in ACTIONS:
         return _action(sub, rest, json_view, fail)
     return fail(c("red", f"Unknown subcommand: {sub}. Use one of {', '.join(SUBCOMMANDS)}."))
@@ -104,6 +106,22 @@ def _catalog(rest: list[str], json_view: bool, fail) -> int:
         _render_plugins(data, data["marketplaces"][0])
     else:
         _render_marketplaces(data)
+    return 0
+
+
+def _info(rest: list[str], json_view: bool, fail) -> int:
+    """`swe plugins info <ref>` — the detail sheet the table cannot hold."""
+    from swe.plugins.info import plugin_info
+
+    if len(rest) != 1 or any(a.startswith("-") for a in rest):
+        return fail(c("red", "Usage: swe plugins info <plugin>@<marketplace> [--json]"))
+    data = plugin_info(rest[0], Path.home())
+    if data is None:
+        return fail(c("red", f"No plugin named {rest[0]} — "
+                             "see `swe plugins catalog --json` for refs"))
+    if json_view:
+        return emit(data)
+    _render_info(data)
     return 0
 
 
@@ -225,3 +243,72 @@ def _render_errors(errors: list) -> None:
     for err in errors:
         where = err["harness"] + (f" {err['marketplace']}" if err["marketplace"] else "")
         print(f"  {c('yellow', '!')} {c('dim', sanitize(where + ': ' + err['detail']))}")
+
+
+def _render_info(data: dict) -> None:
+    plugin = data["plugin"]
+    meta = []
+    if plugin.get("version"):
+        meta.append(f"v{sanitize(plugin['version'])}")
+    if data.get("updated"):
+        meta.append(f"updated {data['updated'][:10]}")
+    if plugin.get("source_path"):
+        meta.append(sanitize(plugin["source_path"]))
+    print(f"\n{c('bold', sanitize(data['ref']))}"
+          + (f"  {c('dim', ' · '.join(meta))}" if meta else ""))
+    if plugin.get("description"):
+        print(f"  {c('dim', sanitize(plugin['description']))}")
+
+    states = [f"{h} {_state_cell(s)}" for h, s in plugin["harnesses"].items()]
+    if states:
+        print(f"  {c('dim', 'states')}  {'  '.join(states)}")
+
+    components = plugin.get("components") or {}
+    if components:
+        bits = [f"{n} {k.replace('_', ' ')}" for k, n in sorted(components.items()) if n]
+        print(f"  {c('dim', 'provides')}  {', '.join(bits)}")
+
+    skills = data.get("skills") or []
+    if skills:
+        print(f"\n  {c('bold', 'Skills')}")
+        for skill in skills:
+            calls = skill["usage"].get("calls")
+            note = f"{calls} calls" if calls else "no calls" \
+                if skill["usage"].get("tracked") else "untracked"
+            print(f"    {sanitize(skill['name']).ljust(24)}{c('dim', note)}"
+                  f"  {c('dim', 'seen by ' + ', '.join(skill.get('harnesses') or []))}")
+
+    mcp_servers = data.get("mcp_servers") or []
+    if mcp_servers:
+        print(f"\n  {c('bold', 'MCP servers')}")
+        for server in mcp_servers:
+            bits = []
+            if server.get("in_hub"):
+                bits.append("in hub")
+            if server.get("harnesses"):
+                bits.append("in " + ", ".join(server["harnesses"]))
+            if server.get("disabled_in"):
+                bits.append("off in " + ", ".join(server["disabled_in"]))
+            print(f"    {sanitize(server['name']).ljust(24)}{c('dim', '; '.join(bits) or 'declared only')}")
+            for key in server.get("env_keys") or []:
+                print(f"      {c('dim', 'env')} {sanitize(key)}")
+            for key in server.get("header_keys") or []:
+                print(f"      {c('dim', 'hdr')} {sanitize(key)}")
+            # secrets_missing holds the placeholder names inside ${…},
+            # not env keys — a missing secret can sit in a header, an
+            # argument or the URL too, so it lists on its own.
+            for name in server.get("secrets_missing") or []:
+                print(f"      {c('yellow', 'missing')} {sanitize(name)}")
+            calls = server["usage"].get("calls")
+            if server["usage"].get("tracked") and calls:
+                print(f"      {c('dim', f'{calls} calls')}")
+
+    usage = data.get("usage") or {}
+    if usage.get("tracked"):
+        calls = usage.get("calls", 0)
+        sessions = usage.get("sessions", 0)
+        print(f"\n  {c('dim', 'usage')}  {calls} calls across {sessions} sessions"
+              + (f"  last {usage['last_used'][:10]}" if usage.get("last_used") else ""))
+        for harness, n in (usage.get("by_harness") or {}).items():
+            print(f"      {c('cyan', harness.ljust(12))} {n} calls")
+    print()
