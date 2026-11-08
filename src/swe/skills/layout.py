@@ -117,7 +117,18 @@ def save_link_records(links: list[dict]) -> None:
 
 
 def record_symlink(label: str, path: Path, target: Path) -> None:
-    links = [l for l in load_link_records() if l.get("label") != label]
+    # Replace this root's symlink record and any selection record at the
+    # same path (a re-linked root stopped being a selection), but not a
+    # different root's record that happens to share the label.
+    old_selection = selection_record_at(path)
+    links = [
+        l for l in load_link_records()
+        if (l.get("label") != label or l.get("kind") == "selection")
+        and (
+            old_selection is None
+            or str(l.get("path")) != str(old_selection.get("path"))
+        )
+    ]
     links.append(
         {
             "label": label,
@@ -131,7 +142,109 @@ def record_symlink(label: str, path: Path, target: Path) -> None:
 
 
 def remove_link_record(label: str) -> None:
-    links = [l for l in load_link_records() if l.get("label") != label]
+    # Only the whole-root symlink record: a "selection" record under the
+    # same label is a different link kind and survives a resync that sees
+    # the root is a directory again.
+    links = [
+        l for l in load_link_records()
+        if l.get("label") != label or l.get("kind") == "selection"
+    ]
+    save_link_records(links)
+
+
+# A skills root can be a real directory holding one symlink per shared
+# skill it keeps. ``mode`` is the selection's rule for skills added to the
+# shared tree later: "except" links everything not on its ``disabled``
+# list (a converted whole-folder link), "only" links just its ``enabled``
+# list (a private folder that picked skills up). The filesystem is what a
+# harness sees; the record is intent, so ``swe skills sync`` can converge
+# the two after a hand edit or a new shared skill.
+SELECTION_MODES = ("except", "only")
+
+
+def _selection_records() -> list[dict]:
+    return [
+        l for l in load_link_records()
+        if l.get("kind") == "selection" and l.get("mode") in SELECTION_MODES
+    ]
+
+
+def selection_record_at(path: Path) -> dict | None:
+    """The recorded selection for a root, found by where it sits.
+
+    Records are matched by path, not label: a root can be named by its
+    harness label or its registry key for the same folder, and either is
+    the record to load.
+    """
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError):
+        resolved = path
+    for record in _selection_records():
+        record_path = Path(str(record.get("path", "")))
+        try:
+            if record_path.resolve() == resolved:
+                return record
+        except (OSError, RuntimeError):
+            if record_path == path:
+                return record
+    return None
+
+
+def selection_intent(record: dict) -> tuple[str, set[str]]:
+    """``(mode, names)``: the shared folders the record wants unlinked for
+    ``except``, or linked for ``only``. A list it cannot read is intent it
+    cannot claim, so malformed records settle on the safe side: except
+    with no exclusions links everything, only with no picks links nothing.
+    """
+    mode = record.get("mode")
+    if mode == "except":
+        names = record.get("disabled")
+    else:
+        mode, names = "only", record.get("enabled")
+    return mode, {n for n in names if isinstance(n, str)} if isinstance(names, list) else set()
+
+
+def remove_selection_record(path: Path) -> None:
+    """Drop a root's selection record, matched by where it sits."""
+    old = selection_record_at(path)
+    if old is None:
+        return
+    links = [
+        l for l in load_link_records()
+        if l.get("kind") != "selection" or str(l.get("path")) != str(old.get("path"))
+    ]
+    save_link_records(links)
+
+
+def record_selection(label: str, path: Path, mode: str, names) -> None:
+    """Persist a root's selection. ``names`` is the ``disabled`` list for
+    ``except``, the ``enabled`` list for ``only``; both hold shared
+    folder names."""
+    key = "disabled" if mode == "except" else "enabled"
+    # Replace by where the root sits, not by label: two roots can share
+    # one label (~/.foo/skills and ~/.config/foo/skills are both "foo"),
+    # so dropping by label could erase the other root's record.
+    old = selection_record_at(path)
+    links = [
+        l for l in load_link_records()
+        if old is None or str(l.get("path")) != str(old.get("path"))
+    ]
+    # Anything but a collection of names is no intent at all; a bare
+    # string would otherwise record its characters as skill names.
+    picked = {
+        n for n in names if isinstance(n, str)
+    } if isinstance(names, (list, tuple, set)) else set()
+    links.append(
+        {
+            "label": label,
+            "path": str(path),
+            "kind": "selection",
+            "mode": mode,
+            key: sorted(picked),
+            "updated": datetime.now().isoformat(),
+        }
+    )
     save_link_records(links)
 
 

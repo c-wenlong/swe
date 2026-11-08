@@ -370,6 +370,78 @@ def _harness_owned_dirs(root: Path) -> frozenset[str]:
     return frozenset(owned)
 
 
+def shared_skill_dirs(shared: Path) -> dict[str, Path]:
+    """``{name: dir}`` for each skill folder directly under the shared root.
+
+    Only folders holding a SKILL.md count: a scratch directory parked in
+    ~/.swe/skills is not a skill and not something a selection would link.
+    An entry that is itself a link (a skill vendored from elsewhere)
+    counts — is_dir and the SKILL.md test both follow it.
+    """
+    out: dict[str, Path] = {}
+    try:
+        entries = sorted(shared.iterdir())
+    except OSError:
+        return out
+    for entry in entries:
+        if entry.is_dir() and (entry / "SKILL.md").is_file():
+            out[entry.name] = entry
+    return out
+
+
+def skill_root_links(root: Path, shared: Path) -> dict[str, Path]:
+    """``{name: link}`` for each top-level symlink under ``root`` that
+    resolves into ``shared``.
+
+    A selection root is a real directory of these links. Dangling ones
+    count too — resolve() settles where a link points without the target
+    existing, and a link that aimed into shared is swe's to remove whether
+    or not the skill behind it is still there.
+    """
+    try:
+        shared_resolved = shared.resolve()
+    except (OSError, RuntimeError):
+        return {}
+    out: dict[str, Path] = {}
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return out
+    for entry in entries:
+        if not entry.is_symlink():
+            continue
+        try:
+            target = entry.resolve()
+        except (OSError, RuntimeError):
+            continue
+        try:
+            target.relative_to(shared_resolved)
+        except ValueError:
+            continue
+        out[entry.name] = entry
+    return out
+
+
+def _selection_detail(path: Path, shared: Path, links: dict[str, Path]) -> str:
+    """The classify detail for a selection root: what the links cover."""
+    shared_names = set(shared_skill_dirs(shared))
+    off = sorted(shared_names - set(links))
+    parts = [f"{len(set(links) & shared_names)} of {len(shared_names)} shared linked"]
+    if off:
+        shown = ", ".join(off[:3]) + (f", +{len(off) - 3} more" if len(off) > 3 else "")
+        parts.append(f"{shown} off")
+    try:
+        private = sum(
+            1 for entry in path.iterdir()
+            if not entry.is_symlink() and entry.is_dir() and (entry / "SKILL.md").is_file()
+        )
+    except OSError:
+        private = 0
+    if private:
+        parts.append(f"{private} private")
+    return "; ".join(parts)
+
+
 def _skill_mds(
     root: Path, skip: frozenset[str] = frozenset()
 ) -> tuple[dict[str, list[Path]], bool]:
@@ -559,6 +631,23 @@ def classify_skill_root(path: Path, home: Path | None = None) -> tuple[str, str]
             return "conflict", "real file, needs --force"
         return "create", ""
 
+    # A real directory of per-skill links into the shared tree is a
+    # selection, not a keep and never an absorb: the walk below follows
+    # those links, reads them as private copies of shared skills, and
+    # would have init delete the root and replace it with one symlink —
+    # erasing exactly the exclusions the directory exists to hold. A
+    # recorded selection whose links are all gone counts too: "except
+    # every shared skill" leaves an empty dir the absorb would gladly
+    # replace, putting every excluded skill back.
+    links = skill_root_links(path, shared)
+    if not links:
+        from swe.skills.layout import selection_record_at
+
+        if selection_record_at(path) is None:
+            links = None
+    if links is not None:
+        return "selection", _selection_detail(path, shared, links)
+
     owned = _harness_owned_dirs(path)
     mds, complete = _skill_mds(path, owned)
     if not complete:
@@ -626,7 +715,7 @@ class LinkStatus:
 
     label: str
     path: Path
-    state: str  # linked | create | relink | conflict | skipped | ignored
+    state: str  # linked | selection | create | relink | absorb | keep | conflict | skipped | ignored
     detail: str = ""
     # What the link should point at, when that differs per path. Hooks
     # need it: every hook script is its own canonical file, where every

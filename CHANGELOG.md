@@ -263,6 +263,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-harness skill selections: `swe skills enable|disable|sync`.** A
+  harness's skills folder no longer has to be the whole shared tree or
+  nothing: it can be a directory of one link per shared skill it keeps.
+  `swe skills disable foo --harness=codex` on a linked folder converts it
+  to an `except` selection (every shared skill but the ones switched
+  off, and new shared skills still arrive); `swe skills enable foo
+  --harness=claude` on a folder with no skills dir creates an `only`
+  selection, the way a harness picks up a single shared skill while
+  keeping its own private folders. `swe skills sync` re-applies every
+  recorded selection: skills added to `~/.swe/skills` link into `except`
+  roots (and `swe skills new` does the reconcile on the spot), links to
+  deleted skills drop, and a link removed by hand comes back while its
+  record still wants it. `swe init` now classifies such a directory as
+  `selection` instead of `absorb` — it used to flatten the folder back
+  into one symlink and erase every exclusion. `skill_links.json` gains
+  `kind: "selection"` records holding the `mode` and the name list, so
+  state survives hand edits; `swe skills --json` roots report `mode`,
+  `enabled` and `disabled`, and per-skill `harnesses` attribution counts
+  a folder that links the skill rather than resolving the whole root.
+  Relinking a selection to the whole folder needs no `--force` while it
+  holds only links (nothing private to lose), still needs it when a
+  private folder sits inside, and `swe skills unlink` on a selection
+  drops the shared links but keeps the private folders. On the Mac the
+  harness-links panel marks a selection root with its own state and
+  offers Link all skills / Unlink all; the web page mirrors it. Per-skill
+  toggles in the clients come next.
+
 - **Cursor's `store.db` sessions list and read.** `~/.cursor/acp-sessions/<id>/`
   and `~/.cursor/chats/<workspace>/<id>/` hold the sessions Cursor's editor
   agent, SDK and headless runs write without an `agent-transcripts` JSONL:

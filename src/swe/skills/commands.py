@@ -8,8 +8,11 @@ from swe.skills.catalog_commands import cmd_skills_catalog, cmd_skills_discover
 from swe.skills.discovery import discover_skills
 from swe.skills.help_text import cmd_skills_help, print_skills_overview
 from swe.skills.layout_commands import (
+    cmd_skills_disable,
+    cmd_skills_enable,
     cmd_skills_link,
     cmd_skills_move,
+    cmd_skills_sync,
     cmd_skills_unlink,
 )
 from swe.table import Table
@@ -55,9 +58,18 @@ def cmd_skills_new(args):
     except ValueError as exc:
         print(c("red", f"  {exc}"), file=refusal)
         return 1
+    # Except selections take every shared skill not on their list, so the
+    # new one links in; only selections hold out until it is enabled.
+    from swe.skills.link_ops import reconcile_all_selections
+
+    linked_into = [row["label"] for row in reconcile_all_selections()
+                   if positional[0] in row["added"]]
     if json_view:
-        return emit({"name": positional[0], "path": str(path)})
+        return emit({"name": positional[0], "path": str(path),
+                     "linked_into": linked_into})
     print(c("green", f"  ✓ Created {positional[0]}: {path}"))
+    if linked_into:
+        print(c("dim", f"  also linked into: {', '.join(sorted(linked_into))}"))
     if created_root:
         # The hub skills root is brand new, so no harness links to it and
         # the skill is invisible until swe init points them at it.
@@ -106,6 +118,12 @@ def cmd_skills(args):
         return cmd_skills_unlink(args[1:])
     if args[0] == "move":
         return cmd_skills_move(args[1:])
+    if args[0] == "enable":
+        return cmd_skills_enable(args[1:])
+    if args[0] == "disable":
+        return cmd_skills_disable(args[1:])
+    if args[0] == "sync":
+        return cmd_skills_sync(args[1:])
     if args[0] == "new":
         return cmd_skills_new(args[1:])
     if args[0] == "hub":

@@ -343,9 +343,17 @@ _WRITE_LOCK = CONFIG_LOCK
 
 
 def link_state(root: dict) -> str:
-    """SkillRoot.link: linked, notLinked or blocked."""
+    """SkillRoot.link: linked, selection, notLinked or blocked.
+
+    A selection root links some skills and not others, so it is none of
+    the whole-folder answers: bulk "link all" must leave it be (it is not
+    a loose folder), while a single "Link" or "Unlink" on it stays legal —
+    Link re-ties it as a whole-folder link, Unlink drops its links.
+    """
     if root["state"] == "linked":
         return "linked"
+    if root["state"] == "selection":
+        return "selection"
     return "notLinked" if root["state"] in ("create", "relink", "absorb") else "blocked"
 
 
@@ -372,6 +380,14 @@ def explanation(root: dict) -> str:
         return f"Holds skills that exist nowhere else ({detail}). Move them into ~/.swe/skills before linking."
     if state == "ignored":
         return f"Ignored: {detail}." if detail else "Ignored by swe init."
+    if state == "selection":
+        n_off = len(root.get("disabled") or [])
+        picks = {
+            "except": "links every shared skill but the ones switched off",
+            "only": "links just the shared skills switched on",
+        }.get(root.get("mode"), "links picked shared skills")
+        off = f" ({n_off} off)" if n_off else ""
+        return f"A selection{off}: it {picks}."
     if state == "skipped":
         return "The harness isn't installed."
     return f"{state}: {detail}" if detail else state
@@ -524,6 +540,8 @@ def _link(root: dict, home: Path) -> dict:
     # folder with an entry in it unless forced. Both kinds were just
     # classified (no file, or only copies of shared skills), and --force
     # backs the folder up before it is removed, so nothing can be lost.
+    # A selection holding private folders asks the same --force; one that
+    # is all links is relinked without it.
     force = root["state"] == "absorb"
     try:
         label, src, tgt = link_skill_root(root["path"], home=home, cwd=Path(os.sep), force=force)
@@ -537,7 +555,7 @@ def _unlink(root: dict, home: Path) -> dict:
     from swe.skills.link_ops import SkillLayoutError, unlink_skill_root
     from swe.skills.models import UnlinkReply
 
-    if root["state"] != "linked":
+    if root["state"] not in ("linked", "selection"):
         raise PageError(409, "not_linked", f"{root['name']}'s folder isn't linked to the shared skills.")
     _same_folder(root, home)
     try:

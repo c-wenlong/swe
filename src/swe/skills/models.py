@@ -57,6 +57,46 @@ class MoveReply:
 
 
 @dataclass(frozen=True)
+class ToggleReply:
+    """The ``swe skills enable|disable --json`` reply.
+
+    ``mode`` is the root's selection after the call: ``all`` for a
+    whole-folder link, ``except`` or ``only`` for a directory of
+    per-skill links. ``converted`` is true when this call turned a
+    whole-folder link or an unmanaged folder into a selection.
+    """
+
+    action: str
+    harness: str
+    skill: str
+    mode: str
+    enabled: bool
+    changed: bool
+    converted: bool
+
+    def to_json(self) -> dict:
+        return {
+            "action": self.action,
+            "harness": self.harness,
+            "skill": self.skill,
+            "mode": self.mode,
+            "enabled": self.enabled,
+            "changed": self.changed,
+            "converted": self.converted,
+        }
+
+
+@dataclass(frozen=True)
+class SyncReply:
+    """The ``swe skills sync --json`` reply: roots reconcile changed."""
+
+    roots: list[dict]
+
+    def to_json(self) -> dict:
+        return {"action": "sync", "roots": self.roots}
+
+
+@dataclass(frozen=True)
 class CatalogRow:
     """One ``swe skills catalog discover --json`` row."""
 

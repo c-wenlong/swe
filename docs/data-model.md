@@ -20,7 +20,7 @@ be rebuilt; deleting them loses user state.
 | `mcp.json` | swe | JSON | hub MCP server definitions, `${NAME}` secret refs | `swe mcp` commands | `swe mcp`, app via `swe mcp list` |
 | `config/providers.json` | swe | JSON | provider registry, seeded from built-ins (`kind`: `inference`, `infra` or `services`), `_removed` list blocks re-merge | `providers/registry.py` | `swe providers`, doctor |
 | `config/skill_catalogs.json` | swe | JSON list | extra skill catalog paths | `swe skills catalog` | `skills/discovery.py` |
-| `config/skill_links.json` | swe | JSON `{links, updated}` | recorded harness skill symlinks | `skills` link ops | `swe skills`, `init --check` |
+| `config/skill_links.json` | swe | JSON `{links, updated}` | recorded harness skill symlinks (`kind: "symlink"`) and per-skill selections (`kind: "selection"` with `mode: "except"|"only"` plus a `disabled`/`enabled` name list) | `skills` link ops | `swe skills`, `init --check` |
 | `config/plugin-display-names.json` | app | JSON object | marketplace display-name overrides | `PluginDisplayNames` (SWECore) | plugin explorer, skill detail |
 | `accounts/profiles.json` (+ `profiles.lock`, `<vendor>/<id>/home/`) | app | JSON + per-profile home dirs | extra harness accounts the app manages | `ProfileStore` | accounts page, ledger roots, session listing |
 | `accounts/harness-names.json` | app | JSON `{schema, names}` | account names for harness cards, app-owned (renaming in Accounts never writes harness.json) | `HarnessAccountNameStore` | accounts cards, menu bar, widgets |

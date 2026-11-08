@@ -22,13 +22,14 @@ const SKILL_SOURCES = [["shared", "Shared"], ["plugin", "Plugin"], ["harness", "
   ["builtin", "Built in"], ["catalog", "Catalog"], ["project", "Project"]];
 const SKILL_RANK = { shared: 0, harness: 1, catalog: 2, project: 3, plugin: 4, builtin: 5 };
 const SKILL_FOLD = 15, DETAIL_FOLD = 3;
-const LINK_TITLE = { linked: "Linked", notLinked: "Not linked", blocked: "Blocked" };
+const LINK_TITLE = { linked: "Linked", selection: "Selection", notLinked: "Not linked", blocked: "Blocked" };
 
 const skillSourceTitle = (s) => (SKILL_SOURCES.find(([id]) => id === s) || [s, "Harness"])[1];
 
 /* SkillRoot.link */
 function rootLink(root) {
   if (root.state === "linked") return "linked";
+  if (root.state === "selection") return "selection";
   return ["create", "relink", "absorb"].includes(root.state) ? "notLinked" : "blocked";
 }
 
@@ -45,6 +46,13 @@ function rootExplanation(root) {
     case "relink": return d ? `Points somewhere else: ${d.replace("points at ", "")}.` : "Points somewhere else.";
     case "absorb": return d === "empty" ? "An empty folder. Linking replaces it."
       : `Holds only copies of shared skills (${d}). Linking backs it up and replaces it.`;
+    case "selection": {
+      const off = (root.disabled || []).length;
+      const picks = root.mode === "except"
+        ? "links every shared skill but the ones switched off"
+        : "links just the shared skills switched on";
+      return `A selection${off ? ` (${off} off)` : ""}: it ${picks}.`;
+    }
     case "keep": return `Holds skills that exist nowhere else (${d}). Move them into ~/.swe/skills before linking.`;
     case "ignored": return d ? `Ignored: ${d}.` : "Ignored by swe init.";
     case "skipped": return "The harness isn't installed.";
@@ -122,10 +130,13 @@ function skillsConfirmText(c, d) {
   const root = d.harnesses.find((r) => r.path === c.path);
   const path = skillsPath(root.path, d.home), name = Fmt.harnessName(root.name);
   if (c.kind === "unlink") {
-    return `Removes the link at ${path}. ${name} stops loading the shared skills; nothing in ${shared} changes.`
-      + (root.archived ? " It's archived in swe, so swe init won't link it again." : "");
+    return root.state === "selection"
+      ? `Removes the shared-skill links at ${path}. ${name} stops loading the shared skills; its own folders stay, and nothing in ${shared} changes.`
+      : `Removes the link at ${path}. ${name} stops loading the shared skills; nothing in ${shared} changes.`
+        + (root.archived ? " It's archived in swe, so swe init won't link it again." : "");
   }
   switch (root.state) {
+    case "selection": return `Replaces ${path} with one link to ${shared}: ${name} loads every shared skill, including the ones switched off in the selection.`;
     case "create": return `Creates ${path} as a link to ${shared}, so ${name} loads every shared skill.`;
     case "relink": return `Points ${path} at ${shared} instead of where it points now, so ${name} loads every shared skill.`;
     default: return rootNeedsForce(root)
@@ -181,7 +192,8 @@ function skillsHeader(busy) {
   const where = d && d.machine ? d.machine : "the hub";
   let links = "";
   if (d) {
-    const roots = d.harnesses, linked = roots.filter((r) => rootLink(r) === "linked").length;
+    const roots = d.harnesses,
+      linked = roots.filter((r) => rootLink(r) === "linked" || rootLink(r) === "selection").length;
     const blocked = roots.some((r) => rootLink(r) === "blocked");
     links = `<div class="sk-links-wrap">
       <button class="sk-links-button${skillsPage.links !== null ? " open" : ""}" id="sk-links" type="button"
@@ -226,7 +238,7 @@ function skillsLinksPanel(d) {
   }
   const body = roots.length
     ? `<div class="sk-chips">${roots.map((r) => skillsChip(r.name, rootLink(r), { root: r.path, busy: p.busy.has(r.path) })).join("")}</div>
-       <div class="sk-legend">${["linked", "notLinked", "blocked"].map((l) =>
+       <div class="sk-legend">${["linked", "selection", "notLinked", "blocked"].map((l) =>
          `<span>${skillsLinkDot(l)}${LINK_TITLE[l]}</span>`).join("")}<span class="muted">Click one to link or unlink it.</span></div>
        ${all}`
     : `<div class="sk-none"><span>No harness skills folders found. Register a harness first.</span>
@@ -250,6 +262,12 @@ function skillsRootActions(root, d, link) {
   if (c) return skillsConfirm(c, d, c.kind === "unlink" ? "Unlink" : "Link", busy);
   if (link === "linked") {
     return `<div class="sk-actions"><button class="btn hairline" type="button" data-sk-ask="unlink"${busy ? " disabled" : ""}>Unlink</button></div>`;
+  }
+  if (link === "selection") {
+    return `<div class="sk-actions">
+      <button class="btn hairline" type="button" data-sk-ask="unlink"${busy ? " disabled" : ""}>Unlink all</button>
+      <button class="btn hairline primary" type="button" data-sk-ask="link"${busy ? " disabled" : ""}>Link all skills</button>
+    </div>`;
   }
   if (link === "notLinked") {
     return `<div class="sk-actions"><button class="btn hairline primary" type="button" data-sk-ask="link"${busy ? " disabled" : ""}>Link to shared skills</button></div>`;
