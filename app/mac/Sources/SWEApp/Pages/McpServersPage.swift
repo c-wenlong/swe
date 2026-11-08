@@ -12,6 +12,10 @@ private let detailLabelWidth: CGFloat = 96
 struct McpServersPage: View {
     @Environment(AppModel.self) private var app
     @State private var filter: McpFilter = .all
+    /// Where a server runs: every one, or only local/remote ones.
+    @State private var host: McpHost = .all
+    /// What a server is for; nil lists every type.
+    @State private var type: String?
     @State private var selected: McpServer?
     @State private var adding = false
     /// Harnesses left out of the comparison, remembered on this Mac.
@@ -92,15 +96,15 @@ struct McpServersPage: View {
         app.providers.rows.filter(\.isInstalled).map(\.provider.id).filter { !hidden.contains($0) }
     }
 
-    /// The Local folder rows on their own, for states with no server grid
+    /// The Local folder rows on their own, for states with no server table
     /// to put them in (the inventory is empty or failed to read). With the
     /// hub unknown a row cannot claim "Not in the hub", so the caption hides.
     @ViewBuilder private func folderOnlyRows(hubKnown: Bool) -> some View {
         let local = McpServerRepo.grouped(servers: [], folders: app.mcpRepo.servers).local
         if !local.isEmpty {
             Card {
-                ServerGrid(harnesses: [], local: local, remote: [],
-                           showHealth: false, hubKnown: hubKnown, editor: app.editor) { _ in }
+                ServerTable(harnesses: [], rows: local,
+                            hubKnown: hubKnown, editor: app.editor) { _ in }
             }
         }
     }
@@ -139,33 +143,54 @@ struct McpServersPage: View {
                 folderOnlyRows(hubKnown: true)
             case .loaded(let inventory):
                 let compared = inventory.activeHarnesses.filter { !hidden.contains($0) }
+                let filtered = inventory.servers(filter, across: compared)
+                    .filter { host == .all || $0.isRemote == (host == .remote) }
+                    .filter { type == nil || $0.typeTag == type }
+                let all = McpServerRepo.grouped(servers: filtered, folders: app.mcpRepo.servers,
+                                                usageFrom: inventory.servers)
+                // A folder no hub server uses is in no harness and has no
+                // type, so it shows only on an unfiltered local list; the
+                // Conflicts pill's 4 would otherwise sit over twenty rows.
+                let rows = (all.local + all.remote).filter {
+                    if case .folder = $0 { return filter == .all && host != .remote && type == nil }
+                    return true
+                }
                 HStack(alignment: .center, spacing: 12) {
                     Tabs(options: McpFilter.allCases.map {
                         ($0, "\($0.title) \(inventory.servers($0, across: compared).count)")
                     }, selection: $filter, style: .period, onPanel: true)
                     Spacer(minLength: 8)
+                    Text("Host").font(Theme.control).foregroundStyle(Theme.textMuted)
+                    Tabs(options: McpHost.allCases.map { ($0, $0.title) },
+                         selection: $host, style: .segmented, onPanel: true)
+                    Text("Type").font(Theme.control).foregroundStyle(Theme.textMuted)
+                    SelectMenu(options: [(value: Optional<String>.none, title: "All types")]
+                               + McpServer.knownTypes.map { (.some($0), $0) },
+                               selection: $type, width: nil)
+                    let shown = rows.count { row in
+                        if case .server = row { return true }
+                        return false
+                    }
+                    Text("\(shown) of \(inventory.servers.count)")
+                        .font(Theme.caption).foregroundStyle(Theme.textMuted)
                 }
                 HarnessChips(harnesses: inventory.activeHarnesses, hidden: $hidden)
                     .onChange(of: hidden) { UserDefaults.standard.set(hidden.sorted(), forKey: Self.hiddenKey) }
-                let rows = inventory.servers(filter, across: compared)
-                let all = McpServerRepo.grouped(servers: rows, folders: app.mcpRepo.servers,
-                                                usageFrom: inventory.servers)
-                // A folder no hub server uses is in no harness, so it can't
-                // be out of sync or conflict: only All lists it, or the
-                // Conflicts pill's 4 sat over twenty other rows.
-                let grouped = filter == .all ? all
-                    : (local: all.local.filter { if case .folder = $0 { false } else { true } },
-                       remote: all.remote)
-                if grouped.local.isEmpty && grouped.remote.isEmpty {
-                    Card { Text("Every server is in every compared harness, defined the same way.").font(Theme.bodySmall).foregroundStyle(Theme.textSecondary) }
+                if rows.isEmpty {
+                    Card {
+                        Text(filter != .all && inventory.servers(filter, across: compared).isEmpty
+                             ? "Every server is in every compared harness, defined the same way."
+                             : "No servers match these filters.")
+                            .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
+                    }
                 } else {
                     Card {
-                        ServerGrid(harnesses: compared, local: grouped.local, remote: grouped.remote,
-                                   showHealth: model.hasHealth, editor: app.editor,
-                                   toggle: { server, harness, on in await toggle(server, in: harness, on: on) },
-                                   batchServers: inventory.servers,
-                                   toggleAll: { harness, on, servers in await toggleColumn(harness, on: on, servers: servers) },
-                                   toggleRow: { server, on in await toggleAll(server, on: on) }) { selected = $0 }
+                        ServerTable(harnesses: compared, rows: rows,
+                                    editor: app.editor,
+                                    toggle: { server, harness, on in await toggle(server, in: harness, on: on) },
+                                    batchServers: inventory.servers,
+                                    toggleAll: { harness, on, servers in await toggleColumn(harness, on: on, servers: servers) },
+                                    toggleRow: { server, on in await toggleAll(server, on: on) }) { selected = $0 }
                     }
                     if let toggleError {
                         Text(toggleError).font(Theme.caption).foregroundStyle(Theme.dangerText)
@@ -198,6 +223,21 @@ struct McpServersPage: View {
             McpAddServerSheet(hidden: hidden) {
                 await model.load(swe: app.swe, for: app.swePath, health: model.hasHealth)
             }
+        }
+    }
+}
+
+/// Which servers the table lists: every one, the ones a harness launches
+/// on this Mac, or the ones reached at a URL. It replaces the Local and
+/// Remote group titles the list used to split on.
+private enum McpHost: String, CaseIterable {
+    case all, local, remote
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .local: "Local"
+        case .remote: "Remote"
         }
     }
 }
@@ -236,12 +276,16 @@ private struct HarnessChips: View {
     }
 }
 
-private struct ServerGrid: View {
+/// The hairline at a column's edge, drawn inside each row of the table so
+/// the pieces stack into one ruled edge through header and body alike.
+private func columnSeparator() -> some View {
+    Rectangle().fill(Theme.rowDivider).frame(width: 1)
+}
+
+private struct ServerTable: View {
     var harnesses: [String]
-    /// The grouped list: local servers and unused folders, then remotes.
-    var local: [McpServerRepo.Row]
-    var remote: [McpServerRepo.Row]
-    var showHealth: Bool
+    /// The flat filtered list: server rows and unused folder rows.
+    var rows: [McpServerRepo.Row]
     /// False when the inventory never loaded: an unused-looking folder
     /// cannot claim "Not in the hub", so its caption hides.
     var hubKnown = true
@@ -252,113 +296,243 @@ private struct ServerGrid: View {
     /// and its counts must see the servers the filter hides.
     var batchServers: [McpServer] = []
     /// Switch every server in one harness column (name list supplied by
-    /// the grid, which knows the rows).
+    /// the table, which knows the rows).
     var toggleAll: (String, Bool, [McpServer]) async -> Void = { _, _, _ in }
     /// Switch one server in every place it is defined or marked off.
     var toggleRow: (McpServer, Bool) async -> Void = { _, _ in }
     var open: (McpServer) -> Void
 
-    /// The groups in display order, skipping empty ones. Local names the
-    /// machine whose harnesses launch the server, as the Add sheet does.
-    private var sections: [(title: String, rows: [McpServerRepo.Row])] {
-        var out: [(String, [McpServerRepo.Row])] = []
-        if !local.isEmpty { out.append((mcpLocalTitle, local)) }
-        if !remote.isEmpty { out.append(("Remote", remote)) }
-        return out
-    }
-
     /// The name column takes whatever the cells leave, but never less than this.
     static let nameMinWidth: CGFloat = 180
-    static let cellWidth: CGFloat = 88
-    /// The gap between a Local row's folder buttons and the first harness
-    /// cell, the same on a server's row and an unused folder's.
+    /// The Type column: the widest tag, PRODUCTIVITY, fits inside it.
+    static let typeWidth: CGFloat = 96
+    /// Every harness column shares this width: a regular grid, wide
+    /// enough for a logo plus its qualifier word.
+    static let cellWidth: CGFloat = 92
+    /// One column's footprint for the reorder maths: its leading
+    /// separator plus the cell.
+    static let pitch: CGFloat = 1 + cellWidth
+    /// The gap between a Local row's folder buttons and the first fixed
+    /// column, the same on a server's row and an unused folder's.
     static let actionsGap: CGFloat = 8
-    /// Rows a section shows before folding behind a Show more row.
-    private static let foldLimit = 10
-    /// Section titles the user has unfolded.
-    @State private var opened: Set<String> = []
+    /// Rows the table shows before folding behind a Show more row.
+    private static let foldLimit = 20
+    /// The UserDefaults key the harness column order persists under.
+    static let orderKey = "mcpColumnOrder"
 
-    /// At least 88pt, wider when a heading needs it (a logo and a word,
-    /// or the name of a harness with no logo), so it shows whole.
-    static func columnWidth(_ harness: String) -> CGFloat {
-        let mark = HarnessMark(harness)
-        let font = Theme.nsFont(size: 12, weight: .medium)
-        let text = mark.word.map { ($0 as NSString).size(withAttributes: [.font: font, .kern: 0.12]).width } ?? 0
-        let logo: CGFloat = mark.icon == nil ? 0 : 16 + (mark.word == nil ? 0 : 4)
-        return max(cellWidth, ceil(logo + text) + 16)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The harness columns in display order, remembered on this Mac as a
+    /// list of ids: a dragged column rewrites it, a harness the save
+    /// predates appends, and a hidden or removed one drops out.
+    @State private var order = UserDefaults.standard.stringArray(forKey: ServerTable.orderKey) ?? []
+    @State private var showAll = false
+    /// The card's inner width: the table fills it, and scrolls only past it.
+    @State private var available: CGFloat = 0
+    /// The header mid-drag and how far the pointer has carried it.
+    @State private var dragging: String?
+    @State private var translation: CGFloat = 0
+
+    /// The columns in display order: the saved order, then any harness
+    /// the save predates, and none the comparison left out.
+    private var ordered: [String] {
+        order.filter(harnesses.contains) + harnesses.filter { !order.contains($0) }
     }
 
-    /// The card's inner width: the grid fills it, and scrolls only past it.
-    @State private var available: CGFloat = 0
+    /// The widths RowReorder works on: a uniform `pitch` per column.
+    private var pitches: [CGFloat] { Array(repeating: Self.pitch, count: ordered.count) }
+
+    /// Everything after the name column: its separator, the Type column,
+    /// and every harness column's separator and cell.
+    static func fixedTail(columns: Int) -> CGFloat {
+        1 + typeWidth + CGFloat(columns) * pitch
+    }
+
+    /// The name column on screen: the table's width after the fixed
+    /// columns, at least `nameMinWidth`.
+    private var nameWidth: CGFloat {
+        max(available - Self.fixedTail(columns: ordered.count), Self.nameMinWidth)
+    }
+
+    private var totalWidth: CGFloat { nameWidth + Self.fixedTail(columns: ordered.count) }
 
     var body: some View {
         ScrollView(.horizontal) {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 0) {
-                    Text("Server").frame(minWidth: Self.nameMinWidth, maxWidth: .infinity, alignment: .leading)
-                    ForEach(harnesses, id: \.self) { harness in
-                        HarnessMarkView(harness: harness)
-                            .frame(width: Self.columnWidth(harness))
-                            .contextMenu {
-                                let servers = batchServers
-                                let on = servers.filter { $0.harnesses.contains(harness) }.count
-                                let off = servers.filter { $0.disabledIn.contains(harness) }.count
-                                Button("Turn off all servers in \(HarnessMark(harness).name)") {
-                                    Task { await toggleAll(harness, false, servers) }
-                                }
-                                .disabled(on == 0)
-                                Button("Turn on all servers in \(HarnessMark(harness).name)") {
-                                    Task { await toggleAll(harness, true, servers) }
-                                }
-                                .disabled(off == 0)
-                            }
-                    }
-                }
-                .font(Theme.tableHeader)
-                .tracking(0.12)
-                .foregroundStyle(Theme.tableHeaderText)
-                .padding(.bottom, 8)
+                header
                 Divider().overlay(Theme.border)
-                ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
-                    let shown = RowFold.visible(section.rows, limit: Self.foldLimit,
-                                                expanded: opened.contains(section.title))
-                    Text("\(section.title) · \(section.rows.count)")
-                        .font(Theme.cardTitle).foregroundStyle(Theme.textSecondary)
-                        .padding(.top, 14).padding(.bottom, 6)
-                    ForEach(Array(shown.enumerated()), id: \.element.id) { index, row in
-                        switch row {
-                        case .server(let server, let folders):
-                            ServerRow(server: server, folders: folders, harnesses: harnesses,
-                                      showHealth: showHealth, editor: editor,
-                                      toggle: toggle, toggleRow: toggleRow) { open(server) }
-                        case .folder(let folder):
-                            FolderRow(folder: folder, harnesses: harnesses,
-                                      hubKnown: hubKnown, editor: editor)
-                        }
-                        if index < shown.count - 1 { Divider().overlay(Theme.border) }
+                let shown = RowFold.visible(rows, limit: Self.foldLimit, expanded: showAll)
+                ForEach(Array(shown.enumerated()), id: \.element.id) { index, row in
+                    switch row {
+                    case .server(let server, let folders):
+                        ServerRow(server: server, folders: folders, harnesses: ordered,
+                                  editor: editor,
+                                  toggle: toggle, toggleRow: toggleRow) { open(server) }
+                    case .folder(let folder):
+                        FolderRow(folder: folder, harnesses: ordered,
+                                  hubKnown: hubKnown, editor: editor)
                     }
-                    if RowFold.hiddenCount(total: section.rows.count, limit: Self.foldLimit) > 0 {
-                        Divider().overlay(Theme.border)
-                        ExpandRow(isExpanded: opened.contains(section.title),
-                                  hidden: RowFold.hiddenCount(total: section.rows.count, limit: Self.foldLimit),
-                                  help: (expand: "Show every \(section.title.lowercased()) row",
-                                         collapse: "Show only the first \(Self.foldLimit)"),
-                                  edge: .inset) {
-                            withAnimation(.easeOut(duration: Theme.fadeDuration)) {
-                                if opened.contains(section.title) { opened.remove(section.title) }
-                                else { opened.insert(section.title) }
-                            }
-                        }
+                    if index < shown.count - 1 { Divider().overlay(Theme.border) }
+                }
+                if RowFold.hiddenCount(total: rows.count, limit: Self.foldLimit) > 0 {
+                    Divider().overlay(Theme.border)
+                    ExpandRow(isExpanded: showAll,
+                              hidden: RowFold.hiddenCount(total: rows.count, limit: Self.foldLimit),
+                              help: (expand: "Show every row",
+                                     collapse: "Show only the first \(Self.foldLimit)"),
+                              edge: .inset) {
+                        withAnimation(.easeOut(duration: Theme.fadeDuration)) { showAll.toggle() }
                     }
                 }
             }
             // Exactly the card's width, or the columns' minimum if wider, so a
             // long name truncates instead of pushing the harness columns away.
-            .frame(width: max(available, Self.nameMinWidth + harnesses.map(Self.columnWidth).reduce(0, +)),
+            .frame(width: max(available, Self.nameMinWidth + Self.fixedTail(columns: ordered.count)),
                    alignment: .leading)
+            .overlay(alignment: .topLeading) { dropMarker }
         }
         .scrollIndicators(.automatic)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
+        .onChange(of: order) { UserDefaults.standard.set(order, forKey: Self.orderKey) }
+    }
+
+    /// "Server" over the flexible name column, "Type" over the tag
+    /// column, then a draggable header centred over each harness column.
+    /// Each separator reaches through the row's bottom padding to the
+    /// divider, so the column edges read as one line top to bottom.
+    private var header: some View {
+        HStack(spacing: 0) {
+            Text("Server")
+                .frame(minWidth: Self.nameMinWidth, maxWidth: .infinity, alignment: .leading)
+            columnSeparator().padding(.bottom, -8)
+            Text("Type").frame(width: Self.typeWidth)
+            ForEach(ordered, id: \.self) { harness in
+                columnSeparator().padding(.bottom, -8)
+                let index = ordered.firstIndex(of: harness) ?? 0
+                HarnessHeader(harness: harness, width: Self.cellWidth,
+                              servers: batchServers, toggleAll: toggleAll,
+                              carriedBy: dragging == harness
+                                  ? RowReorder.clamped(translation, heights: pitches, dragged: index)
+                                  : nil,
+                              drag: { dragChanged(harness, $0) },
+                              drop: { finish(move: true) },
+                              cancel: { finish(move: false) })
+            }
+        }
+        .font(Theme.tableHeader)
+        .tracking(0.12)
+        .foregroundStyle(Theme.tableHeaderText)
+        .padding(.bottom, 8)
+    }
+
+    /// The accent bar at the slot a dragged column would land in, like
+    /// the mock's inset drop mark but running the table's height.
+    @ViewBuilder private var dropMarker: some View {
+        if let x = dropEdge {
+            Rectangle().fill(Theme.interactive)
+                .frame(width: 2)
+                .offset(x: x)
+        }
+    }
+
+    /// The insertion edge's x position while a column is mid-drag, nil
+    /// otherwise. The slot the drop targets counts among the other
+    /// columns, so it maps back to the column now standing there.
+    private var dropEdge: CGFloat? {
+        guard let id = dragging, let from = ordered.firstIndex(of: id) else { return nil }
+        let target = RowReorder.targetIndex(heights: pitches, dragged: from, translation: translation)
+        if target >= ordered.count - 1 { return totalWidth - 2 }
+        let slot = target < from ? target : target + 1
+        return nameWidth + Self.typeWidth + CGFloat(slot) * Self.pitch
+    }
+
+    private func dragChanged(_ harness: String, _ translation: CGFloat) {
+        dragging = harness
+        self.translation = translation
+    }
+
+    /// Drop the dragged column at the slot the pointer left it over; the
+    /// other columns slide aside through the animation.
+    private func finish(move: Bool) {
+        guard let id = dragging else { return }
+        defer { dragging = nil; translation = 0 }
+        guard move, let from = ordered.firstIndex(of: id) else { return }
+        let target = RowReorder.targetIndex(heights: pitches, dragged: from, translation: translation)
+        guard target != from else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: Theme.fadeDuration)) {
+            var next = ordered
+            next.remove(at: from)
+            next.insert(id, at: target)
+            order = next
+        }
+    }
+}
+
+/// One harness column's header: a drag grip at the leading edge and the
+/// mark centred over the column. A click opens the column menu, a right
+/// click the same one, and only a drag started on the grip moves the
+/// column, so a press meant for the menu never becomes a move.
+private struct HarnessHeader: View {
+    var harness: String
+    var width: CGFloat
+    var servers: [McpServer]
+    var toggleAll: (String, Bool, [McpServer]) async -> Void
+    /// The pointer offset while this is the header being carried, or nil.
+    var carriedBy: CGFloat?
+    var drag: (CGFloat) -> Void
+    var drop: () -> Void
+    /// The drag ended without reaching `onEnded`: slide everything back.
+    var cancel: () -> Void
+    @State private var hovering = false
+    /// True only while the grip's gesture is live: resets on cancel, which
+    /// never reaches `onEnded`, the same tidy-up ReorderableRows does.
+    @GestureState private var down = false
+
+    private var name: String { HarnessMark(harness).name }
+
+    @ViewBuilder private var columnMenu: some View {
+        let on = servers.filter { $0.harnesses.contains(harness) }.count
+        let off = servers.filter { $0.disabledIn.contains(harness) }.count
+        Button("Turn off all servers in \(name)") {
+            Task { await toggleAll(harness, false, servers) }
+        }
+        .disabled(on == 0)
+        Button("Turn on all servers in \(name)") {
+            Task { await toggleAll(harness, true, servers) }
+        }
+        .disabled(off == 0)
+    }
+
+    var body: some View {
+        Menu { columnMenu } label: {
+            HarnessMarkView(harness: harness)
+                .frame(width: width)
+                .contentShape(.rect)
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .contextMenu { columnMenu }
+        .overlay(alignment: .leading) {
+            Image(systemName: "line.3.horizontal")
+                .font(Theme.font(size: 9, weight: .bold))
+                .foregroundStyle(Theme.textMuted)
+                .frame(width: 14, height: 20)
+                .opacity(hovering || carriedBy != nil ? 0.9 : 0.3)
+                .contentShape(.rect)
+                .hoverTip("Drag to move the \(name) column", pinsOnClick: false)
+                .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .local)
+                    .updating($down) { _, state, _ in state = true }
+                    .onChanged { drag($0.translation.width) }
+                    .onEnded { _ in drop() })
+        }
+        .offset(x: carriedBy ?? 0)
+        .zIndex(carriedBy == nil ? 0 : 1)
+        .opacity(carriedBy == nil ? 1 : 0.85)
+        .onHover { hovering = $0 }
+        .onChange(of: down) { _, isDown in
+            guard !isDown else { return }
+            Task { await Task.yield(); cancel() }
+        }
     }
 }
 
@@ -368,17 +542,18 @@ private struct ServerRow: View {
     /// a remote one.
     var folders: [McpRepoServer] = []
     var harnesses: [String]
-    var showHealth: Bool
     var editor: CodeEditor?
     var toggle: (McpServer, String, Bool) async -> Void = { _, _, _ in }
     var toggleRow: (McpServer, Bool) async -> Void = { _, _ in }
     var open: () -> Void
     @State private var hovering = false
+    /// The `swe mcp enable/disable` for every harness, mid-flight.
+    @State private var masterBusy = false
 
-    /// The harness cells' total width: the folder actions overlay the row
-    /// just left of them, so the checkmark columns never move.
+    /// The fixed columns' total width: the folder actions overlay the row
+    /// just left of the Type separator, so the cells never move.
     private var cellsWidth: CGFloat {
-        harnesses.map(ServerGrid.columnWidth).reduce(0, +)
+        ServerTable.fixedTail(columns: harnesses.count)
     }
 
     /// What the name column leaves for the folder actions.
@@ -390,11 +565,7 @@ private struct ServerRow: View {
         Button(action: open) {
             HStack(spacing: 0) {
                 HStack(alignment: .top, spacing: 8) {
-                    if showHealth, let health = server.health {
-                        Circle().fill(healthColor(health)).frame(width: Theme.statusDot, height: Theme.statusDot)
-                            .padding(.top, 4)
-                            .hoverTip(server.detail ?? "Healthy")
-                    }
+                    master
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 5) {
                             Text(server.name).font(Theme.rowTitle).foregroundStyle(Theme.textPrimary).lineLimit(1)
@@ -409,11 +580,15 @@ private struct ServerRow: View {
                     }
                 }
                 .padding(.trailing, actionsWidth)
-                .frame(minWidth: ServerGrid.nameMinWidth, maxWidth: .infinity, alignment: .leading)
+                .frame(minWidth: ServerTable.nameMinWidth, maxWidth: .infinity, alignment: .leading)
+                columnSeparator()
+                TypeTag(tag: server.typeTag)
+                    .frame(width: ServerTable.typeWidth)
                 let differs = server.conflicts(among: harnesses)
                 ForEach(harnesses, id: \.self) { harness in
-                    Cell(server: server, harness: harness, differs: differs,
-                         toggle: toggle).frame(width: ServerGrid.columnWidth(harness))
+                    columnSeparator()
+                    Cell(server: server, harness: harness, differs: differs, toggle: toggle)
+                        .frame(width: ServerTable.cellWidth)
                 }
             }
             .padding(.vertical, 8)
@@ -422,7 +597,7 @@ private struct ServerRow: View {
         }
         .plainButton(cornerRadius: Theme.smallRadius)
         .onHover { hovering = $0 }
-        .accessibilityLabel("\(server.name), in \(harnessNames(server.harnesses))")
+        .accessibilityLabel("\(server.name), \(server.typeTag), in \(harnessNames(server.harnesses))")
         .contextMenu {
             Button("Turn off everywhere") { Task { await toggleRow(server, false) } }
                 .disabled(server.harnesses.isEmpty)
@@ -435,9 +610,60 @@ private struct ServerRow: View {
         .overlay(alignment: .trailing) {
             if !folders.isEmpty {
                 FolderActions(folders: folders, editor: editor)
-                    .padding(.trailing, cellsWidth + ServerGrid.actionsGap)
+                    .padding(.trailing, cellsWidth + ServerTable.actionsGap)
             }
         }
+    }
+
+    /// The master switch left of the name. Its on-track is also the
+    /// health readout the dot used to carry: green for a healthy probe,
+    /// red for a failing one, amber when the probe never ran or a secret
+    /// is missing, and a plain track when the server is off everywhere.
+    /// Flipping it runs `swe mcp disable`/`enable` for every harness the
+    /// server touches; the hub restores the exact set on the way back.
+    @ViewBuilder private var master: some View {
+        let on = !server.harnesses.isEmpty
+        let tip = masterTip(on: on)
+        Group {
+            if masterBusy {
+                ProgressView().controlSize(.mini)
+                    .frame(width: 36, height: 20)
+            } else {
+                Toggle(server.name, isOn: Binding(
+                    get: { on },
+                    set: { value in
+                        masterBusy = true
+                        Task { await toggleRow(server, value); masterBusy = false }
+                    }))
+                .labelsHidden()
+                .toggleStyle(AccentSwitchStyle(tint: masterTint(on: on)))
+                .disabled(!on && server.disabledIn.isEmpty)
+            }
+        }
+        .padding(.top, 2)
+        .hoverTip(tip.text, title: tip.title, pinsOnClick: false)
+    }
+
+    private func masterTint(on: Bool) -> Color {
+        guard on else { return Theme.interactive }
+        if server.health == "error" { return Theme.danger }
+        if server.health == "ok", server.secretsMissing.isEmpty { return Theme.success }
+        return Theme.warning
+    }
+
+    private func masterTip(on: Bool) -> (text: String, title: String?) {
+        if !on {
+            return server.disabledIn.isEmpty
+                ? ("Not in any harness.", nil)
+                : ("Off everywhere. Turn the harnesses back on.", nil)
+        }
+        let health: String
+        switch server.health {
+        case "error": health = server.detail ?? "The probe is failing."
+        case "ok": health = server.secretsMissing.isEmpty ? "Healthy." : "A secret value is missing."
+        default: health = server.secretsMissing.isEmpty ? "Not probed yet." : "A secret value is missing."
+        }
+        return ("On for \(harnessNames(server.harnesses)). Turn off everywhere.", health)
     }
 
     /// "stdio · checkout · linear-mcp · main ↑1 ↓45 · Local changes": the
@@ -469,6 +695,34 @@ private struct ServerRow: View {
     }
 }
 
+/// The small muted type tag in the Type column: a capsule tinted by the
+/// kind the hub recorded, "other" when it recorded none the app knows.
+private struct TypeTag: View {
+    var tag: String
+
+    /// One muted tint per type. The hue is enough to tell the tags apart;
+    /// none of them reads as a status colour.
+    private var tint: Color {
+        switch tag {
+        case "dev": .blue
+        case "productivity": .purple
+        case "research": .teal
+        case "social": .pink
+        case "search": .indigo
+        default: .secondary
+        }
+    }
+
+    var body: some View {
+        Text(tag.uppercased())
+            .font(Theme.font(size: 9, weight: .semibold))
+            .tracking(0.6)
+            .foregroundStyle(tint)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(tint.opacity(0.12), in: .rect(cornerRadius: 5))
+    }
+}
+
 private struct Cell: View {
     var server: McpServer
     var harness: String
@@ -480,28 +734,21 @@ private struct Cell: View {
 
     private var name: String { HarnessMark(harness).name }
 
-    /// A click switches the cell: on pulls the entry out of the harness
-    /// (the hub keeps a copy to restore), off puts it back. The em dash
-    /// means absent — nothing to switch.
+    /// A click anywhere in the cell switches it: on pulls the entry out
+    /// of the harness (the hub keeps a copy to restore), off puts it
+    /// back. The em dash means absent, nothing to switch.
     var body: some View {
         if busy {
-            ProgressView().controlSize(.mini).frame(width: 20, height: 20)
+            ProgressView().controlSize(.mini)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let group = server.group(of: harness) {
             Button {
                 busy = true
                 Task { await toggle(server, harness, false); busy = false }
             } label: {
-                if differs {
-                    Text(variantLetter(group))
-                        .font(Theme.font(size: 11, weight: .semibold))
-                        .foregroundStyle(group == 0 ? Theme.textPrimary : Theme.warningText)
-                        .frame(width: 20, height: 20)
-                        .background(Theme.subtle, in: .rect(cornerRadius: 5))
-                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border, lineWidth: 1))
-                } else {
-                    Image(systemName: "checkmark").font(Theme.font(size: 12, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                }
+                (differs ? AnyView(variant(group)) : AnyView(check))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .hoverTip("On for \(name). Click to turn it off.", pinsOnClick: false)
@@ -512,12 +759,30 @@ private struct Cell: View {
             } label: {
                 Image(systemName: "power").font(Theme.font(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.textMuted)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .hoverTip("Off for \(name). Click to turn it back on.", pinsOnClick: false)
         } else {
-            Text("—").foregroundStyle(Theme.borderStrong).hoverTip("Not in \(name)", pinsOnClick: false)
+            Text("—").foregroundStyle(Theme.borderStrong)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .hoverTip("Not in \(name)", pinsOnClick: false)
         }
+    }
+
+    private var check: some View {
+        Image(systemName: "checkmark").font(Theme.font(size: 12, weight: .semibold))
+            .foregroundStyle(Theme.textPrimary)
+    }
+
+    private func variant(_ group: Int) -> some View {
+        Text(variantLetter(group))
+            .font(Theme.font(size: 11, weight: .semibold))
+            .foregroundStyle(group == 0 ? Theme.textPrimary : Theme.warningText)
+            .frame(width: 20, height: 20)
+            .background(Theme.subtle, in: .rect(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border, lineWidth: 1))
     }
 }
 
@@ -1122,14 +1387,19 @@ private struct FolderRow: View {
         HStack(spacing: 0) {
             RepoFolderRow(folder: folder, usedBy: hubKnown ? [] : nil, editor: editor)
                 // Its buttons end where a server row's do, not 8pt further right.
-                .padding(.trailing, ServerGrid.actionsGap)
-                .frame(minWidth: ServerGrid.nameMinWidth, maxWidth: .infinity, alignment: .leading)
-            // In no harness: a dash per column, like any server a
-            // harness lacks, rather than blank cells.
+                .padding(.trailing, ServerTable.actionsGap)
+                .frame(minWidth: ServerTable.nameMinWidth, maxWidth: .infinity, alignment: .leading)
+            columnSeparator()
+            // A folder has no type and no harness: a dash per fixed
+            // column, like any server a harness lacks.
+            Text("—").foregroundStyle(Theme.borderStrong)
+                .hoverTip("Folders have no type")
+                .frame(width: ServerTable.typeWidth)
             ForEach(harnesses, id: \.self) { harness in
+                columnSeparator()
                 Text("—").foregroundStyle(Theme.borderStrong)
                     .hoverTip("Not in \(HarnessMark(harness).name)")
-                    .frame(width: ServerGrid.columnWidth(harness))
+                    .frame(width: ServerTable.cellWidth)
             }
         }
         .padding(.vertical, 8)
@@ -1282,8 +1552,8 @@ private struct RepoFolderRow: View {
     }
 }
 
-/// The Local group's title: the machine whose harnesses launch a command
-/// server. The Mac app manages this Mac's harnesses.
+/// The Add sheet's local-card title: the machine whose harnesses launch a
+/// command server. The Mac app manages this Mac's harnesses.
 /// Read once: `Host.current()` can stall for seconds on a misconfigured
 /// network, and this is read in view bodies on the main thread.
 let mcpLocalTitle: String = {
@@ -1293,14 +1563,14 @@ let mcpLocalTitle: String = {
 
 // MARK: - Loading
 
-/// The grid's loading shape: the "Server" header and harness mark
-/// columns at their real widths, a section strip, then rows of name
-/// lines and cell marks where the server's cells will land.
+/// The table's loading shape: the "Server" and "Type" headers and the
+/// harness mark columns at their real widths, then rows of name lines
+/// and cell marks where the server's cells will land.
 private struct McpGridSkeleton: View {
     var harnesses: [String]
     var rows = 6
     var label: String
-    /// The card's inner width: the grid fills it, and scrolls only past it.
+    /// The card's inner width: the table fills it, and scrolls only past it.
     @State private var available: CGFloat = 0
 
     var body: some View {
@@ -1309,23 +1579,25 @@ private struct McpGridSkeleton: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 0) {
                         SkeletonBlock(width: 44, height: 10)
-                            .frame(minWidth: ServerGrid.nameMinWidth, maxWidth: .infinity, alignment: .leading)
-                        ForEach(harnesses, id: \.self) { harness in
+                            .frame(minWidth: ServerTable.nameMinWidth, maxWidth: .infinity, alignment: .leading)
+                        columnSeparator()
+                        SkeletonBlock(width: 24, height: 10)
+                            .frame(width: ServerTable.typeWidth)
+                        ForEach(harnesses, id: \.self) { _ in
+                            columnSeparator()
                             SkeletonBlock(width: 18, height: 18, radius: 4)
-                                .frame(width: ServerGrid.columnWidth(harness))
+                                .frame(width: ServerTable.cellWidth)
                         }
                     }
                     .padding(.bottom, 8)
                     Divider().overlay(Theme.border)
-                    SkeletonBlock(width: 90, height: 13)
-                        .padding(.top, 14).padding(.bottom, 6)
                     ForEach(0..<rows, id: \.self) { row in
                         rowBody(row)
                         if row < rows - 1 { Divider().overlay(Theme.border) }
                     }
                 }
-                .frame(width: max(available, ServerGrid.nameMinWidth
-                                  + harnesses.map(ServerGrid.columnWidth).reduce(0, +)),
+                .frame(width: max(available, ServerTable.nameMinWidth
+                                  + ServerTable.fixedTail(columns: harnesses.count)),
                        alignment: .leading)
             }
             .scrollIndicators(.automatic)
@@ -1338,19 +1610,21 @@ private struct McpGridSkeleton: View {
     private func rowBody(_ row: Int) -> some View {
         HStack(spacing: 0) {
             HStack(alignment: .top, spacing: 8) {
-                if row % 2 == 0 {
-                    SkeletonBlock(width: Theme.statusDot, height: Theme.statusDot, radius: Theme.statusDot / 2)
-                        .padding(.top, 4)
-                }
+                SkeletonBlock(width: 36, height: 20, radius: 10)
+                    .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 4) {
                     SkeletonBlock(width: 130 - CGFloat(row % 3) * 22, height: 13)
                     SkeletonBlock(width: 180 - CGFloat(row % 2) * 44, height: 10)
                 }
             }
-            .frame(minWidth: ServerGrid.nameMinWidth, maxWidth: .infinity, alignment: .leading)
-            ForEach(harnesses, id: \.self) { harness in
+            .frame(minWidth: ServerTable.nameMinWidth, maxWidth: .infinity, alignment: .leading)
+            columnSeparator()
+            SkeletonBlock(width: 44, height: 12, radius: 5)
+                .frame(width: ServerTable.typeWidth)
+            ForEach(harnesses, id: \.self) { _ in
+                columnSeparator()
                 SkeletonBlock(width: 14, height: 14, radius: 7)
-                    .frame(width: ServerGrid.columnWidth(harness))
+                    .frame(width: ServerTable.cellWidth)
             }
         }
         .padding(.vertical, 8)

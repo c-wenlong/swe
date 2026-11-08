@@ -137,16 +137,32 @@ public struct McpServer: Codable, Sendable, Equatable, Identifiable {
     /// config and the hub keeps the copy `swe mcp enable` restores.
     /// Absent from an older swe, which decodes as nothing disabled.
     public let disabledIn: [String]
+    /// What the server is for (`dev`, `productivity`, `research`,
+    /// `social`, `search`, `other`), set in mcp.json. Absent from a swe
+    /// before the field existed.
+    public let type: String?
     /// Set only on a saved server, which keeps `summary` in place of the
     /// command line or URL.
     let savedSummary: String?
+
+    /// The values `type` can carry, in the order the page's filter
+    /// lists them. `other` is also what anything outside this list —
+    /// or no `type` at all — reads as.
+    public static let knownTypes = ["dev", "productivity", "research", "social", "search", "other"]
+
+    /// `type` as one of `knownTypes`: lowercase matched, anything else
+    /// (a value a newer swe invented, none at all) reads as `other`.
+    public var typeTag: String {
+        let raw = type?.lowercased() ?? ""
+        return Self.knownTypes.contains(raw) ? raw : "other"
+    }
 
     public init(name: String, transport: String = "stdio", command: String? = nil, args: [String] = [],
                 url: String? = nil, envKeys: [String] = [], headerKeys: [String] = [],
                 harnesses: [String], conflict: Bool = false, variants: [[String]]? = nil,
                 health: String? = nil, detail: String? = nil, secretsMissing: [String] = [],
                 inHub: Bool = false, savedSummary: String? = nil, remoteIn: [String]? = nil,
-                disabledIn: [String] = []) {
+                disabledIn: [String] = [], type: String? = nil) {
         self.name = name
         self.transport = transport
         self.command = command
@@ -164,12 +180,13 @@ public struct McpServer: Codable, Sendable, Equatable, Identifiable {
         self.savedSummary = savedSummary
         self.remoteIn = remoteIn
         self.disabledIn = disabledIn
+        self.type = type
     }
 
     private enum CodingKeys: String, CodingKey {
         case name, transport, command, args, url, envKeys, headerKeys
         case harnesses, conflict, variants, health, detail
-        case secretsMissing, inHub, savedSummary, remoteIn, disabledIn
+        case secretsMissing, inHub, savedSummary, remoteIn, disabledIn, type
     }
 
     public init(from decoder: Decoder) throws {
@@ -191,6 +208,7 @@ public struct McpServer: Codable, Sendable, Equatable, Identifiable {
         savedSummary = try container.decodeIfPresent(String.self, forKey: .savedSummary)
         remoteIn = try container.decodeIfPresent([String].self, forKey: .remoteIn)
         disabledIn = try container.decodeIfPresent([String].self, forKey: .disabledIn) ?? []
+        type = try container.decodeIfPresent(String.self, forKey: .type)
     }
 
     /// The server as it may be written to disk. No command line or URL:
@@ -203,7 +221,7 @@ public struct McpServer: Codable, Sendable, Equatable, Identifiable {
         McpServer(name: name, transport: transport, envKeys: envKeys, headerKeys: headerKeys, harnesses: harnesses,
                   conflict: conflict, variants: variants, secretsMissing: secretsMissing,
                   inHub: inHub, savedSummary: savedSummary ?? outline, remoteIn: remoteIn,
-                  disabledIn: disabledIn)
+                  disabledIn: disabledIn, type: type)
     }
 
     /// The program or the scheme and host, and "…" when there is more.

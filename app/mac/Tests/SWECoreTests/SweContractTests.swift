@@ -166,12 +166,16 @@ import Testing
         #expect(stdio.health == nil)
         #expect(stdio.detail == nil)
         #expect(stdio.secretsMissing == ["SECRET_TOKEN"])
+        #expect(stdio.type == "dev")
+        #expect(stdio.typeTag == "dev")
         let http = try #require(inventory.servers.first { $0.name == "fixture-http" })
         #expect(http.transport == "http")
         #expect(http.url == "https://fixture.example/mcp")
         #expect(http.headerKeys == ["Authorization"])
         #expect(http.secretsMissing == [])
         #expect(http.inHub)
+        #expect(http.type == "search")
+        #expect(http.typeTag == "search")
         let hubOnly = try #require(inventory.servers.first { $0.name == "fixture-hub-only" })
         #expect(hubOnly.inHub)
         #expect(hubOnly.harnesses == [])
@@ -181,6 +185,13 @@ import Testing
         #expect(hubOnly.disabledIn == ["claude"])
         #expect(stdio.inHub)
         #expect(stdio.disabledIn == [])
+        // An older swe sends no `type`; the row still reads as `other`,
+        // and so does a value the app doesn't know.
+        #expect(hubOnly.type == nil)
+        #expect(hubOnly.typeTag == "other")
+        #expect(McpServer(name: "x", harnesses: [], type: "UNKNOWN_KIND").typeTag == "other")
+        #expect(McpServer(name: "x", harnesses: [], type: "Research").typeTag == "research")
+        #expect(McpServer(name: "x", harnesses: [], type: "other").typeTag == "other")
     }
 
     /// Built to the shape `swe mcp disable fixture-stdio --for=claude
