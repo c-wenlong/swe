@@ -415,7 +415,8 @@ private struct ServerTable: View {
                                   : nil,
                               drag: { dragChanged(harness, $0) },
                               drop: { finish(move: true) },
-                              cancel: { finish(move: false) })
+                              cancel: { finish(move: false) },
+                              move: { moveColumn(harness, $0) })
             }
         }
         .font(Theme.tableHeader)
@@ -450,6 +451,21 @@ private struct ServerTable: View {
         self.translation = translation
     }
 
+    /// The VoiceOver and keyboard reorder the grip does by pointer: move
+    /// the column one slot left or right. `direction` counts among the
+    /// other columns, the same space RowReorder's target uses.
+    private func moveColumn(_ harness: String, _ direction: Int) {
+        guard let from = ordered.firstIndex(of: harness) else { return }
+        let target = from + direction
+        guard target >= 0, target <= ordered.count - 1 else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: Theme.fadeDuration)) {
+            var next = ordered
+            next.remove(at: from)
+            next.insert(harness, at: target)
+            order = next
+        }
+    }
+
     /// Drop the dragged column at the slot the pointer left it over; the
     /// other columns slide aside through the animation.
     private func finish(move: Bool) {
@@ -482,6 +498,8 @@ private struct HarnessHeader: View {
     var drop: () -> Void
     /// The drag ended without reaching `onEnded`: slide everything back.
     var cancel: () -> Void
+    /// VoiceOver and keyboard reorder, one slot in a direction (-1, +1).
+    var move: (Int) -> Void
     @State private var hovering = false
     /// True only while the grip's gesture is live: resets on cancel, which
     /// never reaches `onEnded`, the same tidy-up ReorderableRows does.
@@ -533,6 +551,8 @@ private struct HarnessHeader: View {
             guard !isDown else { return }
             Task { await Task.yield(); cancel() }
         }
+        .accessibilityAction(named: "Move left") { move(-1) }
+        .accessibilityAction(named: "Move right") { move(1) }
     }
 }
 
