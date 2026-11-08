@@ -214,7 +214,9 @@ def is_injected_turn(text: str) -> bool:
 _TEXT_BLOCK_TYPES = frozenset({"text", "input_text", "output_text", "thinking", "reasoning"})
 _TOOL_CALL_TYPES = frozenset({"tool_use", "toolcall", "tool_call", "function_call"})
 _TOOL_RESULT_TYPES = frozenset({"tool_result", "toolresult", "function_call_output"})
-_TOOL_INPUT_KEYS = ("command", "cmd", "file_path", "path", "pattern", "query", "description")
+# First match wins; "skill" sits last so an input carrying both it and a
+# stronger key still indexes by that key.
+_TOOL_INPUT_KEYS = ("command", "cmd", "file_path", "path", "pattern", "query", "description", "skill")
 
 
 def _joined(parts: list[str]) -> str | None:

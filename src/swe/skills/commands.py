@@ -14,6 +14,7 @@ from swe.skills.layout_commands import (
     cmd_skills_move,
     cmd_skills_sync,
     cmd_skills_unlink,
+    cmd_skills_usage,
 )
 from swe.table import Table
 
@@ -124,6 +125,8 @@ def cmd_skills(args):
         return cmd_skills_disable(args[1:])
     if args[0] == "sync":
         return cmd_skills_sync(args[1:])
+    if args[0] == "usage":
+        return cmd_skills_usage(args[1:])
     if args[0] == "new":
         return cmd_skills_new(args[1:])
     if args[0] == "hub":

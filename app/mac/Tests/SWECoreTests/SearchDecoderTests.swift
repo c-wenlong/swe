@@ -30,6 +30,17 @@ import Testing
         ])
     }
 
+    @Test func claudeSkillCallsIndexByName() {
+        // The "skill" input key is what `swe skills usage` counts on.
+        let out = SearchDecoder.decode(agent: .claude, line: line(
+            #"{"type":"assistant","timestamp":"t","sessionId":"s1","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"pdf"}}]}}"#))
+        #expect(out.messages == [SearchMessage(role: .tool, text: "Skill: pdf", ts: "t")])
+        // A stronger key still wins when both are present.
+        let both = SearchDecoder.decode(agent: .claude, line: line(
+            #"{"type":"assistant","timestamp":"t","sessionId":"s1","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"skill":"pdf","command":"ls"}}]}}"#))
+        #expect(both.messages == [SearchMessage(role: .tool, text: "Bash: ls", ts: "t")])
+    }
+
     @Test func claudeToolResultsOnAUserRecordAreToolMessages() {
         let out = SearchDecoder.decode(agent: .claude, line: line(
             #"{"type":"user","timestamp":"2026-10-03T10:00:02Z","sessionId":"s1","message":{"role":"user","content":[{"type":"tool_result","content":"first line\nsecond line"},{"type":"tool_result","content":[{"type":"text","text":"block A"},{"type":"text","text":"block B"}]}]}}"#))

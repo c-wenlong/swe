@@ -37,6 +37,9 @@ def print_skills_overview():
   {c('cyan', 'swe skills disable <name> --harness=<h>')}  Drop it without touching the rest
   {c('cyan', 'swe skills sync')}                           Re-apply each selection (new skills arrive)
 
+{c('bold', 'Usage')}
+  {c('cyan', 'swe skills usage <name>')}                Call counts from the session index
+
 {c('bold', 'Catalogs (extra skill directories)')}
   {c('cyan', 'swe skills discover [--apply]')} Scan ~/Desktop and ~/Documents
   {c('cyan', 'swe skills catalog .')}         Add current directory as catalog
@@ -48,7 +51,7 @@ def print_skills_overview():
   {SKILL_CATALOGS_FILE}   extra catalog paths
   {SKILL_LINKS_FILE}      recorded harness symlinks
 
-{c('bold', 'Help')}  {c('cyan', 'swe skills help <topic>')}  — topics: catalog, discover, enable, hub, link, move, new, sync, tree, scope, unlink
+{c('bold', 'Help')}  {c('cyan', 'swe skills help <topic>')}  — topics: catalog, discover, enable, hub, link, move, new, sync, tree, scope, unlink, usage
   {c('dim', 'help comes before the topic here — unlike swe mcp <command> help, which puts it after.')}
 """
     )
@@ -200,6 +203,25 @@ def print_skills_sync_help():
     )
 
 
+def print_skills_usage_help():
+    print(
+        f"""
+  {c('bold', 'swe skills usage')} — How often a skill gets called
+
+  Counts {c('bold', 'Skill: <name>')} tool calls in the session search index
+  (~/.swe/data/search/search.sqlite), broken down by harness, with the call
+  count, the sessions it ran in, and when it was last used.
+
+  {c('cyan', 'swe skills usage my-skill')}         Counts for one skill
+  {c('cyan', 'swe skills usage my-skill --json')}  Machine-readable
+
+  {c('dim', 'Needs the index: `swe session index --on`, or it stays on while the')}
+  {c('dim', 'app runs. Only calls indexed since it switched on are counted;')}
+  {c('dim', 'older `Skill` calls carry no name and tally under "unattributed".')}
+"""
+    )
+
+
 def print_skills_hub_help():
     print(
         f"""
@@ -242,6 +264,7 @@ SKILLS_HELP_TOPICS = {
     "new": print_skills_new_help,
     "sync": print_skills_sync_help,
     "unlink": print_skills_unlink_help,
+    "usage": print_skills_usage_help,
     "move": print_skills_move_help,
     "tree": print_skills_tree_help,
     "scope": print_skills_tree_help,
