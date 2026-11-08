@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Skills &amp; plugins — table mock</title>
+<style>
+  :root {
+    --bg: #f5f5f4; --card: #ffffff; --border: #e7e5e4; --rule: #f0efee;
+    --col-rule: #ececea; --ink: #1c1917; --body: #44403c; --muted: #78716c;
+    --faint: #a8a29e; --hover: #f0f6ff; --accent: #2563eb; --accent-soft: #eff6ff;
+    --ok: #16a34a; --warn: #b45309; --warn-bg: #fef3c7; --warn-line: #d97706;
+    --violet: #7c3aed; --violet-bg: #f5f3ff; --violet-line: #ddd6fe;
+    --danger: #dc2626;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 12.5px -apple-system, system-ui, sans-serif; padding: 24px; }
+  .card { max-width: 1180px; margin: 0 auto; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+
+  /* ---------- toolbar ---------- */
+  .bar { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .bar h1 { font-size: 13.5px; font-weight: 600; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+  .seg button { border: 0; background: #fff; padding: 5px 12px; font: 11.5px -apple-system, system-ui, sans-serif; color: var(--body); cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .lbl { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .4px; text-transform: uppercase; }
+  .sel { border: 1px solid var(--border); border-radius: 7px; background: #fff; padding: 4px 8px;
+         font: 11.5px -apple-system, system-ui, sans-serif; color: var(--body); }
+  .search { border: 1px solid var(--border); border-radius: 7px; padding: 4px 9px; width: 140px;
+            font: 11.5px -apple-system, system-ui, sans-serif; color: var(--body); background: #fff; }
+  .count { margin-left: auto; font-size: 11.5px; color: var(--faint); }
+  .btn { border: 1px solid var(--border); border-radius: 7px; background: #fff; padding: 5px 12px;
+         font: 11.5px -apple-system, system-ui, sans-serif; color: var(--body); cursor: pointer; }
+  .btn.accent { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+  .btn.danger { border-color: #fecaca; color: var(--danger); }
+  .btn.danger:hover { background: #fef2f2; }
+
+  /* ---------- the table ---------- */
+  .wrap { overflow: auto; max-height: 640px; }
+  table { border-collapse: collapse; table-layout: fixed; width: 100%; min-width: 1060px; }
+  col.c-name { width: 250px; } col.c-src { width: 108px; } col.c-use { width: 84px; }
+  col.c-upd { width: 72px; } col.c-h { width: 84px; }
+  thead th { position: sticky; top: 0; z-index: 2; background: #fafaf9; border-bottom: 1px solid #d6d3d1;
+             font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: .5px; padding: 10px 12px; text-align: left; }
+  thead th:not(:first-child), tbody td:not(:first-child) { border-left: 1px solid var(--col-rule); }
+  thead th.h { text-align: center; cursor: grab; }
+  thead th.h:hover { background: #f0efee; }
+  thead th.h.dragging { opacity: .35; }
+  thead th.h.dropmark { box-shadow: inset 3px 0 0 var(--accent); }
+  thead th.h .mark { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 500; color: var(--body); }
+  thead th.h .mark i { width: 14px; height: 14px; border-radius: 50%; color: #fff; font: 600 8px/14px -apple-system; text-align: center; font-style: normal; }
+  thead th.h .mark em { font-style: normal; font-size: 9px; color: var(--faint); }
+  thead th.num { text-align: right; }
+  tbody td { padding: 9px 12px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  tbody td.h { text-align: center; padding: 0; }
+  tbody td.src { padding: 9px 8px; }
+  tbody td.num { text-align: right; font-family: var(--mono); font-size: 11px; color: var(--body); }
+  tbody td.num small { color: var(--faint); font-size: 9.5px; }
+  tbody td.upd { font-size: 11px; color: var(--muted); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--hover); }
+  .cell { display: flex; align-items: center; justify-content: center; height: 42px; cursor: pointer; }
+  .cell .on { font-size: 13px; font-weight: 600; color: var(--ink); }
+  .cell .offmark { color: var(--faint); font-size: 14px; }
+  .cell .absent { color: #d6d3d1; font-size: 13px; cursor: default; }
+  .cell .chip-state { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+                      border-radius: 5px; font-size: 11px; font-weight: 600; }
+  .cell .pv { background: var(--violet-bg); border: 1px solid var(--violet-line); color: var(--violet); }
+  .cell .dc { background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn); }
+  .name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .nm { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub { font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .warnpill { font-size: 9.5px; color: var(--warn); background: var(--warn-bg); border-radius: 4px; padding: 1px 5px; flex: none; }
+  .updpill { font-size: 9.5px; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 1px 5px; flex: none; }
+
+  /* source tags */
+  .src { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 600; letter-spacing: .3px;
+         border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; color: var(--muted); background: #f5f5f4;
+         text-transform: none; }
+  .src i { width: 13px; height: 13px; border-radius: 50%; color: #fff; font: 600 7.5px/13px -apple-system; text-align: center; font-style: normal; flex: none; }
+  .src.swe { color: var(--accent); background: var(--accent-soft); border-color: #dbeafe; }
+  .src.plugin { color: #0f766e; background: #f0fdfa; border-color: #ccfbf1; }
+  .src.catalog { color: var(--accent); background: var(--accent-soft); border-color: #dbeafe; }
+
+  /* master switch */
+  .sw { position: relative; width: 30px; height: 18px; border-radius: 99px; background: #d6d3d1; cursor: pointer; transition: background .12s; flex: none; }
+  .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .12s; }
+  .sw.on::after { left: 14px; }
+  .sw.ok      { background: var(--ok); }
+  .sw.issue   { background: #d97706; }
+  .sw.priv    { background: var(--violet); }
+  .empty { padding: 40px; text-align: center; color: var(--faint); }
+
+  /* ---------- detail sheet ---------- */
+  .sheet { position: fixed; top: 0; right: -400px; width: 380px; height: 100%; background: #fff;
+           border-left: 1px solid var(--border); transition: right .18s ease; padding: 20px; overflow: auto; }
+  .sheet.open { right: 0; }
+  .sheet h2 { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .sheet h2 .nm { font-size: 15px; }
+  .sheet .x { margin-left: auto; cursor: pointer; color: var(--faint); border: 0; background: none; font-size: 15px; flex: none; }
+  .kv { display: flex; gap: 10px; margin-top: 10px; font-size: 12px; }
+  .kv b { width: 76px; flex: none; color: var(--muted); font-weight: 600; }
+  .kv span { color: var(--body); font-family: var(--mono); font-size: 11px; word-break: break-all; }
+  .sect { margin-top: 18px; font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: .4px; text-transform: uppercase; }
+  .hrow { display: flex; align-items: center; gap: 8px; font-size: 11px; font-family: var(--mono); color: var(--body); margin-top: 7px; }
+  .hrow i { width: 14px; height: 14px; border-radius: 50%; color: #fff; font: 600 8px/14px -apple-system; text-align: center; font-style: normal; flex: none; }
+  .hrow .where { width: 76px; flex: none; font-family: -apple-system, system-ui, sans-serif; }
+  .hrow em { font-style: normal; color: var(--faint); }
+  .hrow .mini { margin-left: auto; border: 1px solid var(--border); border-radius: 5px; background: #fff; padding: 2px 8px;
+                font: 10px -apple-system, system-ui, sans-serif; color: var(--body); cursor: pointer; flex: none; }
+  .hrow .mini:hover { background: var(--hover); }
+  .hrow .mini.adopt { border-color: var(--violet-line); color: var(--violet); }
+  .krow { display: flex; align-items: center; gap: 8px; font-size: 11px; font-family: var(--mono); color: var(--body); margin-top: 6px; }
+  .krow .kname { min-width: 110px; font-weight: 600; }
+  .krow .kst { font-size: 10px; }
+  .krow .kst.set { color: var(--ok); }
+  .krow .kst.miss { color: var(--warn); }
+  .krow .mini { margin-left: auto; }
+  .kedit { display: flex; gap: 6px; margin-top: 5px; }
+  .kedit input { flex: 1; border: 1px solid var(--accent); border-radius: 5px; padding: 4px 8px; font: 11px var(--mono); }
+  .kedit button { border: 1px solid var(--border); border-radius: 5px; background: #fff; padding: 3px 9px; font: 10.5px -apple-system, system-ui, sans-serif; cursor: pointer; }
+  .kedit button.save { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .khint { font-size: 10px; color: var(--faint); margin-top: 4px; font-family: -apple-system, system-ui, sans-serif; }
+  .actions { display: flex; gap: 8px; margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--rule); flex-wrap: wrap; }
+  .field { margin-top: 10px; }
+  .field b { display: block; font-size: 11px; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+  .field input, .field textarea, .field select { width: 100%; border: 1px solid var(--border); border-radius: 7px; padding: 6px 9px;
+            font: 12px -apple-system, system-ui, sans-serif; color: var(--body); background: #fff; }
+  .field textarea { resize: vertical; min-height: 54px; }
+  .check { display: flex; align-items: center; gap: 7px; margin-top: 7px; font-size: 12px; color: var(--body); }
+  .check input { width: auto; }
+  .check i { width: 14px; height: 14px; border-radius: 50%; color: #fff; font: 600 8px/14px -apple-system; text-align: center; font-style: normal; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="bar">
+    <h1 id="title">Skills</h1>
+    <span class="seg" id="modeSeg">
+      <button class="on" data-v="skills">Skills</button><button data-v="plugins">Plugins</button>
+    </span>
+    <span class="lbl">Source</span><select class="sel" id="srcSel"></select>
+    <span class="lbl">In harness</span><select class="sel" id="harnSel"></select>
+    <input class="search" id="q" placeholder="filter names…">
+    <span class="count" id="count"></span>
+    <button class="btn accent" id="newBtn">+ New</button><button class="btn">Sync</button>
+  </div>
+  <div class="wrap">
+    <table id="tbl">
+      <colgroup><col class="c-name"><col class="c-src"><col class="c-use"><col class="c-upd">
+                <col class="c-h"><col class="c-h"><col class="c-h"><col class="c-h"><col class="c-h"><col class="c-h"></colgroup>
+      <thead><tr id="headRow">
+        <th id="nameHead">Skill</th><th>Source</th><th class="num">Calls</th><th>Updated</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>Nothing matches these filters.</div>
+  </div>
+</div>
+
+<aside class="sheet" id="sheet"></aside>
+
+<script>
+const HARN = {
+  claude:    { label: "Claude",    bg: "#1c1917", ch: "C"  },
+  codex:     { label: "Codex",     bg: "#374151", ch: "x"  },
+  cursor:    { label: "Cursor",    bg: "#0f766e", ch: "cu" },
+  kilo:      { label: "Kilo",      bg: "#7c2d12", ch: "k"  },
+  opencode:  { label: "Opencode",  bg: "#164e63", ch: "o"  },
+  gemini:    { label: "Gemini",    bg: "#1e3a8a", ch: "g"  },
+};
+// Canonical harness index (cells[] is aligned to this); ORDER is the
+// visible column order, drag a header to rearrange it.
+const H = Object.keys(HARN);
+let ORDER = H.slice();
+
+// Both datasets share one row shape so the helpers stay mode-free:
+//   [name, meta, source, calls, updated, cells, opts]
+// Skill cell states: on (linked/enabled) · off (disabled in selection) ·
+// P (private real folder in that harness, not a link) · - (absent)
+//   source: "swe" | harness key (private) | "plugin:<ref>" (bundled)
+//   opts: {sess, warn}
+let SKILLS = [
+ ["code-review","Review a diff for correctness and style","swe",124,"2d",["on","on","on","on","on","-"],{sess:31}],
+ ["commit","Draft a commit message from the staged diff","swe",88,"5d",["on","on","off","on","on","on"],{sess:26}],
+ ["verify","Reproduce, fix, prove the fix","swe",203,"1d",["on","on","on","on","on","on"],{sess:54}],
+ ["design-review","Critique a UI change against the system","swe",17,"2w",["off","off","on","off","off","-"],{sess:6}],
+ ["kaipedia","Personal wiki lookup conventions","claude",12,"3d",["P","-","-","-","-","-"],{sess:4}],
+ ["scratch-notes","Throwaway note taking","codex",0,"1w",["-","P","-","-","-","-"],{sess:0}],
+ ["hover","Type hover docs via the lsp server","plugin:lsp@official",9,"4d",["on","on","-","-","-","-"],{sess:3}],
+ ["sql-migrate","Write a migration with rollback","swe",5,"1mo",["on","on","on","P","on","-"],{sess:2,warn:"opencode copy shadows the link"}],
+ ["review-security","Threat-model a change before merge","swe",33,"6d",["on","on","on","off","on","on"],{sess:11}],
+ ["frontend-patterns","Component and state conventions","swe",0,"3w",["-","-","-","-","-","-"],{sess:0}],
+];
+
+// Plugin cell states: on (installed+enabled) · off (installed, disabled) ·
+// D (declared in that harness's own config, not installed by swe) · - (absent)
+// Plugin row: [ref, ver, source, calls, updated, cells, opts]
+//   source: "swe" (catalog install) | harness key (declared there only)
+//   opts: {servers:[{name,keys,missing}], skills:[...], update:"vX.Y.Z"}
+let PLUGINS = [
+ ["lsp@official","v1.4.2","swe",52,"4d",["on","on","on","-","on","-"],
+   {servers:[{name:"lsp",keys:["TOKEN"],missing:[]}],skills:["hover"]}],
+ ["github-tools@acme","v0.9.0","swe",18,"1w",["on","-","-","-","-","-"],
+   {servers:[{name:"gh_api",keys:["GH_TOKEN"],missing:[]},{name:"gh_search",keys:[],missing:[]}],skills:[]}],
+ ["db-admin@internal","v0.3.1","swe",64,"1d",["on","on","on","on","on","on"],
+   {servers:[{name:"pg",keys:["DATABASE_URL"],missing:["DATABASE_URL"]}],skills:["sql-explain","dump-schema","slow-queries","vacuum-report"]}],
+ ["web-scrape@official","v2.1.0","swe",7,"3d",["on","on","off","on","on","on"],
+   {servers:[{name:"scrape",keys:[],missing:[]}],skills:["selector-hint"]}],
+ ["notes-sync@acme","v1.1.0","swe",3,"1w",["on","-","-","-","-","-"],
+   {servers:[{name:"notes",keys:["API_KEY"],missing:["API_KEY"]}],skills:[]}],
+ ["agent-tools@official","v3.0.0","swe",91,"6h",["on","on","on","on","on","on"],
+   {servers:[{name:"run",keys:[]},{name:"watch",keys:[]}],skills:["spawn-agent"]}],
+ ["old-plugin@official","v1.0.0","swe",2,"2mo",["off","off","off","-","-","-"],
+   {servers:[{name:"old",keys:[]}],skills:[],update:"v2.0.0"}],
+ ["my-tools@local","-","codex",0,"-",["-","D","-","-","-","-"],
+   {servers:[{name:"my_tools",keys:["SECRET"],missing:[]}],skills:[],declaredIn:"codex"}],
+];
+
+const MODE = {
+  skills:   { data: () => SKILLS, nameHead: "Skill",  newLabel: "+ New skill",
+              srcOpts: [["all","All sources"],["swe","swe (shared)"],["private","harness-private"],["plugin","plugin-bundled"]] },
+  plugins:  { data: () => PLUGINS, nameHead: "Plugin", newLabel: "+ Install plugin",
+              srcOpts: [["all","All sources"],["swe","swe catalog"],["declared","declared in a harness"]] },
+};
+
+let mode = "skills", src = "all", inHarn = "any", q = "";
+const rowsEl = document.getElementById("rows"), emptyEl = document.getElementById("empty");
+const sheet = document.getElementById("sheet");
+
+// ---- filters ----
+const srcSel = document.getElementById("srcSel"), harnSel = document.getElementById("harnSel");
+function fillSels() {
+  srcSel.innerHTML = MODE[mode].srcOpts.map(([v,t])=>`<option value="${v}"${v===src?" selected":""}>${t}</option>`).join("");
+  harnSel.innerHTML = `<option value="any">Any harness</option>` +
+    H.map(h=>`<option value="${h}"${h===inHarn?" selected":""}>${HARN[h].label}</option>`).join("");
+}
+srcSel.onchange = e => { src = e.target.value; render(); };
+harnSel.onchange = e => { inHarn = e.target.value; render(); };
+document.getElementById("q").oninput = e => { q = e.target.value.toLowerCase(); render(); };
+document.getElementById("modeSeg").addEventListener("click", e => {
+  if (e.target.tagName !== "BUTTON" || e.target.dataset.v === mode) return;
+  mode = e.target.dataset.v; src = "all"; inHarn = "any"; q = ""; document.getElementById("q").value = "";
+  document.querySelectorAll("#modeSeg button").forEach(b=>b.classList.toggle("on", b===e.target));
+  document.getElementById("title").textContent = mode === "skills" ? "Skills" : "Plugins";
+  document.getElementById("nameHead").textContent = MODE[mode].nameHead;
+  document.getElementById("newBtn").textContent = MODE[mode].newLabel;
+  fillSels(); closeSheet(); render();
+});
+document.getElementById("newBtn").onclick = () => openCreate();
+
+// ---- row helpers ----
+const isSkill = () => mode === "skills";
+function srcKey(row) {
+  if (isSkill()) {
+    if (row[2] === "swe") return "swe";
+    if (row[2].startsWith("plugin:")) return "plugin";
+    return "private";            // harness key
+  }
+  return row[2] === "swe" ? "swe" : "declared";
+}
+function srcTag(row) {
+  const s = row[2];
+  if (s === "swe") return `<span class="src swe">swe</span>`;
+  if (s.startsWith("plugin:")) return `<span class="src plugin">${s.slice(7).split("@")[0]}</span>`;
+  const m = HARN[s];
+  return `<span class="src"><i style="background:${m.bg}">${m.ch}</i>${m.label}</span>`;
+}
+function cellHtml(s) {
+  if (s === "on")  return `<div class="cell" title="Enabled — click to disable"><span class="on">✓</span></div>`;
+  if (s === "off") return `<div class="cell" title="Disabled — click to enable"><span class="offmark">⏻</span></div>`;
+  if (s === "P")   return `<div class="cell" title="Private copy in this folder — not managed by swe"><span class="chip-state pv">P</span></div>`;
+  if (s === "D")   return `<div class="cell" title="Declared here, not installed by swe — click to adopt"><span class="chip-state dc">D</span></div>`;
+  return `<div class="cell" title="Not present"><span class="absent">—</span></div>`;
+}
+// Master switch: OFF marks every harness currently on (layout saved); ON restores it.
+function masterOff(row) { row[9] = row[5].slice(); row[5] = row[5].map(c => c === "on" ? "off" : c); }
+function masterOn(row)  { if (row[9]) { row[5] = row[9]; row[9] = null; } }
+const masterState = row => row[5].some(c => c === "on" || c === "P" || c === "D");
+const swClass = row => {
+  if (!masterState(row)) return "";
+  if (isSkill() && row[2] !== "swe" && !row[2].startsWith("plugin:")) return "priv";
+  if (!isSkill() && (row[6]?.servers||[]).some(s => (s.missing||[]).length)) return "issue";
+  return "ok";
+};
+
+// ---- draggable column headers ----
+const headRow = document.getElementById("headRow");
+function renderHead() {
+  headRow.querySelectorAll("th.h").forEach(el => el.remove());
+  ORDER.forEach(h => {
+    const m = HARN[h], th = document.createElement("th");
+    th.className = "h"; th.draggable = true;
+    th.title = `${m.label} — drag to rearrange · click for the column menu`;
+    th.dataset.h = h;
+    th.innerHTML = `<span class="mark"><i style="background:${m.bg}">${m.ch}</i>${m.label}<em>▾</em></span>`;
+    th.addEventListener("dragstart", e => {
+      e.dataTransfer.setData("text/harness", h);
+      e.dataTransfer.effectAllowed = "move";
+      th.classList.add("dragging");
+    });
+    th.addEventListener("dragend", () => {
+      th.classList.remove("dragging");
+      headRow.querySelectorAll("th.h").forEach(x => x.classList.remove("dropmark"));
+    });
+    th.addEventListener("dragover", e => {
+      if (![...e.dataTransfer.types].includes("text/harness")) return;
+      e.preventDefault();
+      headRow.querySelectorAll("th.h").forEach(x => x.classList.toggle("dropmark", x === th));
+    });
+    th.addEventListener("drop", e => {
+      e.preventDefault();
+      const from = ORDER.indexOf(e.dataTransfer.getData("text/harness"));
+      const to = ORDER.indexOf(h);
+      if (from < 0 || from === to) return;
+      ORDER.splice(to, 0, ORDER.splice(from, 1)[0]);
+      renderHead(); render();
+    });
+    headRow.appendChild(th);
+  });
+}
+
+// ---- table render ----
+function render() {
+  const data = MODE[mode].data();
+  let n = 0;
+  rowsEl.innerHTML = "";
+  for (const row of data) {
+    const cells = row[5];
+    if (src !== "all" && srcKey(row) !== src) continue;
+    if (inHarn !== "any" && cells[H.indexOf(inHarn)] === "-") continue;
+    if (q && !row[0].toLowerCase().includes(q)) continue;
+    n++;
+    const o = row[6] || {};
+    const warn = isSkill() ? o.warn : (o.servers||[]).flatMap(s=>s.missing||[])[0];
+    const upd = o.update ? ` <span class="updpill">${o.update}</span>` : "";
+    const sub = isSkill()
+      ? (row[2] === "swe" ? row[1] : row[2].startsWith("plugin:") ? `bundled by ${row[2].slice(7)}` : `private · ~/.${row[2]}/skills/${row[0]}`)
+      : `${row[1]} · ${o.servers?.length||0} mcp${o.skills?.length ? ` · ${o.skills.length} skill${o.skills.length>1?"s":""}` : ""}`;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><div class="name"><span class="sw ${swClass(row)}" title="Everywhere — click to toggle all"></span>
+      <span><span class="nm">${row[0]}</span>${warn ? ` <span class="warnpill">⚠ ${warn === "opencode copy shadows the link" ? "shadowed" : warn}</span>` : ""}${upd}
+      <div class="sub">${sub}</div></span></div></td>
+      <td class="src">${srcTag(row)}</td>
+      <td class="num">${row[3] || "—"}${isSkill() && o.sess ? ` <small>· ${o.sess}s</small>` : ""}</td>
+      <td class="upd">${row[4]}</td>
+      ${ORDER.map(h2 => `<td class="h">${cellHtml(cells[H.indexOf(h2)])}</td>`).join("")}`;
+    tr.querySelector(".sw").onclick = e => {
+      e.stopPropagation();
+      masterState(row) ? masterOff(row) : masterOn(row);
+      render();
+    };
+    tr.querySelectorAll("td.h .cell").forEach((el, i) => {
+      const ci = H.indexOf(ORDER[i]);
+      el.onclick = e => {
+        e.stopPropagation();
+        const c = cells[ci];
+        if (c === "on") cells[ci] = "off";
+        else if (c === "off") cells[ci] = "on";
+        else return openSheet(row);   // P, D and absent cells open the sheet instead
+        render();
+      };
+    });
+    tr.onclick = () => openSheet(row);
+    rowsEl.appendChild(tr);
+  }
+  emptyEl.hidden = n > 0;
+  document.getElementById("count").textContent = `${n} of ${MODE[mode].data().length}`;
+}
+
+// ---- detail sheet ----
+function closeSheet() { sheet.classList.remove("open"); }
+function hrowHtml(h, state, action) {
+  const m = HARN[h];
+  const label = { on:"enabled", off:"disabled", P:"private copy", D:"declared", "-":"not present" }[state] || state;
+  const path = state === "-" ? "" :
+    isSkill() ? `~/.${h}/skills/${cur[0]}` : `~/.${h}/mcp.json`;
+  return `<div class="hrow"><i style="background:${m.bg}">${m.ch}</i><span class="where">${m.label}</span>
+    <span>${label}${path ? ` <em>${path}</em>` : ""}</span>
+    ${action ? `<button class="mini ${action.cls||""}" data-h="${h}">${action.text}</button>` : ""}</div>`;
+}
+let cur = null;
+function openSheet(row) {
+  cur = row;
+  if (isSkill()) sheetSkill(row); else sheetPlugin(row);
+  sheet.classList.add("open");
+}
+function actionFor(row, h, i) {
+  const c = row[5][i];
+  if (isSkill()) {
+    if (row[2] !== "swe") return null;                 // private: managed by Promote/Delete below
+    if (c === "on")  return { text: "Unlink" };
+    if (c === "off") return { text: "Link" };
+    if (c === "-")   return { text: "Link" };
+    if (c === "P")   return { text: "Adopt", cls: "adopt" };  // move copy into shared, then link
+  } else {
+    if (c === "on")  return { text: "Remove" };
+    if (c === "off") return { text: "Enable" };
+    if (c === "-")   return { text: "Install" };
+    if (c === "D")   return { text: "Adopt", cls: "adopt" };
+  }
+  return null;
+}
+function bindHrowActions(row) {
+  sheet.querySelectorAll(".hrow .mini").forEach(btn => {
+    btn.onclick = e => {
+      e.stopPropagation();
+      const i = H.indexOf(btn.dataset.h), c = row[5][i], t = btn.textContent;
+      if (t === "Unlink" || t === "Remove") row[5][i] = "off";
+      else if (t === "Link" || t === "Install" || t === "Enable" || t === "Adopt") row[5][i] = "on";
+      render(); openSheet(row);
+    };
+  });
+}
+function commonActions(row) {
+  bindHrowActions(row);
+  sheet.querySelector(".x").onclick = closeSheet;
+  const del = sheet.querySelector(".del");
+  if (del) del.onclick = () => {
+    const d = MODE[mode].data(); d.splice(d.indexOf(row), 1);
+    closeSheet(); render();
+  };
+}
+function sheetSkill(row) {
+  const [name, desc, source, calls, upd, cells, o] = row;
+  const sess = o?.sess || 0, warn = o?.warn;
+  const isPrivate = source !== "swe" && !source.startsWith("plugin:");
+  sheet.innerHTML = `
+    <h2><span class="nm">${name}</span>${srcTag(row)}<button class="x">✕</button></h2>
+    <div class="sect">Skill</div>
+    <div class="kv"><b>Enabled</b><span style="display:flex;align-items:center;gap:8px;font-family:-apple-system,system-ui,sans-serif">
+      <span class="sw ${swClass(row)}" id="shSw"></span>
+      <em style="font-style:normal;color:var(--faint);font-size:10px">${masterState(row) ? "on somewhere — click to mark off everywhere" : "off — click to restore"}</em></span></div>
+    <div class="kv"><b>Description</b><span id="shDesc" style="font-family:-apple-system,system-ui,sans-serif">${desc}</span></div>
+    <div class="kv"><b>Lives in</b><span>${source === "swe" ? "~/.swe/skills/" + name : source.startsWith("plugin:") ? "plugin " + source.slice(7) : "~." + source + "/skills/" + name + " (private)"}</span></div>
+    <div class="kv"><b>Used</b><span>${calls} calls · ${sess} sessions · last ${upd} ago</span></div>
+    ${warn ? `<div class="kv"><b>Conflict</b><span style="color:var(--warn)">${warn}</span></div>` : ""}
+    <div class="sect">Harnesses</div>
+    ${ORDER.map(h => hrowHtml(h, cells[H.indexOf(h)], actionFor(row, h, H.indexOf(h)))).join("")}
+    <div class="actions">
+      <button class="btn" id="editBtn">Edit</button>
+      ${isPrivate ? `<button class="btn accent" id="promoteBtn">Promote to shared</button>` : ""}
+      <button class="btn danger del" style="margin-left:auto">Delete</button>
+    </div>`;
+  commonActions(row);
+  sheet.querySelector("#shSw").onclick = () => { masterState(row) ? masterOff(row) : masterOn(row); render(); openSheet(row); };
+  sheet.querySelector("#editBtn").onclick = () => {
+    const d = sheet.querySelector("#shDesc");
+    d.innerHTML = `<input id="descIn" value="${desc.replace(/"/g,"&quot;")}" style="width:100%;border:1px solid var(--accent);border-radius:5px;padding:2px 6px;font:12px -apple-system">`;
+    const inp = sheet.querySelector("#descIn"); inp.focus();
+    inp.onkeydown = e => { if (e.key === "Enter") { row[1] = inp.value; render(); openSheet(row); } };
+  };
+  const pr = sheet.querySelector("#promoteBtn");
+  if (pr) pr.onclick = () => {
+    row[2] = "swe";
+    row[5] = row[5].map(c => c === "P" ? "on" : c);   // the private copy becomes the shared skill, linked back
+    render(); openSheet(row);
+  };
+}
+function sheetPlugin(row) {
+  const [ref, ver, source, calls, upd, cells, o] = row;
+  const missing = (o.servers||[]).flatMap(s => s.missing || []);
+  sheet.innerHTML = `
+    <h2><span class="nm">${ref}</span>${srcTag(row)}<button class="x">✕</button></h2>
+    <div class="sect">Plugin</div>
+    <div class="kv"><b>Enabled</b><span style="display:flex;align-items:center;gap:8px;font-family:-apple-system,system-ui,sans-serif">
+      <span class="sw ${swClass(row)}" id="shSw"></span>
+      <em style="font-style:normal;color:var(--faint);font-size:10px">${masterState(row) ? "installed somewhere" : "not installed anywhere"}</em></span></div>
+    <div class="kv"><b>Version</b><span>${ver}${o.update ? ` · <em style="font-style:normal;color:var(--accent)">${o.update} available</em>` : ""}</span></div>
+    <div class="kv"><b>Source</b><span>${source === "swe" ? "swe catalog" : `declared in ~/.${source}/mcp.json only`}</span></div>
+    <div class="kv"><b>Used</b><span>${calls} calls · updated ${upd}</span></div>
+    ${(o.servers||[]).length ? `<div class="sect">MCP servers</div>` + (o.servers||[]).map((s, si) =>
+      `<div class="hrow"><span class="where">${s.name}</span><span>${(s.keys||[]).length} env key${(s.keys||[]).length===1?"":"s"}</span></div>
+       ${(s.keys||[]).length ? (s.keys||[]).map(k => {
+         const miss = s.missing?.includes(k);
+         return `<div class="krow"><span class="kname">${k}</span>
+           <span class="kst ${miss ? "miss" : "set"}">${miss ? "missing value" : "set · hidden"}</span>
+           <button class="mini kedit-btn" data-si="${si}" data-k="${k}">${miss ? "Set value" : "Rotate"}</button></div>
+           <div id="ke_${si}_${k}"></div>`;
+       }).join("") : `<div class="khint">no keys declared</div>`}`).join("") : ""}
+    ${(o.skills||[]).length ? `<div class="sect">Skills</div>` + o.skills.map(s => `<div class="hrow"><span class="where">${s}</span></div>`).join("") : ""}
+    <div class="sect">Harnesses</div>
+    ${ORDER.map(h => hrowHtml(h, cells[H.indexOf(h)], actionFor(row, h, H.indexOf(h)))).join("")}
+    <div class="actions">
+      ${o.update ? `<button class="btn accent">Update to ${o.update}</button>` : ""}
+      <button class="btn danger del" style="margin-left:auto">${source === "swe" ? "Uninstall" : "Remove declaration"}</button>
+    </div>`;
+  commonActions(row);
+  sheet.querySelector("#shSw").onclick = () => { masterState(row) ? masterOff(row) : masterOn(row); render(); openSheet(row); };
+  sheet.querySelectorAll(".kedit-btn").forEach(btn => {
+    btn.onclick = e => {
+      e.stopPropagation();
+      const box = sheet.querySelector(`#ke_${btn.dataset.si}_${btn.dataset.k}`);
+      const where = row[2] === "swe"
+        ? "~/.swe/secrets.json — swe injects it when it writes each harness file"
+        : `~/.${row[2]}/mcp.json — the plugin is declared there, so the value lives in that harness's own file`;
+      box.innerHTML = `<div class="kedit">
+        <input type="password" placeholder="${btn.dataset.k} value" autocomplete="off">
+        <button class="save">Save</button><button>Cancel</button></div>
+        <div class="khint">stored in ${where} — write-only, never shown after saving</div>`;
+      const inp = box.querySelector("input"); inp.focus();
+      box.querySelector(".save").onclick = () => {
+        if (!inp.value.trim()) return;
+        const s = row[6].servers[+btn.dataset.si];
+        s.missing = (s.missing || []).filter(k => k !== btn.dataset.k);
+        render(); openSheet(row);   // re-render flips the row pill + swClass off "issue"
+      };
+      box.querySelectorAll("button")[1].onclick = () => box.innerHTML = "";
+    };
+  });
+}
+
+// ---- create ----
+function openCreate() {
+  cur = null;
+  if (isSkill()) {
+    sheet.innerHTML = `
+      <h2><span class="nm">New skill</span><button class="x">✕</button></h2>
+      <div class="sect">Create in the shared registry</div>
+      <div class="field"><b>Name</b><input id="nName" placeholder="my-skill"></div>
+      <div class="field"><b>Description</b><textarea id="nDesc" placeholder="what it does"></textarea></div>
+      <div class="field"><b>Enable in</b></div>
+      ${ORDER.map(h => `<div class="check"><input type="checkbox" id="n_${h}" checked><i style="background:${HARN[h].bg}">${HARN[h].ch}</i>${HARN[h].label}</div>`).join("")}
+      <div class="actions"><button class="btn accent" id="mkBtn">Create</button></div>`;
+    sheet.querySelector(".x").onclick = closeSheet;
+    sheet.querySelector("#mkBtn").onclick = () => {
+      const name = sheet.querySelector("#nName").value.trim() || "untitled";
+      const desc = sheet.querySelector("#nDesc").value.trim() || "";
+      SKILLS.push([name, desc, "swe", 0, "now",
+        H.map(h => sheet.querySelector("#n_" + h).checked ? "on" : "off"), {sess:0}]);
+      closeSheet(); render();
+    };
+  } else {
+    sheet.innerHTML = `
+      <h2><span class="nm">Install plugin</span><button class="x">✕</button></h2>
+      <div class="sect">From the catalog</div>
+      <div class="field"><b>Ref</b><input id="nRef" placeholder="name@source"></div>
+      <div class="field"><b>Install to</b></div>
+      ${ORDER.map(h => `<div class="check"><input type="checkbox" id="n_${h}" checked><i style="background:${HARN[h].bg}">${HARN[h].ch}</i>${HARN[h].label}</div>`).join("")}
+      <div class="actions"><button class="btn accent" id="mkBtn">Install</button></div>`;
+    sheet.querySelector(".x").onclick = closeSheet;
+    sheet.querySelector("#mkBtn").onclick = () => {
+      const ref = sheet.querySelector("#nRef").value.trim() || "new@official";
+      PLUGINS.push([ref, "v0.1.0", "swe", 0, "now",
+        H.map(h => sheet.querySelector("#n_" + h).checked ? "on" : "-"), {servers:[],skills:[]}]);
+      closeSheet(); render();
+    };
+  }
+  sheet.classList.add("open");
+}
+
+fillSels();
+renderHead();
+render();
+</script>
+</body>
+</html>

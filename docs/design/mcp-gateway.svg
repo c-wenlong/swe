@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1020" height="640" viewBox="0 0 1020 640" font-family="-apple-system, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0.5,0.5 L8,4.5 L0.5,8.5 Z" fill="#a8a29e"/>
+    </marker>
+  </defs>
+  <rect width="1020" height="640" fill="#ffffff"/>
+
+  <text x="30" y="44" font-size="20" font-weight="600" fill="#1c1917">MCP gateway: how it's managed</text>
+  <text x="30" y="66" font-size="12.5" fill="#78716c">install once, launchd keeps it alive, hub decides what runs, counters report back</text>
+
+  <!-- B1 install -->
+  <g>
+    <rect x="30" y="92" width="240" height="92" rx="10" fill="#fafaf9" stroke="#e7e5e4" stroke-width="1.2"/>
+    <text x="46" y="117" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="12.5" font-weight="600" fill="#1c1917">swe mcp gateway install</text>
+    <text x="46" y="139" font-size="11.5" fill="#57534e">registers the LaunchAgent</text>
+    <text x="46" y="157" font-size="11.5" fill="#57534e">run again after app updates</text>
+    <text x="46" y="175" font-size="11.5" fill="#57534e">uninstall stops &amp; removes it</text>
+  </g>
+
+  <!-- a1 install -> launchd -->
+  <line x1="270" y1="138" x2="354" y2="138" stroke="#a8a29e" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <text x="315" y="128" text-anchor="middle" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="10" fill="#78716c">writes plist</text>
+
+  <!-- B2 launchd -->
+  <g>
+    <rect x="360" y="92" width="300" height="92" rx="10" fill="#fafaf9" stroke="#e7e5e4" stroke-width="1.2"/>
+    <text x="376" y="117" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="12.5" font-weight="600" fill="#1c1917">launchd · LaunchAgent</text>
+    <text x="376" y="139" font-size="11.5" fill="#57534e">com.cwenlong.swe.mcp-gateway</text>
+    <text x="376" y="157" font-size="11.5" fill="#57534e">starts at login · restarts on crash</text>
+    <text x="376" y="175" font-size="11.5" fill="#57534e">log: cache/mcp-gateway/gateway.log</text>
+  </g>
+
+  <!-- a2 launchd -> daemon -->
+  <line x1="510" y1="184" x2="510" y2="216" stroke="#a8a29e" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <text x="510" y="208" text-anchor="middle" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="10" fill="#78716c">runs: mcp gateway serve</text>
+
+  <!-- B3 daemon (accent) -->
+  <g>
+    <rect x="360" y="222" width="280" height="120" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.6"/>
+    <text x="376" y="247" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="12.5" font-weight="700" fill="#1d4ed8">gateway daemon · :8478</text>
+    <text x="376" y="269" font-size="11.5" fill="#44403c">one process per shared server,</text>
+    <text x="376" y="287" font-size="11.5" fill="#44403c">every session multiplexed on it</text>
+    <text x="376" y="305" font-size="11.5" fill="#44403c">watches hub + secrets · reloads</text>
+    <text x="376" y="323" font-size="11.5" fill="#44403c">counts every proxied tools/call</text>
+  </g>
+
+  <!-- B4 share / sync -->
+  <g>
+    <rect x="30" y="222" width="240" height="120" rx="10" fill="#fafaf9" stroke="#e7e5e4" stroke-width="1.2"/>
+    <text x="46" y="247" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="12.5" font-weight="600" fill="#1c1917">swe mcp gateway share</text>
+    <text x="46" y="269" font-size="11.5" fill="#57534e">marks hub entry shared: true</text>
+    <text x="46" y="289" font-size="11.5" fill="#57534e">swe mcp sync → configs get</text>
+    <text x="46" y="307" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="10.5" fill="#57534e">URL 127.0.0.1:8478/mcp/&lt;n&gt;</text>
+    <text x="46" y="329" font-size="11.5" fill="#57534e">unshare / uninstall undo it</text>
+  </g>
+
+  <!-- B5 hub -->
+  <g>
+    <rect x="740" y="92" width="250" height="100" rx="10" fill="#fafaf9" stroke="#e7e5e4" stroke-width="1.2"/>
+    <text x="756" y="117" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="12.5" font-weight="600" fill="#1c1917">~/.swe/mcp.json — hub</text>
+    <text x="756" y="139" font-size="11.5" fill="#57534e">master list of servers</text>
+    <text x="756" y="157" font-size="11.5" fill="#57534e">shared: true → via gateway</text>
+    <text x="756" y="175" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="10.5" fill="#57534e">${NAME} → secrets/mcp/</text>
+  </g>
+
+  <!-- a3 share -> hub (elbow through the corridor between rows) -->
+  <path d="M150,222 L150,205 L735,205 L800,198" fill="none" stroke="#a8a29e" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <text x="335" y="199" text-anchor="middle" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="10" fill="#78716c">shared: true</text>
+
+  <!-- B6 harnesses -->
+  <g>
+    <rect x="740" y="240" width="250" height="100" rx="10" fill="#fafaf9" stroke="#e7e5e4" stroke-width="1.2"/>
+    <text x="756" y="265" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="12.5" font-weight="600" fill="#1c1917">harness sessions</text>
+    <text x="756" y="287" font-size="11.5" fill="#57534e">Claude · Codex · Cursor · Kilo…</text>
+    <text x="756" y="305" font-size="11.5" fill="#57534e">config holds the gateway URL,</text>
+    <text x="756" y="323" font-size="11.5" fill="#57534e">not the server command</text>
+  </g>
+
+  <!-- a5 harnesses -> daemon -->
+  <line x1="740" y1="290" x2="646" y2="290" stroke="#a8a29e" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <text x="693" y="282" text-anchor="middle" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="9.5" fill="#78716c">POST /mcp/&lt;n&gt;</text>
+
+  <!-- a8 hub -> daemon -->
+  <path d="M770,192 C720,200 665,210 648,220" fill="none" stroke="#a8a29e" stroke-width="1.3" marker-end="url(#arrow)"/>
+
+  <!-- a4 sync -> harnesses (elbow under the daemon) -->
+  <path d="M270,330 L330,330 L330,362 L800,362 L800,346" fill="none" stroke="#a8a29e" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <text x="525" y="356" text-anchor="middle" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="10" fill="#78716c">sync writes the URL into each harness config</text>
+
+  <!-- a6 daemon -> processes -->
+  <path d="M640,325 C710,345 745,385 772,426" fill="none" stroke="#a8a29e" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <text x="660" y="386" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="10" fill="#78716c">spawns once</text>
+  <text x="660" y="400" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="10" fill="#78716c">stdio JSON-RPC</text>
+
+  <!-- B7 shared processes -->
+  <g>
+    <rect x="740" y="430" width="250" height="90" rx="10" fill="#fafaf9" stroke="#e7e5e4" stroke-width="1.2"/>
+    <text x="756" y="455" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="12.5" font-weight="600" fill="#1c1917">shared server processes</text>
+    <text x="756" y="477" font-size="11.5" fill="#57534e">one stdio child per server</text>
+    <text x="756" y="495" font-size="11.5" fill="#57534e">dv__github · pd__notion · so__rss</text>
+    <text x="756" y="513" font-size="11.5" fill="#57534e">respawned on exit · backoff</text>
+  </g>
+
+  <!-- a7 daemon -> stats -->
+  <line x1="510" y1="342" x2="510" y2="424" stroke="#a8a29e" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <text x="518" y="392" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="10" fill="#78716c">every proxied tools/call</text>
+
+  <!-- B8 stats -->
+  <g>
+    <rect x="360" y="430" width="280" height="80" rx="10" fill="#fafaf9" stroke="#e7e5e4" stroke-width="1.2"/>
+    <text x="376" y="455" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="12.5" font-weight="600" fill="#1c1917">stats.json · cache/mcp-gateway</text>
+    <text x="376" y="477" font-size="11.5" fill="#57534e">calls · calls_by_tool · call_errors</text>
+    <text x="376" y="495" font-size="11.5" fill="#57534e">last_call · survives restarts</text>
+  </g>
+
+  <!-- a9 daemon -> observers -->
+  <path d="M360,305 C310,315 250,390 175,426" fill="none" stroke="#a8a29e" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <text x="230" y="392" text-anchor="middle" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="10" fill="#78716c">GET /status</text>
+
+  <!-- B9 observers -->
+  <g>
+    <rect x="30" y="430" width="240" height="110" rx="10" fill="#fafaf9" stroke="#e7e5e4" stroke-width="1.2"/>
+    <text x="46" y="455" font-size="12.5" font-weight="600" fill="#1c1917">read it back</text>
+    <text x="46" y="477" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="11" fill="#57534e">swe mcp gateway status</text>
+    <text x="46" y="495" font-family="ui-monospace, SF Mono, Menlo, monospace" font-size="11" fill="#57534e">swe mcp info NAME</text>
+    <text x="46" y="513" font-size="11.5" fill="#57534e">SWE.app → server sheet</text>
+    <text x="46" y="531" font-size="11.5" fill="#57534e">rows: state, pid, calls, last call</text>
+  </g>
+
+  <!-- footer -->
+  <text x="30" y="596" font-size="11.5" fill="#78716c">mcp.json is the source of truth — the daemon watches it, sync writes harness configs from it, ${NAME} secrets resolve from secrets/mcp/.api_keys.</text>
+  <text x="30" y="616" font-size="11.5" fill="#78716c">Unshare or uninstall and the next sync writes the real command again — back to per-session copies.</text>
+</svg>
