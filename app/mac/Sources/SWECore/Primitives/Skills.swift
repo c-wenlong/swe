@@ -268,6 +268,9 @@ public struct SkillUsage: Decodable, Sendable, Equatable {
 @Observable
 public final class SkillsModel {
     public var inventory: Loadable<SkillInventory> { skills.state }
+    /// Fetches so far; a detail reading beside the inventory keys its
+    /// task on it so Refresh reloads the detail too.
+    public var loadCount: Int { skills.generation }
     /// Roots with a link or unlink in flight, by path.
     public private(set) var busy: Set<String> = []
     /// The last link or unlink that failed, in swe's words.

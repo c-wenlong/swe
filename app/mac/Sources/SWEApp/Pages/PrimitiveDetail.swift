@@ -832,7 +832,7 @@ struct PluginDetailView: View {
             }
             if folders != nil, !editable { lockNote }
             header
-            PluginInfoCard(ref: plugin.ref)
+            PluginInfoCard(ref: plugin.ref, refresh: refresh)
             if folders == nil {
                 SkeletonRows(rows: 5, shape: .file, label: "Reading the plugin's folder…")
             } else {
@@ -1027,9 +1027,15 @@ struct PluginDetailView: View {
 /// the swe predates `info` — the catalog row already says the rest.
 private struct PluginInfoCard: View {
     var ref: String
+    /// The sheet's reload count; a refresh keeps `ref` while the plugin's
+    /// files and index counts move on, so it keys the fetch.
+    var refresh: Int
     @Environment(AppModel.self) private var app
     /// nil until the swe call lands; a failed call stays nil forever.
     @State private var info: PluginInfo?
+    /// Servers before the list folds behind a Show more row.
+    private static let foldLimit = 8
+    @State private var showsAll = false
 
     var body: some View {
         Group {
@@ -1038,13 +1044,13 @@ private struct PluginInfoCard: View {
                 VStack(alignment: .leading, spacing: 10) {
                     if !info.mcpServers.isEmpty {
                         Text("MCP servers").font(Theme.font(size: 12, weight: .semibold))
-                        ForEach(info.mcpServers, id: \.name) { server in
+                        ForEach(RowFold.visible(info.mcpServers, limit: Self.foldLimit,
+                                                expanded: showsAll), id: \.name) { server in
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack(spacing: 6) {
                                     Text(server.name)
                                         .font(Theme.font(size: 12, design: .monospaced))
-                                    Text(serverState(server))
-                                        .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                                    ServerStateView(server: server)
                                     Spacer()
                                     if let usage = server.usage, usage.tracked, usage.calls > 0 {
                                         Text("\(usage.calls) calls")
@@ -1064,6 +1070,16 @@ private struct PluginInfoCard: View {
                                 }
                             }
                         }
+                        if RowFold.hiddenCount(total: info.mcpServers.count, limit: Self.foldLimit) > 0 {
+                            ExpandRow(isExpanded: showsAll,
+                                      hidden: RowFold.hiddenCount(total: info.mcpServers.count,
+                                                                  limit: Self.foldLimit),
+                                      help: (expand: "Show every declared server",
+                                             collapse: "Show the first \(Self.foldLimit) servers"),
+                                      edge: .inset) {
+                                withAnimation(.easeOut(duration: Theme.fadeDuration)) { showsAll.toggle() }
+                            }
+                        }
                     }
                     if !info.mcpServers.isEmpty, usageLine != nil { Divider() }
                     if let line = usageLine {
@@ -1078,19 +1094,42 @@ private struct PluginInfoCard: View {
                 }
             }
         }
-        .task(id: ref) {
+        .task(id: [ref, String(refresh)]) {
             // A swe from before `info` fails the call; the card stays
             // hidden rather than blank.
             info = try? await app.swe.pluginInfo(ref)
         }
     }
 
-    private func serverState(_ server: PluginInfo.DeclaredServer) -> String {
-        var bits: [String] = []
-        if server.inHub { bits.append("in hub") }
-        if !server.harnesses.isEmpty { bits.append("in \(server.harnesses.joined(separator: ", "))") }
-        if !server.disabledIn.isEmpty { bits.append("off in \(server.disabledIn.joined(separator: ", "))") }
-        return bits.isEmpty ? "declared only" : bits.joined(separator: " · ")
+    /// Where a declared server stands: its swe hub flag and each harness
+    /// it is installed in or switched off for, names through
+    /// HarnessMarkView like every harness mention.
+    private struct ServerStateView: View {
+        var server: PluginInfo.DeclaredServer
+
+        var body: some View {
+            if server.harnesses.isEmpty && server.disabledIn.isEmpty && !server.inHub {
+                Text("declared only").font(Theme.caption).foregroundStyle(Theme.textMuted)
+            } else {
+                HStack(spacing: 4) {
+                    if server.inHub {
+                        Text("in hub").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    }
+                    if !server.harnesses.isEmpty {
+                        Text("in").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                        ForEach(server.harnesses, id: \.self) { harness in
+                            HarnessMarkView(harness: harness, size: 12)
+                        }
+                    }
+                    if !server.disabledIn.isEmpty {
+                        Text("off in").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                        ForEach(server.disabledIn, id: \.self) { harness in
+                            HarnessMarkView(harness: harness, size: 12)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// One line for the usage rollup, or nil when the index is off or
@@ -1101,7 +1140,7 @@ private struct PluginInfoCard: View {
         let called = skillRows.filter { ($0.usage?.calls ?? 0) > 0 }
         var line: String
         if usage.calls == 0 {
-            line = "No calls indexed yet — the index counts sessions built after it switched on."
+            line = "No calls indexed yet: the index scans existing sessions too."
         } else {
             line = "\(usage.calls) calls across \(usage.sessions) sessions"
             if let last = usage.lastUsed { line += " · last \(last.prefix(10))" }
