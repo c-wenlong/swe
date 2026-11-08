@@ -201,6 +201,9 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
     "skills sync": [
         ("--json", "Print what changed as JSON"),
     ],
+    "skills usage": [
+        ("--json", "Print the call stats as JSON"),
+    ],
     "skills discover": [
         ("--apply", "Write catalog entries"),
         ("--json", "Machine-readable output"),
@@ -260,6 +263,9 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
     ],
     "plugins catalog": [
         ("--json", "Every marketplace and plugin as JSON"),
+    ],
+    "plugins info": [
+        ("--json", "Print the detail sheet as JSON"),
     ],
     "plugins install": [
         ("--harness=claude", "Act in Claude Code"),
@@ -575,14 +581,14 @@ _NESTED_FLAGS: dict[str, dict[str, str]] = {
         "move": "skills move", "discover": "skills discover",
         "hub": "skills hub", "new": "skills new",
         "enable": "skills enable", "disable": "skills disable",
-        "sync": "skills sync",
+        "sync": "skills sync", "usage": "skills usage",
     },
     "sk": {
         "link": "skills link", "unlink": "skills unlink",
         "move": "skills move", "discover": "skills discover",
         "hub": "skills hub",
         "enable": "skills enable", "disable": "skills disable",
-        "sync": "skills sync",
+        "sync": "skills sync", "usage": "skills usage",
     },
     "find": {
         "amd": "find", "agents": "find", "agents.md": "find",
@@ -592,6 +598,7 @@ _NESTED_FLAGS: dict[str, dict[str, str]] = {
     },
     "plugins": {
         "catalog": "plugins catalog", "marketplace": "plugins marketplace add",
+        "info": "plugins info",
         # every action takes the same flags
         "install": "plugins install", "uninstall": "plugins install",
         "enable": "plugins install", "disable": "plugins install",
@@ -807,6 +814,7 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
     "plugins": [
         ("catalog", "Every plugin in every registered marketplace"),
         ("marketplace", "Add a marketplace source to a harness"),
+        ("info", "One plugin's servers, env keys, skills and calls"),
         ("install", "Install a plugin in one harness"),
         ("uninstall", "Uninstall a plugin from one harness"),
         ("enable", "Enable an installed plugin"),
@@ -835,6 +843,7 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("enable", "Link one shared skill into a harness"),
         ("disable", "Drop one shared skill's link in a harness"),
         ("sync", "Re-apply each harness's skill selection"),
+        ("usage", "Call counts from the session index"),
         ("new", "Create a SKILL.md in the hub"),
         ("discover", "Find skills not yet cataloged"),
         ("hub", "Plugins the swe hub offers"),
@@ -852,6 +861,7 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("enable", "Link one shared skill into a harness"),
         ("disable", "Drop one shared skill's link in a harness"),
         ("sync", "Re-apply each harness's skill selection"),
+        ("usage", "Call counts from the session index"),
         ("new", "Create a SKILL.md in the hub"),
         ("discover", "Find skills not yet cataloged"),
         ("hub", "Plugins the swe hub offers"),

@@ -65,7 +65,7 @@ class DevinDecodeTests(unittest.TestCase):
         result, _ = decoder.decode_line(
             b'{"message_id":"m3","role":"tool","content":"output here","tool_call_id":"c1",'
             b'"metadata":{"created_at":"2026-09-15T15:48:57Z"}}')
-        self.assertEqual(result, _msgs([("tool", "exec: output here", "2026-09-15T15:48:57Z")]))
+        self.assertEqual(result, _msgs([("tool", "→ exec: output here", "2026-09-15T15:48:57Z")]))
         system, _ = decoder.decode_line(
             b'{"message_id":"m0","role":"system","content":"<system_info>x</system_info>"}')
         self.assertEqual(system, [])
@@ -126,7 +126,7 @@ class JsonlDecodeTests(unittest.TestCase):
             b'{"type": "message", "timestamp": "t3", "message": {"role": "toolResult",'
             b' "toolCallId": "call_1", "toolName": "bash", "content": [{"type": "text",'
             b' "text": "AGENTS.md\\nREADME.md"}], "isError": false}}')
-        self.assertEqual(result, _msgs([("tool", "bash: AGENTS.md\nREADME.md", "t3")]))
+        self.assertEqual(result, _msgs([("tool", "→ bash: AGENTS.md\nREADME.md", "t3")]))
         self.assertEqual(decode.Decoder("pi").decode_line(
             b'{"type": "model_change", "provider": "x", "modelId": "y"}')[0], [])
         _, info = decode.Decoder("pi").decode_line(b'{"type": "session_info", "name": "my session name"}')
@@ -290,7 +290,7 @@ class DevinTests(_Home):
             "user: find the walrus config",
             "assistant: Looking for it.",
             "tool: exec: grep -r walrus .",
-            "tool: exec: conf/walrus.toml",
+            "tool: → exec: conf/walrus.toml",
             "assistant: It is conf/walrus.toml.",
         ])
         hits = search_index.search(self.home, "walrus")

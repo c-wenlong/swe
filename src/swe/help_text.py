@@ -507,6 +507,7 @@ to use their own login state and environment."""
   {c('cyan', 'swe plugins')}                       Every marketplace claude, codex or cursor has registered
   {c('cyan', 'swe plugins catalog <marketplace>')}   One marketplace's plugins and their state per harness
   {c('cyan', 'swe plugins catalog --json')}          The whole catalog as JSON (the app's Plugins page)
+  {c('cyan', 'swe plugins info <ref>')}              One plugin's servers, env keys, skills and calls
   {c('cyan', 'swe plugins install <ref> --harness=claude|codex')}
   {c('cyan', 'swe plugins uninstall <ref> --harness=claude|codex')}
   {c('cyan', 'swe plugins enable <ref> --harness=claude|codex')}

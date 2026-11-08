@@ -454,25 +454,44 @@ def _plugin_json(folder: Path) -> dict:
     return {}
 
 
-def mcp_server_count(folder: Path | None) -> int:
-    """How many MCP servers a plugin declares, by name only.
+def mcp_server_details(folder: Path | None) -> list[dict]:
+    """The MCP servers a plugin declares: name plus env/header key names.
 
     ``.mcp.json`` (``{"mcpServers": {...}}`` or a bare name map) and the
-    plugin manifest's ``mcpServers`` object. Only the keys are counted; the
-    values can carry API keys and are never read further.
+    plugin manifest's ``mcpServers`` object. Env and header dicts yield
+    their keys only — the values can carry API keys and are never read.
     """
     if folder is None:
-        return 0
-    names: set = set()
+        return []
+    out: dict[str, dict] = {}
+    sources = []
     data = _read_json(folder / ".mcp.json")
     if data is not _BROKEN:
-        servers = data.get("mcpServers", data)
-        if isinstance(servers, dict):
-            names |= {k for k, v in servers.items() if isinstance(v, dict)}
-    servers = _plugin_json(folder).get("mcpServers")
-    if isinstance(servers, dict):
-        names |= {k for k, v in servers.items() if isinstance(v, dict)}
-    return len(names)
+        sources.append(data.get("mcpServers", data))
+    sources.append(_plugin_json(folder).get("mcpServers"))
+    for servers in sources:
+        if not isinstance(servers, dict):
+            continue
+        for name, cfg in servers.items():
+            if not isinstance(cfg, dict):
+                continue
+            entry = out.setdefault(str(name), {"name": str(name),
+                                               "env_keys": set(),
+                                               "header_keys": set()})
+            env = cfg.get("env")
+            if isinstance(env, dict):
+                entry["env_keys"] |= {str(k) for k in env}
+            headers = cfg.get("headers")
+            if isinstance(headers, dict):
+                entry["header_keys"] |= {str(k) for k in headers}
+    return [{**e, "env_keys": sorted(e["env_keys"]),
+             "header_keys": sorted(e["header_keys"])}
+            for e in sorted(out.values(), key=lambda e: e["name"])]
+
+
+def mcp_server_count(folder: Path | None) -> int:
+    """How many MCP servers a plugin declares, by name only."""
+    return len(mcp_server_details(folder))
 
 
 def _harness_state(view: View, record: _Record, plugin: _Plugin, ref: str) -> dict:
