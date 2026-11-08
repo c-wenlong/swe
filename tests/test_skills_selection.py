@@ -133,6 +133,139 @@ class SelectionTest(unittest.TestCase):
             set_skill_enabled("foo", "claude", enabled=True, home=home, cwd=home)
         self.assertIn("not installed", str(ctx.exception))
 
+    def test_disable_on_a_root_linked_elsewhere_is_refused(self):
+        # A whole-folder link that does not land on shared is not a
+        # client of the tree: toggling it would silently convert a root
+        # swe does not own into per-skill links.
+        home = self._home()
+        self._write_skill(home / ".swe" / "skills", "foo")
+        elsewhere = home / "elsewhere"
+        elsewhere.mkdir()
+        root = home / ".codex" / "skills"
+        root.parent.mkdir(parents=True)
+        root.symlink_to(elsewhere)
+
+        with self.assertRaises(SkillLayoutError) as ctx:
+            set_skill_enabled("foo", "codex", enabled=False, home=home, cwd=home)
+        self.assertIn("link it to shared", str(ctx.exception))
+
+    def test_a_root_that_is_a_file_is_refused(self):
+        home = self._home()
+        self._write_skill(home / ".swe" / "skills", "foo")
+        root = home / ".codex" / "skills"
+        root.parent.mkdir(parents=True)
+        root.write_text("not a dir")
+
+        with self.assertRaises(SkillLayoutError) as ctx:
+            set_skill_enabled("foo", "codex", enabled=False, home=home, cwd=home)
+        self.assertIn("not a skills folder", str(ctx.exception))
+
+    def test_an_unrecorded_directory_is_managed_as_only(self):
+        # A real folder swe never recorded — private folder, or links made
+        # by hand — takes the conservative mode: it gets nothing new
+        # unless asked. Its existing links seed the intent.
+        home = self._home()
+        shared = home / ".swe" / "skills"
+        self._write_skill(shared, "foo")
+        self._write_skill(shared, "bar")
+        root = home / ".codex" / "skills"
+        root.mkdir(parents=True)
+        (root / "foo").symlink_to(shared / "foo")
+
+        out = set_skill_enabled("bar", "codex", enabled=True, home=home, cwd=home)
+
+        self.assertEqual(out["mode"], "only")
+        self.assertTrue((root / "bar").is_symlink())
+        record = selection_record_at(root)
+        self.assertEqual(sorted(record["enabled"]), ["bar", "foo"])
+
+    def test_enable_retargets_a_stale_link_inside_shared(self):
+        # The slot holds a link swe made that now points at the wrong
+        # shared folder (the skill moved). Enabling fixes the link instead
+        # of treating it as private.
+        home = self._home()
+        shared = home / ".swe" / "skills"
+        self._write_skill(shared, "foo")
+        self._write_skill(shared, "other")
+        root = home / ".codex" / "skills"
+        root.mkdir(parents=True)
+        (root / "foo").symlink_to(shared / "other")
+
+        out = set_skill_enabled("foo", "codex", enabled=True, home=home, cwd=home)
+
+        self.assertTrue(out["changed"])
+        self.assertEqual((root / "foo").resolve(), (shared / "foo").resolve())
+
+    def test_disable_a_private_link_is_hands_off(self):
+        home = self._home()
+        self._write_skill(home / ".swe" / "skills", "foo")
+        root = home / ".codex" / "skills"
+        root.mkdir(parents=True)
+        (root / "foo").symlink_to(home / "elsewhere" / "foo")
+
+        with self.assertRaises(SkillLayoutError) as ctx:
+            set_skill_enabled("foo", "codex", enabled=False, home=home, cwd=home)
+        self.assertIn("private link", str(ctx.exception))
+        self.assertTrue((root / "foo").is_symlink())
+
+    def test_disable_in_an_only_selection_discards_the_name(self):
+        home = self._home()
+        shared = home / ".swe" / "skills"
+        self._write_skill(shared, "foo")
+        (home / ".claude").mkdir()
+        set_skill_enabled("foo", "claude", enabled=True, home=home, cwd=home)
+        root = home / ".claude" / "skills"
+
+        out = set_skill_enabled("foo", "claude", enabled=False, home=home, cwd=home)
+
+        self.assertTrue(out["changed"])
+        self.assertFalse((root / "foo").exists())
+        record = selection_record_at(root)
+        self.assertEqual((record["mode"], record["enabled"]), ("only", []))
+
+    def test_reconcile_skips_a_private_folder_shadowing_a_wanted_skill(self):
+        # An only record asks for foo, but a real foo folder sits in the
+        # slot: reconcile cannot claim it and leaves the private copy
+        # alone.
+        home = self._home()
+        shared = home / ".swe" / "skills"
+        self._write_skill(shared, "foo")
+        self._write_skill(shared, "bar")
+        (home / ".claude").mkdir()
+        set_skill_enabled("foo", "claude", enabled=True, home=home, cwd=home)
+        root = home / ".claude" / "skills"
+        (root / "foo").unlink()
+        self._write_skill(root, "foo", name="private-foo")
+
+        rows = reconcile_all_selections(home)
+
+        self.assertIn("private-foo",
+                      (root / "foo" / "SKILL.md").read_text())
+        self.assertTrue((root / "foo").is_dir()
+                        and not (root / "foo").is_symlink())
+        self.assertEqual(
+            [r for r in rows if "foo" in r["added"]], [])
+
+    def test_a_skill_nested_in_another_shared_skill_cannot_be_toggled(self):
+        # Only folders directly under shared/ are toggleable; a SKILL.md
+        # deeper in the tree belongs to its parent skill.
+        home = self._home()
+        shared = home / ".swe" / "skills"
+        self._write_skill(shared, "outer")
+        self._write_skill(shared / "outer", "inner")
+        self._linked(home)
+
+        with self.assertRaises(SkillLayoutError) as ctx:
+            set_skill_enabled("inner", "codex", enabled=False, home=home, cwd=home)
+        self.assertIn("not a top-level", str(ctx.exception))
+
+    def test_reconcile_skips_a_record_whose_path_is_gone(self):
+        from swe.skills.layout import record_selection
+
+        home = self._home()
+        record_selection("x", home / "nowhere" / "skills", "only", ["foo"])
+        self.assertEqual(reconcile_all_selections(home), [])
+
     def test_toggle_round_trip_inside_an_except_selection(self):
         home = self._home()
         shared = home / ".swe" / "skills"
@@ -359,6 +492,77 @@ class SelectionTest(unittest.TestCase):
         self.assertIn(
             "promoted", selection_record_at(only_root)["enabled"])
 
+    def test_move_to_shared_takes_the_name_off_an_except_disabled_list(self):
+        # codex had foo disabled, then moved its own private foo to
+        # shared: the root that wrote it keeps loading it, so the name
+        # comes off the disabled list.
+        home = self._home()
+        shared = home / ".swe" / "skills"
+        self._write_skill(shared, "foo")
+        root = self._linked(home)
+        set_skill_enabled("foo", "codex", enabled=False, home=home, cwd=home)
+        self._write_skill(root, "foo", name="private-foo")
+
+        move_skill("foo", "codex", "shared", home=home, cwd=home, force=True)
+
+        record = selection_record_at(root)
+        self.assertNotIn("foo", record["disabled"])
+        self.assertTrue((root / "foo").is_symlink())
+
+    def test_move_to_shared_from_an_unrecorded_root_reconciles_others(self):
+        # The private copy sat in a harness with no selection record:
+        # nothing to claim, but except roots elsewhere still pick it up.
+        home = self._home()
+        shared = home / ".swe" / "skills"
+        self._write_skill(shared, "foo")
+        except_root = self._linked(home)
+        set_skill_enabled("foo", "codex", enabled=False, home=home, cwd=home)
+        private_root = home / ".claude" / "skills"
+        private_root.mkdir(parents=True)
+        self._write_skill(private_root, "mine")
+
+        move_skill("mine", "claude", "shared", home=home, cwd=home)
+
+        self.assertTrue((except_root / "mine").is_symlink())
+        self.assertIsNone(selection_record_at(private_root))
+
+    def test_reconcile_retargets_a_link_that_points_at_the_wrong_skill(self):
+        # foo is wanted but its slot links at a different shared folder:
+        # the stale swe link is dropped and remade.
+        home = self._home()
+        shared = home / ".swe" / "skills"
+        self._write_skill(shared, "foo")
+        self._write_skill(shared, "other")
+        root = self._linked(home)
+        set_skill_enabled("other", "codex", enabled=False, home=home, cwd=home)
+        (root / "foo").unlink()
+        (root / "foo").symlink_to(shared / "other")
+
+        rows = reconcile_all_selections(home)
+
+        self.assertEqual((root / "foo").resolve(), (shared / "foo").resolve())
+        self.assertEqual([r for r in rows if r["label"] == "codex"][0]["added"],
+                         ["foo"])
+
+    def test_reconcile_leaves_a_foreign_link_in_a_wanted_slot_alone(self):
+        # The record wants foo, but the slot holds someone's link outside
+        # shared. Reconcile is not the one to delete it.
+        home = self._home()
+        shared = home / ".swe" / "skills"
+        self._write_skill(shared, "foo")
+        (home / ".claude").mkdir()
+        set_skill_enabled("foo", "claude", enabled=True, home=home, cwd=home)
+        root = home / ".claude" / "skills"
+        (root / "foo").unlink()
+        (root / "foo").symlink_to(home / "elsewhere" / "foo")
+
+        rows = reconcile_all_selections(home)
+
+        self.assertTrue((root / "foo").is_symlink())
+        self.assertEqual((root / "foo").resolve(),
+                         (home / "elsewhere" / "foo").resolve())
+        self.assertEqual([r for r in rows if "foo" in r["added"]], [])
+
     def test_move_to_shared_keeps_a_promoted_skill_off_an_unrelated_only_root(self):
         # The claiming above is for the root the skill came from; another
         # harness's only selection still holds a promoted skill out.
@@ -425,6 +629,26 @@ class SelectionTest(unittest.TestCase):
         self.assertTrue(root.is_dir() and not root.is_symlink())
         self.assertFalse((root / "foo").exists())
         self.assertTrue((root / "bar").is_symlink())
+
+    def test_init_apply_on_an_unrecorded_link_dir_leaves_it_alone(self):
+        # Links into shared with no record still classify "selection" —
+        # _apply has no intent to repair against, so it just reports the
+        # state and touches nothing.
+        home = self._home()
+        shared = home / ".swe" / "skills"
+        self._write_skill(shared, "foo")
+        root = home / ".codex" / "skills"
+        root.mkdir(parents=True)
+        (root / "foo").symlink_to(shared / "foo")
+
+        from swe.init.commands import _apply
+        from swe.init.layout import LinkStatus
+
+        status = LinkStatus("codex", root, "selection", "")
+        result = _apply(status, shared, home, force=False)
+
+        self.assertEqual(result, "selection")
+        self.assertTrue((root / "foo").is_symlink())
 
     # -- inventory -----------------------------------------------------------
 
@@ -548,6 +772,54 @@ class SkillsToggleCommandTest(unittest.TestCase):
             code, out = _run(cmd_skills_sync, [])
         self.assertEqual(code, 0)
         self.assertIn("already matches", out)
+
+    def test_toggle_no_change_says_already(self):
+        result = {"action": "enable", "harness": "codex", "skill": "foo",
+                  "mode": "all", "enabled": True, "changed": False,
+                  "converted": False}
+        with patch(
+            "swe.skills.layout_commands.set_skill_enabled",
+            return_value=result,
+        ):
+            code, out = _run(
+                cmd_skills_enable, ["foo", "--harness=codex"])
+        self.assertEqual(code, 0)
+        self.assertIn("already on for codex", out)
+
+    def test_toggle_change_names_the_resulting_mode(self):
+        result = {"action": "disable", "harness": "codex", "skill": "foo",
+                  "mode": "only", "enabled": False, "changed": True,
+                  "converted": False}
+        with patch(
+            "swe.skills.layout_commands.set_skill_enabled",
+            return_value=result,
+        ):
+            code, out = _run(
+                cmd_skills_disable, ["foo", "--harness=codex"])
+        self.assertEqual(code, 0)
+        self.assertIn("disabled for codex", out)
+        self.assertIn("only", out)
+
+    def test_sync_lists_added_and_removed(self):
+        rows = [{"label": "codex", "path": "/p",
+                 "added": ["foo"], "removed": ["old"]}]
+        with patch(
+            "swe.skills.layout_commands.reconcile_all_selections",
+            return_value=rows,
+        ):
+            code, out = _run(cmd_skills_sync, [])
+        self.assertEqual(code, 0)
+        self.assertIn("linked foo", out)
+        self.assertIn("dropped old", out)
+
+    def test_sync_rejects_extra_args(self):
+        code, out = _run(cmd_skills_sync, ["extra"])
+        self.assertEqual(code, 1)
+        self.assertIn("Unexpected args", out)
+
+    def test_sync_help(self):
+        code, out = _run(cmd_skills_sync, ["--help"])
+        self.assertEqual(code, 0)
 
 
 if __name__ == "__main__":

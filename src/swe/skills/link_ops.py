@@ -535,11 +535,30 @@ def reconcile_selection_root(root: Path, shared: Path, record: dict) -> dict:
         else intent & set(shared_dirs)
     )
     added, removed = [], []
-    for n in sorted(want - set(links)):
+    # A link under a wanted name but resolving to a different shared
+    # folder is stale; it is remade below, not counted as satisfied.
+    try:
+        shared_resolved = shared.resolve()
+    except (OSError, RuntimeError):
+        shared_resolved = shared
+    stale = set()
+    for n in want & set(links):
+        try:
+            if links[n].resolve() != shared_dirs[n].resolve():
+                stale.add(n)
+        except (OSError, RuntimeError):
+            stale.add(n)
+    for n in sorted((want - set(links)) | stale):
         slot = root / n
         if os.path.lexists(slot):
             if not slot.is_symlink():
                 continue  # a private folder shadows the link; hands off
+            if n not in stale:
+                try:
+                    if not slot.resolve().is_relative_to(shared_resolved):
+                        continue  # a private link elsewhere; hands off
+                except (OSError, RuntimeError):
+                    continue
             slot.unlink()
         slot.symlink_to(shared_dirs[n], target_is_directory=True)
         added.append(n)
@@ -561,10 +580,7 @@ def reconcile_all_selections(home: Path | None = None) -> list[dict]:
 
     out = []
     for record in _selection_records():
-        try:
-            path = Path(str(record.get("path", "")))
-        except ValueError:
-            continue
+        path = Path(str(record.get("path", "")))
         if not path.is_dir() or path.is_symlink():
             continue
         result = reconcile_selection_root(path, shared, record)
