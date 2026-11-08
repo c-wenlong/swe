@@ -90,6 +90,35 @@ import Testing
         #expect(request.value(forHTTPHeaderField: "x-goog-api-key") == key)
     }
 
+    /// The services taking the key under a custom header send exactly
+    /// the header their API documents, not a Bearer.
+    @Test(arguments: [
+        ("PARALLEL_API_KEY", "x-api-key", "https://api.parallel.ai/v1/tasks"),
+        ("TINYFISH_API_KEY", "X-API-Key", "https://agent.tinyfish.ai/v1/runs"),
+        ("BROWSER_USE_API_KEY", "X-Browser-Use-API-Key", "https://api.browser-use.com/api/v3/sessions"),
+        ("EXA_API_KEY", "x-api-key", "https://api.exa.ai/websets/v0/searches"),
+    ])
+    func aHeaderProbeSendsTheServiceHeader(name: String, header: String, url: String) async throws {
+        let transport = FakeTransport()
+        transport.reply(200)
+        let probe = try #require(APIKeyProbe.probe(forName: name))
+        _ = await APIKeyChecker(transport: transport).check(key: key, probe: probe)
+        let request = try #require(transport.requests.first)
+        #expect(request.httpMethod == "GET")
+        #expect(request.url?.absoluteString == url)
+        #expect(request.value(forHTTPHeaderField: header) == key)
+        #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+    }
+
+    @Test func firecrawlGoesOutAsBearer() async throws {
+        let transport = FakeTransport()
+        transport.reply(200)
+        let probe = try #require(APIKeyProbe.probe(forName: "FIRECRAWL_API_KEY"))
+        _ = await APIKeyChecker(transport: transport).check(key: key, probe: probe)
+        let request = try #require(transport.requests.first)
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(key)")
+    }
+
     @Test func routingRunPostsAnEmptyJsonBody() async throws {
         let transport = FakeTransport()
         transport.reply(200)

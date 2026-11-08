@@ -113,6 +113,14 @@ public enum ModelBrands {
         .init(id: "digitalocean", name: "DigitalOcean", icon: "digitalocean",
               keywords: ["digitalocean", "digital ocean", "doctl"]),
         .init(id: "heroku", name: "Heroku", icon: "heroku", keywords: ["heroku"]),
+        // Services: agent-facing APIs — search, scraping and browser
+        // services — on the Providers page's Services tab.
+        .init(id: "parallel", name: "Parallel", icon: "parallel", keywords: ["parallel"]),
+        .init(id: "firecrawl", name: "Firecrawl", icon: "firecrawl", keywords: ["firecrawl"]),
+        .init(id: "tinyfish", name: "TinyFish", icon: "tinyfish", keywords: ["tinyfish"]),
+        .init(id: "browseruse", name: "Browser Use", icon: "browseruse",
+              keywords: ["browseruse", "browser use"]),
+        .init(id: "exa", name: "Exa", icon: "exa", keywords: ["exa"]),
         // Inference plan vendors and API key providers, so a key filed
         // under their name shows the logo too.
         .init(id: "tencent", name: "Tencent", icon: "tencentcloud", keywords: ["tencent", "hunyuan", "tokenhub"]),

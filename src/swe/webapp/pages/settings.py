@@ -490,6 +490,8 @@ def _provider_registry(ctx) -> dict:
         for name, info in user.items()
         if name != preg._REMOVED_KEY and name not in removed
     }
+    # DEFAULT_ALL, not only the inference seed: infra and services
+    # providers belong in the picker and the name/url lookups too.
     for name, info in DEFAULT_ALL.items():
         if name not in removed and name not in merged:
             merged[name] = preg._hydrate(dict(info))

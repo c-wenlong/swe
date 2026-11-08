@@ -106,10 +106,12 @@ def cmd_list(args: list[str]) -> int:
     # One section per kind, AI providers first, the same 5-column table
     # in each. An empty section is skipped unless both are (a filter
     # that matches nothing still prints the empty AI table, as before).
-    ai_rows = [r for r in rows if _kind(r) != "infra"]
+    ai_rows = [r for r in rows if _kind(r) not in ("infra", "services")]
     infra_rows = [r for r in rows if _kind(r) == "infra"]
+    service_rows = [r for r in rows if _kind(r) == "services"]
     sections = [s for s in (("AI Providers", ai_rows),
-                            ("Infra Providers", infra_rows)) if s[1]]
+                            ("Infra Providers", infra_rows),
+                            ("Service Providers", service_rows)) if s[1]]
     if not sections:
         sections = [("AI Providers", [])]
     for title, section_rows in sections:
@@ -537,10 +539,10 @@ def cmd_add(args: list[str]) -> int:
             i += 2
         elif a == "--kind":
             kind_flag = args[i + 1].strip().lower()
-            if kind_flag not in ("inference", "infra"):
+            if kind_flag not in ("inference", "infra", "services"):
                 print(
                     c("red",
-                      f"Unknown kind: {args[i + 1]!r} — inference or infra.")
+                      f"Unknown kind: {args[i + 1]!r} — inference, infra or services.")
                 )
                 return 1
             i += 2

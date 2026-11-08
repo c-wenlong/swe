@@ -247,11 +247,11 @@ the design. No code was copied from either.
 harnesses and providers SWE lists, imported by
 `script/import-harness-icons.py`: Ant Group, Antigravity, Arcade, Ark,
 Baidu Cloud, Browserbase, Cartesia, CheapestInference, Claude, Cloudflare, Codex, Cohere, Command Code, Crush,
-State Cloud (Ctyun), DeepSeek, Featherless, Fireworks AI, Gemini, Honeycomb,
+State Cloud (Ctyun), DeepSeek, Exa, Featherless, Firecrawl, Fireworks AI, Gemini, Honeycomb,
 Huawei Cloud, Hugging Face, iFlytek, JD Cloud, Meta, MiniMax, Mistral Vibe,
 Moore Threads, NVIDIA, OpenCode, OpenRouter, Perplexity, Qoder CN, Qwen Code,
 SenseNova, Sourcegraph, Standard Compute, Statsig, StepFun, Tencent Cloud,
-Together AI, UCloud, China Unicom, Upstage, WorkOS and Zapier (46 logos)
+TinyFish, Together AI, UCloud, China Unicom, Upstage, WorkOS and Zapier (49 logos)
 keep their brand colours (`harness-<id>-color.svg`), the rest are
 single-colour marks. Every logo is a trademark of its owner
 and is used only to name that harness; none of them implies endorsement.
@@ -320,6 +320,12 @@ Where each came from is in `Resources/harness-icons.tsv`:
   squircle plate it sits on is dropped), and Artificial Analysis's
   geometric mark from the inline SVG in artificialanalysis.ai's header;
   both are trademark-only like the rest.
+- The Services tab marks: Exa and Firecrawl come from LobeHub icons
+  (`@lobehub/icons-static-svg`, MIT). Browser Use's mark is the inline
+  SVG in browser-use.com's header, Parallel's is parallel.ai's favicon
+  (the white plate it ships on is dropped) and TinyFish's fish is pulled
+  out of the logo file docs.tinyfish.ai ships; all three are
+  trademark-only like the rest.
 - The `tool-*.svg` marks Settings draws for uninstalled terminals and
   editors — Ghostty, iTerm2, WezTerm, Cursor, Zed, VSCodium and Xcode —
   come from Simple Icons (simple-icons, CC0-1.0); Visual Studio Code's

@@ -2,15 +2,17 @@ import AppKit
 import SWECore
 import SwiftUI
 
-/// Settings › Providers › Infra: the keys that deploy and manage
-/// resources rather than run inference — Vercel, Netlify, Cloudflare
-/// and friends — in the same `.api_keys` file Inference edits, with the
-/// same masking, reveal, ordering and checks. The catalogue rows are
-/// `InfraList.items`: keys the infra providers claim by variable or
-/// heading, then the services with no key yet. A name no catalogue
-/// claims sits here only while a "mark" keeps it (a custom service the
-/// user added or moved by hand).
-struct InfraSection: View {
+/// A non-inference tab of Settings › Providers: the keys a `KeysSection`
+/// claims — Infra's deploy/platform credentials or the Services tab's
+/// agent-facing APIs — in the same `.api_keys` file Inference edits,
+/// with the same masking, reveal, ordering and checks. The catalogue
+/// rows are `KeysSection.items`: keys the section's services claim by
+/// variable or heading, then the services with no key yet. A name no
+/// catalogue claims sits here only while a "mark" keeps it (a custom
+/// service the user added or moved by hand).
+struct KeysSectionView: View {
+    let section: KeysSection
+
     /// `withKeys`, the default, hides every service with no key yet;
     /// "Any status" and the per-state picks show them.
     enum StateFilter: Hashable { case withKeys, all, state(InferenceKeyState) }
@@ -43,14 +45,24 @@ struct InfraSection: View {
     private static let foldLimit = 12
     @State private var showsAll = false
 
+    /// The marks and row order for this tab, off AppModel's per-tab stores.
+    private var marks: MarkedKeys { app.marks(for: section) }
+    private var order: KeysOrder { app.order(for: section) }
+
+    /// What the tab calls its entries: "infra services" or "services",
+    /// for the search prompts, tips and empty state.
+    private var things: String { section == .infra ? "infra services" : "services" }
+    /// "infra" or "service", for the empty state and catalogue labels.
+    private var noun: String { section == .infra ? "infra" : "service" }
+
     var body: some View {
         let model = app.apiKeys
-        let marked = app.infraMarks.names
-        let all = app.infraOrder.sorted(InfraList.items(keys: model.rows, marked: marked))
+        let marked = marks.names
+        let all = order.sorted(section.items(keys: model.rows, marked: marked))
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Infra keys").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+                    Text("\(section.title) keys").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
                     Text(keysSubtitle(model)).font(Theme.caption).foregroundStyle(Theme.textSecondary)
                 }
                 Spacer(minLength: 12)
@@ -66,7 +78,7 @@ struct InfraSection: View {
                     .hoverTip("Send each key to its own service to see if it still works", replacesLabel: false)
                 Button("Catalogue", systemImage: "square.grid.2x2") { cataloguing = true }
                     .secondaryButton()
-                    .hoverTip("Every infra service SWE knows; pick one to add its key", replacesLabel: false)
+                    .hoverTip("Every \(things) SWE knows; pick one to add its key", replacesLabel: false)
                 Button("Add key", systemImage: "plus") {
                     editing = KeyDraft(provider: "", name: "", value: "", isNew: true)
                 }
@@ -90,9 +102,9 @@ struct InfraSection: View {
         .keysFileWatch(model)
         .onDisappear { revealed.removeAll() }
         .cardSheet(isPresented: $cataloguing) {
-            ProviderCatalogueSheet(entries: InfraCatalogue.entries(keys: model.rows, marked: marked),
-                                   title: "Infra catalogue",
-                                   prompt: "Search infra services", kinds: []) { entry in
+            ProviderCatalogueSheet(entries: section.catalogueEntries(keys: model.rows, marked: marked),
+                                   title: "\(section.title) catalogue",
+                                   prompt: "Search \(things)", kinds: []) { entry in
                 if case .provider(let provider) = entry.target {
                     editing = KeyDraft(provider: "", name: "", value: "", isNew: true,
                                        providerID: provider.id)
@@ -100,8 +112,8 @@ struct InfraSection: View {
             }
         }
         .cardSheet(item: $editing) { draft in
-            InfraKeyEditor(draft: draft, providers: model.providers, rows: model.rows,
-                           save: { provider, name, value, tested in
+            KeysEditor(section: section, draft: draft, providers: model.providers, rows: model.rows,
+                       save: { provider, name, value, tested in
                 if draft.isNew {
                     try await model.set(name: name, value: value, provider: provider, tested: tested)
                 } else {
@@ -138,40 +150,42 @@ struct InfraSection: View {
     }
 
     /// A key the catalogue claims stays wherever its own table puts it;
-    /// anything else keeps an Infra mark so a row saved from this tab
+    /// anything else keeps this tab's mark so a row saved from here
     /// lands back here — and a rename away from a catalogue name gains
     /// the mark, so the key follows its edit rather than its old name.
+    /// A variable the other tab claims is left to it.
     private func settleMark(saved name: String, previous: String?) {
-        if let previous, previous != name { app.infraMarks.unmark(previous) }
-        if let provider = APIKeyProviders.infraProvider(forVariable: name) {
+        if let previous, previous != name { marks.unmark(previous) }
+        if let provider = section.provider(forVariable: name) {
             // A key under a sibling variable replaces the catalogue row's
             // id; keep the dragged position on the new one.
             if provider.envVars[0] != name {
-                app.infraOrder.substitute(provider.envVars[0], with: name)
+                order.substitute(provider.envVars[0], with: name)
             }
-            app.infraMarks.unmark(name)
-        } else if APIKeyProviders.provider(forVariable: name) == nil {
-            app.infraMarks.mark(name)
+            marks.unmark(name)
+        } else if KeysSection.claimed(forVariable: name)
+                    && !KeysSection.allCases.contains(where: { $0.provider(forVariable: name) != nil }) {
+            marks.mark(name)
         } else {
-            app.infraMarks.unmark(name)
+            marks.unmark(name)
         }
     }
 
-    private func state(of item: InfraItem) -> InferenceKeyState {
+    private func state(of item: KeysItem) -> InferenceKeyState {
         InferenceKeyState(hasKey: item.hasKey, check: item.key.flatMap { app.apiKeys.check(for: $0) }?.result)
     }
 
-    private func visible(_ all: [InfraItem]) -> [InfraItem] {
+    private func visible(_ all: [KeysItem]) -> [KeysItem] {
         let state: InferenceKeyState? = if case .state(let value) = stateFilter { value } else { nil }
         return all.filter {
             (stateFilter != .withKeys || $0.hasKey)
-                && InfraList.matches($0, state: state, query: query, stateOf: self.state(of:))
+                && KeysSection.matches($0, state: state, query: query, stateOf: self.state(of:))
         }
     }
 
     /// The shared filter bar: the state select, then search taking the
     /// slack, then the count.
-    private func filterBar(_ all: [InfraItem]) -> some View {
+    private func filterBar(_ all: [KeysItem]) -> some View {
         func count(_ state: InferenceKeyState) -> Int { all.filter { self.state(of: $0) == state }.count }
         let shown = visible(all).count
         return HStack(spacing: 10) {
@@ -182,7 +196,7 @@ struct InfraSection: View {
                                  (.state(.unchecked), "Not checked (\(count(.unchecked)))"),
                                  (.state(.noKey), "No key (\(count(.noKey)))")],
                        selection: $stateFilter)
-            SearchField(prompt: "Search services or variables", text: $query)
+            SearchField(prompt: "Search \(things) or variables", text: $query)
                 .frame(maxWidth: .infinity)
             Text(shown == 1 ? "1 row" : "\(shown) rows")
                 .font(Theme.caption).foregroundStyle(Theme.textSecondary).monospacedDigit()
@@ -190,7 +204,7 @@ struct InfraSection: View {
         }
     }
 
-    private func table(_ all: [InfraItem]) -> some View {
+    private func table(_ all: [KeysItem]) -> some View {
         let rows = visible(all)
         let compact = tableWidth > 0 && tableWidth < Self.compactBelow
         return VStack(spacing: 0) {
@@ -211,7 +225,7 @@ struct InfraSection: View {
             } else {
                 let shown = RowFold.visible(rows, limit: Self.foldLimit, expanded: showsAll)
                 ReorderableRows(shown, showsDividers: true) { id, before in
-                    app.infraOrder.move(id, before: before ?? after(shown, all: all, moving: id), in: all)
+                    order.move(id, before: before ?? after(shown, all: all, moving: id), in: all)
                 } row: { item in
                     row(item, compact: compact)
                 }
@@ -232,29 +246,29 @@ struct InfraSection: View {
     }
 
     /// What the table says when nothing shows.
-    private func emptyText(_ all: [InfraItem]) -> String {
+    private func emptyText(_ all: [KeysItem]) -> String {
         if all.isEmpty {
-            return "No infra keys yet. Add one and SWE writes it to \(displayPath(app.apiKeys.path))."
+            return "No \(noun) keys yet. Add one and SWE writes it to \(displayPath(app.apiKeys.path))."
         }
         if stateFilter == .withKeys,
-           all.contains(where: { !$0.hasKey && InfraList.matches($0, state: nil, query: query,
-                                                                 stateOf: self.state(of:)) }) {
-            return "Only services with no key match. Open the catalogue to add one, or pick “Any status” to see them here."
+           all.contains(where: { !$0.hasKey && KeysSection.matches($0, state: nil, query: query,
+                                                                   stateOf: self.state(of:)) }) {
+            return "Only \(things) with no key match. Open the catalogue to add one, or pick “Any status” to see them here."
         }
         return "Nothing matches these filters."
     }
 
     /// Dropped below the last shown row: land just after it in the full
     /// order, not after every row the filters hide.
-    private func after(_ rows: [InfraItem], all: [InfraItem], moving id: String) -> String? {
+    private func after(_ rows: [KeysItem], all: [KeysItem], moving id: String) -> String? {
         guard let last = rows.last(where: { $0.id != id }),
               let index = all.firstIndex(where: { $0.id == last.id }) else { return nil }
         return all[(index + 1)...].first { $0.id != id }?.id
     }
 
-    private func row(_ item: InfraItem, compact: Bool) -> some View {
+    private func row(_ item: KeysItem, compact: Bool) -> some View {
         let model = app.apiKeys
-        return InfraRow(
+        return KeysRow(
             item: item, compact: compact, isRevealed: revealed.contains(item.id),
             check: item.key.flatMap { model.check(for: $0) }, isChecking: model.checking.contains(item.id),
             recheck: { Task { await model.check(name: item.id) } },
@@ -270,10 +284,10 @@ struct InfraSection: View {
             },
             // A row with no catalogue service got here through a mark;
             // lifting the mark sends it back to Inference.
-            moveToInference: item.provider == nil ? { app.infraMarks.unmark(item.id) } : nil)
+            moveToInference: item.provider == nil ? { marks.unmark(item.id) } : nil)
     }
 
-    private func open(_ item: InfraItem) {
+    private func open(_ item: KeysItem) {
         if let key = item.key {
             editing = KeyDraft(provider: key.provider, name: key.name, value: key.value, isNew: false)
         } else if let provider = item.provider {
@@ -286,8 +300,8 @@ struct InfraSection: View {
 /// One row: grip, logo and the service or heading, the variable's value
 /// with reveal and copy beside it, then the status. Anywhere but those
 /// buttons and the status opens the key.
-private struct InfraRow: View {
-    var item: InfraItem
+private struct KeysRow: View {
+    var item: KeysItem
     /// Narrow table: the variable name goes under the service name.
     var compact = false
     var isRevealed: Bool
@@ -322,7 +336,7 @@ private struct InfraRow: View {
                     }
                 }
             }
-            .frame(width: compact ? InfraSection.compactFirstWidth : InfraSection.firstWidth,
+            .frame(width: compact ? KeysSectionView.compactFirstWidth : KeysSectionView.firstWidth,
                    alignment: .leading)
             // The variable name lives in the editor; the row shows the value.
             VStack(alignment: .leading, spacing: 3) {
@@ -350,7 +364,7 @@ private struct InfraRow: View {
                         .font(Theme.caption).foregroundStyle(Theme.textMuted)
                 }
             }
-            .frame(width: InfraSection.statusWidth, alignment: .leading)
+            .frame(width: KeysSectionView.statusWidth, alignment: .leading)
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
         .background(hovering ? Theme.rowHover : .clear)
@@ -388,16 +402,18 @@ private struct InfraRow: View {
     }
 }
 
-/// Add, change or remove one infra key. A new key first picks its
-/// service from the infra catalogue: a known service fixes the variable
-/// (a pick when it has several) and offers the page that hands out keys;
-/// "Custom provider" takes a heading and a variable name only — there is
-/// no endpoint to learn. On an existing key the provider heading and the
-/// variable name edit as they do on Inference: a rename, a move and a new
-/// value save together. Saving a non-empty value tests it first where a
-/// probe exists; a rejection shows instead of saving until "Save anyway".
-private struct InfraKeyEditor: View {
+/// Add, change or remove one key on a `KeysSection` tab. A new key first
+/// picks its service from the section's catalogue: a known service fixes
+/// the variable (a pick when it has several) and offers the page that
+/// hands out keys; "Custom provider" takes a heading and a variable name
+/// only — there is no endpoint to learn. On an existing key the provider
+/// heading and the variable name edit as they do on Inference: a rename,
+/// a move and a new value save together. Saving a non-empty value tests
+/// it first where a probe exists; a rejection shows instead of saving
+/// until "Save anyway".
+private struct KeysEditor: View {
     @Environment(\.dismissSheet) private var dismiss
+    let section: KeysSection
     @State var draft: KeyDraft
     /// The name the row had when the sheet opened; the draft's changes.
     private let originalName: String
@@ -416,7 +432,7 @@ private struct InfraKeyEditor: View {
     @State private var error: String?
     @State private var working = false
     /// The new-key pick: "" nothing yet, "custom" the free-name path,
-    /// else an `APIKeyProvider.id` from `APIKeyProviders.infra`.
+    /// else an `APIKeyProvider.id` from the section's catalogue.
     @State private var providerChoice = ""
     /// The variable a multi-variable service saves under.
     @State private var envVarChoice = ""
@@ -435,10 +451,11 @@ private struct InfraKeyEditor: View {
     /// Cancel during the test never saves.
     @State private var saveTask: Task<Void, Never>?
 
-    init(draft: KeyDraft, providers: [String], rows: [APIKeysModel.Row],
+    init(section: KeysSection, draft: KeyDraft, providers: [String], rows: [APIKeysModel.Row],
          save: @escaping (String, String, String, APIKeyCheckResult?) async throws -> Void,
          test: @escaping (String, String) async -> APIKeyCheckResult,
          remove: @escaping (String) async throws -> Void) {
+        self.section = section
         _draft = State(initialValue: draft)
         originalName = draft.name
         originalValue = draft.value
@@ -447,14 +464,14 @@ private struct InfraKeyEditor: View {
         self.save = save
         self.test = test
         self.remove = remove
-        let prefill = draft.providerID.flatMap { APIKeyProviders.infraProvider(forID: $0) }
+        let prefill = draft.providerID.flatMap { section.provider(forID: $0) }
         _providerChoice = State(initialValue: prefill?.id ?? "")
         _envVarChoice = State(initialValue: prefill?.envVars[0] ?? "")
     }
 
     /// The picked service on a new key, nil for "custom" or none yet.
     private var picked: APIKeyProvider? {
-        draft.isNew ? APIKeyProviders.infraProvider(forID: providerChoice) : nil
+        draft.isNew ? section.provider(forID: providerChoice) : nil
     }
 
     /// Whether the custom-provider fields show.
@@ -527,7 +544,7 @@ private struct InfraKeyEditor: View {
     /// catalogue knows.
     private var editKeyURL: URL? {
         guard !draft.isNew else { return nil }
-        return APIKeyProviders.infraProvider(forVariable: finalName)?.keyURL
+        return section.provider(forVariable: finalName)?.keyURL
     }
 
     private var saveDisabled: Bool {
@@ -561,7 +578,7 @@ private struct InfraKeyEditor: View {
                 if draft.isNew {
                     Button("Browse…") { browsing = true }
                         .secondaryButton()
-                        .hoverTip("Every infra service SWE knows",
+                        .hoverTip("Every \(things) SWE knows",
                                   replacesLabel: false, pinsOnClick: false)
                         .disabled(working || testing)
                 } else if confirmingRemove {
@@ -589,23 +606,26 @@ private struct InfraKeyEditor: View {
         .background(Theme.panel)
         .onDisappear { saveTask?.cancel() }
         .cardSheet(isPresented: $browsing) {
-            ProviderCatalogueSheet(entries: InfraCatalogue.entries(keys: rows),
-                                   title: "Infra catalogue",
-                                   prompt: "Search infra services", kinds: []) { entry in
+            ProviderCatalogueSheet(entries: section.catalogueEntries(keys: rows),
+                                   title: "\(section.title) catalogue",
+                                   prompt: "Search \(things)", kinds: []) { entry in
                 if case .provider(let provider) = entry.target { providerChoice = provider.id }
             }
         }
     }
 
-    /// The catalogue picker a new key starts with: the infra services,
-    /// then "Custom provider" for anything else.
+    /// What the tab calls its entries, for the search prompts and tips.
+    private var things: String { section == .infra ? "infra services" : "services" }
+
+    /// The catalogue picker a new key starts with: the section's
+    /// services, then "Custom provider" for anything else.
     private var providerPicker: some View {
         FormField("Provider") {
-            PopoverSelect(options: APIKeyProviders.infra.map { ($0.id, $0.name, $0.logo) }
+            PopoverSelect(options: section.providers.map { ($0.id, $0.name, $0.logo) }
                               + [("custom", "Custom provider", nil)],
                           selection: $providerChoice,
                           title: providerChoice.isEmpty ? "Choose a provider" : nil,
-                          searchPrompt: "Search infra services")
+                          searchPrompt: "Search \(things)")
             .onChange(of: providerChoice) {
                 envVarChoice = picked?.envVars[0] ?? ""
                 saveAnyway = false

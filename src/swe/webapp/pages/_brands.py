@@ -74,6 +74,13 @@ BRANDS: list[tuple[str, str, str | None, str | None, tuple[str, ...], tuple[str,
     ("digitalocean", "DigitalOcean", None, "digitalocean",
      ("digitalocean", "digital ocean", "doctl"), ()),
     ("heroku", "Heroku", None, "heroku", ("heroku",), ()),
+    # Services: agent-facing APIs — search, scraping and browser services —
+    # on the Providers page's Services tab.
+    ("parallel", "Parallel", None, "parallel", ("parallel",), ()),
+    ("firecrawl", "Firecrawl", None, "firecrawl", ("firecrawl",), ()),
+    ("tinyfish", "TinyFish", None, "tinyfish", ("tinyfish",), ()),
+    ("browseruse", "Browser Use", None, "browseruse", ("browseruse", "browser use"), ()),
+    ("exa", "Exa", None, "exa", ("exa",), ()),
     # Inference plan vendors and API key providers.
     ("tencent", "Tencent", None, "tencentcloud", ("tencent", "hunyuan", "tokenhub"), ()),
     ("baidu", "Baidu", None, "baiducloud", ("baidu", "qianfan", "ernie"), ()),

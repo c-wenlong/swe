@@ -382,6 +382,27 @@ no error or abort signal). A session id that exists in both formats keeps
 its JSONL row, and one the account-wide usage feed reports but no local
 machine holds stays details-only.</p>
 </li>
+<li><p><strong>A Services tab under Settings › Providers.</strong> Provider kinds are
+now three: <code>inference</code> for the AI providers, <code>infra</code> for deploy and
+platform keys, and the new <code>services</code> for the agent-facing APIs a
+tool calls rather than deploys onto: search, scraping, research and
+browser services. <code>DEFAULT_SERVICES</code> ships five — Parallel,
+Firecrawl, TinyFish, Browser Use and Exa — seeded into providers.json
+like the other built-ins, so <code>swe providers list</code> prints a Service
+Providers table after the AI and Infra sections, a <code>services</code> filter,
+a slug or an env var narrows to it, and <code>swe providers add --kind=services</code> registers one (existing custom kinds still file
+under AI Providers). The setup wizard's LLM providers stage leaves
+both non-inference kinds out. On the Mac the Providers page gains a
+Services tab beside Infra sharing its catalogue browsing, filters,
+drag order, marks and add/edit/remove/check flow under its own
+<code>servicesOrder</code> and <code>servicesKeys</code> stores — inference claims a
+variable or heading first, then infra, then services — with a Move to
+Services action on the Inference tab to match Move to Infra. Each
+service's Check button probes a cheap authenticated endpoint. The web
+app reads the same merged registry, so service keys keep their names,
+env vars and key URLs in its provider data; it has an Infra tab but
+no Services tab yet.</p>
+</li>
 <li><p><strong>Remote sessions can run over the Agent Client Protocol.</strong> <code>swe remote attach</code> (and the apps' Attach) now picks a harness's ACP mode
 when its CLI has one installed (<code>devin acp</code>, and cursor-agent or
 copilot builds that list it), after the codex and opencode channels

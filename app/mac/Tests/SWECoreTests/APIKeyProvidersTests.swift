@@ -4,8 +4,9 @@ import Testing
 
 @Suite struct APIKeyProvidersTests {
     /// The (slug, url, env_vars) of every entry one defaults.py dict
-    /// holds, in file order: `from` is `DEFAULT_PROVIDERS = {` or
-    /// `DEFAULT_INFRA = {`. Reading straight out of the file keeps the
+    /// holds, in file order: `from` is `DEFAULT_PROVIDERS = {`,
+    /// `DEFAULT_INFRA = {` or `DEFAULT_SERVICES = {`. Reading straight
+    /// out of the file keeps the
     /// Swift tables honest when the Python one changes.
     private static func pythonProviders(from marker: String) throws -> [(slug: String, url: String, envVars: [String])] {
         let file = URL(fileURLWithPath: #filePath)
@@ -47,6 +48,9 @@ import Testing
         let infra = try Self.pythonProviders(from: "DEFAULT_INFRA = {")
         #expect(infra.count >= 10, "DEFAULT_INFRA parsed almost empty; the sync regex broke")
         expect(APIKeyProviders.infra, match: infra)
+        let services = try Self.pythonProviders(from: "DEFAULT_SERVICES = {")
+        #expect(services.count >= 5, "DEFAULT_SERVICES parsed almost empty; the sync regex broke")
+        expect(APIKeyProviders.services, match: services)
     }
 
     /// One Swift table against the parsed entries of one defaults.py

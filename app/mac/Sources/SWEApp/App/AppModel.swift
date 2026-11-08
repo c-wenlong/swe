@@ -420,10 +420,19 @@ final class AppModel {
     let hubWebViews = HubWebViews()
     /// The order of Settings › Providers › Inference's rows.
     let inferenceOrder = InferenceOrder(store: UserDefaultsStore())
-    /// The same for the Infra tab's rows, under its own store key.
-    let infraOrder = InfraOrder(store: UserDefaultsStore())
-    /// The variables filed to the Infra tab that no catalogue claims.
-    let infraMarks = InfraMarks(store: UserDefaultsStore())
+    /// Per-tab row orders and "moved here" marks for the non-inference
+    /// tabs, each under its own store key so they never entangle.
+    private let keyOrders = Dictionary(uniqueKeysWithValues: KeysSection.allCases.map {
+        ($0, KeysOrder(store: UserDefaultsStore(), section: $0))
+    })
+    private let keyMarks = Dictionary(uniqueKeysWithValues: KeysSection.allCases.map {
+        ($0, MarkedKeys(store: UserDefaultsStore(), section: $0))
+    })
+
+    /// The row order for one of the non-inference Providers tabs.
+    func order(for section: KeysSection) -> KeysOrder { keyOrders[section]! }
+    /// The variables filed to that tab that no catalogue claims.
+    func marks(for section: KeysSection) -> MarkedKeys { keyMarks[section]! }
     /// What the starred harnesses are running right now (the Compute page).
     let compute: ComputeModel
     /// The Compute page's fan popover; a manual speed lives in a root

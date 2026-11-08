@@ -48,7 +48,12 @@ from unittest.mock import patch
 
 from swe.console import c, strip_ansi, visible_len
 from swe.providers.commands import cmd_info, cmd_list
-from swe.providers.defaults import DEFAULT_ALL, DEFAULT_INFRA, DEFAULT_PROVIDERS
+from swe.providers.defaults import (
+    DEFAULT_ALL,
+    DEFAULT_INFRA,
+    DEFAULT_PROVIDERS,
+    DEFAULT_SERVICES,
+)
 
 
 def _registry_patches(config_dir: Path, registry_file: Path):
@@ -567,15 +572,16 @@ class CmdListInfraSectionTest(unittest.TestCase):
             lines = plain.split("\n")
             infra_idx = next(i for i, ln in enumerate(lines)
                              if "Infra Providers" in ln)
+            # The section ends where the next section's heading begins.
+            end = next((i for i, ln in enumerate(lines)
+                        if i > infra_idx and "Service Providers" in ln),
+                       len(lines))
             infra_body = [
-                ln for ln in lines[infra_idx + 4:]
+                ln for ln in lines[infra_idx + 4:end]
                 if ln.strip()
             ]
-            # The table ends at the footer's dim line, which also
-            # carries " │ " ("add  │  help"): rows are the " │ " lines
-            # minus the footer.
             infra_rows = [ln for ln in infra_body if " │ " in ln]
-            self.assertEqual(len(infra_rows) - 1, len(DEFAULT_INFRA),
+            self.assertEqual(len(infra_rows), len(DEFAULT_INFRA),
                              infra_rows)
             self.assertTrue(
                 any("vercel" in ln for ln in infra_rows), infra_rows)
@@ -637,6 +643,56 @@ class CmdListInfraSectionTest(unittest.TestCase):
             ):
                 output = _run_cmd_list([])
             self.assertNotIn("Infra Providers", strip_ansi(output))
+
+
+class CmdListServicesSectionTest(unittest.TestCase):
+    """``swe providers list`` files service providers under their own
+    "Service Providers" heading after the Infra table."""
+
+    def _patches(self, tmp_path: Path):
+        config_dir, registry_file, keys_dir = _setup(tmp_path)
+        return _registry_patches(config_dir, registry_file) + (
+            patch(
+                "swe.providers.commands.default_keys_dir",
+                return_value=keys_dir,
+            ),
+        )
+
+    def test_services_section_renders_after_the_infra_table(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            patches = self._patches(tmp_path)
+            with patches[0], patches[1], patches[2]:
+                output = _run_cmd_list([])
+            plain = strip_ansi(output)
+            self.assertGreater(plain.find("Service Providers"), 0)
+            self.assertLess(plain.find("Infra Providers"),
+                            plain.find("Service Providers"))
+            lines = plain.split("\n")
+            svc_idx = next(i for i, ln in enumerate(lines)
+                           if "Service Providers" in ln)
+            svc_rows = [
+                ln for ln in lines[svc_idx + 4:]
+                if ln.strip() and " │ " in ln
+            ]
+            # Rows are the " │ " lines minus the table's footer.
+            self.assertEqual(len(svc_rows) - 1, len(DEFAULT_SERVICES),
+                             svc_rows)
+            self.assertTrue(
+                any("firecrawl" in ln for ln in svc_rows), svc_rows)
+
+    def test_filter_services_shows_only_the_services_section(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            patches = self._patches(tmp_path)
+            with patches[0], patches[1], patches[2]:
+                output = _run_cmd_list(["services"])
+            plain = strip_ansi(output)
+            self.assertNotIn("AI Providers", plain)
+            self.assertNotIn("Infra Providers", plain)
+            self.assertIn("Service Providers", plain)
+            self.assertIn("firecrawl", plain)
+            self.assertNotIn("openai", plain)
 
 
 class CmdInfoMigrationTest(unittest.TestCase):
@@ -1258,6 +1314,17 @@ class CmdAddTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(saved["myinfra"]["kind"], "infra")
         self.assertIn("kind: infra", out)
+
+    def test_add_kind_services_persists_and_echoes(self):
+        with TemporaryDirectory() as tmp:
+            patches, registry_file = self._patches(Path(tmp))
+            with patches[0], patches[1]:
+                rc, out = self._run_add(
+                    ["myapi", "--kind=services", "--env=MY_TOKEN"])
+            saved = self._read_registry(registry_file)
+        self.assertEqual(rc, 0)
+        self.assertEqual(saved["myapi"]["kind"], "services")
+        self.assertIn("kind: services", out)
 
     def test_add_defaults_kind_to_inference(self):
         with TemporaryDirectory() as tmp:

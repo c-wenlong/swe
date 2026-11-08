@@ -153,6 +153,27 @@ public enum APIKeyProviders {
                        keyURL: URL(string: "https://dashboard.heroku.com/account")!),
     ]
 
+    /// Every entry in defaults.py's DEFAULT_SERVICES, same order: APIs an
+    /// agent calls rather than deploys onto — search, scraping, research
+    /// and browser services — shown on the Providers page's Services tab.
+    public static let services: [APIKeyProvider] = [
+        APIKeyProvider(id: "parallel", name: "Parallel",
+                       envVars: ["PARALLEL_API_KEY"],
+                       keyURL: URL(string: "https://platform.parallel.ai/settings?tab=api-keys")!),
+        APIKeyProvider(id: "firecrawl", name: "Firecrawl",
+                       envVars: ["FIRECRAWL_API_KEY"],
+                       keyURL: URL(string: "https://www.firecrawl.dev/app/api-keys")!),
+        APIKeyProvider(id: "tinyfish", name: "TinyFish",
+                       envVars: ["TINYFISH_API_KEY"],
+                       keyURL: URL(string: "https://agent.tinyfish.ai/api-keys")!),
+        APIKeyProvider(id: "browser_use", name: "Browser Use",
+                       envVars: ["BROWSER_USE_API_KEY"],
+                       keyURL: URL(string: "https://cloud.browser-use.com/settings?tab=api-keys")!),
+        APIKeyProvider(id: "exa", name: "Exa",
+                       envVars: ["EXA_API_KEY"],
+                       keyURL: URL(string: "https://dashboard.exa.ai/api-keys")!),
+    ]
+
     /// The inference provider one of whose variables is `name`, if any.
     public static func provider(forVariable name: String) -> APIKeyProvider? {
         all.first { $0.envVars.contains(name) }
@@ -173,6 +194,12 @@ public enum APIKeyProviders {
     /// picked.
     public static func infraProvider(forID id: String) -> APIKeyProvider? {
         infra.first { $0.id == id }
+    }
+
+    /// A services provider from the picker's id, nil for "custom" or
+    /// none picked.
+    public static func servicesProvider(forID id: String) -> APIKeyProvider? {
+        services.first { $0.id == id }
     }
 
     /// The heading a new key for `provider` goes under: an existing group

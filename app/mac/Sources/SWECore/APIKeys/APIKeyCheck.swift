@@ -13,6 +13,9 @@ public struct APIKeyProbe: Equatable, Sendable {
         case xApiKey
         /// `x-goog-api-key: <key>`.
         case googApiKey
+        /// `<name>: <key>` — services that take the key under their own
+        /// header (x-api-key, X-Browser-Use-API-Key).
+        case header(String)
     }
 
     /// Hosts to try in order; the first that accepts the key wins.
@@ -104,6 +107,16 @@ public struct APIKeyProbe: Equatable, Sendable {
         put(get(.bearer, "https://api.render.com/v1/services?limit=1"), "RENDER_API_KEY")
         put(get(.bearer, "https://api.digitalocean.com/v2/account"),
             "DIGITALOCEAN_ACCESS_TOKEN", "DIGITALOCEAN_TOKEN")
+        // The services, each verified against a fake key the same way:
+        // a bare GET on the cheapest auth-reading endpoint refuses it
+        // as the table lists. TinyFish and Browser Use take the key
+        // under their own header.
+        put(get(.header("x-api-key"), "https://api.parallel.ai/v1/tasks"), "PARALLEL_API_KEY")
+        put(get(.bearer, "https://api.firecrawl.dev/v2/team/credit-usage"), "FIRECRAWL_API_KEY")
+        put(get(.header("X-API-Key"), "https://agent.tinyfish.ai/v1/runs"), "TINYFISH_API_KEY")
+        put(get(.header("X-Browser-Use-API-Key"), "https://api.browser-use.com/api/v3/sessions"),
+            "BROWSER_USE_API_KEY")
+        put(get(.header("x-api-key"), "https://api.exa.ai/websets/v0/searches"), "EXA_API_KEY")
         for plan in InferenceCatalog.all {
             if let probe = InferenceCatalog.probe(for: plan) { put(probe, plan.keyName) }
         }
@@ -491,6 +504,8 @@ public struct APIKeyChecker: Sendable {
             request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         case .googApiKey:
             request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+        case .header(let name):
+            request.setValue(key, forHTTPHeaderField: name)
         }
         do {
             let (body, response) = try await transport.send(request)

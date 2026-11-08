@@ -19,6 +19,7 @@ blackbox	mono	https://docs.blackbox.ai/favicon.svg	trademark, no licence stated	
 bolt	mono	https://unpkg.com/simple-icons@16.36.0/icons/stackblitz.svg	CC0-1.0 (Simple Icons); StackBlitz trademark	StackBlitz bolt, the parent mark Bolt.new uses, for its status page
 braintrust	mono	https://unpkg.com/simple-icons@16.36.0/icons/braintrust.svg	CC0-1.0 (Simple Icons); Braintrust trademark	Braintrust mark, for its status page
 browserbase	color	https://www.browserbase.com/favicon.svg	trademark, no licence stated	Browserbase mark tile, site favicon
+browseruse	mono	https://www.browser-use.com/ (inline header SVG)	trademark, no licence stated	Browser Use mark, verbatim from the site's inline header logo; currentColor painted black
 buildkite	mono	https://unpkg.com/simple-icons@16.34.0/icons/buildkite.svg	CC0-1.0 (Simple Icons); Buildkite trademark	Buildkite mark, for its status page
 cartesia	color	https://www.cartesia.ai/favicon.svg	trademark, no licence stated	Cartesia mark tile, site favicon
 cerebras	mono	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/cerebras.svg	MIT (LobeHub icons); Cerebras trademark	Cerebras mark
@@ -53,9 +54,11 @@ docker	mono	https://unpkg.com/simple-icons@16.34.0/icons/docker.svg	CC0-1.0 (Sim
 droid	mono	https://factory.ai/ (redirects to factory.com; inline svg id=mobile-nav-logo)	trademark, no licence stated	Factory asterisk mark, currentColor; extracted verbatim from page HTML; favicon.svg there is same mark on black square
 e2b	mono	https://e2b.dev/brand/e2b-symbol-black-m.svg	trademark, no licence stated	E2B symbol, from its brand page
 elevenlabs	mono	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/elevenlabs.svg	MIT (LobeHub icons); ElevenLabs trademark	two-bar mark, for API keys
+exa	color	https://unpkg.com/@lobehub/icons-static-svg@1.101.0/icons/exa-color.svg	MIT (LobeHub icons); Exa trademark	Exa mark
 expo	mono	https://unpkg.com/simple-icons@16.34.0/icons/expo.svg	CC0-1.0 (Simple Icons); Expo trademark	Expo mark, for its status page
 featherless	color	https://featherless.ai/	trademark, no licence stated	the rebranded F (the site's inline SVG) on Featherless's yellow tile #FEF47A, as the favicon shows it; composed locally, F at 64% of the tile
 figma	mono	https://unpkg.com/simple-icons@16.34.0/icons/figma.svg	CC0-1.0 (Simple Icons); Figma trademark	Figma mark, for its status page
+firecrawl	color	https://unpkg.com/@lobehub/icons-static-svg@1.101.0/icons/firecrawl-color.svg	MIT (LobeHub icons); Firecrawl trademark	Firecrawl flame mark
 fireworks	color	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/fireworks-color.svg	MIT (LobeHub icons); Fireworks AI trademark	Fireworks AI colour mark
 flyio	mono	https://unpkg.com/simple-icons@16.34.0/icons/flydotio.svg	CC0-1.0 (Simple Icons); Fly.io trademark	Fly.io mark, for its status page
 forge	mono	https://forgecode.dev/shared/brand/favicon-light.svg	trademark, no licence stated	{F} mark, fill #1c1d1f; favicon-dark.svg (white) and favicon.svg (media-query) also on site
@@ -114,6 +117,7 @@ ona	mono	https://ona.com/ona-dark-favicon.svg	trademark, no licence stated	Ona m
 openai	mono	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/openai.svg	MIT (LobeHub icons); OpenAI trademark	OpenAI mark
 opencode	color	TokenTracker dashboard/public/brand-logos/opencode.svg	MIT (TokenTracker)	OpenCode mark in its purple
 openrouter	color	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/openrouter-color.svg	MIT (LobeHub icons); OpenRouter trademark	OpenRouter colour mark
+parallel	mono	https://parallel.ai/icon.svg	trademark, no licence stated	Parallel lines-in-disc mark, site favicon; the white background circle it ships on was removed so the mark stands alone
 perplexity	color	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/perplexity-color.svg	MIT (LobeHub icons); Perplexity trademark	Perplexity colour mark, for API keys
 pi	mono	TokenTracker dashboard/public/brand-logos/pi.svg	MIT (TokenTracker)	Pi mark from pi.dev
 pinecone	mono	https://www.pinecone.io/images/pinecone-logo.svg	trademark, no licence stated	pinecone mark, from the site's logo SVG; the wordmark paths were removed
@@ -155,6 +159,7 @@ taotoken	mono	https://static.taotoken.net/release/taotoken_fe/dist/logo.svg	trad
 tavily	mono	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/tavily.svg	MIT (LobeHub icons); Tavily trademark	Tavily mark, for its status page
 temporal	mono	https://unpkg.com/simple-icons@16.34.0/icons/temporal.svg	CC0-1.0 (Simple Icons); Temporal trademark	Temporal mark, for its status page
 tencentcloud	color	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/tencentcloud-color.svg	MIT (LobeHub icons); Tencent trademark	Tencent Cloud mark, for TokenHub plans
+tinyfish	color	https://docs.tinyfish.ai/logo/dark.svg	trademark, no licence stated	TinyFish fish mark; the logo file ships the mark and wordmark together, so the fish's paths were pulled out into a mark-only SVG
 together	color	https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons/together-color.svg	MIT (LobeHub icons); Together AI trademark	Together AI colour mark
 travisci	mono	https://unpkg.com/simple-icons@16.34.0/icons/travisci.svg	CC0-1.0 (Simple Icons); Travis CI trademark	Travis CI mark, for its status page
 turso	mono	https://cdn.simpleicons.org/turso	CC0-1.0 (Simple Icons); Turso trademark	Turso mark
