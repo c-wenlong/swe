@@ -55,7 +55,7 @@ Status words:
 
 | Feature | Mac | Web | iOS | Notes |
 | --- | --- | --- | --- | --- |
-| Plugins | yes | part | - | Web: no rename or Add marketplace |
+| Plugins | yes | part | - | Mac: the detail card also shows `swe plugins info` — declared MCP servers with env/header key names (missing secrets marked), per-skill and MCP call counts, last-change date. Web: no rename or Add marketplace |
 | Skills | yes | part | - | Web: no frontmatter edits |
 | Skills per-harness selection | yes | yes | - | `swe skills enable|disable|sync`: a harness's skills folder can be a dir of per-skill links instead of one whole-folder link — `except` (all but the disabled) or `only` (just the enabled), recorded in `skill_links.json` and reconciled by `swe init` and `swe skills new`. `swe skills --json` roots carry `state: "selection"`, `mode`, `enabled`, `disabled`. Mac: a shared skill's detail card toggles it per harness folder — linked, missing, keep and selection roots all take the switch, ignored/relink/skipped show a non-clicking chip — and the folder row still offers Link all/Unlink all; the card also shows `swe skills usage` counts (calls, sessions, last used, per-harness) when the session index is on. Web: same states, Link all/Unlink all only |
 | AGENTS.md | yes | part | - | Web: read and link, no editing |
