@@ -28,7 +28,7 @@ import subprocess
 import time
 
 from swe.paths import account_homes_for, session_status_cache_file_for
-from swe.sessions import opencode_store, parse_cache
+from swe.sessions import cursor_store, opencode_store, parse_cache
 from swe.sessions.engines.common import read_tail_lines, sqlite_uri
 from swe.sessions.models import Session
 
@@ -347,6 +347,72 @@ def _probe_cursor(session: Session, ctx: dict):
     """(phase, text) from the terminal ``turn_ended`` record."""
     path = _cursor_transcript(session, ctx)
     return _walk_tail(path, _cursor_walk) if path else (None, "")
+
+
+def _cursor_store_index() -> dict:
+    """Session id -> ``store.db`` path under ``~/.cursor/{acp-sessions,chats}``."""
+    return cursor_store.store_index()
+
+
+def _cursor_store_path(session: Session, ctx: dict) -> str:
+    index = _indexed(ctx, "cursor_stores", _cursor_store_index)
+    return index.get(session.session_id, "")
+
+
+def _cursor_store_verdict(path: str):
+    """(phase, text) from the store's last ordered message.
+
+    The store has no ``turn_ended`` record: a landed reply's last blob is
+    the assistant text itself, and anything else at the tail — a user
+    prompt, a tool result, a reasoning-only assistant — means the turn is
+    still open. There is no error or abort signal.
+    """
+    message = cursor_store.last_message(path)
+    if message is None:
+        return None, ""
+    if message.get("role") != "assistant":
+        return "midturn", ""
+    text = _blocks_text(message.get("content") or [])
+    if text:
+        return "finished", text
+    return "midturn", ""
+
+
+def _cursor_verdict(session: Session, ctx: dict):
+    """``_verdict`` for Cursor: the JSONL tail, else the ``store.db`` tail.
+
+    Sessions whose transcript is an ACP store instead of an
+    agent-transcripts file get the same answer from
+    ``_cursor_store_verdict``, cached against the ``-wal`` file when one
+    exists — that is the file every write touches. With neither file the
+    session stays unknown.
+    """
+    path = _cursor_transcript(session, ctx)
+    if path:
+
+        def compute():
+            phase, text = _walk_tail(path, _cursor_walk)
+            return [phase, phase == "finished" and needs_followup(text)]
+
+        return tuple(
+            parse_cache.lookup_in(
+                ctx.get("tail_cache"), "cursor", path, compute,
+                valid=_valid_verdict)
+        )
+    store = _cursor_store_path(session, ctx)
+    if not store:
+        return None, False
+    cache_file = store + "-wal" if os.path.exists(store + "-wal") else store
+
+    def compute_store():
+        phase, text = _cursor_store_verdict(store)
+        return [phase, phase == "finished" and needs_followup(text)]
+
+    return tuple(
+        parse_cache.lookup_in(
+            ctx.get("tail_cache"), "cursor", cache_file, compute_store,
+            valid=_valid_verdict)
+    )
 
 
 def _pid_alive(pid: int) -> bool:
@@ -903,6 +969,7 @@ _TAIL_PROBES = {
 # the answer that comes from one file's bytes. Keyed the same way.
 _VERDICT_PROBES = {
     _probe_cline: _cline_verdict,
+    _probe_cursor: _cursor_verdict,
 }
 
 
@@ -919,6 +986,7 @@ def transcript_path(session: Session, ctx: dict) -> str:
 _TAIL_CACHE_MODULES = (
     "swe.sessions.parse_cache",
     "swe.sessions.status",
+    "swe.sessions.cursor_store",
     "swe.sessions.engines.common",
 )
 _PHASES = (None, "error", "aborted", "midturn", "finished")

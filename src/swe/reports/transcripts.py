@@ -16,7 +16,7 @@ from typing import Any, Callable, Iterable
 
 from swe.console import sanitize, sanitize_document
 from swe.paths import expand_user
-from swe.sessions import opencode_store
+from swe.sessions import cursor_store, opencode_store
 from swe.sessions.engines.common import sqlite_uri
 from swe.sessions.models import Session
 
@@ -461,9 +461,67 @@ for _name, _root, _patterns in (
     ("claude", "~/.claude/projects", ("*.jsonl",)),
     ("droid", "~/.factory/sessions", ("*.jsonl",)),
     ("pi", "~/.pi/agent/sessions", ("*.jsonl",)),
-    ("cursor", "~/.cursor/projects", ("*.jsonl",)),
 ):
     READER_REGISTRY[_name] = _jsonl_reader(_root, _patterns)
+
+
+def _cursor_store_block(block: Any) -> Any:
+    """Rename a store blob's AI-SDK fields to the block shapes readers know."""
+    if not isinstance(block, dict):
+        return block
+    kind = str(block.get("type") or "").lower()
+    if kind == "tool-call":
+        return {
+            "type": "tool_use",
+            "name": block.get("toolName"),
+            "input": block.get("args"),
+        }
+    if kind == "tool-result":
+        return {
+            "type": "tool_result",
+            "name": block.get("toolName"),
+            "content": block.get("result")
+            if block.get("result") is not None
+            else block.get("experimental_content"),
+        }
+    return block
+
+
+def _read_cursor_store(path: str) -> list[NormalizedMessage]:
+    messages: list[NormalizedMessage] = []
+    for record in cursor_store.read_messages(path):
+        content = record.get("content")
+        blocks = (
+            [_cursor_store_block(block) for block in content]
+            if isinstance(content, list)
+            else content
+        )
+        messages.extend(_messages_from_content(_role(record.get("role")), blocks))
+    return messages
+
+
+@register_reader("cursor")
+def _read_cursor(session: Session) -> NormalizedTranscript:
+    """The agent-transcripts JSONL when it exists, else the ACP ``store.db``.
+
+    ``~/.cursor/acp-sessions/<id>/`` and ``~/.cursor/chats/<ws>/<id>/`` hold
+    the sessions the editor and headless runs make without a transcript
+    file; ``cursor_store`` decodes their manifest-ordered message blobs.
+    """
+    home = session.account_home or os.path.expanduser("~/.cursor")
+    path = _find_session_file(
+        Path(os.path.join(home, "projects")), session.session_id, ("*.jsonl",)
+    )
+    if path is not None:
+        transcript = _new(session, [path])
+        transcript.messages = _read_jsonl(path)
+        return transcript
+    store = cursor_store.find_store(session.session_id, home)
+    if not store:
+        return _unreadable(session, "transcript file not found")
+    transcript = _new(session, [Path(store)])
+    transcript.messages = _read_cursor_store(store)
+    return transcript
 
 
 @register_reader("codex")

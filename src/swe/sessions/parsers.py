@@ -24,7 +24,7 @@ from swe.sessions.engines import (
     strip_file_uri,
 )
 from swe.sessions.engines.jsonl_engine import event_cwd
-from swe.sessions import failures, opencode_store, parse_cache
+from swe.sessions import cursor_store, failures, opencode_store, parse_cache
 from swe.sessions.models import Session
 
 
@@ -1229,54 +1229,106 @@ def _is_cursor_scan(value) -> bool:
     )
 
 
+def _cursor_transcript_sessions() -> list[Session]:
+    """Sessions from ``~/.cursor/projects/*/agent-transcripts`` JSONL files."""
+    sessions: list[Session] = []
+    projects_dir = os.path.expanduser("~/.cursor/projects")
+    if not os.path.exists(projects_dir):
+        return sessions
+    home = os.path.expanduser("~")
+    try:
+        # ⚡ Bolt: Using os.scandir to reduce stat syscalls
+        with os.scandir(projects_dir) as enc_entry_it:
+            for enc_entry in enc_entry_it:
+                transcripts_dir = os.path.join(enc_entry.path, "agent-transcripts")
+                if not os.path.isdir(transcripts_dir):
+                    continue
+                with os.scandir(transcripts_dir) as uuid_entry_it:
+                    for uuid_entry in uuid_entry_it:
+                        if not uuid_entry.is_dir():
+                            continue
+                        jsonl_path = os.path.join(uuid_entry.path, f"{uuid_entry.name}.jsonl")
+                        if not os.path.isfile(jsonl_path):
+                            continue
+                        mtime = get_mtime(jsonl_path)
+                        if mtime == 0:
+                            continue
+                        # The transcript scan is cached per file; meta.json
+                        # and the directory checks below run every time.
+                        prompt_title, all_paths = parse_cache.lookup(
+                            "cursor:scan",
+                            jsonl_path,
+                            lambda fp=jsonl_path: _cursor_scan(fp, home),
+                            valid=_is_cursor_scan,
+                        )
+                        meta = _cursor_meta(uuid_entry.name)
+                        title = _cursor_meta_title(meta)
+                        sessions.append(
+                            Session(
+                                timestamp=mtime,
+                                agent="Cursor",
+                                path=_cursor_session_dir(enc_entry.path, all_paths, meta),
+                                title=prompt_title if title is None else title,
+                                session_id=uuid_entry.name,
+                                tool_name="cursor",
+                            )
+                        )
+    except Exception as exc:
+        failures.record("cursor", exc)
+    return sessions
+
+
+def _cursor_store_sessions(seen: set[str]) -> list[Session]:
+    """Sessions whose transcript is a ``store.db`` (ACP runs, ``chats``).
+
+    ``cursor_store`` owns the format. An id already listed by the
+    agent-transcripts scan keeps that row; the store copy is the same
+    session's own record, not a second session.
+    """
+    sessions: list[Session] = []
+    try:
+        for sid, session_dir in cursor_store.session_dirs():
+            if sid in seen:
+                continue
+            seen.add(sid)
+            meta = cursor_store.read_meta_json(session_dir)
+            title = _cursor_meta_title(meta)
+            cwd = meta.get("cwd")
+            store_meta: dict = {}
+            workspace = ""
+            if title is None or not (isinstance(cwd, str) and cwd.strip()):
+                store_meta, workspace = cursor_store.session_fields(
+                    os.path.join(session_dir, "store.db")
+                )
+                if title is None:
+                    title = _cursor_meta_title({"title": store_meta.get("name")})
+            if isinstance(cwd, str) and cwd.strip():
+                cwd = cwd.strip()
+                if os.path.isfile(cwd):
+                    cwd = os.path.dirname(cwd)
+            else:
+                cwd = workspace
+            sessions.append(
+                Session(
+                    timestamp=cursor_store.store_stamp(session_dir, meta, store_meta),
+                    agent="Cursor",
+                    path=cwd,
+                    title=title or "",
+                    session_id=sid,
+                    tool_name="cursor",
+                )
+            )
+    except Exception as exc:
+        failures.record("cursor", exc)
+    return sessions
+
+
 def parse_cursor():
     """Cursor agent-transcripts layout is unique; keep custom scanner."""
 
     def custom() -> list[Session]:
-        sessions: list[Session] = []
-        projects_dir = os.path.expanduser("~/.cursor/projects")
-        if not os.path.exists(projects_dir):
-            return sessions
-        home = os.path.expanduser("~")
-        try:
-            # ⚡ Bolt: Using os.scandir to reduce stat syscalls
-            with os.scandir(projects_dir) as enc_entry_it:
-                for enc_entry in enc_entry_it:
-                    transcripts_dir = os.path.join(enc_entry.path, "agent-transcripts")
-                    if not os.path.isdir(transcripts_dir):
-                        continue
-                    with os.scandir(transcripts_dir) as uuid_entry_it:
-                        for uuid_entry in uuid_entry_it:
-                            if not uuid_entry.is_dir():
-                                continue
-                            jsonl_path = os.path.join(uuid_entry.path, f"{uuid_entry.name}.jsonl")
-                            if not os.path.isfile(jsonl_path):
-                                continue
-                            mtime = get_mtime(jsonl_path)
-                            if mtime == 0:
-                                continue
-                            # The transcript scan is cached per file; meta.json
-                            # and the directory checks below run every time.
-                            prompt_title, all_paths = parse_cache.lookup(
-                                "cursor:scan",
-                                jsonl_path,
-                                lambda fp=jsonl_path: _cursor_scan(fp, home),
-                                valid=_is_cursor_scan,
-                            )
-                            meta = _cursor_meta(uuid_entry.name)
-                            title = _cursor_meta_title(meta)
-                            sessions.append(
-                                Session(
-                                    timestamp=mtime,
-                                    agent="Cursor",
-                                    path=_cursor_session_dir(enc_entry.path, all_paths, meta),
-                                    title=prompt_title if title is None else title,
-                                    session_id=uuid_entry.name,
-                                    tool_name="cursor",
-                                )
-                            )
-        except Exception as exc:
-            failures.record("cursor", exc)
+        sessions = _cursor_transcript_sessions()
+        sessions.extend(_cursor_store_sessions({s.session_id for s in sessions}))
         return sessions
 
     return parse_jsonl_projects(

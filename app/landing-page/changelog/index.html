@@ -369,6 +369,19 @@ thread moves its rollout there, and an archived session still ran.</p>
 </ul>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
+<li><p><strong>Cursor's <code>store.db</code> sessions list and read.</strong> <code>~/.cursor/acp-sessions/&lt;id&gt;/</code>
+and <code>~/.cursor/chats/&lt;workspace&gt;/&lt;id&gt;/</code> hold the sessions Cursor's editor
+agent, SDK and headless runs write without an <code>agent-transcripts</code> JSONL:
+title and cwd come from <code>meta.json</code> and the session manifest, and the
+transcript lives in <code>store.db</code> as content-addressed blobs ordered by the
+<code>latestRootBlobId</code> manifest chain. A new <code>sessions/cursor_store.py</code>
+decodes that format, <code>parse_cursor</code> lists its sessions, the transcript
+reader falls back to it when no JSONL exists, and the status probe reads
+a store's tail (a landed assistant text is <code>finished</code>; the store records
+no error or abort signal). A session id that exists in both formats keeps
+its JSONL row, and one the account-wide usage feed reports but no local
+machine holds stays details-only.</p>
+</li>
 <li><p><strong>Remote sessions can run over the Agent Client Protocol.</strong> <code>swe remote attach</code> (and the apps' Attach) now picks a harness's ACP mode
 when its CLI has one installed (<code>devin acp</code>, and cursor-agent or
 copilot builds that list it), after the codex and opencode channels
