@@ -132,8 +132,10 @@ first-pass, ~1,700 guard refusals, 453 ack-unblocks in 171 sessions.
 
 ## Phasing
 
-- v0 (this doc + store): `insights.sqlite` DDL, T0 metrics pass, `swe insights`.
-  No model calls anywhere.
+- v0 (this doc + store + T0 pass): `insights.sqlite` DDL and the T0
+  metrics pass landed (`insights/store.py`, `insights/metrics.py`,
+  `insights/t0.py` — drain callable, no trigger wired yet). `swe insights`
+  remains. No model calls anywhere.
 - v1: T2 trigger hooks, `outcome`/`first_pass`, app Insights tab,
   orchestration rollups (dispatched → finished → failed per batch).
 - v2: optional launchd scoring, benchmarks/evals on the metric layer.
