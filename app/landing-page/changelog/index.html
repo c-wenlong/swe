@@ -386,8 +386,11 @@ machine holds stays details-only.</p>
 now three: <code>inference</code> for the AI providers, <code>infra</code> for deploy and
 platform keys, and the new <code>services</code> for the agent-facing APIs a
 tool calls rather than deploys onto: search, scraping, research and
-browser services. <code>DEFAULT_SERVICES</code> ships five — Parallel,
-Firecrawl, TinyFish, Browser Use and Exa — seeded into providers.json
+browser services. <code>DEFAULT_SERVICES</code> ships twenty-one — Parallel,
+Firecrawl, TinyFish, Browser Use, Exa, Tavily, Brave Search,
+Browserbase, Apify, E2B, Runloop, Supermemory, Pinecone, Langfuse,
+Braintrust, ElevenLabs, Deepgram, AssemblyAI, Cartesia, Stability AI
+and Replicate — seeded into providers.json
 like the other built-ins, so <code>swe providers list</code> prints a Service
 Providers table after the AI and Infra sections, a <code>services</code> filter,
 a slug or an env var narrows to it, and <code>swe providers add --kind=services</code> registers one (existing custom kinds still file
@@ -398,7 +401,10 @@ drag order, marks and add/edit/remove/check flow under its own
 <code>servicesOrder</code> and <code>servicesKeys</code> stores — inference claims a
 variable or heading first, then infra, then services — with a Move to
 Services action on the Inference tab to match Move to Infra. Each
-service's Check button probes a cheap authenticated endpoint. The web
+service's Check button probes a cheap authenticated endpoint, except
+Brave (its API answers a bad key with a 422, not a rejection the
+check can read) and Langfuse (the API wants the public/secret pair
+as basic auth). The web
 app reads the same merged registry, so service keys keep their names,
 env vars and key URLs in its provider data; it has an Infra tab but
 no Services tab yet.</p>

@@ -97,6 +97,11 @@ import Testing
         ("TINYFISH_API_KEY", "X-API-Key", "https://agent.tinyfish.ai/v1/runs"),
         ("BROWSER_USE_API_KEY", "X-Browser-Use-API-Key", "https://api.browser-use.com/api/v3/sessions"),
         ("EXA_API_KEY", "x-api-key", "https://api.exa.ai/websets/v0/searches"),
+        ("BROWSERBASE_API_KEY", "x-bb-api-key", "https://api.browserbase.com/v1/projects"),
+        ("E2B_API_KEY", "X-API-KEY", "https://api.e2b.dev/sandboxes"),
+        ("PINECONE_API_KEY", "Api-Key", "https://api.pinecone.io/indexes"),
+        ("ELEVENLABS_API_KEY", "xi-api-key", "https://api.elevenlabs.io/v1/user"),
+        ("CARTESIA_API_KEY", "X-API-Key", "https://api.cartesia.ai/voices"),
     ])
     func aHeaderProbeSendsTheServiceHeader(name: String, header: String, url: String) async throws {
         let transport = FakeTransport()
@@ -108,6 +113,53 @@ import Testing
         #expect(request.url?.absoluteString == url)
         #expect(request.value(forHTTPHeaderField: header) == key)
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+    }
+
+    /// AssemblyAI takes the bare key in `authorization` — the standard
+    /// header, but with no scheme word.
+    @Test func assemblyAiSendsTheBareKeyInAuthorization() async throws {
+        let transport = FakeTransport()
+        transport.reply(200)
+        let probe = try #require(APIKeyProbe.probe(forName: "ASSEMBLYAI_API_KEY"))
+        _ = await APIKeyChecker(transport: transport).check(key: key, probe: probe)
+        let request = try #require(transport.requests.first)
+        #expect(request.url?.absoluteString
+                == "https://api.assemblyai.com/v2/transcript?limit=1")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == key)
+    }
+
+    /// Deepgram and Replicate read `Authorization: Token <key>` rather
+    /// than Bearer.
+    @Test(arguments: [
+        ("DEEPGRAM_API_KEY", "https://api.deepgram.com/v1/projects"),
+        ("REPLICATE_API_TOKEN", "https://api.replicate.com/v1/models"),
+    ])
+    func aTokenProbeSendsAuthorizationToken(name: String, url: String) async throws {
+        let transport = FakeTransport()
+        transport.reply(200)
+        let probe = try #require(APIKeyProbe.probe(forName: name))
+        _ = await APIKeyChecker(transport: transport).check(key: key, probe: probe)
+        let request = try #require(transport.requests.first)
+        #expect(request.url?.absoluteString == url)
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Token \(key)")
+    }
+
+    /// Tavily and Supermemory only read the key on a POST; the request
+    /// carries the body the table lists.
+    @Test(arguments: [
+        ("TAVILY_API_KEY", "https://api.tavily.com/search", "{}"),
+        ("SUPERMEMORY_API_KEY", "https://api.supermemory.ai/v4/search", "{\"q\":\"ping\"}"),
+    ])
+    func aServicePostProbeSendsItsBody(name: String, url: String, body: String) async throws {
+        let transport = FakeTransport()
+        transport.reply(200)
+        let probe = try #require(APIKeyProbe.probe(forName: name))
+        _ = await APIKeyChecker(transport: transport).check(key: key, probe: probe)
+        let request = try #require(transport.requests.first)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.absoluteString == url)
+        #expect(request.httpBody == Data(body.utf8))
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(key)")
     }
 
     @Test func firecrawlGoesOutAsBearer() async throws {

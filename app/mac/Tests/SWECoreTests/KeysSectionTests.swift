@@ -248,7 +248,7 @@ import Testing
     @Test func everyServiceStatesItsCheck() {
         let reasoned: [KeysSection: Set<String>] = [
             .infra: ["fly", "railway", "heroku"],
-            .services: [],
+            .services: ["brave", "langfuse"],
         ]
         for section in KeysSection.allCases {
             for provider in section.providers {

@@ -280,8 +280,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now three: `inference` for the AI providers, `infra` for deploy and
   platform keys, and the new `services` for the agent-facing APIs a
   tool calls rather than deploys onto: search, scraping, research and
-  browser services. `DEFAULT_SERVICES` ships five — Parallel,
-  Firecrawl, TinyFish, Browser Use and Exa — seeded into providers.json
+  browser services. `DEFAULT_SERVICES` ships twenty-one — Parallel,
+  Firecrawl, TinyFish, Browser Use, Exa, Tavily, Brave Search,
+  Browserbase, Apify, E2B, Runloop, Supermemory, Pinecone, Langfuse,
+  Braintrust, ElevenLabs, Deepgram, AssemblyAI, Cartesia, Stability AI
+  and Replicate — seeded into providers.json
   like the other built-ins, so `swe providers list` prints a Service
   Providers table after the AI and Infra sections, a `services` filter,
   a slug or an env var narrows to it, and `swe providers add
@@ -293,7 +296,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `servicesOrder` and `servicesKeys` stores — inference claims a
   variable or heading first, then infra, then services — with a Move to
   Services action on the Inference tab to match Move to Infra. Each
-  service's Check button probes a cheap authenticated endpoint. The web
+  service's Check button probes a cheap authenticated endpoint, except
+  Brave (its API answers a bad key with a 422, not a rejection the
+  check can read) and Langfuse (the API wants the public/secret pair
+  as basic auth). The web
   app reads the same merged registry, so service keys keep their names,
   env vars and key URLs in its provider data; it has an Infra tab but
   no Services tab yet.

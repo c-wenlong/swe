@@ -13,6 +13,8 @@ public struct APIKeyProbe: Equatable, Sendable {
         case xApiKey
         /// `x-goog-api-key: <key>`.
         case googApiKey
+        /// `Authorization: Token <key>` (Deepgram, Replicate).
+        case token
         /// `<name>: <key>` — services that take the key under their own
         /// header (x-api-key, X-Browser-Use-API-Key).
         case header(String)
@@ -117,6 +119,37 @@ public struct APIKeyProbe: Equatable, Sendable {
         put(get(.header("X-Browser-Use-API-Key"), "https://api.browser-use.com/api/v3/sessions"),
             "BROWSER_USE_API_KEY")
         put(get(.header("x-api-key"), "https://api.exa.ai/websets/v0/searches"), "EXA_API_KEY")
+        // The common agent services. Tavily and Supermemory only read
+        // the key on a POST, so a real key's empty body earns a request
+        // error that counts as works; both refuse a fake with 401.
+        // AssemblyAI takes the bare key in `authorization`; Browserbase,
+        // ElevenLabs, Pinecone, Cartesia and E2B each take their own
+        // header; Deepgram and Replicate take `Token <key>`. Brave
+        // answers a bad key with a 422, which reads as a request error
+        // rather than a rejection, and Langfuse's API wants the
+        // public/secret pair as basic auth: both have no check.
+        put(APIKeyProbe(hosts: [URL(string: "https://api.tavily.com/search")!],
+                        method: "POST", body: Data("{}".utf8), auth: .bearer,
+                        worksOnBadRequest: true), "TAVILY_API_KEY")
+        put(APIKeyProbe(hosts: [URL(string: "https://api.supermemory.ai/v4/search")!],
+                        method: "POST", body: Data("{\"q\":\"ping\"}".utf8),
+                        auth: .bearer, worksOnBadRequest: false), "SUPERMEMORY_API_KEY")
+        put(get(.header("x-bb-api-key"), "https://api.browserbase.com/v1/projects"),
+            "BROWSERBASE_API_KEY")
+        put(get(.bearer, "https://api.apify.com/v2/acts?limit=1"),
+            "APIFY_TOKEN", "APIFY_API_TOKEN")
+        put(get(.header("X-API-KEY"), "https://api.e2b.dev/sandboxes"), "E2B_API_KEY")
+        put(get(.bearer, "https://api.runloop.ai/v1/devboxes"), "RUNLOOP_API_KEY")
+        put(get(.header("Api-Key"), "https://api.pinecone.io/indexes"), "PINECONE_API_KEY")
+        put(get(.bearer, "https://api.braintrust.dev/v1/project?limit=1"), "BRAINTRUST_API_KEY")
+        put(get(.header("xi-api-key"), "https://api.elevenlabs.io/v1/user"),
+            "ELEVENLABS_API_KEY", "XI_API_KEY")
+        put(get(.token, "https://api.deepgram.com/v1/projects"), "DEEPGRAM_API_KEY")
+        put(get(.header("authorization"), "https://api.assemblyai.com/v2/transcript?limit=1"),
+            "ASSEMBLYAI_API_KEY")
+        put(get(.header("X-API-Key"), "https://api.cartesia.ai/voices"), "CARTESIA_API_KEY")
+        put(get(.bearer, "https://api.stability.ai/v1/user/account"), "STABILITY_API_KEY")
+        put(get(.token, "https://api.replicate.com/v1/models"), "REPLICATE_API_TOKEN")
         for plan in InferenceCatalog.all {
             if let probe = InferenceCatalog.probe(for: plan) { put(probe, plan.keyName) }
         }
@@ -141,6 +174,10 @@ public struct APIKeyProbe: Equatable, Sendable {
             return "Railway's GraphQL API answers a bad key with a 200 body of errors, which can't tell the key apart."
         case "HEROKU_API_KEY":
             return "Heroku needs a versioned Accept header SWE doesn't send."
+        case "BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY":
+            return "Brave's API answers a bad key with a 422, which can't tell the key apart."
+        case "LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_HOST":
+            return "Langfuse's API wants the public/secret pair as basic auth, so one key alone can't check."
         default:
             return "SWE doesn't know how to check this key."
         }
@@ -504,6 +541,8 @@ public struct APIKeyChecker: Sendable {
             request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         case .googApiKey:
             request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+        case .token:
+            request.setValue("Token \(key)", forHTTPHeaderField: "Authorization")
         case .header(let name):
             request.setValue(key, forHTTPHeaderField: name)
         }
