@@ -38,6 +38,10 @@ for line in sys.stdin:
             sys.exit(3)
         if name == "slow":
             time.sleep(float(args.get("seconds", 1)))
+        if name == "fail":
+            result = {"content": [{"type": "text", "text": "no"}], "isError": True}
+            send({"jsonrpc": "2.0", "id": message["id"], "result": result})
+            continue
         if name == "ask":
             send({"jsonrpc": "2.0", "id": "srv-1", "method": "roots/list"})
             answer = json.loads(sys.stdin.readline())

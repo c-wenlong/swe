@@ -236,9 +236,14 @@ class GatewayStats:
         if path is not None:
             try:
                 data = json.loads(path.read_text())
+            except (OSError, ValueError):
+                data = {}
+            if isinstance(data, dict):
                 for name, row in (data.get("servers") or {}).items():
-                    if isinstance(row, dict):
-                        self._servers[str(name)] = {
+                    if not (isinstance(row, dict) and isinstance(name, str)):
+                        continue
+                    try:
+                        self._servers[name] = {
                             "calls": int(row.get("calls") or 0),
                             "calls_by_tool": {str(k): int(v) for k, v in
                                               (row.get("calls_by_tool") or {}).items()
@@ -246,8 +251,8 @@ class GatewayStats:
                             "call_errors": int(row.get("call_errors") or 0),
                             "last_call": row.get("last_call"),
                         }
-            except (OSError, ValueError, TypeError):
-                pass
+                    except (TypeError, ValueError):
+                        continue
 
     def record(self, server: str, tool: str | None, is_error: bool) -> None:
         with self._lock:
@@ -255,7 +260,11 @@ class GatewayStats:
                                                     "call_errors": 0, "last_call": None})
             row["calls"] += 1
             if tool:
-                row["calls_by_tool"][tool] = row["calls_by_tool"].get(tool, 0) + 1
+                tools = row["calls_by_tool"]
+                # A caller can mint tool names forever; past the cap new
+                # names fold into one bucket so stats.json stays bounded.
+                key = tool if len(tools) < 64 or tool in tools else "<other>"
+                tools[key] = tools.get(key, 0) + 1
             if is_error:
                 row["call_errors"] += 1
             row["last_call"] = datetime.now().isoformat(timespec="seconds")
@@ -538,8 +547,13 @@ class Backend:
         if message.get("method") == "tools/call":
             params = message.get("params")
             tool = params.get("name") if isinstance(params, dict) else None
+            result = response.get("result")
+            # A tool failure reports isError inside the result, not a
+            # protocol-level error.
+            is_error = ("error" in response
+                        or (isinstance(result, dict) and result.get("isError") is True))
             self._stats.record(self.name, tool if isinstance(tool, str) else None,
-                               "error" in response)
+                               is_error)
         response["id"] = message.get("id")
         return response
 

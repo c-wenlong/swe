@@ -272,10 +272,14 @@ def gateway_status() -> dict:
     for name, server in sorted(get_hub_servers().items()):
         if not gw.is_shared(server):
             continue
-        row = running.get(name) or {"state": "idle" if live else "down", "pid": None,
-                                    "uptime_s": None, "starts": 0, "error": None}
+        # An older daemon has no counters: its rows read as zeros.
+        row = {"calls": 0, "calls_by_tool": {}, "call_errors": 0, "last_call": None,
+               **(running.get(name) or {"state": "idle" if live else "down", "pid": None,
+                                        "uptime_s": None, "starts": 0, "error": None})}
         rows.append({"name": name, "url": gw.url_for(name, settings["port"]),
-                     **{k: row.get(k) for k in ("state", "pid", "uptime_s", "starts", "error")}})
+                     **{k: row.get(k) for k in ("state", "pid", "uptime_s", "starts", "error",
+                                                "calls", "calls_by_tool", "call_errors",
+                                                "last_call")}})
     return {"enabled": settings["enabled"], "port": settings["port"],
             "installed": installed, "pid": pid, "reachable": live is not None,
             "error": (live or {}).get("error"), "servers": rows}
