@@ -125,6 +125,55 @@ class McpEnableDisableTest(unittest.TestCase):
         r = self.run_mcp("disable", "nothing")
         self.assertEqual(r.returncode, 1)
 
+    def codex(self):
+        return (self.home / ".codex" / "config.toml").read_text()
+
+    def seed_codex(self):
+        (self.home / ".codex").mkdir(exist_ok=True)
+        (self.home / ".codex" / "config.toml").write_text(
+            'model = "x"\n[mcp_servers.github]\ncommand = "npx"\n')
+
+    def test_disable_for_flag_only_touches_named_harnesses(self):
+        self.seed()
+        self.seed_codex()
+        r = self.run_mcp("disable", "github", "--for=claude")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertNotIn("github", self.claude())
+        self.assertIn("github", self.codex())
+        self.assertEqual(self.swe_state()["disabled"], {"claude": ["github"]})
+
+    def test_disable_for_an_unknown_harness_fails(self):
+        self.seed()
+        r = self.run_mcp("disable", "github", "--for=bogus")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("github", self.claude())
+
+    def test_disable_for_a_harness_without_it_is_skipped(self):
+        self.seed()
+        r = self.run_mcp("disable", "github", "--for=codex")
+        self.assertEqual(r.returncode, 1, r.stderr + r.stdout)
+        self.assertIn("not defined", r.stdout)
+
+    def test_json_output_reports_the_places(self):
+        self.seed()
+        r = self.run_mcp("disable", "github", "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["data"]["disabled_in"], ["claude"])
+
+    def test_enable_when_nothing_is_disabled_fails(self):
+        self.seed()
+        r = self.run_mcp("enable", "github")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not disabled", r.stdout)
+
+    def test_enable_without_a_hub_copy_clears_the_mark(self):
+        self.seed()
+        self.run_mcp("disable", "github")
+        self.hub_write({})  # the hub copy is gone
+        r = self.run_mcp("enable", "github")
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(self.swe_state().get("disabled", {}).get("claude"), None)
+
 
 if __name__ == "__main__":
     unittest.main()
