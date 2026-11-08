@@ -133,7 +133,9 @@ struct SelectMenu<Value: Hashable>: View {
 /// Each row is icon slot, title and a trailing check on the current pick;
 /// the icon column drops out when no option carries one. It opens on the
 /// selection so the pick isn't below the fold, and the arrow keys walk the
-/// highlight the way the system menu's do.
+/// highlight the way the system menu's do. A `searchPrompt` adds a filter
+/// field on top, for lists too long to scan: typing narrows the rows while
+/// the arrows and Return keep working with the field still focused.
 struct SelectOptionList<Value: Hashable>: View {
     var options: [(value: Value, title: String)]
     /// The pick the check and the opening highlight sit on.
@@ -147,31 +149,78 @@ struct SelectOptionList<Value: Hashable>: View {
     /// The popover's floor; the select passes its face's width where that
     /// tops it.
     var minWidth: CGFloat = 200
+    /// A filter field's prompt, or nil for a list short enough to scan.
+    var searchPrompt: String? = nil
     /// The row the arrow keys are on; Return picks it.
     @State private var highlighted: Value?
+    /// The filter's text. Typing narrows `shown` by title.
+    @State private var query = ""
     @FocusState private var listFocused: Bool
+    @FocusState private var searchFocused: Bool
 
     /// Rows keep an icon column once any option carries one, so titles
     /// still line up.
     private var hasIcons: Bool { !icons.isEmpty || !symbols.isEmpty }
 
+    /// The rows the filter leaves, or all of them.
+    private var shown: [(value: Value, title: String)] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return options }
+        return options.filter { $0.title.localizedCaseInsensitiveContains(q) }
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(options, id: \.value) { option in
-                        row(option).id(option.value)
-                    }
+            VStack(alignment: .leading, spacing: 0) {
+                if let searchPrompt {
+                    SearchField(prompt: searchPrompt, text: $query)
+                        .focused($searchFocused)
+                        // The field eats plain arrows as caret moves;
+                        // onMoveCommand sees them first, so the highlight
+                        // still walks while typing.
+                        .onMoveCommand { direction in
+                            switch direction {
+                            case .up: _ = step(-1, proxy)
+                            case .down: _ = step(1, proxy)
+                            default: break
+                            }
+                        }
+                        .onSubmit { if let highlighted { pick(highlighted) } }
+                        .padding(.horizontal, 8).padding(.top, 8)
+                        .padding(.bottom, 2)
+                    SettingsDivider()
                 }
-                .padding(.vertical, 6)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if shown.isEmpty {
+                            Text("Nothing matches.")
+                                .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
+                                .frame(maxWidth: .infinity).padding(.vertical, 12)
+                        } else {
+                            ForEach(shown, id: \.value) { option in
+                                row(option).id(option.value)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+                .focusable()
+                .focusEffectDisabled()
+                .focused($listFocused)
             }
-            .focusable()
-            .focusEffectDisabled()
-            .focused($listFocused)
             .onAppear {
+                // A stale filter must not hide the selection on reopen.
+                query = ""
                 highlighted = selection
-                listFocused = true
+                if searchPrompt == nil { listFocused = true } else { searchFocused = true }
                 proxy.scrollTo(selection, anchor: .center)
+            }
+            .onChange(of: query) {
+                // While filtering, Return takes the top match; a cleared
+                // field lands back on the selection.
+                highlighted = query.trimmingCharacters(in: .whitespaces).isEmpty
+                    ? selection : shown.first?.value
+                if let highlighted { proxy.scrollTo(highlighted) }
             }
             .onKeyPress(.upArrow) { step(-1, proxy) }
             .onKeyPress(.downArrow) { step(1, proxy) }
@@ -186,9 +235,9 @@ struct SelectOptionList<Value: Hashable>: View {
     }
 
     private func step(_ by: Int, _ proxy: ScrollViewProxy) -> KeyPress.Result {
-        guard !options.isEmpty else { return .ignored }
-        let index = options.firstIndex { $0.value == highlighted } ?? (by > 0 ? -1 : options.count)
-        let next = options[min(max(index + by, 0), options.count - 1)].value
+        guard !shown.isEmpty else { return .ignored }
+        let index = shown.firstIndex { $0.value == highlighted } ?? (by > 0 ? -1 : shown.count)
+        let next = shown[min(max(index + by, 0), shown.count - 1)].value
         highlighted = next
         proxy.scrollTo(next)
         return .handled
@@ -242,6 +291,9 @@ struct PopoverSelect<Value: Hashable>: View {
     /// What the face shows; the selected option's title when nil. A title
     /// also keeps the face from drawing the picked option's logo.
     var title: String? = nil
+    /// A filter field's prompt over the open list, for lists too long to
+    /// scan; nil keeps the list bare.
+    var searchPrompt: String? = nil
     @State private var open = false
     @State private var hovering = false
 
@@ -282,7 +334,7 @@ struct PopoverSelect<Value: Hashable>: View {
             SelectOptionList(options: options.map { ($0.value, $0.title) },
                              selection: selection,
                              pick: { selection = $0; open = false },
-                             icons: icons, minWidth: 220)
+                             icons: icons, minWidth: 220, searchPrompt: searchPrompt)
         }
     }
 }
