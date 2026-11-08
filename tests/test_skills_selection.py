@@ -563,6 +563,23 @@ class SelectionTest(unittest.TestCase):
                          (home / "elsewhere" / "foo").resolve())
         self.assertEqual([r for r in rows if "foo" in r["added"]], [])
 
+    def test_unlink_drops_a_link_through_a_vendored_shared_skill(self):
+        # A shared skill can itself be a link out (vendored from
+        # elsewhere). A selection's link at it lands outside shared on a
+        # full resolve, but it is still swe's link: unlink must take it.
+        home = self._home()
+        shared = home / ".swe" / "skills"
+        self._write_skill(home / "dotfiles", "foo")
+        (shared / "foo").symlink_to(home / "dotfiles" / "foo")
+        self._write_skill(shared, "bar")
+        root = self._linked(home)
+        set_skill_enabled("bar", "codex", enabled=False, home=home, cwd=home)
+
+        self.assertTrue((root / "foo").is_symlink())
+        unlink_skill_root("codex", home=home, cwd=home)
+
+        self.assertFalse((root / "foo").exists())
+
     def test_move_to_shared_keeps_a_promoted_skill_off_an_unrelated_only_root(self):
         # The claiming above is for the root the skill came from; another
         # harness's only selection still holds a promoted skill out.

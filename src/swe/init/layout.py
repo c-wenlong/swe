@@ -394,10 +394,12 @@ def skill_root_links(root: Path, shared: Path) -> dict[str, Path]:
     resolves into ``shared``.
 
     A selection root is a real directory of these links. Dangling ones
-    count too — resolve() settles where a link points without the target
+    count too — normpath settles where a link points without the target
     existing, and a link that aimed into shared is swe's to remove whether
     or not the skill behind it is still there.
     """
+    import os
+
     try:
         shared_resolved = shared.resolve()
     except (OSError, RuntimeError):
@@ -411,14 +413,17 @@ def skill_root_links(root: Path, shared: Path) -> dict[str, Path]:
         if not entry.is_symlink():
             continue
         try:
-            target = entry.resolve()
-        except (OSError, RuntimeError):
+            target = Path(os.readlink(entry))
+        except OSError:
             continue
-        try:
-            target.relative_to(shared_resolved)
-        except ValueError:
-            continue
-        out[entry.name] = entry
+        if not target.is_absolute():
+            target = entry.parent / target
+        # One hop only: a link written at shared/foo is swe's even when
+        # shared/foo is itself a link out — resolve() would follow that
+        # second hop too and land outside shared.
+        target = Path(os.path.normpath(target))
+        if target.is_relative_to(shared) or target.is_relative_to(shared_resolved):
+            out[entry.name] = entry
     return out
 
 

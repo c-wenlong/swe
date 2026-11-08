@@ -112,7 +112,11 @@ def cmd_skills_unlink(args):
 def _cmd_skills_toggle(args, enabled: bool) -> int:
     verb = "enable" if enabled else "disable"
     json_view = "--json" in args
-    args = expand_value_flags(args, {"--harness"})
+    try:
+        args = expand_value_flags(args, {"--harness"})
+    except ValueError as exc:
+        print(c("red", f"  {exc}"), file=error_stream(json_view))
+        return 1
     harness = None
     rest = []
     i = 0

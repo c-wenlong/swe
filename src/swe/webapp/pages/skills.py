@@ -452,6 +452,10 @@ def _new(ctx, home: Path, body: dict) -> dict:
             target, _ = create(name.strip(), (description or "").strip() or None, home)
         except (ValueError, OSError) as exc:
             raise PageError(422, "bad_skill", str(exc)) from exc
+        # Same follow-up as `swe skills new`: the new shared skill links
+        # into every except selection right away, not on the next sync.
+        from swe.skills.link_ops import reconcile_all_selections
+        linked_into = [row["label"] for row in reconcile_all_selections(home)]
         after = _inventory(home)
     # The inventory lists real paths (macOS's /var is /private/var).
     mine = {_real(target), _real(target.parent)}
@@ -459,6 +463,7 @@ def _new(ctx, home: Path, body: dict) -> dict:
     reply.update({
         "action": "new",
         "created": str(target),
+        "linked_into": linked_into,
         "skill": next((s for s in after["skills"] if _real(s["path"]) in mine), None),
     })
     return reply
