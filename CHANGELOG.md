@@ -263,6 +263,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cursor's `store.db` sessions list and read.** `~/.cursor/acp-sessions/<id>/`
+  and `~/.cursor/chats/<workspace>/<id>/` hold the sessions Cursor's editor
+  agent, SDK and headless runs write without an `agent-transcripts` JSONL:
+  title and cwd come from `meta.json` and the session manifest, and the
+  transcript lives in `store.db` as content-addressed blobs ordered by the
+  `latestRootBlobId` manifest chain. A new `sessions/cursor_store.py`
+  decodes that format, `parse_cursor` lists its sessions, the transcript
+  reader falls back to it when no JSONL exists, and the status probe reads
+  a store's tail (a landed assistant text is `finished`; the store records
+  no error or abort signal). A session id that exists in both formats keeps
+  its JSONL row, and one the account-wide usage feed reports but no local
+  machine holds stays details-only.
+
+
 - **Remote sessions can run over the Agent Client Protocol.** `swe
   remote attach` (and the apps' Attach) now picks a harness's ACP mode
   when its CLI has one installed (`devin acp`, and cursor-agent or
