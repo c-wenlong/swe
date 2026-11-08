@@ -12,6 +12,12 @@ import SwiftUI
 /// spent on the tip instead of the control underneath. Every tip window
 /// is flagged `ignoresMouseEvents` once it attaches, so clicks pass
 /// through to whatever the bubble happens to cover.
+///
+/// The pin tap is a local event monitor on the anchor's window, not a
+/// gesture: it watches the click go by and pins, so it can never take
+/// one either. A TapGesture — even a simultaneous one — raced the
+/// control underneath and won, which is what spent a Button's first
+/// click on the tip.
 struct HoverTip: ViewModifier {
     var text: String
     /// A bold first line above the text, such as a skill's name.
@@ -23,8 +29,8 @@ struct HoverTip: ViewModifier {
     var replacesLabel = true
     /// Off for views where a click means something else (a draggable
     /// row, a mark inside a Button's label): the tip still opens on a
-    /// resting hover but never pins, and attaches no live tap, so the
-    /// click reaches the row or Button underneath.
+    /// resting hover but never pins. Clicks always reach the view now;
+    /// the flag only says whether a click also pins the tip.
     var pinsOnClick = true
     /// Off while the row is mid-drag: an open tip would cover the rows
     /// the pointer is choosing between. Gates behaviour only — the view
@@ -46,16 +52,9 @@ struct HoverTip: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(AnchorWindow(window: $anchorWindow))
+            .background(AnchorWindow(window: $anchorWindow,
+                                     watchesPresses: pinsOnClick, pinTap: pinTap))
             .contentShape(.rect)
-            // The tap pins the tip; a text selection would take it first.
-            .textSelection(.disabled)
-            // A tip that never pins attaches no live tap at all: even a
-            // tap that ignores the click claims it, so a tip inside a
-            // Button's label would leave the Button dead. Masking keeps
-            // the view tree one shape either way.
-            .gesture(TapGesture().onEnded { pinTap() },
-                     including: pinsOnClick ? .all : .subviews)
             .onHover { inside in
                 guard enabled, inside != hovering else { return }
                 hovering = inside
@@ -81,6 +80,9 @@ struct HoverTip: ViewModifier {
             .modifier(TipAccessibility(text: title.map { "\($0): \(text)" } ?? text,
                                        replacesLabel: replacesLabel))
             .accessibilityAddTraits(pinsOnClick ? .isButton : [])
+            // The press monitor hears real mice only: VoiceOver's press
+            // goes through this named action instead.
+            .accessibilityAction(named: Text("Pin the tip")) { pinTap() }
             .popover(isPresented: $open, arrowEdge: .bottom) {
                 tipContent
             }
@@ -110,6 +112,11 @@ struct HoverTip: ViewModifier {
         } else {
             open = true
             pinned = true
+        }
+        // A popover can't present in an offscreen test window, so tests
+        // watch this post to know a click really pinned the tip.
+        if pinned {
+            NotificationCenter.default.post(name: .hoverTipPinned, object: nil)
         }
     }
 
@@ -179,27 +186,72 @@ private struct TipBubble: View {
     }
 }
 
-/// An invisible NSView behind the tipped content that reports which
-/// window it sits in — how the tip finds its popover window to flag.
+extension Notification.Name {
+    /// Posted when a click pins a tip open. Nothing in the app listens;
+    /// tests observe it because a popover cannot present offscreen.
+    static let hoverTipPinned = Notification.Name("SWEHoverTipPinned")
+}
+
+/// An invisible NSView behind the tipped content. It reports which
+/// window it sits in — how the tip finds its popover window to flag —
+/// and, for a tip that pins on click, watches the window's left
+/// mouse-downs for one inside the anchor's cell. A monitor only ever
+/// observes the event, so the press always goes on to the view.
 private struct AnchorWindow: NSViewRepresentable {
     @Binding var window: NSWindow?
+    /// Off for a tip that never pins: no monitor is installed at all.
+    var watchesPresses: Bool
+    var pinTap: () -> Void
 
     func makeNSView(context: Context) -> NSView {
         let view = ReporterView()
         view.report = { window = $0 }
+        view.watchesPresses = watchesPresses
+        view.pinTap = pinTap
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        (nsView as? ReporterView)?.report = { window = $0 }
+        let view = nsView as? ReporterView
+        view?.report = { window = $0 }
+        view?.watchesPresses = watchesPresses
+        view?.pinTap = pinTap
     }
 
     private final class ReporterView: NSView {
         var report: ((NSWindow?) -> Void)?
-        override func viewDidMoveToWindow() { report?(window) }
+        var watchesPresses = false
+        var pinTap: (() -> Void)?
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            report?(window)
+            if window != nil, monitor == nil, watchesPresses {
+                monitor = NSEvent.addLocalMonitorForEvents(
+                    matching: .leftMouseDown
+                ) { [weak self] event in
+                    if self?.claims(event) == true { self?.pinTap?() }
+                    return event
+                }
+            }
+            if window == nil, let monitor {
+                NSEvent.removeMonitor(monitor)
+                self.monitor = nil
+            }
+        }
+
         override func layout() {
             super.layout()
             report?(window)
+        }
+
+        /// Whether a press belongs to this tip: in this window and inside
+        /// the anchor's own bounds — the same answer a tap gesture's hit
+        /// test gave, minus the claim. The press goes on to the view
+        /// either way.
+        private func claims(_ event: NSEvent) -> Bool {
+            guard event.window === window else { return false }
+            return bounds.contains(convert(event.locationInWindow, from: nil))
         }
     }
 }
