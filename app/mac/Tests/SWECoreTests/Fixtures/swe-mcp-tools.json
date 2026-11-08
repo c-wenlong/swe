@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "data": {
+    "name": "fixture-stdio",
+    "transport": "stdio",
+    "server": {"name": "fixture-mcp", "version": "1.4.0"},
+    "protocol_version": "2025-06-18",
+    "tools": [
+      {"name": "fixture_search", "description": "Search the fixture index"},
+      {"name": "fixture_fetch", "description": "Fetch one fixture document"}
+    ],
+    "error": null
+  }
+}

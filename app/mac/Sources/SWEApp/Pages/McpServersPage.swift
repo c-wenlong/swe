@@ -563,6 +563,12 @@ private struct ServerSheet: View {
     @State private var confirmingRemove = false
     /// Harnesses whose switch is mid-flight on `swe mcp enable/disable`.
     @State private var toggling: Set<String> = []
+    /// `swe mcp info`: the files behind this server, loaded on open.
+    @State private var info: McpServerInfo?
+    /// Nil until "Load tools" runs the handshake — spawning a server is
+    /// the user's call, not the sheet's.
+    @State private var toolsResult: McpToolsResult?
+    @State private var toolsLoading = false
 
     /// `swe mcp enable`/`disable` for this one harness, then a reload so
     /// the sheet and the grid behind it show the new state.
@@ -580,6 +586,140 @@ private struct ServerSheet: View {
             self.error = error.localizedDescription
         }
     }
+
+    /// `swe mcp info` for the Files section — file reads only, cheap
+    /// enough to run when the sheet opens.
+    private func loadInfo() async {
+        do {
+            info = try await app.swe.mcpInfo(server: server.name)
+        } catch {
+            // An swe from before `mcp info` has nothing to show; the row
+            // data in the sheet header still covers the basics.
+            info = nil
+        }
+    }
+
+    /// `swe mcp tools` spawns the server for the handshake, so it runs
+    /// only on the button.
+    private func loadTools() async {
+        toolsLoading = true
+        defer { toolsLoading = false }
+        do {
+            toolsResult = try await app.swe.mcpTools(server: server.name)
+        } catch {
+            toolsResult = McpToolsResult(name: server.name, transport: server.transport,
+                                         error: error.localizedDescription)
+        }
+    }
+
+    /// Every file that defines the server or holds its off-mark, plus the
+    /// live gateway row swe saw.
+    @ViewBuilder private func filesSection(_ info: McpServerInfo) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Files").font(Theme.cardTitle)
+            ForEach(info.places, id: \.place) { place in
+                HStack(spacing: 10) {
+                    if McpServer.isHubSource(place.place) {
+                        Image(systemName: "shippingbox")
+                            .foregroundStyle(Theme.textSecondary)
+                            .frame(width: 16)
+                    } else {
+                        HarnessMarkView(harness: place.place, size: 16)
+                    }
+                    Text(place.state == "hub" ? "SWE hub" : HarnessMark(place.place).name)
+                        .font(Theme.bodySmall).foregroundStyle(Theme.textPrimary)
+                    if place.state == "off" {
+                        Badge("off")
+                    }
+                    Spacer(minLength: 8)
+                    Text(displayPath(place.path))
+                        .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                        .lineLimit(1).truncationMode(.middle)
+                    if let stamp = relativeStamp(place.updated) {
+                        Text(stamp).font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    }
+                }
+            }
+            if info.shared {
+                Facts(label: "Shared", value: "Served once through the mcp gateway")
+            }
+            if let gateway = info.gateway {
+                Facts(label: "Gateway", value: gatewaySummary(gateway))
+            }
+            if let stamp = relativeStamp(info.updated), info.places.count > 1 {
+                Facts(label: "Updated", value: stamp)
+            }
+        }
+    }
+
+    /// The server's tool list, from a real handshake on demand.
+    @ViewBuilder private var toolsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Tools").font(Theme.cardTitle)
+                Spacer()
+                if toolsLoading {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Button(toolsResult == nil ? "Load tools" : "Reload") {
+                        Task { await loadTools() }
+                    }
+                    .secondaryButton()
+                }
+            }
+            if let toolsResult {
+                if let failure = toolsResult.error {
+                    Text(failure).font(Theme.caption).foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if toolsResult.tools.isEmpty {
+                    Text("The server answered with no tools.")
+                        .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                } else {
+                    ForEach(toolsResult.tools, id: \.name) { tool in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(tool.name)
+                                .font(Theme.font(size: 12, design: .monospaced))
+                                .foregroundStyle(Theme.textPrimary)
+                            if !tool.description.isEmpty {
+                                Text(tool.description)
+                                    .font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text("Starts the server once to ask what it offers.")
+                    .font(Theme.caption).foregroundStyle(Theme.textMuted)
+            }
+        }
+    }
+
+    private func gatewaySummary(_ gateway: McpServerInfo.GatewayRow) -> String {
+        var bits = [gateway.state]
+        if let pid = gateway.pid { bits.append("pid \(pid)") }
+        if let up = gateway.uptimeS { bits.append("up \(up)s") }
+        if let starts = gateway.starts { bits.append("starts \(starts)") }
+        if let error = gateway.error, !error.isEmpty { bits.append("error: \(error)") }
+        return bits.joined(separator: " · ")
+    }
+
+    /// "3h ago"-style stamp from an ISO mtime; nil when it won't parse.
+    private func relativeStamp(_ iso: String?) -> String? {
+        guard let iso else { return nil }
+        let parsed = ISO8601DateFormatter().date(from: iso)
+            ?? ServerSheet.fractionalISO.date(from: iso)
+        guard let date = parsed else { return nil }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private static let fractionalISO: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
     /// The server as the latest load has it, so a finished sync shows its effect.
     var server: McpServer { model.server(named: initial.name) ?? initial }
@@ -644,6 +784,12 @@ private struct ServerSheet: View {
                         .font(Theme.caption).foregroundStyle(Theme.textMuted)
                 }
             }
+            if let info, !info.places.isEmpty {
+                Divider().overlay(Theme.border)
+                filesSection(info)
+            }
+            Divider().overlay(Theme.border)
+            toolsSection
             if !server.secretsMissing.isEmpty {
                 Divider().overlay(Theme.border)
                 needsValues
@@ -653,6 +799,7 @@ private struct ServerSheet: View {
         }
         .sheetScaffold()
         .onAppear(perform: resetChoice)
+        .task { await loadInfo() }
         .confirmationDialog("Remove \(server.name)?", isPresented: $confirmingRemove) {
             Button("Remove", role: .destructive) { Task { await removeServer() } }
         } message: {

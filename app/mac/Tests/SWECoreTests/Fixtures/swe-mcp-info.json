@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "data": {
+    "name": "fixture-stdio",
+    "transport": "stdio",
+    "command": "fixture-mcp",
+    "args": ["serve", "--fast"],
+    "url": null,
+    "env_keys": ["FIXTURE_TOKEN"],
+    "header_keys": [],
+    "secrets_missing": ["FIXTURE_TOKEN"],
+    "in_hub": true,
+    "shared": true,
+    "harnesses": ["claude", "codex"],
+    "conflict": false,
+    "variants": [["claude", "codex"]],
+    "disabled_in": ["kilo"],
+    "places": [
+      {
+        "place": "claude",
+        "path": "/tmp/home/.claude.json",
+        "state": "on",
+        "updated": "2026-11-02T18:44:00"
+      },
+      {
+        "place": "kilo",
+        "path": "/tmp/home/.kilocode/mcp.json",
+        "state": "off",
+        "updated": "2026-11-01T09:12:00"
+      },
+      {
+        "place": "swe",
+        "path": "/tmp/home/.swe/mcp.json",
+        "state": "hub",
+        "updated": "2026-11-03T11:20:00"
+      }
+    ],
+    "health": "ok",
+    "health_detail": null,
+    "updated": "2026-11-03T11:20:00",
+    "gateway": {
+      "name": "fixture-stdio",
+      "state": "running",
+      "pid": 4123,
+      "uptime_s": 10800,
+      "starts": 2,
+      "error": null
+    }
+  }
+}

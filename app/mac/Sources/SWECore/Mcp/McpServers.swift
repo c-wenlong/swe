@@ -579,6 +579,160 @@ extension SweClient {
         // A partial switch still prints its document on a nonzero exit.
         return try await call(args, allowFailure: true)
     }
+
+    /// `swe mcp info NAME --json`: files, switches, secrets and live
+    /// gateway state for the server sheet. File reads only — no spawn.
+    public func mcpInfo(server name: String) async throws -> McpServerInfo {
+        try await call(["mcp", "info", name, "--json"])
+    }
+
+    /// `swe mcp tools NAME --json`: spawns the server for a handshake, so
+    /// this is lazy in the UI. A failed handshake still prints its
+    /// document — `error` — on a nonzero exit.
+    public func mcpTools(server name: String) async throws -> McpToolsResult {
+        try await call(["mcp", "tools", name, "--json"], allowFailure: true)
+    }
+}
+
+/// `swe mcp info NAME --json`: one server's detail beyond the row.
+///
+/// Everything here is optional-tolerant — a swe from before `info`
+/// exists can't be asked for it, and newer fields must not break an
+/// older decode.
+public struct McpServerInfo: Decodable, Sendable, Equatable {
+    /// One file that defines the server or holds its off-mark.
+    public struct Place: Decodable, Sendable, Equatable {
+        /// Harness name, or `swe` for the hub file.
+        public let place: String
+        public let path: String
+        /// `on` (the file defines it), `off` (swe-disabled) or `hub`.
+        public let state: String
+        /// The file's mtime, ISO; nil when it does not exist.
+        public let updated: String?
+    }
+
+    /// The live gateway's `/status` row for a shared server.
+    public struct GatewayRow: Decodable, Sendable, Equatable {
+        public let name: String
+        /// `running`, `idle` or `error`.
+        public let state: String
+        public let pid: Int?
+        public let uptimeS: Int?
+        public let starts: Int?
+        public let error: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case name, state, pid, starts, error, uptimeS
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+            state = try c.decodeIfPresent(String.self, forKey: .state) ?? ""
+            pid = try c.decodeIfPresent(Int.self, forKey: .pid)
+            uptimeS = try c.decodeIfPresent(Int.self, forKey: .uptimeS)
+            starts = try c.decodeIfPresent(Int.self, forKey: .starts)
+            error = try c.decodeIfPresent(String.self, forKey: .error)
+        }
+    }
+
+    public let name: String
+    public let transport: String
+    public let command: String?
+    public let args: [String]
+    public let url: String?
+    public let envKeys: [String]
+    public let headerKeys: [String]
+    public let secretsMissing: [String]
+    public let inHub: Bool
+    /// Served through the mcp gateway.
+    public let shared: Bool
+    public let harnesses: [String]
+    public let conflict: Bool
+    public let variants: [[String]]
+    public let disabledIn: [String]
+    public let places: [Place]
+    /// The `mcp status` probe result: `ok`, `error` or `unknown`.
+    public let health: String
+    public let healthDetail: String?
+    /// The newest place mtime.
+    public let updated: String?
+    public let gateway: GatewayRow?
+
+    private enum CodingKeys: String, CodingKey {
+        case name, transport, command, args, url, shared, conflict, variants, places, health, updated, gateway
+        case envKeys, headerKeys, secretsMissing, inHub, harnesses, disabledIn, healthDetail
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        transport = try c.decodeIfPresent(String.self, forKey: .transport) ?? "unknown"
+        command = try c.decodeIfPresent(String.self, forKey: .command)
+        args = try c.decodeIfPresent([String].self, forKey: .args) ?? []
+        url = try c.decodeIfPresent(String.self, forKey: .url)
+        envKeys = try c.decodeIfPresent([String].self, forKey: .envKeys) ?? []
+        headerKeys = try c.decodeIfPresent([String].self, forKey: .headerKeys) ?? []
+        secretsMissing = try c.decodeIfPresent([String].self, forKey: .secretsMissing) ?? []
+        inHub = try c.decodeIfPresent(Bool.self, forKey: .inHub) ?? false
+        shared = try c.decodeIfPresent(Bool.self, forKey: .shared) ?? false
+        harnesses = try c.decodeIfPresent([String].self, forKey: .harnesses) ?? []
+        conflict = try c.decodeIfPresent(Bool.self, forKey: .conflict) ?? false
+        variants = try c.decodeIfPresent([[String]].self, forKey: .variants) ?? []
+        disabledIn = try c.decodeIfPresent([String].self, forKey: .disabledIn) ?? []
+        places = try c.decodeIfPresent([Place].self, forKey: .places) ?? []
+        health = try c.decodeIfPresent(String.self, forKey: .health) ?? "unknown"
+        healthDetail = try c.decodeIfPresent(String.self, forKey: .healthDetail)
+        updated = try c.decodeIfPresent(String.self, forKey: .updated)
+        gateway = try c.decodeIfPresent(GatewayRow.self, forKey: .gateway)
+    }
+}
+
+/// `swe mcp tools NAME --json`: what a live handshake reported.
+public struct McpToolsResult: Decodable, Sendable, Equatable {
+    public struct Tool: Decodable, Sendable, Equatable {
+        public let name: String
+        public let description: String
+    }
+
+    /// The initialize result's `serverInfo` (name/version keys, if given).
+    public struct ServerInfo: Decodable, Sendable, Equatable {
+        public let name: String?
+        public let version: String?
+    }
+
+    public let name: String
+    public let transport: String
+    public let server: ServerInfo?
+    public let protocolVersion: String?
+    public let tools: [Tool]
+    /// Why the handshake failed; nil on success.
+    public let error: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case name, transport, server, tools, error, protocolVersion
+    }
+
+    public init(name: String, transport: String, server: ServerInfo? = nil,
+                protocolVersion: String? = nil, tools: [Tool] = [],
+                error: String? = nil) {
+        self.name = name
+        self.transport = transport
+        self.server = server
+        self.protocolVersion = protocolVersion
+        self.tools = tools
+        self.error = error
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        transport = try c.decodeIfPresent(String.self, forKey: .transport) ?? "unknown"
+        server = try c.decodeIfPresent(ServerInfo.self, forKey: .server)
+        protocolVersion = try c.decodeIfPresent(String.self, forKey: .protocolVersion)
+        tools = try c.decodeIfPresent([Tool].self, forKey: .tools) ?? []
+        error = try c.decodeIfPresent(String.self, forKey: .error)
+    }
 }
 
 /// `swe mcp enable/disable --json`: the harnesses the call switched.
