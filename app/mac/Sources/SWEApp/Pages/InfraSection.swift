@@ -604,7 +604,8 @@ private struct InfraKeyEditor: View {
             PopoverSelect(options: APIKeyProviders.infra.map { ($0.id, $0.name, $0.logo) }
                               + [("custom", "Custom provider", nil)],
                           selection: $providerChoice,
-                          title: providerChoice.isEmpty ? "Choose a provider" : nil)
+                          title: providerChoice.isEmpty ? "Choose a provider" : nil,
+                          searchPrompt: "Search infra services")
             .onChange(of: providerChoice) {
                 envVarChoice = picked?.envVars[0] ?? ""
                 saveAnyway = false
