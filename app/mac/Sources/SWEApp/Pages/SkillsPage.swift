@@ -544,6 +544,11 @@ private struct SkillLinksBlock: View {
                     }
                 }
             }
+            // A refused toggle lands in actionError; without this the
+            // chip just stays put with no reason shown.
+            if let error = model.actionError {
+                Text(error).font(Theme.caption).foregroundStyle(Theme.warning)
+            }
         }
     }
 

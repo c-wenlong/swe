@@ -387,7 +387,7 @@ let inventoryJSON = #"""
          "harnesses": [
           {"name": "codex", "label": "codex", "path": "/h/.codex/skills",
            "state": "selection", "mode": "except",
-           "enabled": [], "disabled": ["beta"]}
+           "enabled": ["alpha"], "disabled": ["beta"]}
          ],
          "skills": [
           {"name": "alpha", "path": "/h/.swe/skills/alpha",
@@ -450,8 +450,8 @@ let inventoryJSON = #"""
     @Test func togglingRunsEnableOrDisableWithTheRootPath() async throws {
         let (model, runner) = model([
             (["skills", "--json"], ok(inventoryJSON)),
-            (["skills", "enable"], ok(#"{"action": "enable", "changed": true}"#)),
-            (["skills", "disable"], ok(#"{"action": "disable", "changed": true}"#)),
+            (["skills", "enable"], ok(#"{"action": "enable", "mode": "only", "converted": true, "changed": true}"#)),
+            (["skills", "disable"], ok(#"{"action": "disable", "mode": "except", "converted": true, "changed": true}"#)),
         ])
         await model.load()
         let alpha = try #require(model.allSkills.first { $0.name == "alpha" })
@@ -459,6 +459,8 @@ let inventoryJSON = #"""
         let claude = try #require(model.roots.first { $0.name == "claude" })
         await model.setSkill(alpha, on: codex, enabled: true)
         await model.setSkill(alpha, on: claude, enabled: false)
+        // A decode failure would land in actionError and pass silently.
+        #expect(model.actionError == nil)
         #expect(runner.calls.contains(
             ["skills", "enable", "alpha", "--harness=/h/.codex/skills", "--json"]))
         #expect(runner.calls.contains(

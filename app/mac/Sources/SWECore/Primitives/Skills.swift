@@ -560,7 +560,18 @@ public final class SkillsModel {
             return roots.filter { seeing.contains($0.name) }.map { ($0, .linked, true, false) }
         }
         return roots.map { root in
-            let on = seeing.contains(root.name)
+            // `on` is this folder's state, not the harness name's: two
+            // folders can share a label (both read "foo"), so a linked
+            // root always loads a shared skill and a selection root
+            // answers from its own `enabled` list. For states the model
+            // has no per-folder data for, the name set is the only
+            // signal — good enough, since those chips can't flip anyway.
+            let on: Bool
+            switch root.link {
+            case .linked: on = true
+            case .selection: on = root.enabled.contains(skill.name)
+            case .notLinked, .blocked: on = seeing.contains(root.name)
+            }
             switch root.link {
             case .linked:
                 // Off converts the whole-folder link to an except selection.
