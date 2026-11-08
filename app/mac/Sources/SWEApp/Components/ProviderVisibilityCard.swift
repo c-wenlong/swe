@@ -1,14 +1,23 @@
 import SWECore
 import SwiftUI
 
-/// Settings' provider list, after TokenTracker's: drag to reorder, a switch
-/// per installed provider, Enable all / Disable all. Providers that aren't
-/// installed are greyed out and their switch is off and locked. A click on
-/// a row opens its install or uninstall steps.
+/// Settings' provider list, after TokenTracker's: a filter field, then
+/// drag to reorder, a switch per installed provider, Enable all / Disable
+/// all. Providers that aren't installed are greyed out and their switch is
+/// off and locked. A click on a row opens its install or uninstall steps.
 struct ProviderVisibilityCard: View {
     @Environment(AppModel.self) private var app
     @Bindable var model: ProviderVisibilityModel
     @State private var opened: ProviderVisibilityModel.Row?
+    /// The filter over the list; typing narrows the rows by name.
+    @State private var query = ""
+
+    /// The rows the filter leaves, or all of them.
+    private var shown: [ProviderVisibilityModel.Row] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return model.rows }
+        return model.rows.filter { $0.provider.name.localizedCaseInsensitiveContains(q) }
+    }
 
     var body: some View {
         SettingsCard {
@@ -36,19 +45,28 @@ struct ProviderVisibilityCard: View {
                 }
             }
             SettingsDivider()
-            ReorderableRows(model.rows) { id, before in
-                if let before {
-                    model.move(id, before: before)
-                } else {
-                    model.moveToEnd(id)
+            SearchField(prompt: "Filter providers", text: $query)
+                .padding(.vertical, 8)
+            SettingsDivider()
+            if shown.isEmpty {
+                Text("Nothing matches.")
+                    .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity).padding(.vertical, 16)
+            } else {
+                ReorderableRows(shown) { id, before in
+                    if let target = before ?? afterLast(dropping: id) {
+                        model.move(id, before: target)
+                    } else {
+                        model.moveToEnd(id)
+                    }
+                } row: { row in
+                    ProviderRow(row: row, checked: model.hasChecked, failed: model.checkError != nil,
+                                open: { opened = row }) {
+                        model.setEnabled(row.id, $0)
+                    }
                 }
-            } row: { row in
-                ProviderRow(row: row, checked: model.hasChecked, failed: model.checkError != nil,
-                            open: { opened = row }) {
-                    model.setEnabled(row.id, $0)
-                }
+                .padding(.vertical, 8)
             }
-            .padding(.vertical, 8)
         }
         // Closing the sheet rechecks, so an install or uninstall run from
         // it shows up in the switches.
@@ -58,6 +76,15 @@ struct ProviderVisibilityCard: View {
         // Once per swe: this card is rebuilt on every visit and at the
         // 720pt layout flip, and each check starts a swe process.
         .task(id: app.swePath) { await model.loadIfNeeded(for: app.swePath) }
+    }
+
+    /// Dropped below the last shown row: land just after it in the full
+    /// order, not after every row the filter hides. Nil when the last
+    /// shown row is already last, where the drop is the real end.
+    private func afterLast(dropping id: String) -> String? {
+        guard let last = shown.last(where: { $0.id != id }),
+              let index = model.rows.firstIndex(where: { $0.id == last.id }) else { return nil }
+        return model.rows[(index + 1)...].first { $0.id != id }?.id
     }
 }
 
