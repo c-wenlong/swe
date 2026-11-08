@@ -540,6 +540,15 @@ class TestGet(_Settings):
         self.assertIn("anthropic", ids)
         self.assertEqual((config / "providers.json").read_text(), before)
 
+    def test_the_payload_lists_the_plan_variables_for_the_tab_split(self):
+        prov = settings_page.get(self.ctx(), {})["providers"]
+        # The page keeps these on Inference however their headings read;
+        # the list is the same table test_remote_plan_providers keeps in
+        # step with the Mac's InferenceCatalog.all.
+        self.assertIn("VERCEL_TOKEN_PASS_KEY", prov["plan_vars"])
+        self.assertIn("GLM_CODING_PLAN_KEY", prov["plan_vars"])
+        self.assertEqual(prov["plan_vars"], sorted(set(prov["plan_vars"])))
+
     def test_the_catalog_carries_each_provider_s_kind(self):
         catalog = {r["id"]: r for r in settings_page.get(self.ctx(), {})["providers"]["catalog"]}
         # DEFAULT_INFRA's services land as infra; inference providers and

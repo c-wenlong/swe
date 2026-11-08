@@ -14,10 +14,11 @@ belongs to the hub machine:
 - ``providers``: Providers › Inference and Infra, as the Mac app's:
   ``keys``, every ``export`` in the API keys file in file order with its
   ``# Provider`` heading and the value masked (``APIKeyMask``'s form,
-  never the value), and ``catalog``, ``swe providers list``'s providers
+  never the value); ``catalog``, ``swe providers list``'s providers
   for the Add key picker (name, variables, ``kind`` for the tab split,
-  where to get a key). ``stamp`` fingerprints the file as read, so a
-  write over a newer file is refused.
+  where to get a key); and ``plan_vars``, the coding plans' key
+  variables the tab split keeps on Inference. ``stamp`` fingerprints
+  the file as read, so a write over a newer file is refused.
 - ``paths``: where the hub's swe, API keys file and MCP servers folder are.
 - ``session_search``: Experimental › Session search, the hub's transcript
   index as ``swe session index --status --json`` reports it (whether the
@@ -329,10 +330,15 @@ def _revoke(ctx, body: dict) -> dict:
 def _providers(ctx, home: Path) -> dict:
     from swe.paths import provider_keys_path_for
     from swe.providers import keyfile
+    from swe.remote.plan_providers import PLANS
 
     path = provider_keys_path_for(ctx.home)
     out = {"path": _display(path, home), "exists": path.exists(), "stamp": None,
-           "keys": [], "catalog": [], "error": None}
+           "keys": [], "catalog": [], "error": None,
+           # The tab split keeps a plan's key variable on Inference no
+           # matter which heading it sits under, like the Mac's
+           # InfraList checking InferenceCatalog.all first.
+           "plan_vars": sorted({p[2] for p in PLANS})}
     set_vars: set[str] | None = None
     try:
         keys, data = keyfile.load(path)

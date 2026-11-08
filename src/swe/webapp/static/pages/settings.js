@@ -423,6 +423,9 @@ function infraClaim(prov) {
       for (const v of c.env_vars) claimed.add(v);
     }
   }
+  // A coding plan's variable stays on Inference under any heading,
+  // like the Mac's InferenceCatalog.all check in InfraList.isInfra.
+  for (const v of prov.plan_vars || []) claimed.add(v);
   return { vars, names, claimed };
 }
 
