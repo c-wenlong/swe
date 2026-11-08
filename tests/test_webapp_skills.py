@@ -417,6 +417,55 @@ class TestWrites(_WriteHome, unittest.TestCase):
         self.assertNotIn("codex", reply["skill"]["harnesses"])
         self.assertNotIn("codex", self.links())
 
+    def test_toggle_enable_makes_an_only_selection(self):
+        reply = self.post("toggle", {"harness": self.path("codex"), "expect": "create",
+                                     "skill": str(self.shared), "enabled": True})
+        self.assertEqual(reply["result"]["action"], "enable")
+        self.assertEqual(reply["harness"]["state"], "selection")
+        self.assertEqual(reply["harness"]["mode"], "only")
+        self.assertEqual(reply["harness"]["enabled"], ["tdd"])
+        self.assertTrue(Path(self.path("codex"), "tdd").is_symlink())
+        self.assertIn("codex", reply["skill"]["harnesses"])
+
+    def test_toggle_disable_converts_a_linked_folder_to_except(self):
+        self.post("link", {"harness": self.path("codex")})
+        reply = self.post("toggle", {"harness": self.path("codex"), "expect": "linked",
+                                     "skill": str(self.shared), "enabled": False})
+        self.assertEqual(reply["result"]["mode"], "except")
+        self.assertEqual(reply["harness"]["disabled"], ["tdd"])
+        self.assertFalse(os.path.lexists(Path(self.path("codex")) / "tdd"))
+        self.assertNotIn("codex", reply["skill"]["harnesses"])
+
+    def test_toggle_enable_keeps_private_skills_beside_the_link(self):
+        reply = self.post("toggle", {"harness": self.path("claude"), "expect": "keep",
+                                     "skill": str(self.shared), "enabled": True})
+        self.assertEqual(reply["harness"]["state"], "selection")
+        self.assertTrue(Path(self.path("claude"), "tdd").is_symlink())
+        self.assertTrue(Path(self.path("claude"), "mine", "SKILL.md").is_file())
+        self.assertFalse(Path(self.path("claude"), "mine").is_symlink())
+
+    def test_toggle_refuses_a_non_shared_skill_and_a_bad_flag(self):
+        mine = _skill("mine", self.home / ".claude" / "skills" / "mine")
+        err = self.refused("toggle", {"harness": self.path("codex"),
+                                      "skill": mine["path"], "enabled": True})
+        self.assertEqual((err.status, err.code), (409, "not_shared"))
+        err = self.refused("toggle", {"harness": self.path("codex"),
+                                      "skill": str(self.shared), "enabled": "yes"})
+        self.assertEqual((err.status, err.code), (422, "bad_enabled"))
+
+    def test_toggle_refuses_a_folder_swe_cannot_attach_to(self):
+        kilo = Path(self.path("kilo"))
+        kilo.rmdir()
+        kilo.symlink_to(self.home / "elsewhere")
+        err = self.refused("toggle", {"harness": str(kilo),
+                                      "skill": str(self.shared), "enabled": True})
+        self.assertEqual((err.status, err.code), (409, "relink"))
+
+    def test_detail_carries_the_usage_shape(self):
+        got = page.get(self.ctx, {"skill": str(self.shared)})
+        # No index under the fake home: tracked false, not zero.
+        self.assertEqual(got["usage"], {"tracked": False})
+
     def test_unlink_refuses_a_folder_that_is_not_linked(self):
         err = self.refused("unlink", {"harness": self.path("claude")})
         self.assertEqual((err.status, err.code), (409, "not_linked"))

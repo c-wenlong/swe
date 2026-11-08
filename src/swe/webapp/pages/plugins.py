@@ -66,10 +66,20 @@ _NAMES = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"}
 
 
 def get(ctx, args: dict) -> dict:
+    home = home_path(ctx)
+    # `?info=<ref>` is the detail sheet's second read: declared MCP
+    # servers (key names, never values) and index usage from
+    # `swe plugins info`. Per ref, uncached, beside the view payloads.
+    ref = args.get("info")
+    if ref is not None:
+        from swe.plugins.info import plugin_info
+        data = plugin_info(ref, home)
+        if data is None:
+            raise PageError(404, "unknown_plugin", f"no plugin named {ref}")
+        return {"info": data, "machine": (ctx.machine or {}).get("name")}
     view = args.get("view") or "health"
     if view not in VIEWS:
         raise PageError(400, "bad_view", f"view must be one of {', '.join(VIEWS)}")
-    home = home_path(ctx)
     body, built_at = cached(view, home, refresh=args.get("refresh") == "1")
     return {**body, "view": view, "built_at": built_at,
             "machine": (ctx.machine or {}).get("name")}

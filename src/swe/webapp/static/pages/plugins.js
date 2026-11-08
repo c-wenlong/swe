@@ -664,11 +664,66 @@ function openPlugin(ref) {
       ${copies}
     </div>
     ${skills}
+    <div id="pl-info"></div>
     ${actionsSection(p, d)}
     <div class="sheet-actions"><button class="tab selected" value="close">Close</button></div>
   </form>`;
   bindActions(sheet);
   if (!sheet.open) sheet.showModal();
+  loadPluginInfo(ref, sheet);
+}
+
+/* `swe plugins info` beside the sheet's catalog fields: the MCP servers
+ * it declares (key names, never values), per-server and skill call
+ * counts, and the newest file change. Loaded after the sheet opens; an
+ * older swe has no `info`, and the section just stays empty. */
+async function loadPluginInfo(ref, sheet) {
+  const { status, data } = await api(`/v1/app/plugins?info=${encodeURIComponent(ref)}`);
+  if (!sheet.open || page.sheet !== ref) return;
+  if (status === 401) { sheet.close(); renderGate(); return; }
+  const slot = sheet.querySelector("#pl-info");
+  if (!slot) return;
+  if (status !== 200 || !data || !data.info) return;
+  slot.innerHTML = pluginInfoHtml(data.info);
+}
+
+function pluginInfoHtml(info) {
+  const keyChip = (kind, name) =>
+    `<span class="pl-key" title="${kind} key ${esc(name)}">${esc(kind)} ${esc(name)}</span>`;
+  const servers = (info.mcp_servers || []).map((s) => {
+    const bits = [];
+    if (s.in_hub) bits.push("in hub");
+    if ((s.harnesses || []).length) bits.push(`in ${s.harnesses.join(", ")}`);
+    if ((s.disabled_in || []).length) bits.push(`off in ${s.disabled_in.join(", ")}`);
+    const keys = [...(s.env_keys || []).map((k) => keyChip("env", k)),
+                  ...(s.header_keys || []).map((k) => keyChip("header", k)),
+                  // The placeholder names inside ${…}, not env keys — a
+                  // missing secret can sit in a header, arg or URL too.
+                  ...(s.secrets_missing || []).map((k) =>
+                    `<span class="pl-key missing" title="${esc(k)} is declared but unset">missing ${esc(k)}</span>`)].join("");
+    const calls = s.usage && s.usage.tracked && s.usage.calls ? ` · ${s.usage.calls} calls` : "";
+    return `<div class="pl-skill"><span class="pl-name"><code>${esc(s.name)}</code>
+      <span class="caption">${esc(bits.join(" · ") || "declared only")}${esc(calls)}</span></span>
+      ${keys ? `<div class="pl-keys">${keys}</div>` : ""}</div>`;
+  }).join("");
+  const u = info.usage;
+  let usage = "";
+  if (u && u.tracked) {
+    if (u.calls) {
+      usage = `${u.calls} calls across ${u.sessions} sessions`
+        + (u.last_used ? ` · last ${esc(String(u.last_used).slice(0, 10))}` : "")
+        + (u.skill_calls != null ? ` (${u.skill_calls} skill, ${u.mcp_calls} mcp)` : "");
+      const called = (info.skills || []).filter((s) => s.usage && s.usage.calls > 0);
+      if (called.length) usage += ` — ${called.map((s) => `${esc(s.name)} ${s.usage.calls}`).join(", ")}`;
+    } else {
+      usage = "No calls indexed yet — the index scans existing sessions too, but calls written before the skill input key tally as unattributed.";
+    }
+    usage = `<div class="field-row"><span class="caption">Usage</span><span class="caption">${usage}</span></div>`;
+  }
+  const updated = info.updated ? `<div class="field-row"><span class="caption">Last change</span><span class="caption">${esc(String(info.updated).slice(0, 10))}</span></div>` : "";
+  return (servers || usage || updated)
+    ? `<div class="caption">MCP servers</div><div class="pl-skill-list">${servers}</div>
+       <div class="fields">${usage}${updated}</div>` : "";
 }
 
 /* ------------------------------------------------- install, enable… */

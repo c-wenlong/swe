@@ -193,6 +193,22 @@ class TestBuilt(_CatalogHome, unittest.TestCase):
         self.assertEqual((body["view"], body["machine"], body["sources"]), ("health", "box", 1))
         self.assertIsInstance(body["built_at"], float)
 
+    def test_info_returns_the_detail_sheet_and_404s_unknown(self):
+        ctx = PageContext(home=self.home, state=type("S", (), {"machine": {"name": "box"}})())
+        body = page.get(ctx, {"info": "lsp@official"})
+        self.assertEqual(body["machine"], "box")
+        info = body["info"]
+        self.assertEqual(info["ref"], "lsp@official")
+        # The declared server surfaces env key names, never their values.
+        self.assertEqual(info["mcp_servers"][0]["name"], "lsp")
+        self.assertEqual(info["mcp_servers"][0]["env_keys"], ["TOKEN"])
+        self.assertNotIn("sk-secret", json.dumps(info))
+        self.assertEqual([s["name"] for s in info["skills"]], ["hover"])
+        self.assertEqual(info["skills"][0]["usage"], {"tracked": False})
+        with self.assertRaises(PageError) as raised:
+            page.get(ctx, {"info": "nope@official"})
+        self.assertEqual(raised.exception.status, 404)
+
 
 class TestRoute(HubBase):
     def setUp(self):
