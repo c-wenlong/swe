@@ -366,6 +366,23 @@ func fixture(_ name: String) throws -> Data {
         #expect(runner.calls == [["mcp", "remove", "s", "--from=swe,claude", "--json"]])
     }
 
+    @Test func setTypeArgvAndReply() async throws {
+        let runner = FakeRunner(CommandResult(status: 0, stdout: Data(
+            #"{"schema":1,"data":{"name":"s","type":"dev"}}"#.utf8), stderr: ""))
+        let result = try await SweClient(runner: runner).mcpSetType("dev", server: "s")
+        #expect(runner.calls == [["mcp", "set-type", "s", "dev", "--json"]])
+        #expect(result.name == "s")
+        #expect(result.type == "dev")
+    }
+
+    /// A cleared label (or a live `sse` marker swe leaves alone) decodes nil.
+    @Test func setTypeReplyDecodesNilType() async throws {
+        let runner = FakeRunner(CommandResult(status: 0, stdout: Data(
+            #"{"schema":1,"data":{"name":"s","type":null}}"#.utf8), stderr: ""))
+        let result = try await SweClient(runner: runner).mcpSetType("other", server: "s")
+        #expect(result.type == nil)
+    }
+
     @Test func secretNameDerivesAShellNameScopedToTheServer() {
         #expect(mcpSecretName(server: "my-srv", key: "X-Api-Key") == "MY_SRV_X_API_KEY")
         #expect(mcpSecretName(server: "1password", key: "Authorization") == "MCP_1PASSWORD_AUTHORIZATION")

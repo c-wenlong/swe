@@ -214,7 +214,7 @@ struct McpServersPage: View {
         .cardSheet(item: $selected) { server in
             if case .loaded(let inventory) = model.state {
                 ServerSheet(initial: server, harnesses: inventory.harnesses,
-                            active: inventory.activeHarnesses.filter { !hidden.contains($0) }, model: model) {
+                            model: model) {
                     await model.load(swe: app.swe, for: app.swePath, health: model.hasHealth)
                 }
             }
@@ -641,9 +641,11 @@ private struct ServerRow: View {
     /// is missing, and a plain track when the server is off everywhere.
     /// Flipping it runs `swe mcp disable`/`enable` for every harness the
     /// server touches; the hub restores the exact set on the way back.
+    /// The tint and tip are `mcpMasterTint`/`mcpMasterTip`, shared with
+    /// the server sheet's header switch.
     @ViewBuilder private var master: some View {
         let on = !server.harnesses.isEmpty
-        let tip = masterTip(on: on)
+        let tip = mcpMasterTip(server, on: on)
         Group {
             if masterBusy {
                 ProgressView().controlSize(.mini)
@@ -656,34 +658,12 @@ private struct ServerRow: View {
                         Task { await toggleRow(server, value); masterBusy = false }
                     }))
                 .labelsHidden()
-                .toggleStyle(AccentSwitchStyle(tint: masterTint(on: on)))
+                .toggleStyle(AccentSwitchStyle(tint: mcpMasterTint(server, on: on)))
                 .disabled(!on && server.disabledIn.isEmpty)
             }
         }
         .padding(.top, 2)
         .hoverTip(tip.text, title: tip.title, pinsOnClick: false)
-    }
-
-    private func masterTint(on: Bool) -> Color {
-        guard on else { return Theme.interactive }
-        if server.health == "error" { return Theme.danger }
-        if server.health == "ok", server.secretsMissing.isEmpty { return Theme.success }
-        return Theme.warning
-    }
-
-    private func masterTip(on: Bool) -> (text: String, title: String?) {
-        if !on {
-            return server.disabledIn.isEmpty
-                ? ("Not in any harness.", nil)
-                : ("Off everywhere. Turn the harnesses back on.", nil)
-        }
-        let health: String
-        switch server.health {
-        case "error": health = server.detail ?? "The probe is failing."
-        case "ok": health = server.secretsMissing.isEmpty ? "Healthy." : "A secret value is missing."
-        default: health = server.secretsMissing.isEmpty ? "Not probed yet." : "A secret value is missing."
-        }
-        return ("On for \(harnessNames(server.harnesses)). Turn off everywhere.", health)
     }
 
     /// "stdio · checkout · linear-mcp · main ↑1 ↓45 · Local changes": the
@@ -810,50 +790,80 @@ func variantLetter(_ index: Int) -> String {
     index < 26 ? String(UnicodeScalar(UInt8(65 + index))) : "\(index + 1)"
 }
 
-func healthColor(_ health: String) -> Color {
-    switch health {
-    case "ok": Theme.success
-    case "error": Theme.danger
-    default: Theme.textMuted
-    }
+/// The master switch's on-track tint: the health readout, red for a
+/// failing probe, amber when unprobed or a secret is missing, green for
+/// a healthy one; the off track stays plain. Shared by the table row's
+/// and the server sheet's master switches.
+func mcpMasterTint(_ server: McpServer, on: Bool) -> Color {
+    guard on else { return Theme.interactive }
+    if server.health == "error" { return Theme.danger }
+    if server.health == "ok", server.secretsMissing.isEmpty { return Theme.success }
+    return Theme.warning
 }
 
-/// One server: what it is, who has which definition, and a sync.
+/// What the master switch explains on hover: where the server is on and
+/// what the probe said, or how to bring the stashed set back.
+func mcpMasterTip(_ server: McpServer, on: Bool) -> (text: String, title: String?) {
+    if !on {
+        return server.disabledIn.isEmpty
+            ? ("Not in any harness.", nil)
+            : ("Off everywhere. Turn the harnesses back on.", nil)
+    }
+    let health: String
+    switch server.health {
+    case "error": health = server.detail ?? "The probe is failing."
+    case "ok": health = server.secretsMissing.isEmpty ? "Healthy." : "A secret value is missing."
+    default: health = server.secretsMissing.isEmpty ? "Not probed yet." : "A secret value is missing."
+    }
+    return ("On for \(harnessNames(server.harnesses)). Turn off everywhere.", health)
+}
+
+/// One server, hub-first: its definition, a switch per known harness,
+/// gateway stats, tools and files. The hub (mcp.json) is the source of
+/// truth — `swe mcp sync` writes it into harnesses and a harness-only
+/// server adopts into it on the next sync, so the sheet holds no copy
+/// form: only switches, facts and Remove.
 private struct ServerSheet: View {
     var initial: McpServer
-    /// Every harness swe reads, the sync targets.
+    /// Every harness swe reads; each gets a row and its switch.
     var harnesses: [String]
-    /// The harnesses the grid compares; missing ones are picked by default.
-    var active: [String]
     var model: McpModel
     var reload: () async -> Void
 
     @Environment(AppModel.self) private var app
     @Environment(\.dismissSheet) private var dismiss
-    /// The harness whose definition is copied. A name, not a group index, so
-    /// a reload that regroups definitions can't switch it to another one.
-    @State private var sourceHarness: String?
-    @State private var chosen: Set<String> = []
-    /// Harnesses ticked while shown as having their own definition: the only
-    /// ones a sync may replace.
-    @State private var approvedReplace: Set<String> = []
-    @State private var preview: McpSyncReport?
-    @State private var done: McpSyncReport?
     @State private var error: String?
-    @State private var running = false
-    @State private var confirmingOverwrite = false
+    /// Harnesses whose switch is mid-flight on `swe mcp enable/disable`.
+    @State private var toggling: Set<String> = []
+    /// The header's master switch mid-flight.
+    @State private var masterBusy = false
+    /// `swe mcp set-type` mid-flight.
+    @State private var typeBusy = false
+    @State private var removing = false
     /// The pasted value per missing ${NAME}, cleared after it is saved.
     @State private var secretDrafts: [String: String] = [:]
     @State private var savingSecret: String?
     @State private var confirmingRemove = false
-    /// Harnesses whose switch is mid-flight on `swe mcp enable/disable`.
-    @State private var toggling: Set<String> = []
     /// `swe mcp info`: the files behind this server, loaded on open.
     @State private var info: McpServerInfo?
     /// Nil until "Load tools" runs the handshake — spawning a server is
     /// the user's call, not the sheet's.
     @State private var toolsResult: McpToolsResult?
     @State private var toolsLoading = false
+
+    /// What one known harness holds for this server.
+    private enum HarnessState {
+        /// Defines the server; the switch sits on.
+        case on
+        /// swe-disabled: the entry left the file, its copy stays stashed.
+        case off
+        /// In the hub but not written here; on writes it like a sync does.
+        case notSynced
+        /// Accepts command servers only and the hub definition is a URL.
+        case localOnly
+        /// Harness-only server: nothing to restore until the hub adopts it.
+        case blocked
+    }
 
     /// `swe mcp enable`/`disable` for this one harness, then a reload so
     /// the sheet and the grid behind it show the new state.
@@ -871,6 +881,78 @@ private struct ServerSheet: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    /// The header's batch switch: off pulls the entry from every harness
+    /// (`swe mcp disable` for the whole set), on restores exactly the
+    /// harnesses marked off, like the table row's master switch.
+    private func setEverywhere(_ on: Bool) async {
+        masterBusy = true
+        defer { masterBusy = false }
+        error = nil
+        do {
+            let result = try await app.swe.mcpSetEnabled(
+                on, server: server.name,
+                in: on ? server.disabledIn : server.harnesses)
+            await reload()
+            await loadInfo()
+            if !result.failedIn.isEmpty {
+                error = "\(server.name) stayed off for \(result.failedIn.joined(separator: ", "))"
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// `swe mcp set-type` for the picker's new label, then a reload.
+    /// Re-picking the current value runs nothing.
+    private func setType(_ type: String) async {
+        guard type != currentType else { return }
+        typeBusy = true
+        defer { typeBusy = false }
+        error = nil
+        do {
+            try await app.swe.mcpSetType(type, server: server.name)
+            await reload()
+            await loadInfo()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// The three-position read of one harness row: on, stashed off, or
+    /// not written — plus the two states where the switch stays locked
+    /// (a URL definition in a command-only harness, or nothing anywhere
+    /// to restore until the hub adopts the server).
+    private func harnessState(_ harness: String) -> HarnessState {
+        if server.harnesses.contains(harness) { return .on }
+        if server.disabledIn.contains(harness) { return .off }
+        if server.inHub {
+            if McpServer.localOnly.contains(harness),
+               server.isRemote(from: McpServer.hubSource) {
+                return .localOnly
+            }
+            return .notSynced
+        }
+        return .blocked
+    }
+
+    /// The selected type tag: a known word normalised, an unknown label
+    /// verbatim so it stays displayable, "other" when the hub has none.
+    private var currentType: String {
+        guard let raw = server.type, !raw.isEmpty else { return "other" }
+        let lower = raw.lowercased()
+        return McpServer.knownTypes.contains(lower) ? lower : raw
+    }
+
+    /// The picker's options: every known word, plus the hub's own label
+    /// when it isn't one, so the closed menu still says what it is set to.
+    private var typeOptions: [(value: String, title: String)] {
+        var options = McpServer.knownTypes.map { (value: $0, title: $0) }
+        if !options.contains(where: { $0.value == currentType }) {
+            options.append((currentType, currentType))
+        }
+        return options
     }
 
     /// `swe mcp info` for the Files section — file reads only, cheap
@@ -898,8 +980,8 @@ private struct ServerSheet: View {
         }
     }
 
-    /// Every file that defines the server or holds its off-mark, plus the
-    /// live gateway row swe saw.
+    /// Every file that defines the server or holds its off-mark, with
+    /// its mtime; the hub file reads as "SWE hub".
     @ViewBuilder private func filesSection(_ info: McpServerInfo) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Files").font(Theme.cardTitle)
@@ -925,12 +1007,6 @@ private struct ServerSheet: View {
                         Text(stamp).font(Theme.caption).foregroundStyle(Theme.textMuted)
                     }
                 }
-            }
-            if info.shared {
-                Facts(label: "Shared", value: "Served once through the mcp gateway")
-            }
-            if let gateway = info.gateway {
-                Facts(label: "Gateway", value: gatewaySummary(gateway))
             }
             if let stamp = relativeStamp(info.updated), info.places.count > 1 {
                 Facts(label: "Updated", value: stamp)
@@ -981,18 +1057,20 @@ private struct ServerSheet: View {
         }
     }
 
-    private func gatewaySummary(_ gateway: McpServerInfo.GatewayRow) -> String {
+    /// "running · pid 12 · up 300s · starts 2 · error: …", the gateway
+    /// row minus its call counters, which get their own Stats lines.
+    private func gatewayStateLine(_ gateway: McpServerInfo.GatewayRow) -> String {
         var bits = [gateway.state]
         if let pid = gateway.pid { bits.append("pid \(pid)") }
         if let up = gateway.uptimeS { bits.append("up \(up)s") }
         if let starts = gateway.starts { bits.append("starts \(starts)") }
-        if gateway.calls > 0 {
-            bits.append("\(gateway.calls) calls" +
-                        (gateway.callErrors > 0 ? " (\(gateway.callErrors) errors)" : ""))
-        }
-        if let last = relativeStamp(gateway.lastCall) { bits.append("last call \(last)") }
         if let error = gateway.error, !error.isEmpty { bits.append("error: \(error)") }
         return bits.joined(separator: " · ")
+    }
+
+    /// The most-called tools first; at most five get their own line.
+    private func topTools(_ gateway: McpServerInfo.GatewayRow) -> [(key: String, value: Int)] {
+        Array(gateway.callsByTool.sorted { $0.value > $1.value }.prefix(5))
     }
 
     /// "3h ago"-style stamp from an ISO mtime; nil when it won't parse.
@@ -1023,26 +1101,124 @@ private struct ServerSheet: View {
         return formatter
     }()
 
-    /// The server as the latest load has it, so a finished sync shows its effect.
+    /// The server as the latest load has it, so a finished switch or a
+    /// type change shows its effect.
     var server: McpServer { model.server(named: initial.name) ?? initial }
-    var source: String {
-        if let sourceHarness, model.sources(for: server).contains(sourceHarness) { return sourceHarness }
-        return model.sources(for: server).first ?? ""
-    }
-    var targets: SyncTargets { model.targets(for: server, from: source, in: harnesses) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 8) {
-                Text(server.name).font(Theme.sectionTitle).tracking(-0.5)
-                Badge("\(server.isRemote ? "Remote" : "Local") · \(server.transport)")
-                if let health = server.health {
-                    Circle().fill(healthColor(health)).frame(width: Theme.statusDot, height: Theme.statusDot)
-                    Text(server.detail ?? "Healthy").font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                }
+            header
+            Divider().overlay(Theme.border)
+            definition
+            if !server.secretsMissing.isEmpty {
+                Divider().overlay(Theme.border)
+                needsValues
             }
-            Text(server.summary).font(Theme.font(size: 12, design: .monospaced)).textSelection(.enabled)
-                .foregroundStyle(Theme.textSecondary).lineLimit(3)
+            Divider().overlay(Theme.border)
+            harnessesSection
+            if let gateway = info?.gateway {
+                Divider().overlay(Theme.border)
+                statsSection(gateway)
+            }
+            Divider().overlay(Theme.border)
+            toolsSection
+            if let info, !info.places.isEmpty {
+                Divider().overlay(Theme.border)
+                filesSection(info)
+            }
+            Divider().overlay(Theme.border)
+            footer
+        }
+        .sheetScaffold()
+        .task { await loadInfo() }
+        .confirmationDialog("Remove \(server.name)?", isPresented: $confirmingRemove) {
+            Button("Remove", role: .destructive) { Task { await removeServer() } }
+        } message: {
+            let places = server.harnesses.map { HarnessMark($0).name }
+                + (server.inHub ? ["SWE hub"] : [])
+            Text(places.isEmpty
+                 ? "It only leaves the list."
+                 : "It goes from \(places.joined(separator: ", ")).")
+        }
+    }
+
+    /// Name, editable type, host·transport badge and the master switch,
+    /// the same health-tinted control the table row draws.
+    @ViewBuilder private var header: some View {
+        HStack(spacing: 8) {
+            Text(server.name)
+                .font(Theme.sectionTitle).tracking(-0.5)
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+                .textSelection(.enabled)
+            typeControl
+            Badge("\(server.isRemote ? "Remote" : "Local") · \(server.transport)")
+            Spacer(minLength: 8)
+            master
+        }
+    }
+
+    /// The hub entry's `type` label as a dropdown once the entry exists;
+    /// until the server adopts into the hub the tag is read-only.
+    @ViewBuilder private var typeControl: some View {
+        if server.inHub {
+            SelectMenu(options: typeOptions,
+                       selection: Binding(
+                           get: { currentType },
+                           set: { type in Task { await setType(type) } }),
+                       width: nil)
+                .disabled(typeBusy)
+                .hoverTip("What the server is for: the label its hub entry carries.",
+                          pinsOnClick: false)
+        } else {
+            TypeTag(tag: server.typeTag)
+                .hoverTip("The type label lives on the hub entry: it can be set once the next swe mcp sync adopts this server.",
+                          pinsOnClick: false)
+        }
+    }
+
+    /// The batch switch: off pulls the entry from every harness, on
+    /// restores exactly the harnesses marked off (the hub keeps copies).
+    @ViewBuilder private var master: some View {
+        let on = !server.harnesses.isEmpty
+        let tip = mcpMasterTip(server, on: on)
+        Group {
+            if masterBusy {
+                ProgressView().controlSize(.mini)
+                    .frame(width: 36, height: 20)
+            } else {
+                Toggle(server.name, isOn: Binding(
+                    get: { on },
+                    set: { value in Task { await setEverywhere(value) } }))
+                .labelsHidden()
+                .toggleStyle(AccentSwitchStyle(tint: mcpMasterTint(server, on: on)))
+                .disabled(!on && server.disabledIn.isEmpty)
+            }
+        }
+        .hoverTip(tip.text, title: tip.title, pinsOnClick: false)
+    }
+
+    /// The scrubbed definition: command line or URL, env and header key
+    /// names (values never leave swe), the shared-gateway badge and a
+    /// chip per secret still missing a value. While the server lives
+    /// only in harnesses a hint says the hub adopts it on the next sync.
+    @ViewBuilder private var definition: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Definition").font(Theme.cardTitle)
+                if info?.shared == true {
+                    Badge("Shared · gateway")
+                        .hoverTip("Harnesses point at the mcp gateway, which serves this server once.",
+                                  pinsOnClick: false)
+                }
+                Spacer()
+            }
+            Text(server.summary)
+                .font(Theme.font(size: 12, design: .monospaced))
+                .textSelection(.enabled)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
             if server.groups.count > 1 {
                 // swe describes a server by the first harness that defines it.
                 Text("Command, URL and key names are definition A's.")
@@ -1054,71 +1230,153 @@ private struct ServerSheet: View {
             if !server.headerKeys.isEmpty {
                 Facts(label: "Headers", value: server.headerKeys.joined(separator: ", "))
             }
-            Divider().overlay(Theme.border)
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(server.groups.enumerated()), id: \.offset) { index, group in
-                    HarnessFacts(label: server.groups.count > 1 ? "Definition \(variantLetter(index))" : "In",
-                                 harnesses: group)
-                }
-                let missing = server.missing(from: active)
-                if !missing.isEmpty { HarnessFacts(label: "Missing from", harnesses: missing) }
-            }
-            let switchable = server.harnesses + server.disabledIn.filter { !server.harnesses.contains($0) }
-            if !switchable.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("On for").font(Theme.cardTitle)
-                    ForEach(switchable, id: \.self) { harness in
-                        HStack(spacing: 10) {
-                            HarnessMarkView(harness: harness, size: 16)
-                            Text(HarnessMark(harness).name)
-                                .font(Theme.bodySmall).foregroundStyle(Theme.textPrimary)
-                            Spacer(minLength: 8)
-                            if toggling.contains(harness) { ProgressView().controlSize(.mini) }
-                            Toggle(HarnessMark(harness).name, isOn: Binding(
-                                get: { server.harnesses.contains(harness) },
-                                set: { on in Task { await setEnabled(harness, on: on) } }))
-                                .labelsHidden()
-                                .toggleStyle(AccentSwitchStyle())
-                                .disabled(toggling.contains(harness))
-                        }
-                    }
-                    Text("Off leaves the harness's file; the hub keeps the definition.")
-                        .font(Theme.caption).foregroundStyle(Theme.textMuted)
-                }
-            }
-            if let info, !info.places.isEmpty {
-                Divider().overlay(Theme.border)
-                filesSection(info)
-            }
-            Divider().overlay(Theme.border)
-            toolsSection
             if !server.secretsMissing.isEmpty {
-                Divider().overlay(Theme.border)
-                needsValues
+                FlowLayout(spacing: 6, lineSpacing: 6) {
+                    ForEach(server.secretsMissing, id: \.self) { missingChip($0) }
+                }
             }
-            Divider().overlay(Theme.border)
-            syncForm
-        }
-        .sheetScaffold()
-        .onAppear(perform: resetChoice)
-        .task { await loadInfo() }
-        .confirmationDialog("Remove \(server.name)?", isPresented: $confirmingRemove) {
-            Button("Remove", role: .destructive) { Task { await removeServer() } }
-        } message: {
-            let places = server.harnesses.map { HarnessMark($0).name }
-                + (server.inHub ? ["SWE hub"] : [])
-            Text("It goes from \(places.joined(separator: ", ")).")
-        }
-        .confirmationDialog("Replace their definitions?", isPresented: $confirmingOverwrite) {
-            Button("Replace", role: .destructive) { Task { await run(dryRun: false) } }
-        } message: {
-            let sourceName = McpServer.isHubSource(source) ? "SWE hub" : HarnessMark(source).name
-            Text("\(harnessNames(approvedReplace.intersection(targets.differing).sorted())) will get \(sourceName)'s definition of \(server.name) instead of their own.")
+            if !server.inHub {
+                Text("Not in the hub yet: the next swe mcp sync adopts it there, and the switches below can then write it.")
+                    .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
-    /// Paste fields for the hub's unresolved ${NAME} references. swe
-    /// refuses to sync while one is missing, so these come first.
+    /// One ${NAME} still without a value, as a warning chip.
+    private func missingChip(_ name: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(Theme.font(size: 9, weight: .bold))
+            Text(name)
+                .font(Theme.font(size: 10, design: .monospaced))
+        }
+        .foregroundStyle(Theme.warningText)
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(Theme.warningText.opacity(0.12), in: .rect(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5)
+            .strokeBorder(Theme.warningText.opacity(0.4), lineWidth: 1))
+        .hoverTip("Missing a value: set it below and sync fills it into the harness configs.",
+                  pinsOnClick: false)
+    }
+
+    /// One row per known harness: logo, name, its state and the switch.
+    /// On restores a stashed copy or writes the hub's definition where
+    /// the server was never synced; off stashes it.
+    @ViewBuilder private var harnessesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Harnesses").font(Theme.cardTitle)
+            ForEach(harnesses, id: \.self) { harness in
+                let state = harnessState(harness)
+                HStack(spacing: 10) {
+                    HarnessMarkView(harness: harness, size: 16)
+                    Text(HarnessMark(harness).name)
+                        .font(Theme.bodySmall).foregroundStyle(Theme.textPrimary)
+                    stateCaption(harness, state: state)
+                    Spacer(minLength: 8)
+                    if toggling.contains(harness) {
+                        ProgressView().controlSize(.mini)
+                    }
+                    Toggle(HarnessMark(harness).name, isOn: Binding(
+                        get: { state == .on },
+                        set: { on in Task { await setEnabled(harness, on: on) } }))
+                        .labelsHidden()
+                        .toggleStyle(AccentSwitchStyle())
+                        .disabled(toggling.contains(harness)
+                                  || state == .blocked || state == .localOnly)
+                }
+                .hoverTip(stateTip(harness, state: state), pinsOnClick: false)
+            }
+            if server.inHub {
+                Text("Off leaves the harness's file; the hub keeps the definition.")
+                    .font(Theme.caption).foregroundStyle(Theme.textMuted)
+            } else {
+                Text("Once the hub adopts this server, the remaining harnesses above can switch it on.")
+                    .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder private func stateCaption(_ harness: String,
+                                           state: HarnessState) -> some View {
+        switch state {
+        case .on:
+            // A definition letter flags the harnesses disagreeing with A.
+            if server.groups.count > 1, let group = server.group(of: harness) {
+                Text("def \(variantLetter(group))")
+                    .font(Theme.caption)
+                    .foregroundStyle(group == 0 ? Theme.textMuted : Theme.warningText)
+            }
+        case .off:
+            Text("off, copy kept").font(Theme.caption).foregroundStyle(Theme.textMuted)
+        case .notSynced:
+            Text("not synced").font(Theme.caption).foregroundStyle(Theme.textMuted)
+        case .localOnly:
+            Text("commands only").font(Theme.caption).foregroundStyle(Theme.textMuted)
+        case .blocked:
+            Text("not in hub").font(Theme.caption).foregroundStyle(Theme.textMuted)
+        }
+    }
+
+    private func stateTip(_ harness: String, state: HarnessState) -> String {
+        let name = HarnessMark(harness).name
+        switch state {
+        case .on:
+            return "On for \(name). Turning it off pulls the entry out; the hub keeps the definition."
+        case .off:
+            return "Off for \(name). Turning it on restores the stashed copy."
+        case .notSynced:
+            return "Not synced to \(name) yet. Turning it on writes the hub's definition, the same as a swe mcp sync."
+        case .localOnly:
+            return "\(name) only accepts servers it launches with a command; this one is at a URL."
+        case .blocked:
+            return "\(name) has nothing to restore: the next swe mcp sync adopts this server into the hub first."
+        }
+    }
+
+    /// The live gateway's call counters for a shared server.
+    @ViewBuilder private func statsSection(_ gateway: McpServerInfo.GatewayRow) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Stats").font(Theme.cardTitle)
+            Facts(label: "Gateway", value: gatewayStateLine(gateway))
+            Facts(label: "Calls", value: gateway.callErrors > 0
+                  ? "\(gateway.calls) · \(gateway.callErrors) errors"
+                  : "\(gateway.calls)")
+            if let last = relativeStamp(gateway.lastCall) {
+                Facts(label: "Last call", value: last)
+            }
+            ForEach(topTools(gateway), id: \.key) { tool in
+                Facts(label: tool.key, value: "\(tool.value) calls")
+            }
+            if gateway.callsByTool.count > topTools(gateway).count {
+                Facts(label: "More tools",
+                      value: "\(gateway.callsByTool.count - topTools(gateway).count)")
+            }
+        }
+    }
+
+    /// Remove on the left, Close on the right; action errors land above.
+    @ViewBuilder private var footer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let error {
+                Text(error).font(Theme.caption).foregroundStyle(Theme.dangerText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Button("Remove…", role: .destructive) { confirmingRemove = true }
+                    .secondaryButton()
+                    .disabled(removing)
+                if removing { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Close", role: .cancel) { dismiss() }
+                    .secondaryButton()
+            }
+        }
+    }
+
+    /// Paste fields for the hub's unresolved ${NAME} references: swe
+    /// refuses to write a harness config while one is missing.
     private var needsValues: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Needs values").font(Theme.cardTitle)
@@ -1161,111 +1419,10 @@ private struct ServerSheet: View {
         }
     }
 
-    /// Sync from the hub is refused by swe while a ${NAME} has no value.
-    private var secretsBlockSync: Bool {
-        McpServer.isHubSource(source) && !server.secretsMissing.isEmpty
-    }
-
-    @ViewBuilder private var syncForm: some View {
-        Text("Sync").font(Theme.cardTitle)
-        if !server.canSyncAlone {
-            Text("swe can't sync a server whose name has a comma on its own. Use swe mcp sync in Terminal.")
-                .font(Theme.caption).foregroundStyle(Theme.textSecondary)
-        } else {
-            // The picker must come first: with several sources (a hub
-            // copy plus agreeing harnesses) the choice is still live even
-            // when there's nothing to copy from the current source.
-            let sourceChoices = model.sources(for: server)
-            if sourceChoices.count > 1 {
-                HStack(spacing: 10) {
-                    Text("Copy from").font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                        .frame(width: detailLabelWidth, alignment: .leading)
-                    SelectMenu(options: sourceChoices.map { choice in
-                                   (choice, McpServer.isHubSource(choice) ? "SWE hub" : HarnessMark(choice).name, choice)
-                               },
-                               selection: Binding(
-                                   get: { source },
-                                   set: { sourceHarness = $0; resetChoice() }),
-                               width: 366)
-                }
-            } else if !sourceChoices.isEmpty {
-                HarnessFacts(label: "Copy from", harnesses: [source])
-            }
-            if targets.missing.isEmpty && targets.differing.isEmpty {
-                Text(McpServer.isHubSource(source)
-                     ? "Every harness already has this server."
-                     : "Every harness already has this definition.")
-                    .font(Theme.caption).foregroundStyle(Theme.textSecondary)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(targets.missing, id: \.self) { harness in
-                    TargetToggle(harness: harness, replaces: false, isOn: binding(harness))
-                }
-                ForEach(targets.differing, id: \.self) { harness in
-                    TargetToggle(harness: harness, replaces: true, isOn: binding(harness))
-                }
-            }
-        }
-        if let report = done ?? preview {
-            Label(report.sentence, systemImage: done != nil ? "checkmark.circle" : "eye")
-                .font(Theme.caption).foregroundStyle(Theme.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        if let error {
-            Text(error).font(Theme.caption).foregroundStyle(Theme.dangerText).fixedSize(horizontal: false, vertical: true)
-        }
-        HStack {
-            Button("Remove…", role: .destructive) { confirmingRemove = true }
-                .secondaryButton()
-            if running { ProgressView().controlSize(.small) }
-            if secretsBlockSync {
-                Text("Set the values above first.")
-                    .font(Theme.caption).foregroundStyle(Theme.warningText)
-            }
-            Spacer()
-            Button(done == nil ? "Cancel" : "Close", role: .cancel) { dismiss() }
-                .secondaryButton()
-            if done == nil && server.canSyncAlone {
-                Button("Preview") { Task { await run(dryRun: true) } }
-                    .secondaryButton()
-                    .disabled(chosen.isEmpty || running || secretsBlockSync)
-                Button("Sync") {
-                    if targets.needsOverwrite(approvedReplace) {
-                        confirmingOverwrite = true
-                    } else {
-                        Task { await run(dryRun: false) }
-                    }
-                }
-                .primaryButton()
-                .keyboardShortcut(.defaultAction)
-                .disabled(chosen.isEmpty || running || secretsBlockSync)
-            }
-        }
-    }
-
-    private func binding(_ harness: String) -> Binding<Bool> {
-        Binding(get: { chosen.contains(harness) }, set: { on in
-            if on { chosen.insert(harness) } else { chosen.remove(harness) }
-            if on && targets.differing.contains(harness) {
-                approvedReplace.insert(harness)
-            } else if !on {
-                approvedReplace.remove(harness)
-            }
-            preview = nil
-        })
-    }
-
-    private func resetChoice() {
-        // Harnesses that use MCP and lack the server; empty ones stay opt-in.
-        chosen = Set(targets.missing).intersection(active)
-        approvedReplace = []
-        preview = nil
-    }
-
     private func removeServer() async {
-        running = true
+        removing = true
         error = nil
-        defer { running = false }
+        defer { removing = false }
         do {
             _ = try await app.swe.mcpRemove(
                 name: server.name,
@@ -1274,77 +1431,6 @@ private struct ServerSheet: View {
             dismiss()
         } catch {
             self.error = error.localizedDescription
-        }
-    }
-
-    private func run(dryRun: Bool) async {
-        running = true
-        error = nil
-        defer { running = false }
-        // Recomputed from the latest inventory: a harness that gained its own
-        // definition since it was ticked is neither added nor replaced.
-        let adding = harnesses.filter { chosen.contains($0) && targets.missing.contains($0) }
-        let replacing = harnesses.filter { approvedReplace.contains($0) && targets.differing.contains($0) }
-        do {
-            let report = try await model.sync(server, from: source, adding: adding, replacing: replacing,
-                                              dryRun: dryRun, swe: app.swe)
-            if dryRun {
-                preview = report
-            } else {
-                done = report
-                await reload()
-                await loadInfo()
-            }
-        } catch let partial as McpPartialSync {
-            self.error = partial.message
-            if dryRun {
-                preview = partial.report
-            } else {
-                done = partial.report
-                await reload()
-                await loadInfo()
-            }
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-}
-
-/// A sync target: the harness, a note when it would lose its own
-/// definition, and the themed switch.
-private struct TargetToggle: View {
-    var harness: String
-    var replaces: Bool
-    @Binding var isOn: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            let mark = HarnessMark(harness)
-            HarnessIcon(harness: mark.icon ?? harness, size: 16)
-            Text(mark.name).font(Theme.bodySmall).foregroundStyle(Theme.textPrimary)
-            if replaces {
-                Text("replaces its own definition").font(Theme.caption).foregroundStyle(Theme.textMuted)
-            }
-            Spacer(minLength: 8)
-            Toggle(replaces ? "\(mark.name), replaces its own definition" : mark.name, isOn: $isOn)
-                .toggleStyle(AccentSwitchStyle())
-        }
-    }
-}
-
-/// A sheet fact whose value is a set of harnesses, shown as their logos.
-private struct HarnessFacts: View {
-    var label: String
-    var harnesses: [String]
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Text(label).font(Theme.caption).foregroundStyle(Theme.textSecondary).frame(width: detailLabelWidth, alignment: .leading)
-            FlowLayout(spacing: 10, lineSpacing: 6) {
-                ForEach(harnesses, id: \.self) { HarnessMarkView(harness: $0) }
-            }
-            .font(Theme.bodySmall)
-            .foregroundStyle(Theme.textPrimary)
         }
     }
 }
