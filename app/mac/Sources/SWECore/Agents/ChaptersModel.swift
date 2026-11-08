@@ -213,6 +213,19 @@ public enum ChapterIndex {
         normalize(name).split(separator: "/").contains("..")
     }
 
+    /// `name` with `.` and `..` resolved the way a path parser reads
+    /// them, so `a/../b.md` reads as `b.md`. Purely lexical: a link in a
+    /// component would send `..` somewhere else, which is why paths with
+    /// `..` are refused rather than trusted where links can hide.
+    public static func collapse(_ name: String) -> String {
+        var parts: [String] = []
+        for part in normalize(name).split(separator: "/") {
+            if part == ".." { _ = parts.popLast() }
+            else if part != "." { parts.append(String(part)) }
+        }
+        return parts.joined(separator: "/")
+    }
+
     /// Whether `name` sits somewhere under `folder` (not the folder
     /// itself), compared through normalize.
     public static func isUnder(_ name: String, folder: String) -> Bool {
@@ -1744,12 +1757,17 @@ public final class ChaptersModel {
         if let draft = dirtyDraft() {
             return "Save or revert \(draft) before deleting it."
         }
-        // The raw path, never inside(): a link deletes the link, not the
-        // file it points at, and resolving would trash the target.
+        // The entry itself is never resolved: a linked chapter deletes
+        // the link, not its target. Its parent folder is resolved through
+        // inside() — `alias/x.md` through a link out of AGENTS_MD would
+        // otherwise trash the outside file under its index name.
         let root = URL(fileURLWithPath: check.directory).standardizedFileURL
-        let url = root.appending(path: path).standardizedFileURL
-        guard !ChapterIndex.climbs(path),
-              url.path == root.path || url.path.hasPrefix(root.path + "/") else {
+        let url = root.appending(path: path)
+        let parentInside = await offMain {
+            Self.inside((path as NSString).deletingLastPathComponent,
+                        under: check.directory) != nil
+        }
+        guard !ChapterIndex.climbs(path), parentInside else {
             return "The path cannot leave AGENTS_MD."
         }
         return await queuedCompile { () -> String? in
@@ -1771,14 +1789,28 @@ public final class ChaptersModel {
             } else {
                 rules = [:]
             }
+            let slots = ChapterIndex.slots(index.text)
             if isFolder,
-               let climbing = (ChapterIndex.slots(index.text) + rules.keys.sorted())
+               let climbing = (slots + rules.keys.sorted())
                    .first(where: { ChapterIndex.isUnder($0, folder: path)
                                    && ChapterIndex.climbs($0) }) {
                 return "\(climbing) climbs out with ..; fix its path by hand first."
             }
+            // A slot or rule that reaches the entry through ".." never
+            // matches the text compare, but it names the same file:
+            // dropping the file would leave it pointing at a gap. Which
+            // file it really names depends on links the index can't see.
+            if let alias = (slots + rules.keys.sorted()).first(where: {
+                let collapsed = ChapterIndex.collapse($0)
+                let reached = isFolder
+                    ? ChapterIndex.isUnder(collapsed, folder: path)
+                    : collapsed == path
+                return reached && !covered($0)
+            }) {
+                return "\(alias) reaches \(path) through ..; fix its path by hand first."
+            }
             let nextIndex = ChapterIndex.removingSlots(
-                index.text, names: Set(ChapterIndex.slots(index.text).filter(covered)))
+                index.text, names: Set(slots.filter(covered)))
             var nextRules = rules
             var droppedRule = false
             for key in rules.keys where covered(key) {
@@ -1797,16 +1829,29 @@ public final class ChaptersModel {
                 return problem
             }
             // An entry already gone from disk just gets its slot and rule
-            // dropped; the Trash is only asked when a file is there.
-            if await offMain({ FileManager.default.fileExists(atPath: url.path) }) {
+            // dropped. fileExists follows the last link, so a broken link
+            // counts as here through destinationOfSymbolicLink instead.
+            let entryExists = await offMain {
+                FileManager.default.fileExists(atPath: url.path)
+                    || (try? FileManager.default.destinationOfSymbolicLink(
+                        atPath: url.path)) != nil
+            }
+            if entryExists {
                 let trashed = await offMain {
                     (try? FileManager.default.trashItem(at: url,
                                                         resultingItemURL: nil)) != nil
                 }
                 guard trashed else { return "Couldn't move \(path) to the Trash." }
             }
-            for key in self.documents.keys.filter(covered) { self.documents[key] = nil }
-            if let selected = self.selected, covered(selected) {
+            // A draft that went dirty during the saves keeps its document:
+            // its file is gone, so the rail shows it as a ghost whose text
+            // stays reachable instead of being dropped unsaved.
+            for key in self.documents.keys.filter(covered)
+                where self.documents[key]?.isDirty != true {
+                self.documents[key] = nil
+            }
+            if let selected = self.selected, covered(selected),
+               self.documents[selected] == nil {
                 self.selected = ChapterIndex.entries(nextIndex).first
             }
             await self.refreshTree(under: check.directory,
