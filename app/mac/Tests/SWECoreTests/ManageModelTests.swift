@@ -308,6 +308,15 @@ func json(_ text: String, status: Int32 = 0) -> CommandResult {
         #expect(inventory.servers(.drift).map(\.name) == ["solo"])
     }
 
+    @Test func aHarnessHoldingOnlyDisabledServersKeepsItsColumn() throws {
+        let inventory = McpInventory(harnesses: ["claude", "codex"], servers: [
+            McpServer(name: "gh", harnesses: ["claude"], disabledIn: ["codex"]),
+            McpServer(name: "solo", harnesses: ["claude"]),
+        ])
+        #expect(inventory.activeHarnesses == ["claude", "codex"])
+        #expect(inventory.saved.servers.first?.disabledIn == ["codex"])
+    }
+
     @Test func driftAndConflictsAreJudgedAcrossTheComparedHarnesses() {
         let inventory = McpInventory(harnesses: ["claude", "desktop", "codex"], servers: [
             McpServer(name: "gh", harnesses: ["claude", "codex"]),

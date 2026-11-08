@@ -32,9 +32,13 @@ struct McpServersPage: View {
     /// `swe mcp enable`/`disable` for one server in one harness, then a
     /// reload so the cell's new state renders.
     private func toggle(_ server: McpServer, in harness: String, on: Bool) async {
+        toggleError = nil
         do {
-            _ = try await app.swe.mcpSetEnabled(on, server: server.name, in: [harness])
+            let result = try await app.swe.mcpSetEnabled(on, server: server.name, in: [harness])
             await model.load(swe: app.swe, for: app.swePath, health: model.hasHealth)
+            if !result.failedIn.isEmpty {
+                toggleError = "\(HarnessMark(harness).name): \(server.name) stayed off"
+            }
         } catch {
             toggleError = "\(HarnessMark(harness).name): \(error.localizedDescription)"
         }
@@ -43,30 +47,41 @@ struct McpServersPage: View {
     /// The same switch for every harness the server is in (off) or
     /// marked off for (on) — the row's batch action.
     private func toggleAll(_ server: McpServer, on: Bool) async {
+        toggleError = nil
         do {
-            _ = try await app.swe.mcpSetEnabled(on, server: server.name,
-                                                in: on ? server.disabledIn : server.harnesses)
+            let result = try await app.swe.mcpSetEnabled(on, server: server.name,
+                                                         in: on ? server.disabledIn : server.harnesses)
             await model.load(swe: app.swe, for: app.swePath, health: model.hasHealth)
+            if !result.failedIn.isEmpty {
+                toggleError = "\(server.name) stayed off for \(result.failedIn.joined(separator: ", "))"
+            }
         } catch {
             toggleError = error.localizedDescription
         }
     }
 
     /// One harness's whole column: every server it defines off, or every
-    /// server marked off in it back on.
+    /// server marked off in it back on. A single failure stops neither the
+    /// rest of the batch nor the reload that repaints the cells that moved.
     private func toggleColumn(_ harness: String, on: Bool,
                               servers: [McpServer]) async {
+        toggleError = nil
         let names = servers.filter {
             on ? $0.disabledIn.contains(harness) : $0.harnesses.contains(harness)
         }.map(\.name)
         guard !names.isEmpty else { return }
-        do {
-            for name in names {
-                _ = try await app.swe.mcpSetEnabled(on, server: name, in: [harness])
+        var failed = Set<String>()
+        for name in names {
+            do {
+                let result = try await app.swe.mcpSetEnabled(on, server: name, in: [harness])
+                failed.formUnion(result.failedIn)
+            } catch {
+                failed.insert(name)
             }
-            await model.load(swe: app.swe, for: app.swePath, health: model.hasHealth)
-        } catch {
-            toggleError = "\(HarnessMark(harness).name): \(error.localizedDescription)"
+        }
+        await model.load(swe: app.swe, for: app.swePath, health: model.hasHealth)
+        if !failed.isEmpty {
+            toggleError = "\(HarnessMark(harness).name): \(failed.sorted().joined(separator: ", ")) stayed put"
         }
     }
 
@@ -148,6 +163,7 @@ struct McpServersPage: View {
                         ServerGrid(harnesses: compared, local: grouped.local, remote: grouped.remote,
                                    showHealth: model.hasHealth, editor: app.editor,
                                    toggle: { server, harness, on in await toggle(server, in: harness, on: on) },
+                                   batchServers: inventory.servers,
                                    toggleAll: { harness, on, servers in await toggleColumn(harness, on: on, servers: servers) },
                                    toggleRow: { server, on in await toggleAll(server, on: on) }) { selected = $0 }
                     }
@@ -232,21 +248,15 @@ private struct ServerGrid: View {
     var editor: CodeEditor?
     /// Switch one server in one harness (the new state, then a reload).
     var toggle: (McpServer, String, Bool) async -> Void = { _, _, _ in }
+    /// The full inventory, not the filtered rows: a column's batch switch
+    /// and its counts must see the servers the filter hides.
+    var batchServers: [McpServer] = []
     /// Switch every server in one harness column (name list supplied by
     /// the grid, which knows the rows).
     var toggleAll: (String, Bool, [McpServer]) async -> Void = { _, _, _ in }
     /// Switch one server in every place it is defined or marked off.
     var toggleRow: (McpServer, Bool) async -> Void = { _, _ in }
     var open: (McpServer) -> Void
-
-    /// Every server row across the groups: what a column's batch switch
-    /// acts on.
-    private var allServers: [McpServer] {
-        (local + remote).compactMap { row in
-            if case .server(let server, _) = row { return server }
-            return nil
-        }
-    }
 
     /// The groups in display order, skipping empty ones. Local names the
     /// machine whose harnesses launch the server, as the Add sheet does.
@@ -290,7 +300,7 @@ private struct ServerGrid: View {
                         HarnessMarkView(harness: harness)
                             .frame(width: Self.columnWidth(harness))
                             .contextMenu {
-                                let servers = allServers
+                                let servers = batchServers
                                 let on = servers.filter { $0.harnesses.contains(harness) }.count
                                 let off = servers.filter { $0.disabledIn.contains(harness) }.count
                                 Button("Turn off all servers in \(HarnessMark(harness).name)") {
@@ -561,8 +571,11 @@ private struct ServerSheet: View {
         defer { toggling.remove(harness) }
         error = nil
         do {
-            _ = try await app.swe.mcpSetEnabled(on, server: server.name, in: [harness])
+            let result = try await app.swe.mcpSetEnabled(on, server: server.name, in: [harness])
             await reload()
+            if !result.failedIn.isEmpty {
+                error = "\(HarnessMark(harness).name): \(server.name) stayed off"
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -619,7 +632,7 @@ private struct ServerSheet: View {
                                 .font(Theme.bodySmall).foregroundStyle(Theme.textPrimary)
                             Spacer(minLength: 8)
                             if toggling.contains(harness) { ProgressView().controlSize(.mini) }
-                            Toggle("", isOn: Binding(
+                            Toggle(HarnessMark(harness).name, isOn: Binding(
                                 get: { server.harnesses.contains(harness) },
                                 set: { on in Task { await setEnabled(harness, on: on) } }))
                                 .labelsHidden()

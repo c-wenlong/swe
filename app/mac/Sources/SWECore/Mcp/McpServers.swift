@@ -41,7 +41,8 @@ public struct McpInventory: SnapshotValue {
     /// using MCP, so it gets no column and does not make every server look
     /// out of sync; it can still be a sync target.
     public var activeHarnesses: [String] {
-        harnesses.filter { harness in servers.contains { $0.harnesses.contains(harness) } }
+        harnesses.filter { harness in servers.contains {
+            $0.harnesses.contains(harness) || $0.disabledIn.contains(harness) } }
     }
 
     public var idleHarnesses: [String] {
@@ -201,7 +202,8 @@ public struct McpServer: Codable, Sendable, Equatable, Identifiable {
     public var saved: McpServer {
         McpServer(name: name, transport: transport, envKeys: envKeys, headerKeys: headerKeys, harnesses: harnesses,
                   conflict: conflict, variants: variants, secretsMissing: secretsMissing,
-                  inHub: inHub, savedSummary: savedSummary ?? outline, remoteIn: remoteIn)
+                  inHub: inHub, savedSummary: savedSummary ?? outline, remoteIn: remoteIn,
+                  disabledIn: disabledIn)
     }
 
     /// The program or the scheme and host, and "…" when there is more.
@@ -574,7 +576,8 @@ extension SweClient {
                             in harnesses: [String]) async throws -> McpToggleResult {
         var args = ["mcp", on ? "enable" : "disable", name, "--json"]
         if !harnesses.isEmpty { args.append("--for=" + harnesses.joined(separator: ",")) }
-        return try await call(args)
+        // A partial switch still prints its document on a nonzero exit.
+        return try await call(args, allowFailure: true)
     }
 }
 
@@ -583,14 +586,18 @@ public struct McpToggleResult: Decodable, Sendable, Equatable {
     public let name: String
     /// Harnesses a disable wrote off, or an enable restored.
     public let places: [String]
+    /// Harnesses an enable could not restore — the server stays marked
+    /// off there. Absent from a swe before `failed_in` existed.
+    public let failedIn: [String]
 
-    private enum CodingKeys: String, CodingKey { case name, disabledIn, enabledIn }
+    private enum CodingKeys: String, CodingKey { case name, disabledIn, enabledIn, failedIn }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         name = try container.decode(String.self, forKey: .name)
         places = try container.decodeIfPresent([String].self, forKey: .disabledIn)
             ?? container.decodeIfPresent([String].self, forKey: .enabledIn) ?? []
+        failedIn = try container.decodeIfPresent([String].self, forKey: .failedIn) ?? []
     }
 }
 
