@@ -143,6 +143,35 @@ import Testing
         #expect(runner.calls.last == ["mcp", "disable", "fixture-stdio", "--json", "--for=claude"])
     }
 
+    /// `swe mcp info fixture-stdio --json`: files, switches and the
+    /// live gateway row for the server sheet.
+    @Test func mcpInfoDecodesPlacesAndGateway() async throws {
+        let (swe, runner) = try client("swe-mcp-info")
+        let info = try await swe.mcpInfo(server: "fixture-stdio")
+        #expect(runner.calls.last == ["mcp", "info", "fixture-stdio", "--json"])
+        #expect(info.name == "fixture-stdio")
+        #expect(info.shared)
+        #expect(info.disabledIn == ["kilo"])
+        #expect(info.places.count == 3)
+        #expect(info.places[1].state == "off")
+        #expect(info.places[2].place == "swe")
+        #expect(info.updated == "2026-11-03T11:20:00")
+        let gateway = try #require(info.gateway)
+        #expect(gateway.state == "running")
+        #expect(gateway.uptimeS == 10800)
+    }
+
+    /// `swe mcp tools fixture-stdio --json`: the handshake's tool list.
+    @Test func mcpToolsDecodesTheToolList() async throws {
+        let (swe, runner) = try client("swe-mcp-tools")
+        let result = try await swe.mcpTools(server: "fixture-stdio")
+        #expect(runner.calls.last == ["mcp", "tools", "fixture-stdio", "--json"])
+        #expect(result.server?.name == "fixture-mcp")
+        #expect(result.protocolVersion == "2025-06-18")
+        #expect(result.tools.map(\.name) == ["fixture_search", "fixture_fetch"])
+        #expect(result.error == nil)
+    }
+
     @Test func mcpStatusAddsHealthAndDetail() async throws {
         let (swe, _) = try client("swe-mcp-status")
         let inventory = try await swe.mcpServers(health: true)
