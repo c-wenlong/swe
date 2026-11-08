@@ -78,12 +78,13 @@ def server_inventory(tool_data: dict, include_hub: bool = False) -> list[tuple[d
     command, arguments and URL are scrubbed, since a credential can sit in
     any of them (see ``swe.mcp.secrets.scrub_url``).
     """
-    from swe.mcp.cli import get_hub_servers, get_mcp_handler
+    from swe.mcp.cli import disabled_map, get_hub_servers, get_mcp_handler
 
     secrets = load_secrets()
     # Read once for every server: ``secrets_missing`` is the hub's own
     # ``${NAME}`` references the store cannot satisfy.
     hub = get_hub_servers()
+    disabled = disabled_map()
     gateway_settings = _gateway_settings()
     hub_handler = get_mcp_handler("swe")
     seen: dict[str, dict] = {}
@@ -137,6 +138,7 @@ def server_inventory(tool_data: dict, include_hub: bool = False) -> list[tuple[d
                              if name in hub else []),
             in_hub=name in hub,
             remote_in=entry["remote"] + (["swe", "quiver"] if name in hub and _is_url(hub[name]) else []),  # "swe" is the hub's name; "quiver" stays for apps from before the rename
+            disabled_in=sorted(t for t, names in disabled.items() if name in names),
         )
         inventory.append((row.to_json(), entry["raw"]))
 
@@ -166,6 +168,7 @@ def server_inventory(tool_data: dict, include_hub: bool = False) -> list[tuple[d
             secrets_missing=unresolved_names(raw, secrets),
             in_hub=True,
             remote_in=["swe", "quiver"] if canonical.get("url") else [],  # wire names; see above
+            disabled_in=sorted(t for t, names in disabled.items() if name in names),
         )
         inventory.append((row.to_json(), raw))
     inventory.sort(key=lambda pair: pair[0]["name"])
