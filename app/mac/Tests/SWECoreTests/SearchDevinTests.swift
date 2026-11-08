@@ -125,7 +125,7 @@ import Testing
             "user: find the walrus config",
             "assistant: Looking for it.",
             "tool: exec: grep -r walrus .",
-            "tool: exec: conf/walrus.toml",
+            "tool: → exec: conf/walrus.toml",
             "assistant: It is conf/walrus.toml.",
         ])
 

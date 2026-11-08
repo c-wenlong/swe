@@ -97,6 +97,22 @@ class SyncReply:
 
 
 @dataclass(frozen=True)
+class UsageReply:
+    """The ``swe skills usage --json`` reply.
+
+    ``stats`` is `skills.usage.skill_usage`'s dict: ``{"tracked": False}``
+    when no search index exists, else ``calls``, ``sessions``,
+    ``last_used``, ``by_harness`` and ``unattributed``.
+    """
+
+    skill: str
+    stats: dict
+
+    def to_json(self) -> dict:
+        return {"action": "usage", "skill": self.skill, **self.stats}
+
+
+@dataclass(frozen=True)
 class CatalogRow:
     """One ``swe skills catalog discover --json`` row."""
 

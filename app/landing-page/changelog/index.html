@@ -369,6 +369,20 @@ thread moves its rollout there, and an archived session still ran.</p>
 </ul>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
+<li><p><strong>Skill and plugin usage: <code>swe skills usage</code>, <code>swe plugins info</code>.</strong>
+<code>swe skills usage &lt;name&gt;</code> counts <code>Skill: &lt;name&gt;</code> tool calls in the
+session search index — calls, sessions, last used, split by harness,
+with <code>Skill</code> calls indexed before the <code>skill</code> input key tallied as
+<code>unattributed</code> since they carry no name. <code>swe plugins info &lt;plugin&gt;@&lt;marketplace&gt;</code> is the detail sheet the catalog table cannot
+hold: the plugin's declared MCP servers with env and header key names
+(values are never read) joined with <code>swe mcp list</code>'s state, hub
+membership and missing-secret names, its shipped skills, when its
+files last changed, and one usage rollup over <code>Skill: &lt;name&gt;</code> and
+<code>mcp__&lt;server&gt;__*</code> calls. Both answer <code>tracked: false</code> under <code>--json</code>
+when the index is off (<code>swe session index --on</code>). The <code>skill</code> input
+key joined the search writers' argument keys in Python and Swift, so
+calls indexed from now on carry the skill's name.</p>
+</li>
 <li><p><strong>Per-harness skill selections: <code>swe skills enable|disable|sync</code>.</strong> A
 harness's skills folder no longer has to be the whole shared tree or
 nothing: it can be a directory of one link per shared skill it keeps.

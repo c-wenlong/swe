@@ -1,14 +1,15 @@
-"""Skills tree, link, unlink, and move CLI commands."""
+"""Skills tree, link, unlink, move, and usage CLI commands."""
 
 from pathlib import Path
 
-from swe.console import c, tilde
+from swe.console import c, tilde, truncate
 from swe.flags import expand_value_flags
 from swe.json_output import emit, error_stream
 from swe.skills.help_text import (
     print_skills_link_help,
     print_skills_move_help,
     print_skills_unlink_help,
+    print_skills_usage_help,
 )
 from swe.skills.models import LinkReply, MoveReply, SyncReply, ToggleReply, UnlinkReply
 from swe.skills.link_ops import (
@@ -197,6 +198,46 @@ def cmd_skills_sync(args):
         if row["removed"]:
             bits.append(f"dropped {', '.join(row['removed'])}")
         print(c("green", f"  ✓ {row['label']} ({tilde(row['path'], home)}): {'; '.join(bits)}"))
+    print()
+    return 0
+
+
+def cmd_skills_usage(args):
+    """`swe skills usage <name>` — call counts from the session index."""
+    from swe.skills.usage import skill_usage
+
+    json_view = "--json" in args
+    rest = [a for a in args if a != "--json"]
+    if rest and rest[0] in ("-h", "--help"):
+        print_skills_usage_help()
+        return 0
+    if len(rest) != 1 or rest[0].startswith("-"):
+        print(c("red", "  Usage: swe skills usage <name>"),
+              file=error_stream(json_view))
+        return 1
+    from swe.skills.models import UsageReply
+
+    reply = UsageReply(rest[0], skill_usage(rest[0])).to_json()
+    if json_view:
+        return emit(reply)
+    if not reply["tracked"]:
+        print(c("dim", "  Usage is not tracked: no search index yet."))
+        print(c("dim", "  Turn it on with `swe session index --on`.\n"))
+        return 0
+    calls, sessions = reply["calls"], reply["sessions"]
+    print(f"\n  {c('bold', rest[0])} — {calls} call{'s' if calls != 1 else ''}"
+          f" across {sessions} session{'s' if sessions != 1 else ''}")
+    if reply["last_used"]:
+        print(c("dim", f"  last used {reply['last_used'][:10]}"))
+    for harness, n in reply["by_harness"].items():
+        print(c("cyan", f"  {harness.ljust(12)} {n} call{'s' if n != 1 else ''}"))
+    if reply["unattributed"]:
+        print(c("dim", f"  + {reply['unattributed']} `Skill` call{'s' if reply['unattributed'] != 1 else ''}"
+                       " indexed without a skill name"))
+    if not calls:
+        print(c("dim", "  No calls indexed for this skill yet. The index scans"
+                       " existing sessions too, but calls written before the"
+                       " `skill` input key tally under \"without a skill name\"."))
     print()
     return 0
 

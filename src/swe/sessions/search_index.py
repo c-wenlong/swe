@@ -324,6 +324,33 @@ def fill_snippets(home: Path | str | None, hits: list[SearchHit]) -> list[Search
         conn.close()
 
 
+def tool_text_rows(home: Path | str | None, fts: str) -> list[tuple]:
+    """``(session_row_id, agent, ts, tool_text)`` rows matching ``fts``.
+
+    One FTS5 match on the ``tool_text`` column only, for usage counting —
+    ``Skill: <name>`` and ``mcp__<server>__<tool>`` calls land there. The
+    caller passes a column-scoped match like ``tool_text : "skill foo"``;
+    filtering by exact call shape happens on the returned text, since a
+    token query alone cannot tell ``Skill`` from ``Bash: skill …``.
+    """
+    conn = open_sqlite_ro(str(index_path(home)))
+    if conn is None:
+        return []
+    try:
+        return conn.execute(
+            "SELECT m.session_row_id, s.agent, m.ts, messages_fts.tool_text"
+            " FROM messages_fts"
+            " JOIN messages m ON m.id = messages_fts.rowid"
+            " JOIN sessions s ON s.id = m.session_row_id"
+            " WHERE messages_fts MATCH ?",
+            (fts,),
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+
+
 def match_keys(session_id: str) -> frozenset[str]:
     """The id forms one session can be known by, for hit-to-session joining.
 

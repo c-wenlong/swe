@@ -18,7 +18,9 @@ enum SearchContent {
 
     /// The argument that identifies what a tool call actually did, in the
     /// order Orca's `TOOL_INPUT_KEYS` looks for it.
-    static let toolInputKeys = ["command", "cmd", "file_path", "path", "pattern", "query", "description"]
+    /// First match wins; "skill" sits last so an input carrying both it
+    /// and a stronger key still indexes by that key.
+    static let toolInputKeys = ["command", "cmd", "file_path", "path", "pattern", "query", "description", "skill"]
 
     /// Orca's `TOOL_ARGUMENT_SCAN_LIMIT`.
     static let toolArgumentLimit = 2000

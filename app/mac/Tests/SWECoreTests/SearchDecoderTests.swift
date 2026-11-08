@@ -30,6 +30,17 @@ import Testing
         ])
     }
 
+    @Test func claudeSkillCallsIndexByName() {
+        // The "skill" input key is what `swe skills usage` counts on.
+        let out = SearchDecoder.decode(agent: .claude, line: line(
+            #"{"type":"assistant","timestamp":"t","sessionId":"s1","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"pdf"}}]}}"#))
+        #expect(out.messages == [SearchMessage(role: .tool, text: "Skill: pdf", ts: "t")])
+        // A stronger key still wins when both are present.
+        let both = SearchDecoder.decode(agent: .claude, line: line(
+            #"{"type":"assistant","timestamp":"t","sessionId":"s1","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"skill":"pdf","command":"ls"}}]}}"#))
+        #expect(both.messages == [SearchMessage(role: .tool, text: "Bash: ls", ts: "t")])
+    }
+
     @Test func claudeToolResultsOnAUserRecordAreToolMessages() {
         let out = SearchDecoder.decode(agent: .claude, line: line(
             #"{"type":"user","timestamp":"2026-10-03T10:00:02Z","sessionId":"s1","message":{"role":"user","content":[{"type":"tool_result","content":"first line\nsecond line"},{"type":"tool_result","content":[{"type":"text","text":"block A"},{"type":"text","text":"block B"}]}]}}"#))
@@ -246,7 +257,7 @@ import Testing
 
         let result = decoder.decode(line: line(
             #"{"type": "message", "timestamp": "t3", "message": {"role": "toolResult", "toolCallId": "call_1", "toolName": "bash", "content": [{"type": "text", "text": "AGENTS.md\nREADME.md"}], "isError": false}}"#))
-        #expect(result.messages == [SearchMessage(role: .tool, text: "bash: AGENTS.md\nREADME.md", ts: "t3")])
+        #expect(result.messages == [SearchMessage(role: .tool, text: "→ bash: AGENTS.md\nREADME.md", ts: "t3")])
     }
 
     @Test func piSkipsNonMessageLinesAndReadsSessionInfo() {
@@ -274,7 +285,7 @@ import Testing
         // A tool row is labelled with the call it answers, joined by id.
         let result = decoder.decode(line: line(
             #"{"message_id":"m3","role":"tool","content":"output here","tool_call_id":"c1","metadata":{"created_at":"2026-09-15T15:48:57Z"}}"#))
-        #expect(result.messages == [SearchMessage(role: .tool, text: "exec: output here", ts: "2026-09-15T15:48:57Z")])
+        #expect(result.messages == [SearchMessage(role: .tool, text: "→ exec: output here", ts: "2026-09-15T15:48:57Z")])
 
         #expect(decoder.decode(line: line(
             #"{"message_id":"m0","role":"system","content":"<system_info>x</system_info>"}"#)).messages.isEmpty)

@@ -463,7 +463,10 @@ enum SearchPiDecoder {
                 guard let text = SearchContent.toolResultText(message["content"]) else {
                     return ([], hints)
                 }
-                let labeled = JSONValue.string(message["toolName"]).map { "\($0): \(text)" } ?? text
+                // A named reply leads with `→` so the call's `name:` prefix
+                // shape stays unambiguous for usage counting (Python's
+                // `_pi` matches).
+                let labeled = JSONValue.string(message["toolName"]).map { "→ \($0): \(text)" } ?? text
                 var messages: [SearchMessage] = []
                 SearchContent.appendTool(&messages, labeled, ts: ts)
                 return (messages, hints)
@@ -585,7 +588,8 @@ struct SearchDevinDecoder {
         case "tool":
             guard let text = SearchContent.toolResultText(record["content"]) else { return [] }
             let name = JSONValue.string(record["tool_call_id"]).flatMap { state.callNames[$0] }
-            let labeled = name.map { "\($0): \(text)" } ?? text
+            // `→` reply lead, same as Python's `_devin_chat_message`.
+            let labeled = name.map { "→ \($0): \(text)" } ?? text
             var messages: [SearchMessage] = []
             SearchContent.appendTool(&messages, labeled, ts: ts)
             return messages
