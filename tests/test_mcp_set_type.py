@@ -11,8 +11,9 @@ import os
 import pathlib
 import subprocess
 import sys
-import tempfile
 import unittest
+
+from tests._tempdir import temp_dir
 
 MCP_MODULE = "swe.mcp"
 PROJECT_SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
@@ -30,8 +31,7 @@ def _mcp_env(home: pathlib.Path) -> dict[str, str]:
 
 class McpSetTypeTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.home = pathlib.Path(self.tmp.name)
+        self.home = temp_dir(self)
         cfg = self.home / ".swe" / "config"
         cfg.mkdir(parents=True, exist_ok=True)
         (cfg / "tools.json").write_text(
@@ -41,9 +41,6 @@ class McpSetTypeTest(unittest.TestCase):
         self.claude_file = self.home / ".claude.json"
         self.hub_write({})
         self.claude_write({})
-
-    def tearDown(self):
-        self.tmp.cleanup()
 
     def run_mcp(self, *args, stdin=""):
         return subprocess.run(

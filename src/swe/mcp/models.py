@@ -89,6 +89,22 @@ class ToggleReply:
 
 
 @dataclass(frozen=True)
+class SetTypeReply:
+    """``swe mcp set-type NAME TYPE``/``--clear --json``: the label left.
+
+    ``type`` is the label written, or None when the call cleared one (or
+    found a URL server's ``sse`` marker, which is wire metadata it leaves
+    alone).
+    """
+
+    name: str
+    type: str | None = None
+
+    def to_json(self) -> dict:
+        return {"name": self.name, "type": self.type}
+
+
+@dataclass(frozen=True)
 class PlaceRow:
     """One place ``swe mcp info`` found a server: a harness file or the hub.
 

@@ -344,6 +344,39 @@ class McpEnableDisableTest(unittest.TestCase):
         self.assertEqual(sorted(self.master_off()["github"]),
                          ["claude", "codex"])
 
+    def test_for_disable_drops_an_already_off_harness_from_the_restore_set(self):
+        self.seed_everywhere()
+        self.run_mcp("disable", "github")
+        # claude is already off, yet the user still asks for it off —
+        # there is nothing to remove, but the restore set must lose it.
+        r = self.run_mcp("disable", "github", "--for=claude")
+        self.assertEqual(self.master_off(), {"github": ["codex"]})
+
+        r = self.run_mcp("enable", "github")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn("github", self.codex())
+        self.assertNotIn("github", self.claude())
+
+    def test_a_failed_restore_keeps_its_targets_in_the_restore_set(self):
+        # codex is off by hand; the master-off only covers claude, whose
+        # restore then fails on a missing secret. A retry must still
+        # target only claude — not fall back to every marked harness.
+        self.seed_everywhere()
+        self.run_mcp("disable", "github", "--for=codex")
+        self.claude_write({"github": dict(self.GITHUB, env={"K": "${GONE}"})})
+        self.run_mcp("disable", "github")
+
+        r = self.run_mcp("enable", "github")
+        self.assertEqual(r.returncode, 1, r.stderr + r.stdout)
+        self.assertEqual(self.master_off(), {"github": ["claude"]})
+
+        r = self.run_mcp("secret", "set", "GONE", stdin="real-value")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        r = self.run_mcp("enable", "github")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertIn("github", self.claude())
+        self.assertNotIn("github", self.codex())
+
 
 if __name__ == "__main__":
     unittest.main()

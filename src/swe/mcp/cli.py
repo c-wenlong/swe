@@ -52,7 +52,7 @@ from swe.mcp.inventory import server_inventory
 from swe.mcp import gateway as gateway_defaults
 from swe.flags import expand_value_flags
 from swe.mcp.models import ToggleReply
-from swe.mcp.models import InfoReply, PlaceRow, ToolsReply
+from swe.mcp.models import InfoReply, PlaceRow, SetTypeReply, ToolsReply
 from swe.mcp.secrets import _SECRET_FLAG_RE
 from swe.mcp.secrets import load_secrets
 from swe.mcp.secrets import redact as redact_secrets
@@ -2892,6 +2892,12 @@ def cmd_disable(args):
         print(f"{name} is not defined in any harness.", file=refusal)
         return 1
 
+    if for_flag is not None:
+        # An explicit --for off leaves the restore set up front: the user
+        # asked for these harnesses off, so a later master-on must not
+        # resurrect them — even where nothing was left to remove.
+        _drop_master_off(name, targets)
+
     # First the backups, then any deletion: a disabled server must always
     # be recoverable, so nothing leaves a file until the hub and the
     # per-harness raw copies are proven storable.
@@ -2949,10 +2955,6 @@ def cmd_disable(args):
         # switched off so a bare enable restores exactly them — never
         # a harness the user had already turned off by hand.
         _record_master_off(name, turned_off)
-    elif for_flag is not None:
-        # An explicit --for off leaves the restore set: a later
-        # master-on must not resurrect it.
-        _drop_master_off(name, targets)
     if not json_view:
         for target in turned_off:
             print(f"{c('green', '✓')} {name} off for {c('cyan', target)}")
@@ -3066,15 +3068,11 @@ def cmd_enable(args):
             failed.append(target)
             if not json_view:
                 print(f"  {target}: {name} stays off — {why}", file=refusal)
-    if for_flag is None:
-        if recorded is not None:
-            # The restore set was consumed: anything still off keeps its
-            # disabled mark, which a later bare enable falls back to.
-            _drop_master_off(name)
-    else:
-        # A harness enabled on purpose leaves the restore set: there is
-        # nothing left to resurrect there.
-        _drop_master_off(name, turned_on)
+    # Restored harnesses leave the restore set: a bare enable spends its
+    # recorded set, a --for enable takes the named harnesses out of any
+    # set still standing. A failed restore keeps its entry, so a retry
+    # still targets exactly it rather than every marked harness.
+    _drop_master_off(name, turned_on)
     if json_view:
         emit(ToggleReply(name, enabled_in=turned_on, failed_in=failed).to_json())
     return 0 if turned_on else 1
@@ -3129,7 +3127,7 @@ def cmd_set_type(args):
         entry[gateway_defaults.TYPE_KEY] = label
         save_hub_servers(servers)
         if json_view:
-            return emit({"name": name, "type": label})
+            return emit(SetTypeReply(name, label).to_json())
         print(f"{name}: type {label}")
         return 0
 
@@ -3137,7 +3135,7 @@ def cmd_set_type(args):
         # The marker is not a label, and dropping it would downgrade the
         # server to plain http on the next sync — left alone either way.
         if json_view:
-            return emit({"name": name, "type": None})
+            return emit(SetTypeReply(name).to_json())
         print(f"{name}: type is the sse transport marker, not a label — "
               "left alone.")
         return 0
@@ -3146,7 +3144,7 @@ def cmd_set_type(args):
     if changed:
         save_hub_servers(servers)
     if json_view:
-        return emit({"name": name, "type": None})
+        return emit(SetTypeReply(name).to_json())
     print(f"{name}: type cleared" if changed else f"{name}: no type label set")
     return 0
 
