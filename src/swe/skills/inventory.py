@@ -242,7 +242,13 @@ def installed_skills(home: Path | None = None, cwd: Path | None = None) -> dict:
     home = home or Path.home()
     roots = _plan_skill_roots(home)
     archived = archived_names(load_registry(home))
+    shared = paths.skills_dir_for(home)
+    from swe.init.layout import shared_skill_dirs, skill_root_links
+    from swe.skills.layout import selection_intent, selection_record_at
+
+    shared_names = set(shared_skill_dirs(shared))
     harnesses = []
+    selection_roots = []
     for s in roots:
         state, detail = s.state, s.detail
         if state == "ignored" and detail == ARCHIVED_DETAIL:
@@ -250,18 +256,41 @@ def installed_skills(home: Path | None = None, cwd: Path | None = None) -> dict:
             # that. Linking it by hand still depends on what the folder
             # holds, so report that; `archived` keeps the init view.
             state, detail = classify_skill_root(s.path, home)
-        harnesses.append({
+        row = {
             "name": registry_name(s.label),
             "label": s.label,
             "path": str(s.path),
             "state": state,
             "detail": detail,
             "archived": registry_name(s.label) in archived,
-        })
+            "mode": "all" if state == "linked" else "none",
+            "enabled": [],
+            "disabled": [],
+        }
+        if state == "selection":
+            # The record says which rule the folder follows; the links on
+            # disk say what is actually on. An unrecorded dir of links is
+            # "only": it gets nothing new until asked, matching the folder
+            # it has been all along.
+            links = skill_root_links(s.path, shared)
+            record = selection_record_at(s.path)
+            if record is not None:
+                row["mode"], _ = selection_intent(record)
+            else:
+                row["mode"] = "only"
+            row["enabled"] = sorted(n for n in links if n in shared_names)
+            row["disabled"] = sorted(shared_names - set(links))
+            selection_roots.append(row)
+        harnesses.append(row)
     real_roots = [
         (registry_name(s.label), real)
         for s in roots
         if s.path.exists() and (real := _real_path(s.path)) is not None
+    ]
+    # The dir a selection root actually is, for per-skill link checks.
+    selection_dirs = [
+        (row["name"], Path(row["path"]))
+        for row in selection_roots
     ]
     catalogs = {str(entry.get("label", "catalog")) for entry in load_skill_catalogs()}
 
@@ -308,6 +337,16 @@ def installed_skills(home: Path | None = None, cwd: Path | None = None) -> dict:
         for harness, root in real_roots:
             if real is not None and _under(real, root) and harness not in seen_by:
                 seen_by.append(harness)
+        # A selection root's real path is itself, so a shared skill is
+        # never "under" it; it is seen through the per-skill link — and a
+        # private folder with the same name is not that link, so the
+        # shared row stays off for a root that forked it.
+        if real is not None:
+            for harness, root in selection_dirs:
+                slot = root / real.name
+                if (harness not in seen_by and slot.is_symlink()
+                        and _real_path(slot) == real):
+                    seen_by.append(harness)
         seen_by += [owner for owner in owners if owner not in seen_by]
         skills.append({
             "name": name,

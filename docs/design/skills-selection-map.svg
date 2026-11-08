@@ -1,0 +1,156 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 1104" role="img" aria-labelledby="t d">
+  <title id="t">Skills: one registry, per-harness selections</title>
+  <desc id="d">How swe keeps skills in ~/.swe/skills and links a selection of them into each coding harness (claude, codex, cursor) via all, except and only modes.</desc>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#d97706"/>
+    </marker>
+    <style>
+      .m { font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
+      .s { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+      text { fill: #0f172a; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="760" height="1104" fill="#ffffff"/>
+
+  <!-- Header -->
+  <text class="s" x="28" y="44" font-size="27" font-weight="700">Skills: one registry, per-harness selections</text>
+  <text class="s" x="28" y="72" font-size="16" fill="#64748b">swe keeps skills in one shared folder; each coding harness links in its pick.</text>
+
+  <!-- Step 1: registry -->
+  <rect x="28" y="96" width="704" height="118" rx="14" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <circle cx="28" cy="96" r="15" fill="#2563eb"/>
+  <text class="s" x="28" y="102" font-size="17" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+  <text class="m" x="52" y="132" font-size="21" font-weight="700" fill="#1d4ed8">~/.swe/skills</text>
+  <text class="s" x="232" y="132" font-size="17" fill="#64748b">· canonical registry</text>
+  <rect x="52" y="150" width="132" height="48" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text class="m" x="118" y="181" font-size="20" text-anchor="middle">foo/</text>
+  <rect x="200" y="150" width="132" height="48" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text class="m" x="266" y="181" font-size="20" text-anchor="middle">bar/</text>
+  <rect x="348" y="150" width="132" height="48" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text class="m" x="414" y="181" font-size="20" text-anchor="middle">baz/</text>
+
+  <!-- init arrow -->
+  <line x1="360" y1="224" x2="360" y2="250" stroke="#2563eb" stroke-width="3" marker-end="url(#arr)"/>
+  <text x="386" y="244" font-size="18">
+    <tspan class="m" font-weight="700">swe init</tspan><tspan class="s">: every harness starts as </tspan><tspan class="m" font-weight="700" fill="#b45309">all</tspan>
+  </text>
+
+  <!-- Step 2: harness cards -->
+  <circle cx="28" cy="268" r="15" fill="#2563eb"/>
+  <text class="s" x="28" y="274" font-size="17" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+
+  <!-- Card A: claude / all -->
+  <rect x="28" y="268" width="224" height="252" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text class="m" x="44" y="302" font-size="20" font-weight="700">claude</text>
+  <rect x="186" y="284" width="50" height="26" rx="13" fill="#dbeafe"/>
+  <text class="m" x="211" y="302" font-size="16" font-weight="700" fill="#1d4ed8" text-anchor="middle">all</text>
+  <line x1="44" x2="238" y1="318" y2="318" stroke="#e2e8f0"/>
+  <rect x="44" y="332" width="104" height="32" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text class="m" x="96" y="354" font-size="19" font-weight="700" fill="#1d4ed8" text-anchor="middle">skills/</text>
+  <text class="m" x="238" y="353" font-size="16" fill="#2563eb" text-anchor="end">symlink</text>
+  <text class="m" x="60" y="394" font-size="17" fill="#2563eb">→ ~/.swe/skills</text>
+  <text class="m" x="60" y="426" font-size="16" fill="#94a3b8">foo/ bar/ baz/</text>
+  <text class="s" x="44" y="500" font-size="16" fill="#64748b">= every skill, auto</text>
+
+  <!-- Card B: codex / except -->
+  <rect x="268" y="268" width="224" height="252" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text class="m" x="284" y="302" font-size="20" font-weight="700">codex</text>
+  <rect x="398" y="284" width="80" height="26" rx="13" fill="#fef3c7"/>
+  <text class="m" x="438" y="302" font-size="16" font-weight="700" fill="#b45309" text-anchor="middle">except</text>
+  <line x1="284" x2="478" y1="318" y2="318" stroke="#e2e8f0"/>
+  <text class="m" x="284" y="352" font-size="19" font-weight="700">skills/</text>
+  <text class="m" x="478" y="351" font-size="16" fill="#64748b" text-anchor="end">real dir</text>
+  <text class="m" x="300" y="384" font-size="18">foo</text>
+  <text class="m" x="478" y="384" font-size="16" fill="#2563eb" text-anchor="end">→ link</text>
+  <text class="m" x="300" y="416" font-size="18">bar</text>
+  <text class="m" x="478" y="416" font-size="16" fill="#2563eb" text-anchor="end">→ link</text>
+  <text class="m" x="300" y="448" font-size="18" fill="#94a3b8" text-decoration="line-through">baz</text>
+  <line x1="300" x2="337" y1="442" y2="442" stroke="#94a3b8" stroke-width="2"/>
+  <text class="m" x="478" y="448" font-size="16" fill="#94a3b8" text-anchor="end">off</text>
+  <text class="s" x="284" y="500" font-size="16" fill="#64748b">= shared minus baz</text>
+
+  <!-- Card C: cursor / only -->
+  <rect x="508" y="268" width="224" height="252" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text class="m" x="524" y="302" font-size="20" font-weight="700">cursor</text>
+  <rect x="660" y="284" width="58" height="26" rx="13" fill="#fef3c7"/>
+  <text class="m" x="689" y="302" font-size="16" font-weight="700" fill="#b45309" text-anchor="middle">only</text>
+  <line x1="524" x2="718" y1="318" y2="318" stroke="#e2e8f0"/>
+  <text class="m" x="524" y="352" font-size="19" font-weight="700">skills/</text>
+  <text class="m" x="718" y="351" font-size="16" fill="#64748b" text-anchor="end">real dir</text>
+  <text class="m" x="540" y="384" font-size="18">foo</text>
+  <text class="m" x="718" y="384" font-size="16" fill="#2563eb" text-anchor="end">→ link</text>
+  <path d="M540 403h5l2 3h7v9h-14z" fill="#64748b"/>
+  <text class="m" x="560" y="416" font-size="18" font-weight="700">own/</text>
+  <text class="m" x="718" y="416" font-size="16" fill="#475569" text-anchor="end">private</text>
+  <text class="m" x="540" y="448" font-size="18" fill="#94a3b8" text-decoration="line-through">bar</text>
+  <line x1="540" x2="577" y1="442" y2="442" stroke="#94a3b8" stroke-width="2"/>
+  <text class="m" x="718" y="448" font-size="16" fill="#94a3b8" text-anchor="end">not linked</text>
+  <text class="s" x="524" y="500" font-size="16" fill="#64748b">= foo + private own/</text>
+
+  <!-- Step 3: create for N harnesses -->
+  <circle cx="36" cy="556" r="15" fill="#2563eb"/>
+  <text class="s" x="36" y="562" font-size="17" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+  <text class="s" x="60" y="562" font-size="21" font-weight="700">Create for N harnesses</text>
+
+  <rect x="28" y="588" width="704" height="68" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <rect x="52" y="606" width="150" height="32" rx="16" fill="#dbeafe"/>
+  <text class="m" x="127" y="628" font-size="16" font-weight="700" fill="#1d4ed8" text-anchor="middle">all</text>
+  <text class="s" x="222" y="630" font-size="20" fill="#94a3b8">→</text>
+  <text x="250" y="630" font-size="17">
+    <tspan class="m" font-weight="700">swe skills new</tspan><tspan class="s">: lands in shared, auto-links to all</tspan>
+  </text>
+
+  <rect x="28" y="670" width="704" height="68" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <rect x="52" y="688" width="150" height="32" rx="16" fill="#e2e8f0"/>
+  <text class="m" x="127" y="710" font-size="16" font-weight="700" fill="#334155" text-anchor="middle">one</text>
+  <text class="s" x="222" y="712" font-size="20" fill="#94a3b8">→</text>
+  <text x="250" y="712" font-size="17">
+    <tspan class="s">a real folder inside that harness's </tspan><tspan class="m">skills/</tspan>
+  </text>
+
+  <rect x="28" y="752" width="704" height="68" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <rect x="52" y="770" width="150" height="32" rx="16" fill="#fef3c7"/>
+  <text class="m" x="127" y="792" font-size="16" font-weight="700" fill="#b45309" text-anchor="middle">exactly two</text>
+  <text class="s" x="222" y="794" font-size="20" fill="#94a3b8">→</text>
+  <text x="250" y="794" font-size="17">
+    <tspan class="s">create in shared, then toggle off in the third</tspan>
+  </text>
+
+  <!-- Step 4: bidirectional sync -->
+  <circle cx="36" cy="846" r="15" fill="#2563eb"/>
+  <text class="s" x="36" y="852" font-size="17" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+  <text class="s" x="60" y="854" font-size="21" font-weight="700">Bidirectional sync</text>
+
+  <!-- push -->
+  <rect x="28" y="872" width="704" height="92" rx="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <rect x="52" y="890" width="76" height="32" rx="16" fill="#dbeafe"/>
+  <text class="m" x="90" y="912" font-size="16" font-weight="700" fill="#1d4ed8" text-anchor="middle">push</text>
+  <rect x="144" y="886" width="166" height="40" rx="10" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1.5"/>
+  <text class="m" x="227" y="912" font-size="16" fill="#1d4ed8" text-anchor="middle">~/.swe/skills</text>
+  <line x1="318" y1="906" x2="352" y2="906" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arr)"/>
+  <rect x="360" y="886" width="88" height="40" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text class="m" x="404" y="912" font-size="16" text-anchor="middle">claude</text>
+  <rect x="456" y="886" width="88" height="40" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text class="m" x="500" y="912" font-size="16" text-anchor="middle">codex</text>
+  <rect x="552" y="886" width="88" height="40" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text class="m" x="596" y="912" font-size="16" text-anchor="middle">cursor</text>
+  <text class="s" x="52" y="946" font-size="16" fill="#64748b">the links above are the push path: edit once in shared, every linked dir shows it</text>
+
+  <!-- pull -->
+  <rect x="28" y="976" width="704" height="104" rx="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <rect x="52" y="994" width="76" height="32" rx="16" fill="#fef3c7"/>
+  <text class="m" x="90" y="1016" font-size="16" font-weight="700" fill="#b45309" text-anchor="middle">pull</text>
+  <rect x="144" y="990" width="56" height="40" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text class="m" x="172" y="1016" font-size="16" text-anchor="middle">own/</text>
+  <line x1="206" y1="1010" x2="236" y2="1010" stroke="#d97706" stroke-width="2.5" marker-end="url(#arrA)"/>
+  <rect x="242" y="990" width="314" height="40" rx="10" fill="#1e293b"/>
+  <text class="m" x="399" y="1016" font-size="16" fill="#e2e8f0" text-anchor="middle">swe skills move own --to=shared</text>
+  <line x1="562" y1="1010" x2="592" y2="1010" stroke="#d97706" stroke-width="2.5" marker-end="url(#arrA)"/>
+  <text class="m" x="598" y="1016" font-size="16" font-weight="700" fill="#1d4ed8">~/.swe/skills</text>
+  <text class="s" x="52" y="1058" font-size="16" fill="#64748b">lands in the registry · except roots auto-link it · only roots hold out until toggled</text>
+</svg>

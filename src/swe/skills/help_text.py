@@ -32,6 +32,11 @@ def print_skills_overview():
   {c('cyan', 'swe skills unlink <harness> [--mkdir]')} Break link; optional empty dir
   {c('cyan', 'swe skills move <name> --from=A --to=B')} Move a skill folder
 
+{c('bold', 'Per-skill selections')}
+  {c('cyan', 'swe skills enable <name> --harness=<h>')}   Link one shared skill into a harness
+  {c('cyan', 'swe skills disable <name> --harness=<h>')}  Drop it without touching the rest
+  {c('cyan', 'swe skills sync')}                           Re-apply each selection (new skills arrive)
+
 {c('bold', 'Catalogs (extra skill directories)')}
   {c('cyan', 'swe skills discover [--apply]')} Scan ~/Desktop and ~/Documents
   {c('cyan', 'swe skills catalog .')}         Add current directory as catalog
@@ -43,7 +48,7 @@ def print_skills_overview():
   {SKILL_CATALOGS_FILE}   extra catalog paths
   {SKILL_LINKS_FILE}      recorded harness symlinks
 
-{c('bold', 'Help')}  {c('cyan', 'swe skills help <topic>')}  — topics: catalog, discover, hub, link, unlink, move, tree, scope
+{c('bold', 'Help')}  {c('cyan', 'swe skills help <topic>')}  — topics: catalog, discover, enable, hub, link, move, new, sync, tree, scope, unlink
   {c('dim', 'help comes before the topic here — unlike swe mcp <command> help, which puts it after.')}
 """
     )
@@ -155,6 +160,46 @@ def print_skills_move_help():
     )
 
 
+def print_skills_toggle_help():
+    print(
+        f"""
+  {c('bold', 'swe skills enable/disable')} — Turn one shared skill on or off per harness
+
+  {c('cyan', 'swe skills enable my-skill --harness=codex')}    Link it into codex's folder
+  {c('cyan', 'swe skills disable my-skill --harness=codex')}   Remove just that link
+  {c('cyan', '--json')}                          Print the result as JSON
+
+{c('bold', 'How a folder selects')}
+  {c('bold', 'all')}      the whole skills folder is one link to shared (the default)
+  {c('bold', 'except')}   a real dir linking every shared skill but the ones disabled —
+           disabling in a linked folder converts it to this, and new shared
+           skills still arrive
+  {c('bold', 'only')}     a real dir linking just the skills enabled — how a private
+           skills folder picks shared skills up, one at a time
+
+  Enabling in a folder that has no skills dir yet creates an {c('bold', 'only')} root.
+  A private folder with the same name already shadows the shared skill there;
+  move it with {c('cyan', 'swe skills move')} first to make the two one.
+"""
+    )
+
+
+def print_skills_sync_help():
+    print(
+        f"""
+  {c('bold', 'swe skills sync')} — Re-apply each harness's skill selection
+
+  Compares every selected skills folder (an {c('bold', 'except')} or {c('bold', 'only')} root)
+  to what the shared tree holds now, and fixes the links: skills added to
+  shared arrive in except roots, links to deleted skills are dropped, and
+  a link removed by hand comes back when its record still wants it.
+
+  {c('cyan', 'swe skills sync')}            Repair every selection root
+  {c('cyan', 'swe skills sync --json')}    Print what changed as JSON
+"""
+    )
+
+
 def print_skills_hub_help():
     print(
         f"""
@@ -189,10 +234,13 @@ SKILLS_HELP_TOPICS = {
     "": print_skills_overview,
     "catalog": print_skills_catalog_help,
     "catalogs": print_skills_catalog_help,
+    "disable": print_skills_toggle_help,
     "discover": print_skills_discover_help,
+    "enable": print_skills_toggle_help,
     "hub": print_skills_hub_help,
     "link": print_skills_link_help,
     "new": print_skills_new_help,
+    "sync": print_skills_sync_help,
     "unlink": print_skills_unlink_help,
     "move": print_skills_move_help,
     "tree": print_skills_tree_help,

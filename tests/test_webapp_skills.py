@@ -492,6 +492,51 @@ class TestWrites(_WriteHome, unittest.TestCase):
         self.assertFalse(os.path.lexists(self.path("codex")))
         self.assertEqual(self.records.read_text(), "{not json")
 
+    def _selection(self, name: str = "codex", private: bool = False) -> Path:
+        """A skills root as a dir of per-skill links into shared."""
+        root = Path(self.path(name))
+        root.mkdir(parents=True)
+        (root / "tdd").symlink_to(self.shared.parent / "tdd")
+        if private:
+            (root / "own").mkdir()
+            (root / "own" / "SKILL.md").write_text("---\nname: own\n---\n")
+        return root
+
+    def test_a_selection_is_its_own_link_state(self):
+        self._selection()
+        reply = page.get(self.ctx, {})
+        codex = next(r for r in reply["harnesses"] if r["name"] == "codex")
+        self.assertEqual(codex["state"], "selection")
+        self.assertEqual(page.link_state(codex), "selection")
+
+    def test_link_a_pure_selection_relinks_the_whole_folder(self):
+        root = self._selection()
+        reply = self.post("link", {"harness": self.path("codex"), "expect": "selection"})
+        self.assertTrue(root.is_symlink())
+        self.assertEqual(self.states(reply)["codex"], "linked")
+
+    def test_link_a_selection_with_privates_is_refused_without_force(self):
+        root = self._selection(private=True)
+        err = self.refused("link", {"harness": self.path("codex")})
+        self.assertEqual((err.status, err.code), (409, "link_failed"))
+        self.assertTrue(root.is_dir() and not root.is_symlink())
+        self.assertTrue((root / "own" / "SKILL.md").is_file())
+
+    def test_unlink_a_selection_drops_links_keeps_privates(self):
+        root = self._selection(private=True)
+        reply = self.post("unlink", {"harness": self.path("codex"), "expect": "selection"})
+        self.assertFalse((root / "tdd").exists())
+        self.assertTrue((root / "own" / "SKILL.md").is_file())
+        # With only a private skill left the folder reads as keep again.
+        self.assertEqual(self.states(reply)["codex"], "keep")
+
+    def test_link_all_leaves_a_selection_alone(self):
+        self._selection()
+        reply = self.post("link_all", {})
+        self.assertNotIn("codex", {r["name"] for r in reply["result"]["linked"]})
+        self.assertNotIn("codex", {r["name"] for r in reply["result"]["skipped"]})
+        self.assertFalse(Path(self.path("codex")).is_symlink())
+
 
 class TestNewSkill(_WriteHome, unittest.TestCase):
     """New skill: swe skills new, writing ~/.swe/skills/<name>/SKILL.md."""
@@ -538,10 +583,14 @@ class TestExplanation(unittest.TestCase):
                                        ("d", "keep", "1 of 1 skills exist nowhere else", False),
                                        ("e", "conflict", "real file, needs --force", False),
                                        ("f", "create", "", True), ("g", "ignored", "linkignore", False),
-                                       ("h", "linked", "", False))]
+                                       ("h", "linked", "", False), ("i", "selection", "", False))]
+        roots[8].update({"mode": "except", "disabled": ["tdd"]})
         link, skipped = page.link_all_targets(roots)
         self.assertEqual([r["name"] for r in link], ["a", "b"])
+        # A selection is curated, not a loose folder: neither list takes it.
         self.assertEqual([r["name"] for r in skipped], ["c", "d", "e"])
+        self.assertEqual(page.explanation(roots[8]),
+                         "A selection (1 off): it links every shared skill but the ones switched off.")
         self.assertEqual(page.explanation(roots[5]),
                          "No skills folder yet. Archived in swe, so swe init leaves it alone; linking here creates it.")
         self.assertEqual(page.explanation(roots[2]),

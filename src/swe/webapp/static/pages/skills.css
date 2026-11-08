@@ -35,11 +35,13 @@
 .sk-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px;
   border: 1px solid var(--border); background: transparent; font-size: 12px; font-weight: 500; color: var(--text-secondary); }
 .sk-chip.linked { background: var(--subtle); color: var(--text-primary); }
+.sk-chip.selection { background: var(--subtle); color: var(--text-primary); }
 .sk-chip.compact { height: 22px; padding: 0 8px; font-size: 11px; }
 button.sk-chip { cursor: pointer; }
 button.sk-chip:hover { border-color: var(--border-strong); }
 .sk-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: inline-block; }
 .sk-dot.linked { background: var(--accent-fill); }
+.sk-dot.selection { border: 1.2px solid var(--accent-fill); }
 .sk-dot.notLinked { border: 1.2px solid var(--text-muted); }
 .sk-dot.blocked { background: var(--warning); }
 .sk-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12px; color: var(--text-secondary); }

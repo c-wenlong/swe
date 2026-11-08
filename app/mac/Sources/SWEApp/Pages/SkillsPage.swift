@@ -266,7 +266,8 @@ private struct HarnessLinksSummary: View {
 
     var body: some View {
         let roots = model.roots
-        let linked = roots.filter { $0.link == .linked }.count
+        // A selection root reads shared skills too, just not all of them.
+        let linked = roots.filter { $0.link == .linked || $0.link == .selection }.count
         let blocked = roots.contains { $0.link == .blocked }
         Button { open = true } label: {
             HStack(spacing: 6) {
@@ -392,6 +393,11 @@ private struct RootDetail: View {
                 case .linked:
                     Button("Unlink") { act { await model.unlink(root) } }
                         .secondaryButton()
+                case .selection:
+                    Button("Unlink all") { act { await model.unlink(root) } }
+                        .secondaryButton()
+                    Button("Link all skills") { act { await model.link(root) } }
+                        .primaryButton()
                 case .notLinked:
                     Button("Link to shared skills") { act { await model.link(root) } }
                         .primaryButton()
@@ -449,6 +455,7 @@ private struct LinkDot: View {
     var body: some View {
         switch link {
         case .linked: Circle().fill(Theme.accentFill).frame(width: Theme.statusDot, height: Theme.statusDot)
+        case .selection: Circle().strokeBorder(Theme.accentFill, lineWidth: 1.2).frame(width: Theme.statusDot, height: Theme.statusDot)
         case .notLinked: Circle().strokeBorder(Theme.textMuted, lineWidth: 1.2).frame(width: Theme.statusDot, height: Theme.statusDot)
         case .blocked: Circle().fill(Theme.warning).frame(width: Theme.statusDot, height: Theme.statusDot)
         }
@@ -458,7 +465,7 @@ private struct LinkDot: View {
 private struct LinkLegend: View {
     var body: some View {
         HStack(spacing: 14) {
-            ForEach([SkillRoot.Link.linked, .notLinked, .blocked], id: \.self) { link in
+            ForEach([SkillRoot.Link.linked, .selection, .notLinked, .blocked], id: \.self) { link in
                 HStack(spacing: 6) {
                     LinkDot(link: link)
                     Text(link.title).font(Theme.caption).foregroundStyle(Theme.textSecondary)
@@ -599,6 +606,7 @@ extension SkillRoot.Link {
     var title: String {
         switch self {
         case .linked: "Linked"
+        case .selection: "Selection"
         case .notLinked: "Not linked"
         case .blocked: "Blocked"
         }

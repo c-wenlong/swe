@@ -17,13 +17,17 @@ public struct SkillInventory: SnapshotValue {
     }
 }
 
-/// The one folder a harness reads skills from. swe links whole folders,
-/// so this is where linking and unlinking happen.
+/// The one folder a harness reads skills from. swe links whole folders
+/// or a folder of per-skill links (a selection), so this is where
+/// linking, unlinking and per-skill toggling happen.
 public struct SkillRoot: Codable, Sendable, Equatable, Identifiable {
     /// What the page can do about a folder.
     public enum Link: Sendable, Equatable {
         /// Points at `~/.swe/skills`.
         case linked
+        /// A real directory of per-skill links: the harness picked which
+        /// shared skills it sees (`except` or `only` in `mode`).
+        case selection
         /// Missing, empty, holding only copies of shared skills, or pointing
         /// somewhere else: linking it loses nothing.
         case notLinked
@@ -36,23 +40,36 @@ public struct SkillRoot: Codable, Sendable, Equatable, Identifiable {
     /// Registry name, so it joins `swe list --json` on `name`.
     public let name: String
     public let path: String
-    /// `swe init`'s vocabulary: linked, relink, create, absorb, keep,
-    /// ignored, skipped.
+    /// `swe init`'s vocabulary: linked, selection, relink, create, absorb,
+    /// keep, ignored, skipped.
     public let state: String
     public let detail: String
+    /// The selection rule: `all` for a linked folder, `except` (linked
+    /// everything but `disabled`) or `only` (linked just `enabled`) for a
+    /// selection, `none` otherwise.
+    public let mode: String
+    /// Shared skill folders linked in a selection root.
+    public let enabled: [String]
+    /// Shared skill folders a selection root leaves unlinked.
+    public let disabled: [String]
     /// Archived in harness.json. `swe init` leaves such a folder alone; swe
     /// still reports what it holds, so a click here can link it.
     public let archived: Bool
 
-    public init(name: String, path: String, state: String, detail: String = "", archived: Bool = false) {
+    public init(name: String, path: String, state: String, detail: String = "",
+                mode: String = "", enabled: [String] = [], disabled: [String] = [],
+                archived: Bool = false) {
         self.name = name
         self.path = path
         self.state = state
         self.detail = detail
+        self.mode = mode
+        self.enabled = enabled
+        self.disabled = disabled
         self.archived = archived
     }
 
-    enum CodingKeys: String, CodingKey { case name, path, state, detail, archived }
+    enum CodingKeys: String, CodingKey { case name, path, state, detail, mode, enabled, disabled, archived }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -60,12 +77,16 @@ public struct SkillRoot: Codable, Sendable, Equatable, Identifiable {
         path = try c.decode(String.self, forKey: .path)
         state = try c.decode(String.self, forKey: .state)
         detail = try c.decodeIfPresent(String.self, forKey: .detail) ?? ""
+        mode = try c.decodeIfPresent(String.self, forKey: .mode) ?? (state == "linked" ? "all" : "none")
+        enabled = try c.decodeIfPresent([String].self, forKey: .enabled) ?? []
+        disabled = try c.decodeIfPresent([String].self, forKey: .disabled) ?? []
         archived = try c.decodeIfPresent(Bool.self, forKey: .archived) ?? false
     }
 
     public var link: Link {
         switch state {
         case "linked": .linked
+        case "selection": .selection
         case "create", "relink", "absorb": .notLinked
         default: .blocked
         }
@@ -80,6 +101,13 @@ public struct SkillRoot: Codable, Sendable, Equatable, Identifiable {
         switch state {
         case "linked" where archived: "Reads the shared skills. Archived in swe, so swe init won't relink it if you unlink it, but you can link it here."
         case "linked": "Reads the shared skills in ~/.swe/skills."
+        case "selection": {
+            let picks = mode == "except"
+                ? "links every shared skill but the ones switched off"
+                : "links just the shared skills switched on"
+            let off = disabled.isEmpty ? "" : " (\(disabled.count) off: \(disabled.joined(separator: ", ")))"
+            return "A selection\(off): it \(picks)."
+        }()
         case "create" where archived: "No skills folder yet. Archived in swe, so swe init leaves it alone; linking here creates it."
         case "create": "No skills folder yet. Linking creates it."
         case "relink": detail.isEmpty ? "Points somewhere else." : "Points somewhere else: \(detail.replacingOccurrences(of: "points at ", with: ""))."
@@ -163,6 +191,14 @@ extension SweClient {
         let _: LinkReply = try await call(["skills", "unlink", root.path, "--json"])
     }
 
+    /// Links one shared skill into a selection root, or drops its link.
+    public func setSkill(_ skill: Skill, on root: SkillRoot, enabled: Bool) async throws {
+        let _: ToggleReply = try await call([
+            "skills", enabled ? "enable" : "disable", skill.name,
+            "--harness=\(root.path)", "--json",
+        ])
+    }
+
     /// Writes ~/.swe/skills/<name>/SKILL.md. No force flag: an existing
     /// name refuses.
     public func newSkill(name: String, description: String) async throws -> NewSkillReply {
@@ -174,6 +210,13 @@ extension SweClient {
 }
 
 struct LinkReply: Decodable { let action: String }
+
+/// `swe skills enable|disable --json`.
+struct ToggleReply: Decodable {
+    let action: String
+    let mode: String
+    let converted: Bool
+}
 
 /// `swe skills new <name>`: the SKILL.md path it wrote.
 public struct NewSkillReply: Decodable {
@@ -313,12 +356,14 @@ public final class SkillsModel {
     }
 
     public func link(_ root: SkillRoot) async {
-        guard root.link == .notLinked else { return }
+        // A selection linked as a whole folder again, or a loose folder
+        // pointed at shared.
+        guard root.link == .notLinked || root.link == .selection else { return }
         _ = await change(root) { try await $0.link(root) }
     }
 
     public func unlink(_ root: SkillRoot) async {
-        guard root.link == .linked else { return }
+        guard root.link == .linked || root.link == .selection else { return }
         _ = await change(root) { try await $0.unlink(root) }
     }
 
@@ -470,6 +515,9 @@ public final class SkillsModel {
         }
         return roots.map { root in
             if seeing.contains(root.name) { return (root, .linked) }
+            // A selection the skill is off in stays unoffered: linking
+            // the whole folder would also flatten the picks it holds.
+            if root.link == .selection { return (root, .blocked) }
             return (root, root.link == .blocked ? .blocked : .notLinked)
         }
     }

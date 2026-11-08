@@ -9,14 +9,31 @@
         "path": "/tmp/swe-fixture-home/.claude/skills",
         "state": "linked",
         "detail": "",
+        "mode": "all",
+        "enabled": [],
+        "disabled": [],
         "archived": false
       },
       {
         "name": "codex",
         "label": "codex",
         "path": "/tmp/swe-fixture-home/.codex/skills",
+        "state": "selection",
+        "detail": "0 of 1 shared linked; fixture-skill off",
+        "mode": "except",
+        "enabled": [],
+        "disabled": ["fixture-skill"],
+        "archived": false
+      },
+      {
+        "name": "cursor",
+        "label": "cursor",
+        "path": "/tmp/swe-fixture-home/.cursor/skills",
         "state": "create",
         "detail": "",
+        "mode": "none",
+        "enabled": [],
+        "disabled": [],
         "archived": false
       }
     ],

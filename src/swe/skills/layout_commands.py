@@ -10,11 +10,13 @@ from swe.skills.help_text import (
     print_skills_move_help,
     print_skills_unlink_help,
 )
-from swe.skills.models import LinkReply, MoveReply, UnlinkReply
+from swe.skills.models import LinkReply, MoveReply, SyncReply, ToggleReply, UnlinkReply
 from swe.skills.link_ops import (
     SkillLayoutError,
     link_skill_root,
     move_skill,
+    reconcile_all_selections,
+    set_skill_enabled,
     unlink_skill_root,
 )
 
@@ -104,6 +106,98 @@ def cmd_skills_unlink(args):
         msg += " (empty directory created)"
     print(c("green", msg))
     print(c("dim", "  Run `swe skills tree` to verify.\n"))
+    return 0
+
+
+def _cmd_skills_toggle(args, enabled: bool) -> int:
+    verb = "enable" if enabled else "disable"
+    json_view = "--json" in args
+    try:
+        args = expand_value_flags(args, {"--harness"})
+    except ValueError as exc:
+        print(c("red", f"  {exc}"), file=error_stream(json_view))
+        return 1
+    harness = None
+    rest = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--harness":
+            harness = args[i + 1]
+            i += 1
+        elif arg == "--json":
+            pass
+        elif arg in ("-h", "--help"):
+            rest.append(arg)
+        elif arg.startswith("-"):
+            print(c("red", f"  Unknown flag: {arg}"), file=error_stream(json_view))
+            return 1
+        else:
+            rest.append(arg)
+        i += 1
+    if rest and rest[0] in ("-h", "--help"):
+        from swe.skills.help_text import print_skills_toggle_help
+        print_skills_toggle_help()
+        return 0
+    if len(rest) != 1 or not harness:
+        print(c("red", f"  Usage: swe skills {verb} <name> --harness=<h>"),
+              file=error_stream(json_view))
+        return 1
+    try:
+        result = set_skill_enabled(rest[0], harness, enabled=enabled)
+    except SkillLayoutError as exc:
+        print(c("red", f"  {exc}"), file=error_stream(json_view))
+        return 1
+    if json_view:
+        return emit(ToggleReply(**result).to_json())
+    if not result["changed"]:
+        state = "on" if enabled else "off"
+        print(c("dim", f"  {result['skill']} is already {state} for {result['harness']}"))
+        return 0
+    mode = result["mode"]
+    note = {
+        "all": "the folder reads all shared skills",
+        "except": "the folder now links every shared skill but this one",
+        "only": "the folder links only the skills it picked",
+    }.get(mode, mode)
+    print(c("green", f"  ✓ {result['skill']} {'enabled' if enabled else 'disabled'}"
+                    f" for {result['harness']}: {note}"))
+    return 0
+
+
+def cmd_skills_enable(args):
+    return _cmd_skills_toggle(args, enabled=True)
+
+
+def cmd_skills_disable(args):
+    return _cmd_skills_toggle(args, enabled=False)
+
+
+def cmd_skills_sync(args):
+    json_view = "--json" in args
+    rest = [a for a in args if a != "--json"]
+    if rest and rest[0] in ("-h", "--help"):
+        from swe.skills.help_text import print_skills_sync_help
+        print_skills_sync_help()
+        return 0
+    if rest:
+        print(c("red", f"  Unexpected args: {' '.join(rest)}"), file=error_stream(json_view))
+        return 1
+    rows = reconcile_all_selections()
+    if json_view:
+        return emit(SyncReply(rows).to_json())
+    if not rows:
+        print(c("dim", "  Every selected root already matches its skills.\n"))
+        return 0
+    home = Path.home()
+    for row in rows:
+        bits = []
+        if row["added"]:
+            bits.append(f"linked {', '.join(row['added'])}")
+        if row["removed"]:
+            bits.append(f"dropped {', '.join(row['removed'])}")
+        print(c("green", f"  ✓ {row['label']} ({tilde(row['path'], home)}): {'; '.join(bits)}"))
+    print()
     return 0
 
 

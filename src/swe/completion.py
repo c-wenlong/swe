@@ -190,6 +190,17 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
         ("--force", "Back up and replace an existing destination"),
         ("--json", "Print the result as JSON"),
     ],
+    "skills enable": [
+        ("--harness=", "The skills folder to link the skill into"),
+        ("--json", "Print the result as JSON"),
+    ],
+    "skills disable": [
+        ("--harness=", "The skills folder to drop the link from"),
+        ("--json", "Print the result as JSON"),
+    ],
+    "skills sync": [
+        ("--json", "Print what changed as JSON"),
+    ],
     "skills discover": [
         ("--apply", "Write catalog entries"),
         ("--json", "Machine-readable output"),
@@ -563,11 +574,15 @@ _NESTED_FLAGS: dict[str, dict[str, str]] = {
         "link": "skills link", "unlink": "skills unlink",
         "move": "skills move", "discover": "skills discover",
         "hub": "skills hub", "new": "skills new",
+        "enable": "skills enable", "disable": "skills disable",
+        "sync": "skills sync",
     },
     "sk": {
         "link": "skills link", "unlink": "skills unlink",
         "move": "skills move", "discover": "skills discover",
         "hub": "skills hub",
+        "enable": "skills enable", "disable": "skills disable",
+        "sync": "skills sync",
     },
     "find": {
         "amd": "find", "agents": "find", "agents.md": "find",
@@ -817,6 +832,9 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("link", "Point a harness at a shared skills root"),
         ("unlink", "Remove a skills-root symlink"),
         ("move", "Move a skill between scope roots"),
+        ("enable", "Link one shared skill into a harness"),
+        ("disable", "Drop one shared skill's link in a harness"),
+        ("sync", "Re-apply each harness's skill selection"),
         ("new", "Create a SKILL.md in the hub"),
         ("discover", "Find skills not yet cataloged"),
         ("hub", "Plugins the swe hub offers"),
@@ -831,6 +849,9 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("link", "Point a harness at a shared skills root"),
         ("unlink", "Remove a skills-root symlink"),
         ("move", "Move a skill between scope roots"),
+        ("enable", "Link one shared skill into a harness"),
+        ("disable", "Drop one shared skill's link in a harness"),
+        ("sync", "Re-apply each harness's skill selection"),
         ("new", "Create a SKILL.md in the hub"),
         ("discover", "Find skills not yet cataloged"),
         ("hub", "Plugins the swe hub offers"),

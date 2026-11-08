@@ -59,6 +59,7 @@ STATE_COLOR = {
     "create": "cyan",
     "relink": "yellow",
     "absorb": "cyan",
+    "selection": "green",
     "conflict": "red",
     "keep": "yellow",
     "protected": "yellow",
@@ -99,6 +100,18 @@ def _apply(status: LinkStatus, canonical: Path, home: Path, force: bool) -> str:
     if status.state in ("linked", "skipped", "ignored"):
         return status.state
 
+    if status.state == "selection":
+        # A dir of per-skill links is left a dir: init repairs it to the
+        # recorded selection (new shared skills link into an except root;
+        # stale links drop), never replaces it with one whole-folder link.
+        from swe.skills.layout import selection_record_at
+        from swe.skills.link_ops import reconcile_selection_root
+
+        record = selection_record_at(status.path)
+        if record is not None:
+            reconcile_selection_root(status.path, canonical, record)
+        return "selection"
+
     # A directory whose skills exist nowhere else is never replaced on a plain
     # run. Absorbing it would hide the only copy behind the shared tree, and
     # the backup would be the sole survivor. Reported instead.
@@ -127,11 +140,14 @@ def _apply(status: LinkStatus, canonical: Path, home: Path, force: bool) -> str:
 
 # Results that count as linked in the total: already a link, or a check-mode
 # plan that would become one. would-conflict and would-keep are not links.
-_LINKED_RESULTS = frozenset({"linked", "would-create", "would-relink", "would-absorb"})
+# A selection counts too: its folder is tied to the shared tree link by link.
+_LINKED_RESULTS = frozenset({
+    "linked", "would-create", "would-relink", "would-absorb", "selection",
+})
 
 # Order the per-section tallies read in: settled first, then work to do.
 _TALLY_ORDER = (
-    "linked", "create", "relink", "absorb", "keep", "protected",
+    "linked", "selection", "create", "relink", "absorb", "keep", "protected",
     "conflict", "blocked", "unlink", "unlinked", "skipped", "ignored",
 )
 

@@ -178,9 +178,12 @@ let inventoryJSON = #"""
             SkillRoot(name: "f", path: "/f", state: "conflict"),
             SkillRoot(name: "g", path: "/g", state: "create", archived: true),
             SkillRoot(name: "h", path: "/h", state: "linked"),
+            SkillRoot(name: "i", path: "/i", state: "selection"),
         ]
         let (link, skipped) = SkillsModel.linkAllTargets(roots)
         #expect(link.map(\.name) == ["a", "b", "c"])
+        // A selection is curated, not a loose folder: Link all leaves it
+        // be without naming it as something to look at.
         #expect(skipped.map(\.name).sorted() == ["d", "e", "f"])
     }
 
@@ -198,8 +201,9 @@ let inventoryJSON = #"""
         #expect(model.allSkills[3].harnesses.isEmpty)
     }
 
-    @Test func rootStatesMapToLinkedNotLinkedAndBlocked() {
+    @Test func rootStatesMapToLinkedSelectionNotLinkedAndBlocked() {
         #expect(SkillRoot(name: "a", path: "/a", state: "linked").link == .linked)
+        #expect(SkillRoot(name: "a", path: "/a", state: "selection").link == .selection)
         for state in ["create", "relink", "absorb"] {
             #expect(SkillRoot(name: "a", path: "/a", state: state).link == .notLinked)
         }
@@ -372,6 +376,36 @@ let inventoryJSON = #"""
         model.source = nil
         model.query = "  HITS "
         #expect(model.visibleSkills.map(\.name) == ["hammer"])
+    }
+
+    @Test func aSelectionRootIsNotOfferedAsALinkChip() async throws {
+        // A skill switched off in a selection shows the root as blocked:
+        // tapping "link" there would relink the whole folder and flatten
+        // the picks it holds.
+        let json = #"""
+        {"shared_dir": "/h/.swe/skills",
+         "harnesses": [
+          {"name": "codex", "label": "codex", "path": "/h/.codex/skills",
+           "state": "selection", "mode": "except",
+           "enabled": [], "disabled": ["beta"]}
+         ],
+         "skills": [
+          {"name": "alpha", "path": "/h/.swe/skills/alpha",
+           "root": "shared", "source": "shared", "harnesses": ["codex"]},
+          {"name": "beta", "path": "/h/.swe/skills/beta",
+           "root": "shared", "source": "shared", "harnesses": []}
+         ]}
+        """#
+        let (model, _) = model([(["skills", "--json"], ok(json))])
+        await model.load()
+        let alpha = try #require(model.allSkills.first { $0.name == "alpha" })
+        #expect(model.chips(for: alpha).map(\.link) == [.linked])
+        let beta = try #require(model.allSkills.first { $0.name == "beta" })
+        #expect(model.chips(for: beta).map(\.link) == [.blocked])
+        // A selection folder can still be relinked as a whole or detached.
+        let codex = try #require(model.roots.first)
+        #expect(codex.mode == "except")
+        #expect(codex.disabled == ["beta"])
     }
 
     @Test func aSharedSkillShowsEveryFolderItCouldReach() async throws {
