@@ -3216,7 +3216,9 @@ def cmd_tools(args):
                                canonical.get("env") or {},
                                timeout_s=timeout)
     except ProbeError as exc:
-        return fail(str(exc))
+        # Server stderr lands in the message; a child that logs a token
+        # must not hand it back through our output.
+        return fail(redact_secrets(sanitize(str(exc)), load_secrets()))
     reply = ToolsReply(name, st,
                        tools=result["tools"],
                        server=result["server"],

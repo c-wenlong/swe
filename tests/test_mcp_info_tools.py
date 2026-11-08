@@ -77,6 +77,45 @@ for line in sys.stdin:
 # A server that exits as soon as it starts.
 DYING_SERVER = 'import sys; sys.stderr.write("cannot load config\\n"); sys.exit(3)'
 
+# A server that pages its tools: first page carries nextCursor, the
+# second closes the list.
+PAGING_SERVER = r"""
+import json, sys
+for line in sys.stdin:
+    m = json.loads(line)
+    if m.get("method") == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "serverInfo": {"name": "pager", "version": "1"}}}), flush=True)
+    elif m.get("method") == "tools/list":
+        cursor = (m.get("params") or {}).get("cursor")
+        if cursor is None:
+            print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {
+                "tools": [{"name": "page-one", "description": ""}],
+                "nextCursor": "more"}}), flush=True)
+        else:
+            print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {
+                "tools": [{"name": "page-two", "description": ""}]}}),
+                flush=True)
+"""
+
+# A server that floods stderr past the pipe buffer before answering —
+# the probe must drain it or the write blocks and the wait times out.
+FLOODING_SERVER = r"""
+import json, sys
+sys.stderr.write("x" * 200000)
+sys.stderr.flush()
+for line in sys.stdin:
+    m = json.loads(line)
+    if m.get("method") == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "serverInfo": {"name": "floody", "version": "1"}}}), flush=True)
+    elif m.get("method") == "tools/list":
+        print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {
+            "tools": [{"name": "survived", "description": ""}]}}), flush=True)
+"""
+
 
 class McpInfoToolsTest(unittest.TestCase):
     def setUp(self):
@@ -214,6 +253,20 @@ class McpInfoToolsTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         d = json.loads(r.stdout)["data"]
         self.assertIn("stdio only", d["error"])
+
+    def test_tools_follows_next_cursor_pages(self):
+        path = self.script("paging.py", PAGING_SERVER)
+        self.claude_write({"pager": {"command": sys.executable, "args": [path]}})
+        d = self.json_out(self.run_mcp("tools", "pager", "--json"))
+        self.assertEqual([t["name"] for t in d["tools"]],
+                         ["page-one", "page-two"])
+
+    def test_tools_survives_a_stderr_flood(self):
+        path = self.script("flooding.py", FLOODING_SERVER)
+        self.claude_write({"floody": {"command": sys.executable, "args": [path]}})
+        d = self.json_out(self.run_mcp("tools", "floody", "--json",
+                                       "--timeout=20"))
+        self.assertEqual([t["name"] for t in d["tools"]], ["survived"])
 
     def test_tools_unknown_server_is_a_refusal(self):
         r = self.run_mcp("tools", "nope")

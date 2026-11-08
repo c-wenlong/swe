@@ -359,6 +359,13 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
         ("--for=", "Only these harnesses"),
         ("--json", "Machine-readable output"),
     ],
+    "mcp info": [
+        ("--json", "Machine-readable output"),
+    ],
+    "mcp tools": [
+        ("--timeout=", "Seconds to wait for initialize and tools/list"),
+        ("--json", "Machine-readable output"),
+    ],
     "mcp gateway status": [
         ("--json", "Machine-readable output"),
     ],
@@ -949,7 +956,7 @@ def get_completions(words: list[str]) -> list[tuple[str, str]]:
         return _mcp_server_completions(rest[1], partial)
 
     # `swe mcp info|tools|enable|disable <server>` — every name swe knows.
-    if (cmd == "mcp" and len(rest) == 2
+    if (cmd == "mcp" and len(rest) == 1
             and rest[0] in ("info", "tools", "enable", "disable")):
         return _mcp_all_server_completions(partial)
 
