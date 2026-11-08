@@ -7,7 +7,10 @@ tests add a fixture search index so usage counts have something to read.
 
 import json
 import sqlite3
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import swe.plugins.info as info_mod
@@ -144,6 +147,143 @@ class TestInfoCommand(_InfoHome, unittest.TestCase):
         proc = run_swe(self.home, "plugins", "info")
         self.assertEqual(proc.returncode, 1)
         self.assertIn("Usage:", proc.stdout)
+
+
+class TestInfoHelpers(unittest.TestCase):
+    """The small helpers behind the sheet, driven in-process: ``run_swe``
+    covers the subprocess shape, these cover every printed line."""
+
+    def test_latest_mtime_edges(self):
+        from swe.plugins.info import _iso, _latest_mtime
+        from tests._tempdir import temp_dir
+
+        self.assertIsNone(_latest_mtime(None))
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            (folder / "f.txt").write_text("x")
+            (folder / "g.txt").write_text("x")
+            self.assertIsNotNone(_latest_mtime(folder))
+            self.assertIsNotNone(_latest_mtime(folder, cap=1))
+            self.assertIsNone(_latest_mtime(folder / "f.txt"))  # not a dir
+        self.assertIsNone(_iso(None))
+        self.assertIn("T", _iso(1700000000.0))
+
+    def test_latest_mtime_skips_undead_entries(self):
+        # A walk entry that vanishes before stat() is skipped, not raised.
+        import os
+        from swe.plugins.info import _latest_mtime
+
+        with tempfile.TemporaryDirectory() as td:
+            Path(td, "ok").write_text("x")
+            real_walk = os.walk
+
+            def fake_walk(root):
+                yield from real_walk(root)
+                yield (td, ["ghost"], [])
+
+            with patch("swe.plugins.info.os.walk", side_effect=fake_walk):
+                self.assertIsNotNone(_latest_mtime(Path(td)))
+
+    def test_inventory_rows_degrade_on_failure(self):
+        import swe.plugins.info as info_mod
+
+        with patch.dict("sys.modules", {"swe.mcp.cli": None}):
+            self.assertEqual(info_mod._inventory_rows(), [])
+
+
+class TestRenderInfo(unittest.TestCase):
+    def _render(self, data):
+        import io
+        from contextlib import redirect_stdout
+        from swe.plugins.commands import _render_info
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _render_info(data)
+        return buf.getvalue()
+
+    def test_every_branch(self):
+        out = self._render({
+            "ref": "lsp@official",
+            "updated": "2026-11-01T00:00:00+00:00",
+            "plugin": {"name": "lsp", "version": "1.2.3",
+                       "description": "Language smarts",
+                       "source_path": "/src/lsp",
+                       "harnesses": {"claude": {"installed": True, "enabled": True,
+                                                "path": "/p"}},
+                       "components": {"skills": 2, "mcp_servers": 1}},
+            "skills": [{"name": "hover", "harnesses": ["claude"],
+                        "usage": {"tracked": True, "calls": 5}},
+                       {"name": "jump", "harnesses": [],
+                        "usage": {"tracked": False}}],
+            "mcp_servers": [{"name": "lsp", "in_hub": True,
+                             "harnesses": ["claude"], "disabled_in": ["codex"],
+                             "env_keys": ["TOKEN", "GONE"],
+                             "header_keys": ["X-Key"],
+                             "secrets_missing": ["GONE"],
+                             "usage": {"tracked": True, "calls": 3}},
+                            {"name": "other", "usage": {"tracked": True, "calls": 0}}],
+            "usage": {"tracked": True, "calls": 8, "sessions": 2,
+                      "last_used": "2026-11-02T00:00:00Z",
+                      "by_harness": {"claude": 8}},
+        })
+        for needle in ("lsp@official", "v1.2.3", "updated 2026-11-01",
+                       "Language smarts", "2 skills", "1 mcp servers",
+                       "hover", "5 calls", "untracked", "in hub", "in claude",
+                       "off in codex", "TOKEN", "(missing)", "X-Key", "3 calls",
+                       "declared only", "8 calls across 2 sessions"):
+            self.assertIn(needle, out)
+
+    def test_bare_minimum(self):
+        out = self._render({"ref": "x@y", "plugin": {"name": "x", "harnesses": {}}})
+        self.assertIn("x@y", out)
+
+    def test_info_command_in_process(self):
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+        from swe.plugins.commands import _info
+
+        def fail(message):
+            print(message)
+            return 1
+
+        data = {"ref": "x@y", "plugin": {"name": "x", "harnesses": {}}}
+        out = io.StringIO()
+        with patch("swe.plugins.info.plugin_info", return_value=data), \
+                redirect_stdout(out):
+            self.assertEqual(_info(["x@y"], False, fail), 0)
+        self.assertIn("x@y", out.getvalue())
+        out = io.StringIO()
+        with patch("swe.plugins.info.plugin_info", return_value=None), \
+                redirect_stdout(out):
+            self.assertEqual(_info(["none@y"], False, fail), 1)
+        self.assertIn("No plugin named", out.getvalue())
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(_info(["a", "b"], False, fail), 1)
+        self.assertIn("Usage:", out.getvalue())
+
+
+class TestSourcePathFallback(unittest.TestCase):
+    def test_folder_falls_back_to_source_path(self):
+        # A plugin listed but installed nowhere has no harness load path;
+        # declared servers then come from `source_path` (the marketplace
+        # clone). No fixture plugin sits in that state, so the row is
+        # fabricated here.
+        import swe.plugins.info as info_mod
+
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "clone" / "plug"
+            (src / ".claude-plugin").mkdir(parents=True)
+            catalog = {"harnesses": ["claude"], "errors": [], "marketplaces": [{
+                "name": "mk", "harnesses": {}, "plugins": [{
+                    "name": "plug", "ref": "plug@mk", "source_path": str(src),
+                    "harnesses": {"claude": {"installed": False, "path": None}},
+                    "skills": []}]}]}
+            with patch.object(info_mod, "build_catalog", return_value=catalog):
+                data = plugin_info("plug@mk")
+        self.assertIsNotNone(data)
+        self.assertIsNotNone(data["updated"])
 
 
 if __name__ == "__main__":

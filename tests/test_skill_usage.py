@@ -6,6 +6,7 @@ calls, a bare ``Skill`` row from before the ``skill`` input key existed,
 without being a call — the readers must count the call shapes only.
 """
 
+import json
 import sqlite3
 import unittest
 
@@ -190,6 +191,64 @@ class TestUsageCommand(unittest.TestCase):
         proc = run_swe(temp_dir(self), "skills", "usage", "pdf")
         self.assertEqual(proc.returncode, 0)
         self.assertIn("index --on", proc.stdout)
+
+
+class UsageCommandInProcessTest(unittest.TestCase):
+    """In-process passes through ``cmd_skills_usage``: the ``run_swe``
+    tests above run a subprocess coverage cannot see, so each printed
+    branch gets a direct call here with ``skill_usage`` faked."""
+
+    def _run(self, args, reply):
+        import io
+        import sys
+        from contextlib import redirect_stderr, redirect_stdout
+        from unittest.mock import patch
+        from swe.skills.layout_commands import cmd_skills_usage
+
+        out, err = io.StringIO(), io.StringIO()
+        with patch("swe.skills.usage.skill_usage", return_value=reply), \
+                redirect_stdout(out), redirect_stderr(err):
+            code = cmd_skills_usage(list(args))
+        return code, out.getvalue(), err.getvalue()
+
+    _FULL = {"tracked": True, "calls": 3, "sessions": 2,
+             "last_used": "2026-10-03T10:00:00Z",
+             "by_harness": {"claude": 2, "codex": 1}, "unattributed": 1}
+
+    def test_help(self):
+        code, _, _ = self._run(["--help"], {})
+        self.assertEqual(code, 0)
+
+    def test_usage_error_json_goes_to_stderr(self):
+        code, out, err = self._run(["a", "b", "--json"], {})
+        self.assertEqual(code, 1)
+        self.assertEqual(out.strip(), "")
+        self.assertIn("Usage:", err)
+
+    def test_json_reply(self):
+        code, out, _ = self._run(["pdf", "--json"], self._FULL)
+        self.assertEqual(code, 0)
+        data = json.loads(out)["data"]
+        self.assertEqual(data["calls"], 3)
+        self.assertEqual(data["action"], "usage")
+
+    def test_human_full(self):
+        code, out, _ = self._run(["pdf"], self._FULL)
+        self.assertEqual(code, 0)
+        self.assertIn("3 calls", out)
+        self.assertIn("last used 2026-10-03", out)
+        self.assertIn("claude", out)
+        self.assertIn("without a skill name", out)
+
+    def test_human_zero_calls_and_untracked(self):
+        code, out, _ = self._run(
+            ["pdf"], {"tracked": True, "calls": 0, "sessions": 0,
+                      "last_used": None, "by_harness": {}, "unattributed": 0})
+        self.assertEqual(code, 0)
+        self.assertIn("No calls recorded yet", out)
+        code, out, _ = self._run(["pdf"], {"tracked": False})
+        self.assertEqual(code, 0)
+        self.assertIn("not tracked", out)
 
 
 if __name__ == "__main__":
