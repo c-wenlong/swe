@@ -14,6 +14,7 @@ Commands:
   add <name> ...                 Add a server to the hub (and harnesses)
   remove <name> --from=...       Remove a server from the hub or harnesses
   enable/disable <name>          Switch a server on/off per harness
+  set-type <name> TYPE           Label a hub server
   info <name>                    One server's full detail
   tools <name>                   List a server's tools by handshake
   doctor                         Deep diagnostics
@@ -51,7 +52,7 @@ from swe.mcp.inventory import server_inventory
 from swe.mcp import gateway as gateway_defaults
 from swe.flags import expand_value_flags
 from swe.mcp.models import ToggleReply
-from swe.mcp.models import InfoReply, PlaceRow, ToolsReply
+from swe.mcp.models import InfoReply, PlaceRow, SetTypeReply, ToolsReply
 from swe.mcp.secrets import _SECRET_FLAG_RE
 from swe.mcp.secrets import load_secrets
 from swe.mcp.secrets import redact as redact_secrets
@@ -763,6 +764,52 @@ def _mark_enabled(harness: str, name: str) -> None:
     harness_defs.pop(name, None)
     if not harness_defs:
         defs_.pop(harness, None)
+    _save_swe_state(state)
+
+
+def master_off_map() -> dict[str, list[str]]:
+    """``{server: [harnesses]}`` — what a master ``swe mcp disable`` took away.
+
+    A bare ``disable`` records the harnesses it switched off so a bare
+    ``enable`` restores exactly that set: a harness turned off by hand
+    (``--for``) before the master-off is not resurrected.
+    """
+    raw = _swe_state().get("master_off")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): [str(h) for h in v]
+            for k, v in raw.items() if isinstance(v, list)}
+
+
+def _record_master_off(name: str, harnesses: list[str]) -> None:
+    """A master-off's restore set: exactly the harnesses this call switched off."""
+    state = _swe_state()
+    state.setdefault("master_off", {})[name] = list(harnesses)
+    _save_swe_state(state)
+
+
+def _drop_master_off(name: str, harnesses: list[str] | None = None) -> None:
+    """Drop ``harnesses`` — the whole entry when None — from a restore set.
+
+    Emptied lists and an emptied ``master_off`` map go with them: a stray
+    ``[]`` would read as a recorded restore set of nothing.
+    """
+    state = _swe_state()
+    master = state.get("master_off") or {}
+    if name not in master:
+        return
+    recorded = master.get(name)
+    if harnesses is None or not isinstance(recorded, list):
+        master.pop(name, None)
+    else:
+        drop = set(harnesses)
+        left = [h for h in recorded if h not in drop]
+        if left:
+            master[name] = left
+        else:
+            master.pop(name, None)
+    if not master:
+        state.pop("master_off", None)
     _save_swe_state(state)
 
 
@@ -2558,6 +2605,11 @@ MCP_HELP = {
   format flag, so it works the same for every harness — and ``sync``
   honours it: a sync cannot silently turn a disabled server back on.
 
+  A bare disable is the master switch: the harnesses it turns off are
+  recorded in mcp.json's ``swe.master_off`` so a bare ``enable`` restores
+  exactly them — never a harness you had already switched off by hand.
+  A ``--for`` disable leaves that restore set.
+
 {c('bold', 'Flags')}
   --for=a,b         Only these harnesses (default: all that define it)
   --json            Print the result as one JSON document
@@ -2574,6 +2626,11 @@ MCP_HELP = {
   else the hub's canonical copy. No ``--for`` means every harness the
   server is marked off for.
 
+  When a bare ``disable`` recorded ``swe.master_off`` for the server, a
+  bare enable restores exactly that set — a harness you switched off by
+  hand before the master-off stays off. ``--for`` enables just the named
+  harnesses and takes them out of any recorded restore set.
+
 {c('bold', 'Flags')}
   --for=a,b         Only these harnesses
   --json            Print the result as one JSON document
@@ -2581,6 +2638,29 @@ MCP_HELP = {
 {c('bold', 'Examples')}
   swe mcp enable github
   swe mcp enable github --for=cursor,codex""",
+
+    "set-type": f"""\
+  {c('cyan', 'swe mcp set-type <name> <type>')}       Label a hub server
+  {c('cyan', 'swe mcp set-type <name> --clear')}      Remove the label
+
+  The label lives on the server's entry in ~/.swe/mcp.json — swe-side
+  metadata like ``shared``, never written into a harness config, and
+  carried as ``type`` on ``mcp list`` / ``mcp info --json`` rows.
+  Expected values: {', '.join(gateway_defaults.EXPECTED_TYPES)} — but any
+  word works. The value is trimmed, and an empty one clears too.
+
+  Reserved: the transport words ({', '.join(sorted(gateway_defaults.TRANSPORT_TYPES))})
+  are the wire marker ``type`` also carries — a URL server's ``sse`` —
+  so they can never be labels, and set-type refuses to overwrite a live
+  marker (relabel an SSE server by editing mcp.json).
+
+{c('bold', 'Flags')}
+  --clear           Remove the label
+  --json            Print the result as one JSON document
+
+{c('bold', 'Examples')}
+  swe mcp set-type github dev
+  swe mcp set-type github --clear""",
 
     "info": f"""\
   {c('cyan', 'swe mcp info <name>')}           One server's full detail
@@ -2717,6 +2797,7 @@ def cmd_help(args=None):
   {c('cyan', 'swe mcp validate')}     Validate MCP config shape for one/all tools
   {c('cyan', 'swe mcp add')}          Add a server to the hub (and harnesses)
   {c('cyan', 'swe mcp remove')}       Remove a server from the hub or harnesses
+  {c('cyan', 'swe mcp set-type')}     Label a hub server
   {c('cyan', 'swe mcp secret set')}   Store a ${{NAME}} value in the secrets file
   {c('cyan', 'swe mcp doctor')}       Deep diagnostics
   {c('cyan', 'swe mcp gateway')}      Run shared servers once for every session
@@ -2811,6 +2892,12 @@ def cmd_disable(args):
         print(f"{name} is not defined in any harness.", file=refusal)
         return 1
 
+    if for_flag is not None:
+        # An explicit --for off leaves the restore set up front: the user
+        # asked for these harnesses off, so a later master-on must not
+        # resurrect them — even where nothing was left to remove.
+        _drop_master_off(name, targets)
+
     # First the backups, then any deletion: a disabled server must always
     # be recoverable, so nothing leaves a file until the hub and the
     # per-harness raw copies are proven storable.
@@ -2863,6 +2950,11 @@ def cmd_disable(args):
         get_tool_saver(target)(servers, get_tool_config(target)["path"])
         _mark_disabled(target, name, shielded_raws[target])
         turned_off.append(target)
+    if turned_off and for_flag is None:
+        # A bare disable is the master switch: record the harnesses it
+        # switched off so a bare enable restores exactly them — never
+        # a harness the user had already turned off by hand.
+        _record_master_off(name, turned_off)
     if not json_view:
         for target in turned_off:
             print(f"{c('green', '✓')} {name} off for {c('cyan', target)}")
@@ -2887,7 +2979,12 @@ def cmd_enable(args):
 
     registry = load_registry()
     mcp_tools = get_mcp_tools(registry)
+    recorded = master_off_map().get(name)
     fallback = [t for t, names in disabled_map().items() if name in names]
+    if for_flag is None and recorded:
+        # A master-on restores exactly what the master-off disabled; a
+        # harness turned off by hand before it is not resurrected.
+        fallback = recorded
     targets = _enable_disable_targets(registry, mcp_tools, for_flag,
                                       fallback, err=refusal)
     if targets is None:
@@ -2902,6 +2999,12 @@ def cmd_enable(args):
     if name not in hub and not any(name in (defs_.get(t) or {}) for t in targets):
         for target in targets:
             _mark_enabled(target, name)
+        # The marks went with nothing left to restore: the restore set is
+        # spent too, or a later bare enable would chase a ghost.
+        if for_flag is None:
+            _drop_master_off(name)
+        else:
+            _drop_master_off(name, targets)
         print(f"The hub has no copy of {name} to restore — "
               f"cleared the disabled mark. Re-add it with `swe mcp add`.",
               file=refusal)
@@ -2965,9 +3068,85 @@ def cmd_enable(args):
             failed.append(target)
             if not json_view:
                 print(f"  {target}: {name} stays off — {why}", file=refusal)
+    # Restored harnesses leave the restore set: a bare enable spends its
+    # recorded set, a --for enable takes the named harnesses out of any
+    # set still standing. A failed restore keeps its entry, so a retry
+    # still targets exactly it rather than every marked harness.
+    _drop_master_off(name, turned_on)
     if json_view:
         emit(ToggleReply(name, enabled_in=turned_on, failed_in=failed).to_json())
     return 0 if turned_on else 1
+
+
+def cmd_set_type(args):
+    if args and args[0] in ("-h", "--help", "help"):
+        print(MCP_HELP["set-type"])
+        return 0
+    args, json_view = take_json_flag(list(args))
+    refusal = error_stream(json_view)
+    clear = "--clear" in args
+    positional: list[str] = []
+    for arg in args:
+        if arg == "--clear":
+            continue
+        if arg.startswith("--"):
+            print(f"Unknown flag: {arg}", file=refusal)
+            return 1
+        positional.append(arg)
+    if len(positional) != (1 if clear else 2):
+        print(f"Usage: {c('cyan', 'swe mcp set-type NAME TYPE')}  |  "
+              f"{c('cyan', 'swe mcp set-type NAME --clear')}", file=refusal)
+        return 1
+    name = positional[0]
+    # An empty or all-space value cannot label anything: it clears.
+    label = None if clear else (positional[1].strip() or None)
+
+    servers = get_hub_servers()
+    entry = servers.get(name)
+    if not isinstance(entry, dict):
+        print(f"{name} is not in the hub — the label lives on its entry in "
+              f"{MCP_SOURCE_FILE} (`swe mcp discover --apply` pulls one in).",
+              file=refusal)
+        return 1
+
+    marked = gateway_defaults.is_transport_marked(entry)
+
+    if label is not None:
+        if label.lower() in gateway_defaults.TRANSPORT_TYPES:
+            print(f"'{label}' is a transport marker, not a label — it "
+                  f"would change how harnesses connect. Reserved: "
+                  f"{', '.join(sorted(gateway_defaults.TRANSPORT_TYPES))}.",
+                  file=refusal)
+            return 1
+        if marked:
+            print(f"{name}'s type is the sse transport marker — "
+                  "overwriting it would change how the server connects. "
+                  f"Edit {MCP_SOURCE_FILE} by hand to relabel it anyway.",
+                  file=refusal)
+            return 1
+        entry[gateway_defaults.TYPE_KEY] = label
+        save_hub_servers(servers)
+        if json_view:
+            return emit(SetTypeReply(name, label).to_json())
+        print(f"{name}: type {label}")
+        return 0
+
+    if marked:
+        # The marker is not a label, and dropping it would downgrade the
+        # server to plain http on the next sync — left alone either way.
+        if json_view:
+            return emit(SetTypeReply(name).to_json())
+        print(f"{name}: type is the sse transport marker, not a label — "
+              "left alone.")
+        return 0
+    changed = gateway_defaults.TYPE_KEY in entry
+    entry.pop(gateway_defaults.TYPE_KEY, None)
+    if changed:
+        save_hub_servers(servers)
+    if json_view:
+        return emit(SetTypeReply(name).to_json())
+    print(f"{name}: type cleared" if changed else f"{name}: no type label set")
+    return 0
 
 
 def cmd_gateway(args):
@@ -3117,6 +3296,7 @@ def cmd_info(args):
         health=health,
         health_detail=health_detail,
         updated=updated,
+        type=gateway_defaults.label_of(hub.get(name)),
         gateway=_gateway_row(name),
     )
     if json_view:
@@ -3140,6 +3320,8 @@ def cmd_info(args):
     if shared:
         hub_line += " · shared through the gateway"
     print(f"Hub         {hub_line}")
+    if reply.type:
+        print(f"Type        {reply.type}")
     if row["conflict"]:
         print("Variants    " + " | ".join("+".join(v) for v in row["variants"]))
     if row["secrets_missing"]:
@@ -3254,6 +3436,7 @@ COMMANDS = {
     "remove": cmd_remove,
     "enable": cmd_enable,
     "disable": cmd_disable,
+    "set-type": cmd_set_type,
     "info": cmd_info,
     "tools": cmd_tools,
     "secret": cmd_secret,

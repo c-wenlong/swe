@@ -39,6 +39,9 @@ class ServerRow:
     # Harnesses the server is toggled off for — the entry left their file
     # and the hub keeps the copy ``swe mcp enable`` restores.
     disabled_in: list = field(default_factory=list)
+    # The hub entry's ``type`` label (``swe mcp set-type``); None when the
+    # hub does not hold the server or its ``type`` is a transport marker.
+    type: str | None = None
 
     def to_json(self) -> dict:
         return {
@@ -56,6 +59,7 @@ class ServerRow:
             "in_hub": self.in_hub,
             "remote_in": self.remote_in,
             "disabled_in": self.disabled_in,
+            "type": self.type,
         }
 
 
@@ -82,6 +86,22 @@ class ToggleReply:
         if self.failed_in:
             out["failed_in"] = self.failed_in
         return out
+
+
+@dataclass(frozen=True)
+class SetTypeReply:
+    """``swe mcp set-type NAME TYPE``/``--clear --json``: the label left.
+
+    ``type`` is the label written, or None when the call cleared one (or
+    found a URL server's ``sse`` marker, which is wire metadata it leaves
+    alone).
+    """
+
+    name: str
+    type: str | None = None
+
+    def to_json(self) -> dict:
+        return {"name": self.name, "type": self.type}
 
 
 @dataclass(frozen=True)
@@ -133,6 +153,8 @@ class InfoReply:
     health: str
     health_detail: str | None
     updated: str | None
+    # The hub entry's ``type`` label (``swe mcp set-type``), or None.
+    type: str | None = None
     gateway: dict | None = None
 
     def to_json(self) -> dict:
@@ -148,6 +170,7 @@ class InfoReply:
             "in_hub": self.in_hub,
             "harnesses": self.harnesses,
             "shared": self.shared,
+            "type": self.type,
             "conflict": self.conflict,
             "variants": self.variants,
             "disabled_in": self.disabled_in,

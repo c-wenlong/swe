@@ -394,6 +394,7 @@ to use their own login state and environment."""
   {c('cyan', 'swe mcp edit <tool> <name>')}          Edit one server's config in one tool
   {c('cyan', 'swe mcp validate [tool...]')}          Validate MCP config shape for one/all tools
   {c('cyan', 'swe mcp enable/disable <name>')}       Switch a server on/off per harness
+  {c('cyan', 'swe mcp set-type <name> TYPE')}        Label a hub server
   {c('cyan', 'swe mcp info <name>')}                 One server's full detail
   {c('cyan', 'swe mcp tools <name>')}                List a server's tools by handshake
   {c('cyan', 'swe mcp doctor')}                      Deep diagnostics

@@ -305,6 +305,11 @@ def apply_mcp_findings(findings: list[McpFinding], prune: bool = False) -> Merge
                         and shielded.get("command") and not shielded.get("url")):
                     # An edit to the command keeps the server shared.
                     shielded = {**shielded, gateway.SHARED_KEY: True}
+                label = gateway.label_of(servers.get(finding.name))
+                if label is not None and gateway.TYPE_KEY not in shielded:
+                    # The hub's own ``type`` label survives an edit pull,
+                    # like ``shared`` — a harness never carries it.
+                    shielded = {**shielded, gateway.TYPE_KEY: label}
                 servers[finding.name] = shielded
                 updated.append(finding.name)
         elif finding.status == "orphaned":

@@ -379,6 +379,10 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
     "mcp info": [
         ("--json", "Machine-readable output"),
     ],
+    "mcp set-type": [
+        ("--clear", "Remove the label"),
+        ("--json", "Machine-readable output"),
+    ],
     "mcp tools": [
         ("--timeout=", "Seconds to wait for initialize and tools/list"),
         ("--json", "Machine-readable output"),
@@ -556,6 +560,7 @@ _NESTED_FLAGS: dict[str, dict[str, str]] = {
         "secret remove": "mcp secret remove",
         "add": "mcp add", "remove": "mcp remove",
         "disable": "mcp disable", "enable": "mcp enable",
+        "set-type": "mcp set-type",
         "info": "mcp info", "tools": "mcp tools",
         "gateway": "mcp gateway status", "gateway status": "mcp gateway status",
         "gateway install": "mcp gateway install", "gateway serve": "mcp gateway serve",
@@ -784,6 +789,7 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("remove", "Remove a server"),
         ("disable", "Switch a server off per harness"),
         ("enable", "Switch a server back on"),
+        ("set-type", "Label a hub server"),
         ("info", "One server's full detail"),
         ("tools", "List a server's tools by handshake"),
         ("secret", "Store a ${NAME} value"),
@@ -986,10 +992,18 @@ def get_completions(words: list[str]) -> list[tuple[str, str]]:
     if cmd == "mcp" and len(rest) == 2 and rest[0] == "edit":
         return _mcp_server_completions(rest[1], partial)
 
-    # `swe mcp info|tools|enable|disable <server>` — every name swe knows.
+    # `swe mcp info|tools|enable|disable|set-type <server>` — every name
+    # swe knows.
     if (cmd == "mcp" and len(rest) == 1
-            and rest[0] in ("info", "tools", "enable", "disable")):
+            and rest[0] in ("info", "tools", "enable", "disable", "set-type")):
         return _mcp_all_server_completions(partial)
+
+    # `swe mcp set-type <server> <type>` — the expected labels; the field
+    # is free-form, so these are hints, not a filter.
+    if cmd == "mcp" and len(rest) == 2 and rest[0] == "set-type":
+        from swe.mcp.gateway import EXPECTED_TYPES
+        return _filter_by_prefix(
+            [(t, "server label") for t in EXPECTED_TYPES], partial)
 
     # `swe providers info <name>` — provider names from the registry.
     ptargets = _NESTED_PROVIDER_TARGETS.get(cmd)
