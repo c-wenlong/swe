@@ -752,6 +752,8 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("validate", "Check config shapes"),
         ("add", "Add a server to the hub"),
         ("remove", "Remove a server"),
+        ("disable", "Switch a server off per harness"),
+        ("enable", "Switch a server back on"),
         ("secret", "Store a ${NAME} value"),
         ("doctor", "Deep diagnostics"),
         ("gateway", "Run shared servers once for every session"),
