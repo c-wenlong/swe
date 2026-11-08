@@ -540,6 +540,13 @@ class TestGet(_Settings):
         self.assertIn("anthropic", ids)
         self.assertEqual((config / "providers.json").read_text(), before)
 
+    def test_a_non_text_kind_is_rejected_like_the_other_fields(self):
+        # providers.json's own validation catches a bad kind first; the
+        # row builder refuses it too so a registry change can't smuggle
+        # one into the payload.
+        with self.assertRaises(TypeError):
+            settings_page._catalog_row("acme", {"env_vars": ["A"], "kind": 7})
+
     def test_the_payload_lists_the_plan_variables_for_the_tab_split(self):
         prov = settings_page.get(self.ctx(), {})["providers"]
         # The page keeps these on Inference however their headings read;
