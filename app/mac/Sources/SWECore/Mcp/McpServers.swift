@@ -620,9 +620,17 @@ public struct McpServerInfo: Decodable, Sendable, Equatable {
         public let uptimeS: Int?
         public let starts: Int?
         public let error: String?
+        /// `tools/call` replies proxied since counting began; persists
+        /// across gateway restarts through `stats.json`.
+        public let calls: Int
+        public let callsByTool: [String: Int]
+        public let callErrors: Int
+        /// ISO timestamp of the last proxied call; local, no zone.
+        public let lastCall: String?
 
         private enum CodingKeys: String, CodingKey {
             case name, state, pid, starts, error, uptimeS
+            case calls, callsByTool, callErrors, lastCall
         }
 
         public init(from decoder: Decoder) throws {
@@ -633,6 +641,10 @@ public struct McpServerInfo: Decodable, Sendable, Equatable {
             uptimeS = try c.decodeIfPresent(Int.self, forKey: .uptimeS)
             starts = try c.decodeIfPresent(Int.self, forKey: .starts)
             error = try c.decodeIfPresent(String.self, forKey: .error)
+            calls = try c.decodeIfPresent(Int.self, forKey: .calls) ?? 0
+            callsByTool = try c.decodeIfPresent([String: Int].self, forKey: .callsByTool) ?? [:]
+            callErrors = try c.decodeIfPresent(Int.self, forKey: .callErrors) ?? 0
+            lastCall = try c.decodeIfPresent(String.self, forKey: .lastCall)
         }
     }
 

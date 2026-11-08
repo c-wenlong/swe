@@ -701,6 +701,11 @@ private struct ServerSheet: View {
         if let pid = gateway.pid { bits.append("pid \(pid)") }
         if let up = gateway.uptimeS { bits.append("up \(up)s") }
         if let starts = gateway.starts { bits.append("starts \(starts)") }
+        if gateway.calls > 0 {
+            bits.append("\(gateway.calls) calls" +
+                        (gateway.callErrors > 0 ? " (\(gateway.callErrors) errors)" : ""))
+        }
+        if let last = relativeStamp(gateway.lastCall) { bits.append("last call \(last)") }
         if let error = gateway.error, !error.isEmpty { bits.append("error: \(error)") }
         return bits.joined(separator: " · ")
     }

@@ -73,6 +73,45 @@ class GatewayHelpersTest(unittest.TestCase):
         self.assertFalse(gateway.looks_stateful("dv__linear", {"command": "node", "args": ["l.js"]}))
 
 
+class GatewayStatsTest(unittest.TestCase):
+    def test_record_counts_calls_tools_and_errors(self):
+        stats = gateway_server.GatewayStats()
+        stats.record("srv", "echo", False)
+        stats.record("srv", "echo", False)
+        stats.record("srv", None, True)
+        row = stats.row("srv")
+        self.assertEqual(row["calls"], 3)
+        self.assertEqual(row["calls_by_tool"], {"echo": 2})
+        self.assertEqual(row["call_errors"], 1)
+        self.assertTrue(row["last_call"])
+
+    def test_counts_survive_a_restart_and_a_broken_file_starts_over(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "stats.json"
+            gateway_server.GatewayStats(path).record("srv", "echo", False)
+            row = gateway_server.GatewayStats(path).row("srv")
+            self.assertEqual(row["calls"], 1)
+            self.assertEqual(row["calls_by_tool"], {"echo": 1})
+            for bad in ("not json", "[]", '{"servers": []}',
+                        '{"servers": {"srv": {"calls": "lots"}}}'):
+                path.write_text(bad)
+                self.assertEqual(gateway_server.GatewayStats(path).row("srv")["calls"], 0)
+
+    def test_tool_names_fold_into_one_bucket_past_the_cap(self):
+        stats = gateway_server.GatewayStats()
+        for i in range(70):
+            stats.record("srv", f"tool{i}", False)
+        row = stats.row("srv")
+        self.assertEqual(row["calls"], 70)
+        self.assertEqual(len(row["calls_by_tool"]), 65)
+        self.assertEqual(row["calls_by_tool"]["<other>"], 6)
+
+    def test_a_server_with_no_calls_reads_as_zero(self):
+        self.assertEqual(gateway_server.GatewayStats().row("nope"),
+                         {"calls": 0, "calls_by_tool": {}, "call_errors": 0,
+                          "last_call": None})
+
+
 class _GatewayServerCase(unittest.TestCase):
     """A live gateway on localhost and the helpers to talk to it.
 
@@ -263,6 +302,24 @@ class GatewayServerTest(_GatewayServerCase):
         rows = {r["name"]: r for r in self.gateway.status()["servers"]}
         self.assertEqual(rows["broken"]["error"], "no value for TOKEN")
         self.assertEqual(rows["fake"]["state"], "idle")
+
+    def test_status_counts_tool_calls_only(self):
+        self.call("echo")
+        self.call("echo")
+        self.request({"jsonrpc": "2.0", "id": 8, "method": "tools/list"})
+        row = {r["name"]: r for r in self.gateway.status()["servers"]}["fake"]
+        self.assertEqual(row["calls"], 2)
+        self.assertEqual(row["calls_by_tool"], {"echo": 2})
+        self.assertEqual(row["call_errors"], 0)
+        self.assertTrue(row["last_call"])
+        self.assertTrue((pathlib.Path(self.tmp.name) / "stats.json").exists())
+
+    def test_a_tool_result_with_iserror_counts_as_an_error(self):
+        self.call("fail")
+        row = {r["name"]: r for r in self.gateway.status()["servers"]}["fake"]
+        self.assertEqual(row["calls"], 1)
+        self.assertEqual(row["call_errors"], 1)
+        self.assertEqual(row["calls_by_tool"], {"fail": 1})
 
 
 class GatewayHardeningTest(_GatewayServerCase):
@@ -488,7 +545,9 @@ class GatewayCommandsInProcessTest(unittest.TestCase):
         self.run_cmd("share", "api")
         live = {"error": "cannot read the hub, keeping the last good servers: bad",
                 "servers": [{"name": "api", "state": "running", "pid": 42, "uptime_s": 9,
-                             "starts": 1, "error": None},
+                             "starts": 1, "error": None, "calls": 5,
+                             "calls_by_tool": {"echo": 5}, "call_errors": 0,
+                             "last_call": "2026-11-09T00:12:34"},
                             {"name": "nokey", "state": "error", "pid": None, "uptime_s": None,
                              "starts": 0, "error": "no value for MISSING"}]}
         with patch.object(gc, "_fetch", return_value=live), \
@@ -496,12 +555,17 @@ class GatewayCommandsInProcessTest(unittest.TestCase):
             code, out, _ = self.run_cmd("status")
             self.assertEqual(code, 0)
             self.assertIn("running on http://127.0.0.1:8478", out)
-            self.assertIn("pid 42, up 9s", out)
+            self.assertIn("pid 42, up 9s, 5 calls", out)
             self.assertIn("no value for MISSING", out)
             self.assertIn("keeping the last good servers", out)
             code, out, _ = self.run_cmd("status", "--json")
             rows = {r["name"]: r for r in json.loads(out)["data"]["servers"]}
             self.assertEqual(rows["api"]["pid"], 42)
+            self.assertEqual(rows["api"]["calls"], 5)
+            self.assertEqual(rows["api"]["calls_by_tool"], {"echo": 5})
+            self.assertEqual(rows["api"]["last_call"], "2026-11-09T00:12:34")
+            self.assertEqual(rows["nokey"]["calls"], 0)
+            self.assertIsNone(rows["nokey"]["last_call"])
         with patch.object(gc, "_fetch", return_value=None):
             code, out, _ = self.run_cmd()
             self.assertIn("not installed", out)

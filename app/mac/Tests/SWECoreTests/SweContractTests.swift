@@ -159,6 +159,10 @@ import Testing
         let gateway = try #require(info.gateway)
         #expect(gateway.state == "running")
         #expect(gateway.uptimeS == 10800)
+        #expect(gateway.calls == 42)
+        #expect(gateway.callsByTool == ["read_file": 30, "list_dir": 12])
+        #expect(gateway.callErrors == 1)
+        #expect(gateway.lastCall == "2026-11-03T11:19:55")
     }
 
     /// `swe mcp tools fixture-stdio --json`: the handshake's tool list.
