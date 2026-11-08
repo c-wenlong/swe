@@ -55,14 +55,16 @@ public enum KeysSection: String, CaseIterable, Sendable {
     }
 
     /// Whether a keys-file row sits on this tab. A variable or heading
-    /// the tab's catalogue claims is in; a name no tab claims is in only
-    /// when the user moved it here (a "mark"), so a plain unknown key
-    /// still lands on Inference.
+    /// the tab's catalogue claims is in; a name no tab's catalogue
+    /// claims is in only when the user moved it here (a "mark"), so a
+    /// plain unknown key still lands on Inference. A mark can't pull a
+    /// key onto two tabs at once: a variable another tab's catalogue
+    /// names shows there alone, however it was marked before.
     public func contains(_ row: APIKeysModel.Row, marked: Set<String>,
                          plans: [InferencePlan] = InferenceCatalog.all) -> Bool {
         guard Self.claimed(forVariable: row.name, plans: plans) else { return false }
         if provider(for: row) != nil { return true }
-        return marked.contains(row.name)
+        return marked.contains(row.name) && Self.claimed(for: row) == nil
     }
 
     /// The catalogue service a row belongs to in this section: its

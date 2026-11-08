@@ -68,6 +68,21 @@ import Testing
         #expect(!KeysSection.infra.contains(row, marked: []))
     }
 
+    /// A mark can't put a key on two tabs: a variable a catalogue
+    /// claims shows on that catalogue's tab alone, whatever an older
+    /// mark filed it under before the catalogue knew the service.
+    @Test func aCatalogueClaimBeatsAnotherTabsMark() {
+        let row = inferenceKey("EXA_API_KEY")
+        #expect(KeysSection.services.contains(row, marked: []))
+        // infraKeys could hold EXA_API_KEY from before the Services
+        // catalogue shipped; the Infra tab still must not show it.
+        #expect(!KeysSection.infra.contains(row, marked: ["EXA_API_KEY"]))
+        // The same for a heading that names the service.
+        let headed = inferenceKey("SOME_TOKEN", provider: "Firecrawl")
+        #expect(!KeysSection.infra.contains(headed, marked: ["SOME_TOKEN"]))
+        #expect(KeysSection.services.contains(headed, marked: []))
+    }
+
     @Test func itemsKeepFileOrderThenServicesWithNoKey() {
         let items = KeysSection.infra.items(keys: [
             inferenceKey("VERCEL_TOKEN", provider: "Deploy"),
