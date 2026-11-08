@@ -196,4 +196,46 @@ let harnessesJSON = #"""
         #expect(model.all.count == 4)
         #expect(model.busy.isEmpty)
     }
+
+    @Test func focusSitsOnTheScopeThatShowsThePick() async {
+        let (model, _) = model([(["list"], ok(harnessesJSON))])
+        await model.load()
+        // Goose is archived: an In use list filtered to it is empty, so
+        // focus crosses scopes to keep the pick on screen, and back.
+        model.focus("goose")
+        #expect(model.scope == .archived)
+        #expect(model.visible.map(\.name) == ["goose"])
+        model.focus("claude")
+        #expect(model.scope == .inUse)
+        #expect(model.visible.map(\.name) == ["claude"])
+    }
+
+    @Test func focusUnfoldsTheUnstarredPick() async {
+        let (model, _) = model([(["list"], ok(harnessesJSON))])
+        await model.load()
+        model.focus("opencode")
+        #expect(model.scope == .inUse)
+        #expect(model.showsUnstarred)
+        #expect(model.shown.map(\.name) == ["opencode"])
+    }
+
+    @Test func focusKeepsTheScopeWhenNothingMatches() async {
+        let (model, _) = model([(["list"], ok(harnessesJSON))])
+        await model.load()
+        model.focus("no-such-harness")
+        #expect(model.scope == .inUse)
+        #expect(model.visible.isEmpty)
+    }
+
+    @Test func focusBeforeTheLoadOnlyFilters() async {
+        // The scope flip needs the rows: before `load` the model can
+        // only keep the needle, and a second focus after it lands flips.
+        let (model, _) = model([(["list"], ok(harnessesJSON))])
+        model.focus("goose")
+        #expect(model.query == "goose")
+        #expect(model.scope == .inUse)
+        await model.load()
+        model.focus("goose")
+        #expect(model.scope == .archived)
+    }
 }

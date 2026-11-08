@@ -57,10 +57,12 @@ public struct GlobalSearchItem: Identifiable, Hashable, Sendable {
         /// A Repositories dashboard tab. The one-repo tabs stay out: they
         /// mean nothing without a repo chosen.
         case repoTab(RepoTab)
-        /// A session's `harness:id`, opened like a row click on Sessions.
-        case session(key: String)
-        /// The Harnesses page filtered to the harness's name.
-        case harness(id: String, query: String)
+        /// A session, opened like a row click on Sessions. `key` is the
+        /// hub's `harness:id`, `rowId` the list row's id — the same
+        /// session under two accounts is two rows, so the lookup needs it.
+        case session(key: String, rowId: String)
+        /// The Harnesses page filtered to the harness's registry id.
+        case harness(id: String)
         /// A pinned repo's board.
         case repo(name: String)
         /// A task's detail on the Tasks page.

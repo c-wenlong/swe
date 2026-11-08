@@ -26,18 +26,23 @@ struct HarnessesPage: View {
             let harnesses = HarnessesModel(swe: app.swe)
             // The ⌘K search's harness pick can land before the model
             // exists; the other task covers the model already being up.
-            if let query = app.pendingHarnessQuery {
-                harnesses.query = query
-                app.pendingHarnessQuery = nil
-            }
+            let pending = app.pendingHarnessQuery
+            app.pendingHarnessQuery = nil
             model = harnesses
             await harnesses.load()
+            if let pending { harnesses.focus(pending) }
         }
-        // The ⌘K search's harness pick filters the list to its name.
+        // The ⌘K search's harness pick filters the list to its name and
+        // lands on the scope the pick lives in. A model still loading
+        // gets a rerun so `focus` can see the rows.
         .task(id: app.pendingHarnessQuery) {
             guard let query = app.pendingHarnessQuery, let model else { return }
-            model.query = query
             app.pendingHarnessQuery = nil
+            model.focus(query)
+            if case .loaded = model.state {} else {
+                await model.load()
+                model.focus(query)
+            }
         }
         .cardSheet(isPresented: $detecting) {
             if let model { DetectSheet(model: model, reload: { await reload() }) }

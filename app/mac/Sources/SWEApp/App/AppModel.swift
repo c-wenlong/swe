@@ -50,9 +50,14 @@ final class AppModel {
     /// The ⌘K global search card over the window.
     var showsSearch = false
 
-    /// A session `harness:id` the Sessions page opens like a row click,
-    /// then clears. Set by the ⌘K search.
-    var pendingSession: String?
+    /// What the ⌘K search's session pick asks the Sessions page to open:
+    /// the list row's id (the same session under two accounts is two
+    /// rows) and the hub `harness:id` key for the chat fallback.
+    struct PendingSession: Equatable, Sendable {
+        var key: String
+        var rowId: String
+    }
+    var pendingSession: PendingSession?
     /// A task id the Tasks page's detail opens on, then clears.
     var pendingTask: String?
     /// The Harnesses page's filter text set by the ⌘K search, then

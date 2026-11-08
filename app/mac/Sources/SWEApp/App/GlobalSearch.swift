@@ -83,16 +83,23 @@ extension AppModel {
                     keywords: [row.session.id, row.session.agent,
                                row.session.cwd ?? "", row.session.title ?? "",
                                HarnessMark(harness).name],
-                    target: .session(key: HubSessionRow.key(harness: harness, id: row.session.id))))
+                    target: .session(key: HubSessionRow.key(harness: harness, id: row.session.id),
+                                     rowId: row.id)))
             }
         }
+        // Every harness the loaded lists name: the installed providers,
+        // plus any a session, skill, MCP server or hook ran under — a
+        // registered harness ProviderCatalog does not know still lands.
         var seen: Set<String> = []
-        for id in ProviderCatalog.all.map(\.id) + (sessions?.harnesses ?? [])
-        where seen.insert(id).inserted {
-            let name = HarnessMark(id).name
-            items.append(GlobalSearchItem(kind: .harness, title: name,
+        let harnessIds = providers.rows.filter(\.isInstalled).map(\.id)
+            + (sessions?.harnesses ?? [])
+            + (skills.inventory.loaded?.skills ?? []).flatMap(\.harnesses)
+            + (mcp.state.loaded?.servers ?? []).flatMap(\.harnesses)
+            + hooks.hooks.map(\.harness)
+        for id in harnessIds where id != "shared" && seen.insert(id).inserted {
+            items.append(GlobalSearchItem(kind: .harness, title: HarnessMark(id).name,
                                           harnessIcon: id, keywords: [id],
-                                          target: .harness(id: id, query: name)))
+                                          target: .harness(id: id)))
         }
         for pin in github.pins {
             items.append(GlobalSearchItem(kind: .repo, title: pin.name,
@@ -177,15 +184,18 @@ extension AppModel {
             select(.widgets)
         case .repoTab(let tab):
             // Only the all-repos dashboard takes these tabs; a pick there
-            // also shows every repo again.
+            // also shows every repo again, never a focus page left open.
+            github.focused = nil
             github.shownRepo = nil
             github.tab = tab
             select(.repositories)
-        case .session(let key):
-            pendingSession = key
+        case .session(let key, let rowId):
+            pendingSession = PendingSession(key: key, rowId: rowId)
             select(.sessions)
-        case .harness(_, let query):
-            pendingHarnessQuery = query
+        case .harness(let id):
+            // The registry id always matches `Harness.name`; the display
+            // name would break the moment it is renamed.
+            pendingHarnessQuery = id
             select(.harnesses)
         case .repo(let name):
             openGitHub(repo: name, type: "PullRequest")
@@ -193,11 +203,15 @@ extension AppModel {
             pendingTask = id
             select(.tasks)
         case .skill(let name):
+            // A saved harness or source filter could hide the pick.
             skills.query = name
+            skills.harness = nil
+            skills.source = nil
             select(.skills)
         case .plugin(let name):
             pluginsTab = .explore
             pluginCatalog.query = name
+            pluginCatalog.harness = nil
             select(.plugins)
         case .server:
             select(.mcpServers)

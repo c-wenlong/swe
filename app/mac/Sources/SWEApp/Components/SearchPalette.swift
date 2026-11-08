@@ -36,13 +36,29 @@ struct SearchPalette: View {
             SearchField(prompt: "Jump to a page, session, harness or anything else", text: $query)
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
+                // The field eats plain up and down as caret moves; move
+                // commands reach it first, like SelectOptionList's.
+                .onMoveCommand { direction in
+                    switch direction {
+                    case .up: move(-1)
+                    case .down: move(1)
+                    default: break
+                    }
+                }
             results
                 .padding(.top, 10)
                 .padding(.bottom, 12)
         }
         .frame(width: Self.width)
-        .onKeyPress(.upArrow, phases: .down) { _ in move(-1); return .handled }
-        .onKeyPress(.downArrow, phases: .down) { _ in move(1); return .handled }
+        // A focused row gets the same commands; the field's own handler
+        // stops them from arriving twice.
+        .onMoveCommand { direction in
+            switch direction {
+            case .up: move(-1)
+            case .down: move(1)
+            default: break
+            }
+        }
         // Return goes to the field's submit, not to onKeyPress.
         .onSubmit { open(active) }
         .onChange(of: query) { _, _ in active = 0 }
@@ -62,7 +78,10 @@ struct SearchPalette: View {
     @ViewBuilder private var results: some View {
         let shown = rows
         if shown.isEmpty {
-            note(query.isEmpty ? "Nothing to show yet" : "No matches")
+            EmptyCard(text: query.isEmpty ? "Nothing to show yet" : "No matches",
+                      icon: "magnifyingglass", framed: false)
+                .padding(.horizontal, 16)
+                .frame(minHeight: rowHeight)
         } else if shown.count > Self.visibleRows {
             ScrollViewReader { proxy in
                 ScrollView(.vertical) { stack(shown) }
@@ -71,21 +90,13 @@ struct SearchPalette: View {
                     .onChange(of: active) { _, i in
                         proxy.scrollTo(min(i, shown.count - 1))
                     }
+                    // A new needle relists from the top: the lit row is
+                    // already 0, but the scroll may have wandered.
+                    .onChange(of: query) { _, _ in proxy.scrollTo(0) }
             }
         } else {
             stack(shown)
         }
-    }
-
-    /// A muted line in place of rows.
-    private func note(_ text: String) -> some View {
-        HStack(spacing: 10) {
-            Text(text)
-                .font(Theme.caption).foregroundStyle(Theme.textMuted)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 28)
-        .frame(minHeight: rowHeight)
     }
 
     private func stack(_ shown: [GlobalSearchItem]) -> some View {
