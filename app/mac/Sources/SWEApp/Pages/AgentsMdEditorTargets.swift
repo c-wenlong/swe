@@ -13,6 +13,8 @@ struct ChapterTargetsStrip: View {
 
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Editor focus mode folds this away with the links strip and outline.
+    @AppStorage(AgentsMdLayout.focusKey) private var focus = false
     /// The last refusal and the chapter it was about: the strip keeps its
     /// state across selections, and a write can finish after the user
     /// opens another chapter, so it only shows for its own chapter.
@@ -23,16 +25,24 @@ struct ChapterTargetsStrip: View {
     @State private var pending: Set<String> = []
 
     var body: some View {
-        let chapters = app.chapters
         // A deleted draft (no file, no index line) has nothing to target:
-        // turning it on would list a file the build can't find.
-        if case .loaded(let report) = app.agentsMd.check,
-           chapters.files.contains(name) || check.compileState(of: name) != .unlisted {
-            let receipts = ChapterReceipts(name: name, check: check,
-                                           harnesses: report.instructionHarnessNames,
-                                           tree: chapters.tree)
-            let blocked = chapters.targetsParseProblem
-            Strip {
+        // turning it on would list a file the build can't find. Focus mode
+        // removes the strip outright (no empty slot keeping the column's
+        // spacing); its toggle runs in `withAnimation`, so the
+        // transition animates.
+        if !focus, case .loaded(let report) = app.agentsMd.check,
+           app.chapters.files.contains(name) || check.compileState(of: name) != .unlisted {
+            strip(report).transition(.opacity.combined(with: .move(edge: .top)))
+        }
+    }
+
+    private func strip(_ report: InitCheck) -> some View {
+        let chapters = app.chapters
+        let receipts = ChapterReceipts(name: name, check: check,
+                                       harnesses: report.instructionHarnessNames,
+                                       tree: chapters.tree)
+        let blocked = chapters.targetsParseProblem
+        return Strip {
                 // Title and why on one line, the index checkbox at its end;
                 // the chips get the strip's full width below so a narrow
                 // window wraps them into as few rows as it can.
@@ -62,7 +72,6 @@ struct ChapterTargetsStrip: View {
                 }
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: receipts)
-        }
     }
 
     /// The index checkbox: whether the chapter compiles at all. Same
