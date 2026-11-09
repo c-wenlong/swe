@@ -35,6 +35,7 @@ struct AgentsMdPage: View {
                     DraftsMenu { scope = .edit }
                 }
                 if scope == .edit && app.chapters.chapterMode {
+                    EditorFocusButton()
                     ViewCompiledButton(onOpenChapter: { _ in scope = .edit })
                 }
             }
@@ -82,7 +83,9 @@ private struct GlobalInstructions: View {
             ErrorCard(message: message)
         case .loaded(let report):
             VStack(alignment: .leading, spacing: 12) {
-                LinksStrip(report: report)
+                FocusCollapsible(enabled: chapters.chapterMode) {
+                    LinksStrip(report: report)
+                }
                 switch chapters.status {
                 case .loaded(let check) where check.indexExists:
                     ChaptersEditor(check: check)
@@ -944,8 +947,9 @@ private struct ChaptersEditor: View {
 
     var body: some View {
         let chapters = app.chapters
-        HStack(alignment: .top, spacing: 12) {
+        ChapterPaneSplit {
             rail
+        } editor: {
             VStack(alignment: .leading, spacing: 12) {
                 if let name = chapters.selected {
                     if let document = chapters.openDocument(named: name)
@@ -1087,7 +1091,6 @@ private struct ChaptersEditor: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 260)
         .frame(maxHeight: .infinity)
         .onAppear { app.chapters.undoManager = undoManager }
         .onChange(of: undoManager) { _, manager in
