@@ -677,7 +677,7 @@ private struct SkillRootHeader: View {
         Menu { columnMenu } label: {
             HStack(spacing: 4) {
                 if busy { ProgressView().controlSize(.mini) }
-                HarnessMarkView(harness: root.name)
+                HarnessNameMark(harness: root.name)
             }
             .frame(width: width)
             .contentShape(.rect)

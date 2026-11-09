@@ -85,6 +85,25 @@ struct HarnessMarkView: View {
     }
 }
 
+/// A harness as a table column's mark: its logo plus a word that is never
+/// absent — the disambiguating one when `HarnessMark` gives it, the full
+/// name otherwise. A `Menu` label that is only an image is stretched by
+/// the button style, so this keeps a `Text` in every label.
+struct HarnessNameMark: View {
+    var harness: String
+    var size: CGFloat = 16
+
+    var body: some View {
+        let mark = HarnessMark(harness)
+        HStack(spacing: 4) {
+            if let icon = mark.icon { HarnessIcon(harness: icon, size: size) }
+            Text(mark.word ?? mark.name).lineLimit(1)
+        }
+        .accessibilityElement(children: .ignore)
+        .hoverTip(mark.name, pinsOnClick: false)
+    }
+}
+
 /// Full harness names for prose, menus and VoiceOver: "Claude Code, Codex".
 func harnessNames(_ harnesses: [String]) -> String {
     harnesses.map { HarnessMark($0).name }.joined(separator: ", ")
