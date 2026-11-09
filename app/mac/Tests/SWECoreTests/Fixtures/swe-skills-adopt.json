@@ -69,7 +69,7 @@
       {
         "name": "pending-skill",
         "description": "",
-        "path": "/tmp/swe-fixture-home/.cursor/skills/pending-skill",
+        "path": "/private/tmp/swe-fixture-home/.cursor/skills/pending-skill",
         "root": "cursor",
         "source": "harness",
         "harnesses": ["cursor"]

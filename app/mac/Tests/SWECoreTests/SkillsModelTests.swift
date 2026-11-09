@@ -210,35 +210,39 @@ let inventoryJSON = #"""
         // archived harnesses are left alone, and a folder no listed root
         // owns (like ~/.agents/skills) is no harness's to take.
         let json = #"""
-        {"shared_dir": "/h/.swe/skills",
+        {"shared_dir": "/tmp/h/.swe/skills",
          "harnesses": [
-          {"name": "codex", "label": "codex", "path": "/h/.codex/skills",
+          {"name": "codex", "label": "codex", "path": "/tmp/h/.codex/skills",
            "state": "keep", "detail": "1 of 2 skills exist nowhere else"},
-          {"name": "cursor", "label": "cursor", "path": "/h/.cursor/skills",
+          {"name": "claude", "label": "claude", "path": "/tmp/h/.claude/skills",
+           "state": "keep", "detail": "1 of 1 skills exist nowhere else"},
+          {"name": "cursor", "label": "cursor", "path": "/tmp/h/.cursor/skills",
            "state": "ignored", "detail": ".linkignore"},
-          {"name": "gemini", "label": "gemini", "path": "/h/.gemini/skills",
+          {"name": "gemini", "label": "gemini", "path": "/tmp/h/.gemini/skills",
            "state": "skipped", "detail": "not installed"},
-          {"name": "hermes", "label": "hermes", "path": "/h/.hermes/skills",
+          {"name": "hermes", "label": "hermes", "path": "/tmp/h/.hermes/skills",
            "state": "keep", "detail": "x", "archived": true}
          ],
          "skills": [
-          {"name": "a", "path": "/h/.codex/skills/a", "root": "codex",
+          {"name": "a", "path": "/private/tmp/h/.codex/skills/a", "root": "codex",
            "source": "harness", "harnesses": ["codex"]},
-          {"name": "b", "path": "/h/.cursor/skills/b", "root": "cursor",
+          {"name": "f", "path": "/Users/kai/dotfiles/claude/skills/f", "root": "claude",
+           "source": "harness", "harnesses": ["claude"]},
+          {"name": "b", "path": "/private/tmp/h/.cursor/skills/b", "root": "cursor",
            "source": "harness", "harnesses": []},
-          {"name": "c", "path": "/h/.gemini/skills/c", "root": "gemini",
+          {"name": "c", "path": "/private/tmp/h/.gemini/skills/c", "root": "gemini",
            "source": "harness", "harnesses": []},
-          {"name": "d", "path": "/h/.hermes/skills/d", "root": "hermes",
+          {"name": "d", "path": "/private/tmp/h/.hermes/skills/d", "root": "hermes",
            "source": "harness", "harnesses": []},
-          {"name": "e", "path": "/h/.agents/skills/e", "root": "agents",
+          {"name": "e", "path": "/private/tmp/h/.agents/skills/e", "root": "agents",
            "source": "harness", "harnesses": []},
-          {"name": "s", "path": "/h/.swe/skills/s", "root": "shared",
+          {"name": "s", "path": "/private/tmp/h/.swe/skills/s", "root": "shared",
            "source": "shared", "harnesses": []}
          ]}
         """#
         let (model, _) = model([(["skills", "--json"], ok(json))])
         await model.load()
-        let pending = ["a": true, "b": false, "c": false, "d": false, "e": false, "s": false]
+        let pending = ["a": true, "f": true, "b": false, "c": false, "d": false, "e": false, "s": false]
         for skill in model.allSkills {
             #expect(model.pendingAdoption(skill) == pending[skill.name])
         }

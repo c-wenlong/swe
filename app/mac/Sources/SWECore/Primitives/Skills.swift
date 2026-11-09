@@ -459,9 +459,32 @@ public final class SkillsModel {
     }
 
     /// The root whose folder physically holds `skill`: for a private
-    /// one, the root a "move to shared" would carry it out of.
+    /// one, the root a "move to shared" would carry it out of. `swe`
+    /// resolves `skill.path` on walk while `root.path` stays as declared,
+    /// so macOS's `/private/{tmp,var,etc}` prefixes are folded in memory
+    /// first, and a harness-local skill under a symlinked parent falls
+    /// back to the one root that owns its label.
     public func rootHolding(_ skill: Skill) -> SkillRoot? {
-        roots.first { skill.path == $0.path || skill.path.hasPrefix($0.path + "/") }
+        let skillPath = Self.canonicalSystemPrefix(skill.path)
+        if let match = roots.first(where: {
+            let rootPath = Self.canonicalSystemPrefix($0.path)
+            return skillPath == rootPath || skillPath.hasPrefix(rootPath + "/")
+        }) {
+            return match
+        }
+        guard skill.source == .harness else { return nil }
+        let named = roots.filter { $0.name == skill.root }
+        return named.count == 1 ? named[0] : nil
+    }
+
+    private static func canonicalSystemPrefix(_ path: String) -> String {
+        for link in ["/tmp", "/var", "/etc"] {
+            let priv = "/private" + link
+            if path == priv || path.hasPrefix(priv + "/") {
+                return String(path.dropFirst("/private".count))
+            }
+        }
+        return path
     }
 
     /// Whether the next `swe init` or link pass adopts this harness-local
