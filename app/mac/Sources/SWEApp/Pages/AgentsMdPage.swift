@@ -135,7 +135,7 @@ private struct CompileInstructions: View {
 /// What the filter compiles down to: the Include outline with every
 /// file's checkbox, and the Order list of active chapters with per-harness
 /// chips in All view.
-private struct CompileView: View {
+struct CompileView: View {
     var check: InstructionsCheck
     var report: InitCheck
     var onOpenChapter: ((String) -> Void)? = nil
@@ -146,28 +146,16 @@ private struct CompileView: View {
     @State private var error: String?
 
     /// Every harness name the link report shows, first-seen order.
-    private var harnesses: [String] {
-        var seen: [String] = []
-        for row in report.instructionRows where !seen.contains(row.name) {
-            seen.append(row.name)
-        }
-        return seen
-    }
+    private var harnesses: [String] { report.instructionHarnessNames }
 
-    /// state/rule lookups for a file's AGENTS_MD-relative path.
+    /// state/rule lookups for a file's AGENTS_MD-relative path, shared
+    /// with the Edit tab's targets strip (`ChapterReceipts` in SWECore).
     private func state(for name: String) -> CompileState {
-        if check.chapters.contains(where: { $0.name == name }) { return .on }
-        if let entries = check.entries {
-            return entries.contains { $0.name == name && !$0.enabled } ? .off : .unlisted
-        }
-        return .unlisted
+        check.compileState(of: name)
     }
 
     private func rule(for name: String) -> [String: [String]]? {
-        guard let chapter = check.chapters.first(where: { $0.name == name }) else { return nil }
-        if let only = chapter.only { return ["only": only] }
-        if let except = chapter.except { return ["except": except] }
-        return nil
+        check.rule(for: name)
     }
 
     private var harness: String? { filter.isEmpty ? nil : filter }
@@ -276,7 +264,7 @@ private struct CompileView: View {
 
     /// A harness's logo only, falling back to the full mark where a
     /// harness has no icon — the name text follows separately.
-    private static func markIcon(_ name: String, size: CGFloat) -> some View {
+    static func markIcon(_ name: String, size: CGFloat) -> some View {
         let mark = HarnessMark(name)
         return Group {
             if let icon = mark.icon {
@@ -557,7 +545,7 @@ private struct CompileView: View {
     }
 
     /// A checkbox that can also show the folder's mixed dash.
-    private struct TriBox: View {
+    struct TriBox: View {
         var tri: CompileToggle.TriState
         var toggle: () -> Void
 
@@ -957,6 +945,7 @@ private struct ChaptersEditor: View {
                 if let name = chapters.selected {
                     if let document = chapters.openDocument(named: name)
                         ?? (opened?.name == name ? opened?.document : nil) {
+                        ChapterTargetsStrip(name: name, check: check)
                         InstructionEditor(
                             document: document,
                             title: name,
@@ -2119,7 +2108,7 @@ private struct CompiledOutputSheet: View {
 }
 
 /// A compact bordered band above the editor: a label, then what it's about.
-private struct Strip<Content: View>: View {
+struct Strip<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
