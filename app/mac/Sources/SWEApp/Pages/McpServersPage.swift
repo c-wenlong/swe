@@ -516,7 +516,7 @@ private struct HarnessHeader: View {
 
     var body: some View {
         Menu { columnMenu } label: {
-            HarnessMarkView(harness: harness)
+            HarnessNameMark(harness: harness)
                 .frame(width: width)
                 .contentShape(.rect)
         }
