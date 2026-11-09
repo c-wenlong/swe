@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The View AGENTS.md button and popup now show the generated file's size in
   KiB as last built, per harness output on the Compile tab. Part of #1894.
 
+- **AGENTS.md: resizable chapter pane and editor focus mode.** On the macOS
+  app's Edit tab, drag the divider between the chapter outline and the editor
+  (double-click resets; the width persists, with minimums that grow with text
+  zoom). Focus mode (⇧⌘E or the button in the page row) folds away the outline
+  and the harness strip; the file name, Unsaved dot, Save and View AGENTS.md
+  stay visible. Part of #1894.
 - **Devin is a verified MCP sync target.** `swe mcp sync` writes
   `~/.config/devin/mcp_config.json` (Devin CLI v3000.3+ /
   [MCP configuration docs](https://docs.devin.ai/cli/extensibility/mcp/configuration)),
