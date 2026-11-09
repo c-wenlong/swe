@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unsaved changes and jumps to it; it appears only while there are drafts.
   The View AGENTS.md button and popup now show the generated file's size in
   KiB as last built, per harness output on the Compile tab. Part of #1894.
+- **The AGENTS.md chapter outline has search, keyboard navigation and drag
+  handles (Mac).** A Filter chapters field above the Edit tab's outline
+  matches file names and paths and keeps matching files' folders open;
+  clearing it restores your folders and selection. With the outline focused,
+  Up/Down move between rows, Left/Right collapse, expand or climb to the
+  parent folder, and Return opens a chapter, while the text editor keeps its
+  arrow keys. Rows show a grip on hover, a dragged chapter shows an insertion
+  line, and the folder it will land in is outlined. Part of #1894.
 
 - **AGENTS.md: resizable chapter pane and editor focus mode.** On the macOS
   app's Edit tab, drag the divider between the chapter outline and the editor

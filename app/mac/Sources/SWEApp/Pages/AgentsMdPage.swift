@@ -941,6 +941,9 @@ private struct ChaptersEditor: View {
     @State private var moveError: String?
     /// The live file drag: targets, gaps and the dragged row's travel.
     @State private var railDrag = ChapterRailDrag()
+    /// The outline's search text, keyboard cursor and focus.
+    @State private var nav = OutlineNav()
+    @FocusState private var outlineFocused: Bool
     /// The selected chapter's document once its path is checked off the
     /// main actor; nil `document` means the path leaves AGENTS_MD.
     @State private var opened: (name: String, document: InstructionDocument?)?
@@ -1042,11 +1045,19 @@ private struct ChaptersEditor: View {
                     .font(Theme.caption).foregroundStyle(Theme.dangerText)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            OutlineSearchBar(nav: nav) {
+                outlineFocused = true
+            }
+            let shown = ChapterOutline.filter(chapters.tree, query: nav.query)
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(chapters.tree) { node in
+                    if nav.searching && shown.isEmpty {
+                        OutlineNoMatches(query: nav.query)
+                    }
+                    ForEach(shown) { node in
                         OutlineNode(node: node, depth: 0, compiled: check.compiledNames,
-                                    rail: railDrag,
+                                    rail: railDrag, nav: nav,
                                     onNewChapter: { folder in
                                         creating = NewChapterSheet.Initial(folder: folder)
                                     },
@@ -1055,10 +1066,10 @@ private struct ChaptersEditor: View {
                     }
                     // Dirty drafts whose files vanished: their text is
                     // still in the editor, so the row stays selectable.
-                    ForEach(chapters.ghosts, id: \.self) { name in
+                    ForEach(chapters.ghosts.filter(matchesFilter), id: \.self) { name in
                         GhostRow(name: name, rail: railDrag)
                     }
-                    ForEach(chapters.missing, id: \.self) { name in
+                    ForEach(chapters.missing.filter(matchesFilter), id: \.self) { name in
                         GhostRow(name: name, missing: true,
                                  absent: chapters.absent.contains(name), rail: railDrag)
                     }
@@ -1090,12 +1101,27 @@ private struct ChaptersEditor: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .outlineKeyboard(nav: nav, tree: shown, selected: chapters.selected,
+                             focus: $outlineFocused) { chapters.selected = $0 }
+            // A click anywhere in the outline hands it the keyboard.
+            .simultaneousGesture(TapGesture().onEnded { outlineFocused = true })
+            .onChange(of: nav.cursor) { _, path in
+                guard let path else { return }
+                withAnimation(.easeInOut(duration: Theme.fadeDuration)) { proxy.scrollTo(path) }
+            }
+            }
         }
         .frame(maxHeight: .infinity)
         .onAppear { app.chapters.undoManager = undoManager }
         .onChange(of: undoManager) { _, manager in
             app.chapters.undoManager = manager
         }
+    }
+
+    /// Whether a draft row's name passes the outline filter.
+    private func matchesFilter(_ name: String) -> Bool {
+        !nav.searching || name.localizedCaseInsensitiveContains(
+            nav.query.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// A file row dropped on a folder row or the top-level strip: the
@@ -1230,6 +1256,7 @@ private struct ChaptersEditor: View {
         var compiled: Set<String>
         /// The rail's live drag session: targets, gaps and row travel.
         var rail: ChapterRailDrag
+        var nav: OutlineNav
         var onNewChapter: (String) -> Void
         /// The drop ended; the rail's `target` says what it meant.
         var onDrop: () -> Void
@@ -1238,10 +1265,18 @@ private struct ChaptersEditor: View {
 
         @Environment(AppModel.self) private var app
         @State private var hovering = false
-        @AppStorage private var expanded: Bool
+        @AppStorage private var storedExpanded: Bool
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        /// A filter holds every folder open without touching the stored
+        /// state, so clearing it restores the folders as they were.
+        private var expanded: Bool {
+            get { nav.searching || storedExpanded }
+            nonmutating set { if !nav.searching { storedExpanded = newValue } }
+        }
 
         init(node: ChapterNode, depth: Int, compiled: Set<String>,
-             rail: ChapterRailDrag,
+             rail: ChapterRailDrag, nav: OutlineNav,
              onNewChapter: @escaping (String) -> Void,
              onDrop: @escaping () -> Void,
              onDelete: @escaping (ChapterNode) -> Void) {
@@ -1249,11 +1284,12 @@ private struct ChaptersEditor: View {
             self.depth = depth
             self.compiled = compiled
             self.rail = rail
+            self.nav = nav
             self.onNewChapter = onNewChapter
             self.onDrop = onDrop
             self.onDelete = onDelete
             // Expanded by default; each folder's state is its own key.
-            _expanded = AppStorage(wrappedValue: true,
+            _storedExpanded = AppStorage(wrappedValue: true,
                                    ChapterFolderState.outlinePrefix + node.path)
         }
 
@@ -1265,7 +1301,7 @@ private struct ChaptersEditor: View {
                 if node.isFolder && expanded && rail.dragging != node.path {
                     ForEach(node.children) { child in
                         OutlineNode(node: child, depth: depth + 1,
-                                    compiled: compiled, rail: rail,
+                                    compiled: compiled, rail: rail, nav: nav,
                                     onNewChapter: onNewChapter,
                                     onDrop: onDrop, onDelete: onDelete)
                     }
@@ -1274,7 +1310,11 @@ private struct ChaptersEditor: View {
             // Above its later siblings, which would otherwise draw over
             // the dragged row as it travels down.
             .zIndex(rail.dragging == node.path ? 1 : 0)
+            .id(node.path)
         }
+
+        /// The keyboard cursor's ring, only while the outline has focus.
+        private var cursorRing: Bool { nav.focused && nav.cursor == node.path }
 
         /// The row's drag: a file reorders or moves, a folder nests.
         private var railGesture: some Gesture {
@@ -1296,6 +1336,7 @@ private struct ChaptersEditor: View {
             /// grows a little so the row shift marks the drop target.
             let dropTargeted = rail.target == .folder(node.path)
             let isDragged = rail.dragging == node.path
+            let landing = rail.landingFolder == node.path
             return HStack(spacing: 5) {
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
                     .font(Theme.font(size: 9, weight: .semibold))
@@ -1318,6 +1359,7 @@ private struct ChaptersEditor: View {
                     .plainButton(cornerRadius: Theme.controlRadius)
                     .hoverTip("New chapter here", replacesLabel: false)
                 }
+                OutlineGrip(visible: hovering && !nav.searching)
             }
             .padding(.leading, CGFloat(depth) * 14 + 8)
             .padding(.trailing, 8)
@@ -1332,10 +1374,20 @@ private struct ChaptersEditor: View {
                         .fill(dropTargeted ? Theme.dropTarget : hovering ? Theme.hover : .clear)
                 }
             }
+            .overlay {
+                // The folder a drop will land in: aimed at, or a gap in
+                // one of its levels.
+                RoundedRectangle(cornerRadius: Theme.controlRadius)
+                    .strokeBorder(dropTargeted || landing ? Theme.accentFill : .clear, lineWidth: 1)
+            }
+            .animation(reduceMotion ? nil : .easeInOut(duration: Theme.fadeDuration), value: landing)
+            .focusRing(cursorRing, cornerRadius: Theme.controlRadius)
             .contentShape(.rect)
-            .onTapGesture { expanded.toggle() }
+            .onTapGesture { nav.cursor = node.path; expanded.toggle() }
             .onHover { hovering = rail.dragging == nil && $0 }
-            .gesture(railGesture)
+            // Moves resolve against the whole tree, so a filtered outline
+            // (rows missing) can't be dragged.
+            .gesture(railGesture, including: nav.searching ? .subviews : .all)
             .offset(y: rail.yOffset(for: node.path))
             .animation(.easeInOut(duration: Theme.fadeDuration), value: dropTargeted)
             // Spring loading: a drag resting on this collapsed folder
@@ -1368,6 +1420,7 @@ private struct ChaptersEditor: View {
             let selected = chapters.selected == node.path
             let isCompiled = compiled.contains(node.path)
             let isDragged = rail.dragging == node.path
+            let insertionEdge = rail.insertionEdge(for: node.path)
             return HStack(spacing: 6) {
                 Text(node.name)
                     .font(Theme.nav)
@@ -1385,6 +1438,7 @@ private struct ChaptersEditor: View {
                     Text("Not compiled").font(Theme.caption).foregroundStyle(Theme.textMuted)
                         .lineLimit(1).fixedSize()
                 }
+                OutlineGrip(visible: hovering && !nav.searching)
             }
             .padding(.leading, CGFloat(depth) * 14 + 23)
             .padding(.trailing, 8).padding(.vertical, 5)
@@ -1399,9 +1453,17 @@ private struct ChaptersEditor: View {
                 }
             }
             .contentShape(.rect)
-            .onTapGesture { chapters.selected = node.path }
+            .onTapGesture { nav.cursor = node.path; chapters.selected = node.path }
             .onHover { hovering = rail.dragging == nil && $0 }
-            .gesture(railGesture)
+            .gesture(railGesture, including: nav.searching ? .subviews : .all)
+            .overlay(alignment: insertionEdge == .bottom ? .bottom : .top) {
+                if insertionEdge != nil {
+                    OutlineInsertionLine().offset(y: insertionEdge == .bottom ? 2 : -2)
+                }
+            }
+            .animation(reduceMotion ? nil : .easeInOut(duration: Theme.fadeDuration),
+                       value: insertionEdge == nil)
+            .focusRing(cursorRing, cornerRadius: Theme.controlRadius)
             .offset(y: rail.yOffset(for: node.path))
             .zIndex(isDragged ? 1 : 0)
             .animation(isDragged ? nil : .spring(response: 0.28, dampingFraction: 0.86),
