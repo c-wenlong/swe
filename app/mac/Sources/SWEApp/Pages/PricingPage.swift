@@ -444,7 +444,7 @@ private struct SourceMark: View {
 
     @MainActor private static let liteLLM: NSImage? = PricingSourceIcons.liteLLM
         .flatMap(NSImage.init(contentsOf:))
-        .map { image in image.isTemplate = true; return image.limitingDeclaredSize() }
+        .map { image in image.isTemplate = true; return image }
 }
 
 /// "Spend uses the charge Cursor logs for each request, not these rates."
