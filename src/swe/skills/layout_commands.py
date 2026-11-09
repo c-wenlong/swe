@@ -6,17 +6,28 @@ from swe.console import c, tilde, truncate
 from swe.flags import expand_value_flags
 from swe.json_output import emit, error_stream
 from swe.skills.help_text import (
+    print_skills_adopt_help,
     print_skills_link_help,
     print_skills_move_help,
+    print_skills_remove_help,
     print_skills_unlink_help,
     print_skills_usage_help,
 )
-from swe.skills.models import LinkReply, MoveReply, SyncReply, ToggleReply, UnlinkReply
+from swe.skills.models import (
+    AdoptReply,
+    LinkReply,
+    MoveReply,
+    RemoveReply,
+    SyncReply,
+    ToggleReply,
+    UnlinkReply,
+)
 from swe.skills.link_ops import (
     SkillLayoutError,
     link_skill_root,
     move_skill,
     reconcile_all_selections,
+    remove_skill,
     set_skill_enabled,
     unlink_skill_root,
 )
@@ -268,9 +279,132 @@ def cmd_skills_move(args):
         print(c("red", f"  {exc}"), file=error_stream(json_view))
         return 1
     if opts["json"]:
+        warn = _move_out_of_shared_warning(src, dest)
+        if warn:
+            print(c("yellow", warn), file=error_stream(True))
         return emit(MoveReply(name, str(src), str(dest)).to_json())
     home = Path.home()
     print(c("green", f"  ✓ Moved {name}"))
     print(c("dim", f"    from {tilde(src, home)}"))
     print(c("dim", f"    to   {tilde(dest, home)}\n"))
+    warn = _move_out_of_shared_warning(src, dest)
+    if warn:
+        print(c("yellow", warn))
+    return 0
+
+
+def _move_out_of_shared_warning(src: Path, dest: Path) -> str | None:
+    """A skill moved out of the shared tree into a harness's real skills
+    root is a harness-only skill now: the next adopt pass takes it back.
+    Say so on moves where that is what just happened."""
+    from swe.paths import skills_dir_for
+
+    home = Path.home()
+    try:
+        shared = skills_dir_for(home).resolve()
+    except (OSError, RuntimeError):
+        return None
+    try:
+        if not src.parent.resolve() == shared:
+            return None
+        dest_root = dest.parent.resolve()
+    except (OSError, RuntimeError):
+        return None
+    if dest_root == shared:
+        return None
+    from swe.init.layout import discover_skill_roots
+
+    for root in discover_skill_roots(home):
+        try:
+            if root.resolve() == dest_root:
+                return (
+                    f"  note: {dest.name} now lives only in that root; the next "
+                    "swe init or `swe skills adopt` pulls it back into the "
+                    "shared tree"
+                )
+        except (OSError, RuntimeError):
+            continue
+    return None
+
+
+def _print_adopt_result(result) -> None:
+    verb = "Would adopt" if result.dry_run else "Adopted"
+    if result.adopted:
+        names = ", ".join(
+            f"{r['name']} (from {r['from']})" for r in result.adopted)
+        print(c("green", f"  ✓ {verb} {len(result.adopted)} "
+                        f"skill{'s' if len(result.adopted) != 1 else ''} "
+                        f"into ~/.swe/skills: {names}"))
+    if result.deduped:
+        names = ", ".join(
+            f"{r['name']} (in {r['harness']})" for r in result.deduped)
+        print(c("green", f"  ✓ Folded identical private {'copies' if len(result.deduped) != 1 else 'copy'} "
+                        f"into shared links: {names}"))
+    for row in result.held_off:
+        print(c("dim", f"    {row['harness']}: kept {', '.join(row['skills'])} off"))
+    for row in result.conflicts:
+        print(c("yellow", f"  ⚠ {row['name']}: conflict in "
+                        f"{', '.join(row['harnesses'])} — {row['detail']}"))
+    for row in result.failed:
+        print(c("red", f"  ! {row['name']}: {row['error']}"))
+    if not (result.adopted or result.deduped or result.conflicts or result.failed):
+        print(c("dim", "  Nothing to adopt: every skills root is linked, "
+                       "or its folders are already in the shared tree.\n"))
+    elif result.conflicts or result.failed:
+        print()
+
+
+def cmd_skills_adopt(args):
+    json_view = "--json" in args
+    rest = [a for a in args if a not in ("--json", "--all", "--dry-run")]
+    if rest and rest[0] in ("-h", "--help"):
+        print_skills_adopt_help()
+        return 0
+    unknown = [a for a in rest if a.startswith("-")]
+    if unknown or len(rest) > 1:
+        print(c("red", "  Usage: swe skills adopt [<name>] [--all] [--dry-run]"),
+              file=error_stream(json_view))
+        return 1
+    from swe.skills.adopt import adopt_harness_skills
+
+    try:
+        result = adopt_harness_skills(
+            only=rest[0] if rest else None, dry_run="--dry-run" in args)
+    except SkillLayoutError as exc:
+        print(c("red", f"  {exc}"), file=error_stream(json_view))
+        return 1
+    if json_view:
+        return emit(AdoptReply(
+            result.adopted, result.deduped, result.conflicts,
+            result.failed, result.held_off, result.dry_run).to_json())
+    _print_adopt_result(result)
+    return 1 if result.failed else 0
+
+
+def cmd_skills_remove(args):
+    json_view = "--json" in args
+    rest = [a for a in args if a != "--json"]
+    if rest and rest[0] in ("-h", "--help"):
+        print_skills_remove_help()
+        return 0
+    if len(rest) != 1 or rest[0].startswith("-"):
+        print(c("red", "  Usage: swe skills remove <name>"),
+              file=error_stream(json_view))
+        return 1
+    try:
+        result = remove_skill(rest[0])
+    except SkillLayoutError as exc:
+        print(c("red", f"  {exc}"), file=error_stream(json_view))
+        return 1
+    if json_view:
+        return emit(RemoveReply(**result).to_json())
+    print(c("green", f"  ✓ Removed {result['name']} from ~/.swe/skills "
+                    f"(backup at {result['backup']})"))
+    if result["links_dropped"]:
+        print(c("dim", f"    dropped links in: {', '.join(result['links_dropped'])}"))
+    if result["private_left"]:
+        print(c("yellow",
+                f"    {result['name']} still sits as a private folder in "
+                f"{', '.join(result['private_left'])} — the next adopt pass "
+                "pulls it back into the shared tree"))
     return 0

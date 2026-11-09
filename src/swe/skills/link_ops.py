@@ -29,6 +29,7 @@ from swe.skills.layout import (
 __all__ = [
     "SkillLayoutError", "link_skill_root", "unlink_skill_root", "move_skill",
     "set_skill_enabled", "reconcile_selection_root", "reconcile_all_selections",
+    "remove_skill",
 ]
 
 
@@ -568,6 +569,96 @@ def reconcile_selection_root(root: Path, shared: Path, record: dict) -> dict:
             link.unlink()
             removed.append(n)
     return {"added": added, "removed": removed}
+
+
+def remove_skill(
+    name: str,
+    *,
+    home: Path | None = None,
+    cwd: Path | None = None,
+) -> dict:
+    """Delete a shared skill and every per-skill link into it.
+
+    The shared folder is the unit: links pointing at it are dropped from
+    every discovered root (a donor root's adopt link-back included) so a
+    removal leaves no dangling trail and a later adopt pass cannot
+    resurrect it through a leftover link or record. Real private folders
+    of the same name in harness roots are user content and stay; the
+    caller warns that the next adopt pass will pull them back.
+    """
+    home = home or Path.home()
+    cwd = cwd or Path.cwd()
+    check_link_records_writable()
+    shared = skills_dir_for(home)
+    try:
+        shared_resolved = shared.resolve()
+    except (OSError, RuntimeError):
+        shared_resolved = shared
+
+    folder = find_skill_directory(name, SHARED_LABEL, home=home, cwd=cwd)
+    # folder.parent is compared unresolved: a shared skill vendored in by
+    # a symlink resolves OUT of the tree, yet removing its link is the
+    # point. Discovery walks the resolved shared root, so a top-level
+    # skill's folder always parents to it directly.
+    if folder.parent != shared_resolved:
+        raise SkillLayoutError(
+            f"{name} is nested in {folder.parent.name}, not a top-level "
+            "shared skill; remove the skill it belongs to instead"
+        )
+    fname = folder.name
+    target = Path(os.path.normpath(str(shared_resolved / fname)))
+
+    from swe.init.layout import (
+        discover_skill_roots,
+        skill_root_label,
+        skill_root_links,
+    )
+
+    dropped: list[str] = []
+    private_left: list[str] = []
+    for root in discover_skill_roots(home):
+        if root.is_symlink() or not root.is_dir():
+            continue
+        label = skill_root_label(root, home)
+        for link in skill_root_links(root, shared).values():
+            try:
+                pointed = Path(os.readlink(link))
+            except OSError:
+                continue
+            if not pointed.is_absolute():
+                pointed = link.parent / pointed
+            if Path(os.path.normpath(str(pointed))) != target:
+                continue
+            try:
+                link.unlink()
+                dropped.append(label)
+            except OSError:
+                pass
+        slot = root / fname
+        if (
+            not slot.is_symlink()
+            and slot.is_dir()
+            and (slot / "SKILL.md").is_file()
+        ):
+            private_left.append(label)
+
+    backup = backup_tree(folder, home)
+    if folder.is_symlink():
+        folder.unlink()
+    else:
+        shutil.rmtree(folder)
+    # Provenance and selection records for the name would otherwise steer
+    # a later adopt or reconcile on a skill that no longer exists.
+    from swe.skills.layout import purge_skill_state
+
+    purge_skill_state(fname)
+    return {
+        "name": fname,
+        "removed": str(folder),
+        "links_dropped": sorted(set(dropped)),
+        "private_left": sorted(set(private_left)),
+        "backup": str(backup),
+    }
 
 
 def reconcile_all_selections(home: Path | None = None) -> list[dict]:

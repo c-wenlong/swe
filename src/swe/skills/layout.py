@@ -75,15 +75,23 @@ def _expand(home: Path, rel: Path) -> Path:
     return (home / rel).expanduser()
 
 
-def load_link_records() -> list[dict]:
+def _load_store() -> dict:
+    """The whole skill_links.json document as a dict, or {}.
+
+    Writes merge through this so a records rewrite keeps sibling
+    top-level keys (``adopted_from``). A parsed list/scalar answers {}
+    the way load_link_records answers []: save_link_records' parse check
+    then decides whether overwriting is safe.
+    """
     try:
         data = json.loads(SKILL_LINKS_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError, RecursionError):
-        return []
-    # A parsed list/scalar is not a links file: answer empty for reads and
-    # let save_link_records' own parse check decide whether overwriting is
-    # safe.
-    links = data.get("links", []) if isinstance(data, dict) else []
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_link_records() -> list[dict]:
+    links = _load_store().get("links", [])
     return links if isinstance(links, list) else []
 
 
@@ -107,13 +115,76 @@ def check_link_records_writable() -> None:
         ) from exc
 
 
-def save_link_records(links: list[dict]) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    check_link_records_writable()
-    payload = {"links": links, "updated": datetime.now().isoformat()}
+def _write_store(payload: dict) -> None:
+    payload["updated"] = datetime.now().isoformat()
     # A unique temp name (two writers shared skill_links.tmp) that writes
     # through a symlinked skill_links.json instead of replacing the link.
     atomic_write_text(SKILL_LINKS_FILE, json.dumps(payload, indent=2) + "\n")
+
+
+def save_link_records(links: list[dict]) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    check_link_records_writable()
+    payload = _load_store()
+    payload["links"] = links
+    _write_store(payload)
+
+
+# {folder name: harness the skill was adopted out of}, a sibling of
+# ``links`` in skill_links.json. The folder name is the link unit every
+# record and per-skill symlink already speaks in, and it survives a SKILL.md
+# rename, which a frontmatter key would not.
+def skill_adopted_map() -> dict[str, str]:
+    raw = _load_store().get("adopted_from")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items()}
+
+
+def record_adopted(name: str, donor: str) -> None:
+    """Persist which harness root ``name`` was adopted out of."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    check_link_records_writable()
+    store = _load_store()
+    provenance = store.get("adopted_from")
+    if not isinstance(provenance, dict):
+        provenance = {}
+        store["adopted_from"] = provenance
+    provenance[name] = donor
+    _write_store(store)
+
+
+def purge_skill_state(name: str) -> None:
+    """Drop ``name`` from provenance and every selection record.
+
+    A removed shared skill must not be steered by state that predates the
+    removal: a stale ``adopted_from`` lies about where it came from, and a
+    record still listing it in ``enabled``/``disabled`` would resurrect or
+    block it the next time a name collides.
+    """
+    if not SKILL_LINKS_FILE.exists():
+        return
+    check_link_records_writable()
+    store = _load_store()
+    changed = False
+    provenance = store.get("adopted_from")
+    if isinstance(provenance, dict) and name in provenance:
+        del provenance[name]
+        if not provenance:
+            del store["adopted_from"]
+        changed = True
+    links = store.get("links", [])
+    if isinstance(links, list):
+        for record in links:
+            if not isinstance(record, dict) or record.get("kind") != "selection":
+                continue
+            for key in ("enabled", "disabled"):
+                names = record.get(key)
+                if isinstance(names, list) and name in names:
+                    record[key] = [n for n in names if n != name]
+                    changed = True
+    if changed:
+        _write_store(store)
 
 
 def record_symlink(label: str, path: Path, target: Path) -> None:

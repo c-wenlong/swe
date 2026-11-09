@@ -31,6 +31,8 @@ def print_skills_overview():
   {c('cyan', 'swe skills link <harness> [target]')}   Link codex/cursor/claude → shared
   {c('cyan', 'swe skills unlink <harness> [--mkdir]')} Break link; optional empty dir
   {c('cyan', 'swe skills move <name> --from=A --to=B')} Move a skill folder
+  {c('cyan', 'swe skills adopt [<name>]')}            Pull harness-only skills into shared
+  {c('cyan', 'swe skills remove <name>')}             Delete a shared skill and its links
 
 {c('bold', 'Per-skill selections')}
   {c('cyan', 'swe skills enable <name> --harness=<h>')}   Link one shared skill into a harness
@@ -51,7 +53,7 @@ def print_skills_overview():
   {SKILL_CATALOGS_FILE}   extra catalog paths
   {SKILL_LINKS_FILE}      recorded harness symlinks
 
-{c('bold', 'Help')}  {c('cyan', 'swe skills help <topic>')}  — topics: catalog, discover, enable, hub, link, move, new, sync, tree, scope, unlink, usage
+{c('bold', 'Help')}  {c('cyan', 'swe skills help <topic>')}  — topics: adopt, catalog, discover, enable, hub, link, move, new, remove, sync, tree, scope, unlink, usage
   {c('dim', 'help comes before the topic here — unlike swe mcp <command> help, which puts it after.')}
 """
     )
@@ -187,6 +189,58 @@ def print_skills_toggle_help():
     )
 
 
+def print_skills_adopt_help():
+    print(
+        f"""
+  {c('bold', 'swe skills adopt')} — Pull harness-only skills into the shared tree
+
+  {c('cyan', 'swe skills adopt')}               Adopt every harness-only skill
+  {c('cyan', 'swe skills adopt --all')}          Same thing, spelled out
+  {c('cyan', 'swe skills adopt <name>')}         Adopt one skill by name
+  {c('cyan', 'swe skills adopt --dry-run')}      Show what would move, write nothing
+  {c('cyan', 'swe skills adopt --json')}         Print the result as JSON
+
+  A skill is harness-only when its folder sits in a harness's real skills
+  directory (a root `swe init` reports as {c('bold', 'keep')} or {c('bold', 'selection')})
+  instead of ~/.swe/skills. Adopting moves the folder into the shared tree
+  verbatim, leaves a symlink behind where it was so the donor sees no
+  change, records where it came from in {SKILL_LINKS_FILE}'s
+  ``adopted_from``, and marks it off for every other harness so nothing
+  new appears anywhere.
+
+  {c('bold', 'Conflicts')} — when two roots hold the same name, the first in
+  registry order donates and the rest are reported, never merged. When
+  ~/.swe/skills already has the name the private copy stays where it is —
+  identical copies fold into links, different ones are reported.
+
+  `swe init` runs this pass too; `swe init --no-adopt` skips it. Plugin
+  caches and harness-owned folders (``~/.codex/skills/.system``) are never
+  adopted. A moved-out shared skill (`swe skills move --to=<harness>`)
+  comes back on the next pass — that is deliberate.
+"""
+    )
+
+
+def print_skills_remove_help():
+    print(
+        f"""
+  {c('bold', 'swe skills remove')} — Delete a shared skill and its links
+
+  {c('cyan', 'swe skills remove <name>')}        Back up and delete a shared skill
+  {c('cyan', 'swe skills rm <name>')}            Alias
+  {c('cyan', 'swe skills delete <name>')}        Alias
+  {c('cyan', 'swe skills remove <name> --json')} Print the result as JSON
+
+  Removes the folder under ~/.swe/skills after copying it into
+  ~/.swe/backups, drops every per-skill link pointing into it (including
+  the link an adopt left in its donor root), and clears its selection and
+  provenance records so a later adopt cannot resurrect it. A private
+  folder of the same name in a harness root is user content and stays —
+  the command says so, since the next adopt pass pulls it back.
+"""
+    )
+
+
 def print_skills_sync_help():
     print(
         f"""
@@ -254,14 +308,18 @@ def print_skills_tree_help():
 
 SKILLS_HELP_TOPICS = {
     "": print_skills_overview,
+    "adopt": print_skills_adopt_help,
     "catalog": print_skills_catalog_help,
     "catalogs": print_skills_catalog_help,
+    "delete": print_skills_remove_help,
     "disable": print_skills_toggle_help,
     "discover": print_skills_discover_help,
     "enable": print_skills_toggle_help,
     "hub": print_skills_hub_help,
     "link": print_skills_link_help,
     "new": print_skills_new_help,
+    "remove": print_skills_remove_help,
+    "rm": print_skills_remove_help,
     "sync": print_skills_sync_help,
     "unlink": print_skills_unlink_help,
     "usage": print_skills_usage_help,
