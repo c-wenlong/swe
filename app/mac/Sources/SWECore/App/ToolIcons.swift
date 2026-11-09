@@ -17,10 +17,10 @@ public enum ToolIcons {
         let base = resourceNames[id] ?? "tool-\(id)"
         if let url = CoreResources.url(base, "svg"), let image = NSImage(contentsOf: url) {
             image.isTemplate = true
-            return image.limitingDeclaredSize()
+            return image
         }
         if let url = CoreResources.url(base, "png"), let image = NSImage(contentsOf: url) {
-            return image.limitingDeclaredSize()
+            return image
         }
         return nil
     }

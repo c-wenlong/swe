@@ -677,12 +677,13 @@ private struct SkillRootHeader: View {
         Menu { columnMenu } label: {
             HStack(spacing: 4) {
                 if busy { ProgressView().controlSize(.mini) }
-                HarnessNameMark(harness: root.name)
+                HarnessMarkView(harness: root.name)
             }
             .frame(width: width)
             .contentShape(.rect)
         }
         .menuStyle(.button)
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
         .hoverTip("\(name), \(displayPath(root.path)). \(root.explanation)", pinsOnClick: false)

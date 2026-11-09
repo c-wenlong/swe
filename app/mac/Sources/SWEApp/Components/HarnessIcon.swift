@@ -43,9 +43,10 @@ struct HarnessIcon: View {
 
     @MainActor static func image(for harness: String) -> (NSImage, Bool)? {
         if let cached = cache[harness] { return cached }
-        guard let (image, isColor) = HarnessIcons.image(for: harness) else { return nil }
-        cache[harness] = (image, isColor)
-        return (image, isColor)
+        guard let icon = HarnessIcons.logo(for: harness), let image = NSImage(contentsOf: icon.url) else { return nil }
+        image.isTemplate = !icon.isColor
+        cache[harness] = (image, icon.isColor)
+        return (image, icon.isColor)
     }
 
 }
@@ -78,25 +79,6 @@ struct HarnessMarkView: View {
         HStack(spacing: 4) {
             if let icon = mark.icon { HarnessIcon(harness: icon, size: size) }
             if let word = mark.word { Text(word).lineLimit(1) }
-        }
-        .accessibilityElement(children: .ignore)
-        .hoverTip(mark.name, pinsOnClick: false)
-    }
-}
-
-/// A harness as a table column's mark: its logo plus a word that is never
-/// absent — the disambiguating one when `HarnessMark` gives it, the full
-/// name otherwise. A `Menu` label that is only an image is stretched by
-/// the button style, so this keeps a `Text` in every label.
-struct HarnessNameMark: View {
-    var harness: String
-    var size: CGFloat = 16
-
-    var body: some View {
-        let mark = HarnessMark(harness)
-        HStack(spacing: 4) {
-            if let icon = mark.icon { HarnessIcon(harness: icon, size: size) }
-            Text(mark.word ?? mark.name).lineLimit(1)
         }
         .accessibilityElement(children: .ignore)
         .hoverTip(mark.name, pinsOnClick: false)
