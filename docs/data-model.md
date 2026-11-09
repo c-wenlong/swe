@@ -99,6 +99,7 @@ every key below is live.
 | `popupHiddenHarnesses`, `popupHiddenWindows`, `popupHarnessOrder` | legacy popup keys, read-only migration fallbacks; keep until the new keys have covered every install |
 | `mcpHiddenHarnesses` | harness columns hidden on the MCP page |
 | `mcpColumnOrder` | harness column order on the MCP page's table |
+| `skillsColumnOrder`, `pluginsColumnOrder` | folder and harness column order on the Skills and Plugins tables |
 | `providerOrder`, `providerDisabled` | provider list order and switches |
 | `inferenceOrder`, `infraOrder`, `servicesOrder` | row order on the Providers page's Inference, Infra and Services tabs |
 | `infraKeys`, `servicesKeys` | variables filed to the Infra or Services tab that no catalogue claims |

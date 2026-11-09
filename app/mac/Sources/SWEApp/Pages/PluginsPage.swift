@@ -8,6 +8,8 @@ struct PluginsPage: View {
     /// What the Fix all confirmation listed; only these run.
     @State private var confirmingAll: [String]?
     @State private var confirmingAction: PluginAction?
+    /// What a master or column switch asked to run: one batch, one dialog.
+    @State private var confirmingBatch: [PluginAction]?
     /// Drift rows a harness card shows before folding.
     private static let foldLimit = 8
     /// Harnesses whose drift cards are unfolded.
@@ -62,7 +64,9 @@ struct PluginsPage: View {
             switch app.pluginsTab {
             case .explore:
                 PluginExplorer(model: catalog, openHealth: { app.pluginsTab = .health },
-                               addMarketplace: { addingMarketplace = true }) { confirmingAction = $0 }
+                               addMarketplace: { addingMarketplace = true },
+                               confirm: { confirmingAction = $0 },
+                               confirmBatch: { confirmingBatch = $0 })
                     .onPreferenceChange(DetailOpenKey.self) { detailOpen = $0 }
             case .health: health
             }
@@ -103,6 +107,41 @@ struct PluginsPage: View {
                  ? "swe checks the current state, then makes this edit, and writes it only once it is proven safe:\n\n\(action.command)"
                  : "swe checks the current state, then runs:\n\n\(action.command)")
         }
+        .confirmationDialog(batchQuestion,
+                            isPresented: .init(get: { confirmingBatch != nil }, set: { if !$0 { confirmingBatch = nil } }),
+                            presenting: confirmingBatch) { actions in
+            Button("Run all") { Task { await runBatch(actions) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { actions in
+            Text("One at a time, stopping at the first that fails:\n\n"
+                 + actions.map(\.command).joined(separator: "\n"))
+        }
+    }
+
+    /// "Disable tool@kit in 2 harnesses?", or for a column's mixed
+    /// batch "Disable 3 plugins in Codex?".
+    private var batchQuestion: String {
+        guard let actions = confirmingBatch, let first = actions.first else { return "" }
+        let count = actions.count
+        if Set(actions.map(\.ref)).count == 1 {
+            return "\(first.verb.title) \(first.ref) in \(count) \(count == 1 ? "harness" : "harnesses")?"
+        }
+        return "\(first.verb.title) \(count) plugins in \(HarnessMark(first.harness).name)?"
+    }
+
+    /// A master or column switch's actions, one `swe plugins` call at a
+    /// time through the same confirmed path a single cell takes, then the
+    /// same reloads `run` does.
+    private func runBatch(_ actions: [PluginAction]) async {
+        let hub = actions.contains { action in
+            catalog.index?.rows.first { $0.id == action.ref }?.isHub == true
+        }
+        for action in actions {
+            await catalog.run(action, swe: app.swe, for: app.swePath)
+            if catalog.actionError != nil { break }
+        }
+        await refreshSkills()
+        if hub { await model.load(swe: app.swe, for: app.swePath) }
     }
 
     /// The drift report, as before Explore: one card per harness.

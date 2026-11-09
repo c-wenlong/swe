@@ -280,6 +280,56 @@ let inventoryJSON = #"""
         ])
     }
 
+    @Test func theTableColumnsSkipRootsAClickCannotChange() async throws {
+        // A folder the user ignored or whose harness is absent takes no
+        // click at all, so it earns no column. A folder pointing away
+        // keeps one: its cell still explains the blocked mark.
+        let json = #"""
+        {"shared_dir": "/h/.swe/skills",
+         "harnesses": [
+          {"name": "claude", "label": "claude", "path": "/h/.claude/skills", "state": "linked", "detail": ""},
+          {"name": "cursor", "label": "cursor", "path": "/h/.cursor/skills", "state": "ignored", "detail": ".linkignore"},
+          {"name": "gemini", "label": "gemini", "path": "/h/.gemini/skills", "state": "skipped", "detail": "not installed"},
+          {"name": "codex", "label": "codex", "path": "/h/.codex/skills", "state": "relink", "detail": "points at /h/skills"}
+         ],
+         "skills": [{"name": "alpha", "path": "/h/.swe/skills/alpha", "root": "shared",
+                     "source": "shared", "harnesses": ["claude"]}]}
+        """#
+        let (model, _) = model([(["skills", "--json"], ok(json))])
+        await model.load()
+        #expect(model.tableRoots.map(\.name) == ["claude", "codex"])
+    }
+
+    @Test func rootHoldingFindsTheFolderAPrivateSkillSitsIn() async throws {
+        let (model, _) = model([(["skills", "--json"], ok(inventoryJSON))])
+        await model.load()
+        let kept = try #require(model.allSkills.first { $0.name == "only-codex" })
+        #expect(model.rootHolding(kept)?.path == "/h/.codex/skills")
+        // The shared library is not a root's folder, and a plugin cache
+        // belongs to no skills root either.
+        let shared = try #require(model.allSkills.first { $0.name == "alpha" })
+        #expect(model.rootHolding(shared) == nil)
+        let plugin = try #require(model.allSkills.first { $0.name == "hammer" })
+        #expect(model.rootHolding(plugin) == nil)
+    }
+
+    @Test func moveToSharedRunsTheMoveAgainstTheSkillsFolder() async throws {
+        let (model, runner) = model([
+            (["skills", "move"], ok(#"{"action": "move", "name": "only-codex", "from": "/h/.codex/skills/only-codex", "to": "/h/.swe/skills/only-codex"}"#)),
+            (["skills", "--json"], ok(inventoryJSON)),
+        ])
+        await model.load()
+        let skill = try #require(model.allSkills.first { $0.name == "only-codex" })
+        let root = try #require(model.rootHolding(skill))
+        await model.moveToShared(skill, from: root)
+        #expect(runner.calls == [
+            ["skills", "--json"],
+            ["skills", "move", "only-codex", "--from=/h/.codex/skills", "--to=shared", "--json"],
+            ["skills", "--json"],
+        ])
+        #expect(model.actionError == nil)
+    }
+
     @Test func aRefusedLinkShowsSwesReason() async throws {
         let refusal = CommandResult(status: 1, stdout: Data(), stderr: "\u{1B}[31m  /h/.hermes/skills is a non-empty directory.\u{1B}[0m\n")
         let (model, _) = model([

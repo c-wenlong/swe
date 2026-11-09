@@ -321,6 +321,25 @@ public struct PluginExploreIndex: Sendable, Equatable {
         }
     }
 
+    /// The Explore table's rows: the filtered sources flattened to one
+    /// entry per plugin, the first source's pick for a shared ref, the
+    /// same pick `entry(for:)` makes for a detail view.
+    public func tableEntries(harness: String? = nil, query: String = "") -> [ExplorePlugin] {
+        var seen = Set<String>()
+        return sources(harness: harness, query: query)
+            .flatMap(\.marketplaces).flatMap(\.plugins)
+            .filter { seen.insert($0.row.id).inserted }
+    }
+
+    /// Every harness worth a column in the table: swe's own list, then
+    /// any only a plugin's state names (a copy installed in a harness
+    /// that registers no marketplace, like Cursor's cache).
+    public var tableHarnesses: [String] {
+        let extra = Set(catalog.plugins.flatMap { $0.harnesses.keys })
+            .subtracting(catalog.harnesses).sorted()
+        return catalog.harnesses + extra
+    }
+
     /// How many plugins `sources` holds, each counted once however many
     /// sources it sits under.
     public static func distinctPlugins(in sources: [ExploreSource]) -> Int {

@@ -199,6 +199,15 @@ extension SweClient {
         ])
     }
 
+    /// `swe skills move`: carries the folder between scope roots. The
+    /// scopes are root refs, a literal root path resolves too, `shared`
+    /// names the hub's library.
+    public func moveSkill(_ skill: Skill, from: String, to: String) async throws {
+        let _: MoveReply = try await call([
+            "skills", "move", skill.name, "--from=\(from)", "--to=\(to)", "--json",
+        ])
+    }
+
     /// `swe skills usage <name> --json`: call counts from the session
     /// index; `tracked` false when the index is off rather than a zero.
     public func skillUsage(_ name: String) async throws -> SkillUsage {
@@ -222,6 +231,12 @@ struct ToggleReply: Decodable {
     let action: String
     let mode: String
     let converted: Bool
+}
+
+/// `swe skills move --json`.
+struct MoveReply: Decodable {
+    let action: String
+    let name: String
 }
 
 /// `swe skills new <name>`: the SKILL.md path it wrote.
@@ -412,6 +427,26 @@ public final class SkillsModel {
     /// through the same serialized, reloading path as a folder link.
     public func setSkill(_ skill: Skill, on root: SkillRoot, enabled: Bool) async {
         _ = await change(root) { try await $0.setSkill(skill, on: root, enabled: enabled) }
+    }
+
+    /// A private skill becomes a shared one: `swe skills move` carries
+    /// its folder into `~/.swe/skills`, and the reload shows it linked
+    /// wherever that root's state allows.
+    public func moveToShared(_ skill: Skill, from root: SkillRoot) async {
+        _ = await change(root) { try await $0.moveSkill(skill, from: root.path, to: "shared") }
+    }
+
+    /// The folders worth a column in the table: every root swe could still
+    /// act in. `skipped` (the harness isn't installed) and `ignored`
+    /// folders are left out, nothing a click there could change.
+    public var tableRoots: [SkillRoot] {
+        roots.filter { $0.state != "skipped" && $0.state != "ignored" }
+    }
+
+    /// The root whose folder physically holds `skill`: for a private
+    /// one, the root a "move to shared" would carry it out of.
+    public func rootHolding(_ skill: Skill) -> SkillRoot? {
+        roots.first { skill.path == $0.path || skill.path.hasPrefix($0.path + "/") }
     }
 
     /// What "Link all" can safely take on: loose folders that cost nothing

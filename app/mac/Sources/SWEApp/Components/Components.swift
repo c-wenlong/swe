@@ -557,6 +557,14 @@ private struct AccentSwitch: View {
     }
 }
 
+// MARK: - Tables
+
+/// The hairline at a column's edge, drawn inside each row of a table so
+/// the pieces stack into one ruled edge through header and body alike.
+func columnSeparator() -> some View {
+    Rectangle().fill(Theme.rowDivider).frame(width: 1)
+}
+
 // MARK: - Fields
 
 extension View {
