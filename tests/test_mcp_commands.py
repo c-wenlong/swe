@@ -491,6 +491,27 @@ class KiloMcpConfigTest(unittest.TestCase):
         self.assertIn("srv", data["mcp"])
 
 
+
+class DevinMcpConfigTest(unittest.TestCase):
+    """Devin CLI stores MCP servers in ~/.config/devin/mcp_config.json
+    (Local 3.6 / CLI v3000.3), not the unverified ~/.devin/mcp.json path.
+    Docs: https://docs.devin.ai/cli/extensibility/mcp/configuration
+    """
+
+    def test_devin_descriptor_uses_native_mcp_config(self):
+        cfg = cli_mod.get_tool_config("devin")
+        self.assertEqual(cfg["key"], "mcpServers")
+        self.assertEqual(cfg["format"], "standard")
+        self.assertNotIn("unverified", cfg)
+        self.assertEqual(cfg["path"], Path.home() / ".config" / "devin" / "mcp_config.json")
+        self.assertEqual(cfg["label"], "Devin")
+
+    def test_devin_is_verified_in_mcp_config_map(self):
+        self.assertIn("devin", cli_mod.MCP_CONFIG_MAP)
+        self.assertEqual(
+            cli_mod.MCP_CONFIG_MAP["devin"]["path"].name, "mcp_config.json")
+
+
 class McpLsAliasTest(unittest.TestCase):
     def test_ls_routes_to_list(self):
         from swe.mcp.cli import COMMANDS

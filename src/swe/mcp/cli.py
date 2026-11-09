@@ -142,6 +142,15 @@ MCP_CONFIG_MAP = {
         "label": "Factory Droid",
         "format": "droid",
     },
+    # Devin Local 3.6+ (CLI v3000.3): dedicated mcp_config.json.
+    # Docs: https://docs.devin.ai/cli/extensibility/mcp/configuration
+    # Not ~/.devin/mcp.json (the unverified ~/.<tool>/mcp.json guess).
+    "devin": {
+        "path": Path.home() / ".config" / "devin" / "mcp_config.json",
+        "key": "mcpServers",
+        "label": "Devin",
+        "format": "standard",
+    },
 }
 
 # Aliases for tools that aren't in the harness.json registry (always-available peers).
