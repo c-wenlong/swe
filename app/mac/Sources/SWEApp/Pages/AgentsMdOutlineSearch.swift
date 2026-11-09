@@ -41,9 +41,10 @@ struct OutlineSearchBar: View {
                 nav.query = ""
                 return .handled
             }
-            .onKeyPress(.downArrow) {
-                onEnterOutline()
-                return .handled
+            // The field eats plain Down as a caret move; move commands
+            // reach it first, as in SearchPalette.
+            .onMoveCommand { direction in
+                if direction == .down { onEnterOutline() }
             }
     }
 }
@@ -64,6 +65,18 @@ struct OutlineNoMatches: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 18)
+    }
+}
+
+/// The cursor ring and scroll id for a draft row below the tree.
+struct OutlineDraftCursor: ViewModifier {
+    var nav: OutlineNav
+    var name: String
+
+    func body(content: Content) -> some View {
+        content
+            .focusRing(nav.focused && nav.cursor == name, cornerRadius: Theme.controlRadius)
+            .id(name)
     }
 }
 
@@ -132,6 +145,8 @@ private struct OutlineKeyboard: ViewModifier {
     var nav: OutlineNav
     var tree: [ChapterNode]
     var selected: String?
+    /// Draft rows drawn below the tree (deleted or missing chapters).
+    var extra: [String]
     var focus: FocusState<Bool>.Binding
     var open: (String) -> Void
 
@@ -139,16 +154,29 @@ private struct OutlineKeyboard: ViewModifier {
         nav.searching ? { _ in true } : OutlineNav.isExpanded
     }
 
+    private func rows() -> [ChapterOutline.Row] {
+        ChapterOutline.visibleRows(tree, isExpanded: expanded)
+            + extra.map { ChapterOutline.Row(path: $0, isFolder: false, parent: "") }
+    }
+
     func body(content: Content) -> some View {
         content
             .focusable()
+            // Clearing a search can fold the cursor's row away again.
+            .onChange(of: nav.searching) { _, _ in
+                guard let cursor = nav.cursor else { return }
+                let rows = rows()
+                if !rows.contains(where: { $0.path == cursor }) {
+                    nav.cursor = ChapterOutline.nearestVisible(cursor, rows: rows)
+                        ?? rows.first?.path
+                }
+            }
             .focused(focus)
             .focusEffectDisabled()
             .onChange(of: focus.wrappedValue) { _, focused in
                 nav.focused = focused
                 if focused && nav.cursor == nil {
-                    nav.cursor = selected
-                        ?? ChapterOutline.visibleRows(tree, isExpanded: expanded).first?.path
+                    nav.cursor = selected ?? rows().first?.path
                 }
             }
             .onKeyPress(.upArrow) { press(.up) }
@@ -164,7 +192,7 @@ private struct OutlineKeyboard: ViewModifier {
     }
 
     private func press(_ key: ChapterOutline.Key) -> KeyPress.Result {
-        let rows = ChapterOutline.visibleRows(tree, isExpanded: expanded)
+        let rows = rows()
         let start = nav.cursor ?? selected
         let step = ChapterOutline.step(key, from: start, rows: rows, isExpanded: expanded)
         switch step {
@@ -178,7 +206,7 @@ private struct OutlineKeyboard: ViewModifier {
     }
 
     private func activate() -> KeyPress.Result {
-        let rows = ChapterOutline.visibleRows(tree, isExpanded: expanded)
+        let rows = rows()
         guard let path = nav.cursor ?? selected,
               let row = rows.first(where: { $0.path == path }) else { return .ignored }
         if row.isFolder {
@@ -192,9 +220,9 @@ private struct OutlineKeyboard: ViewModifier {
 
 extension View {
     func outlineKeyboard(nav: OutlineNav, tree: [ChapterNode], selected: String?,
-                         focus: FocusState<Bool>.Binding,
+                         extra: [String], focus: FocusState<Bool>.Binding,
                          open: @escaping (String) -> Void) -> some View {
-        modifier(OutlineKeyboard(nav: nav, tree: tree, selected: selected,
+        modifier(OutlineKeyboard(nav: nav, tree: tree, selected: selected, extra: extra,
                                  focus: focus, open: open))
     }
 }

@@ -1067,11 +1067,11 @@ private struct ChaptersEditor: View {
                     // Dirty drafts whose files vanished: their text is
                     // still in the editor, so the row stays selectable.
                     ForEach(chapters.ghosts.filter(matchesFilter), id: \.self) { name in
-                        GhostRow(name: name, rail: railDrag)
+                        GhostRow(name: name, rail: railDrag, nav: nav)
                     }
                     ForEach(chapters.missing.filter(matchesFilter), id: \.self) { name in
                         GhostRow(name: name, missing: true,
-                                 absent: chapters.absent.contains(name), rail: railDrag)
+                                 absent: chapters.absent.contains(name), rail: railDrag, nav: nav)
                     }
                     // Where a drop moves to the top level: only while a
                     // drag is live, so an accidental sideways drift can
@@ -1102,6 +1102,7 @@ private struct ChaptersEditor: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .outlineKeyboard(nav: nav, tree: shown, selected: chapters.selected,
+                             extra: (chapters.ghosts + chapters.missing).filter(matchesFilter),
                              focus: $outlineFocused) { chapters.selected = $0 }
             // A click anywhere in the outline hands it the keyboard.
             .simultaneousGesture(TapGesture().onEnded { outlineFocused = true })
@@ -1202,6 +1203,7 @@ private struct ChaptersEditor: View {
         var absent = false
         /// The live rail drag; the row measures in so it isn't a target.
         var rail: ChapterRailDrag
+        var nav: OutlineNav
         @Environment(AppModel.self) private var app
         @State private var hovering = false
 
@@ -1226,8 +1228,9 @@ private struct ChaptersEditor: View {
             .background(selected ? Theme.navActive : hovering ? Theme.hover : .clear,
                         in: .rect(cornerRadius: Theme.controlRadius))
             .contentShape(.rect)
-            .onTapGesture { chapters.selected = name }
+            .onTapGesture { nav.cursor = name; chapters.selected = name }
             .onHover { hovering = $0 }
+            .modifier(OutlineDraftCursor(nav: nav, name: name))
             .onGeometryChange(for: CGRect.self) {
                 $0.frame(in: .named("railOutline"))
             } action: { rail.frames[name] = $0 }

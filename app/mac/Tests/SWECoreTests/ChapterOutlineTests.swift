@@ -102,6 +102,17 @@ import Testing
         #expect(ChapterOutline.step(.right, from: "empty", rows: rows, isExpanded: open()) == .none)
     }
 
+    @Test func aHiddenCursorFallsBackToItsVisibleFolder() {
+        let closed: Set<String> = ["engineering/review"]
+        let rows = ChapterOutline.visibleRows(tree, isExpanded: open(closed))
+        #expect(ChapterOutline.nearestVisible("engineering/review/Checklist.md", rows: rows)
+                == "engineering/review")
+        let folded = ChapterOutline.visibleRows(tree, isExpanded: open(["engineering"]))
+        #expect(ChapterOutline.nearestVisible("engineering/review/Checklist.md", rows: folded)
+                == "engineering")
+        #expect(ChapterOutline.nearestVisible("intro.md", rows: folded) == nil)
+    }
+
     @Test func leftCollapsesThenClimbs() {
         let rows = ChapterOutline.visibleRows(tree, isExpanded: open())
         #expect(ChapterOutline.step(.left, from: "engineering/review", rows: rows, isExpanded: open())

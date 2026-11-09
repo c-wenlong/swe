@@ -74,6 +74,17 @@ public enum ChapterOutline {
         return rows
     }
 
+    /// Where a cursor on `path` goes when its row is no longer shown: the
+    /// nearest enclosing folder that still is, else nil.
+    public static func nearestVisible(_ path: String, rows: [Row]) -> String? {
+        var parent = (path as NSString).deletingLastPathComponent
+        while !parent.isEmpty {
+            if rows.contains(where: { $0.path == parent }) { return parent }
+            parent = (parent as NSString).deletingLastPathComponent
+        }
+        return nil
+    }
+
     /// The step `key` takes from the row at `current` (nil or unknown
     /// starts at the first row). Up and Down stop at the ends. Right opens
     /// a closed folder, then enters an open one; Left closes an open
