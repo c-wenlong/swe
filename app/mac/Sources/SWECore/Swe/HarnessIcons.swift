@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Harness logos, bundled from app/mac/script/import-harness-icons.py. A logo
@@ -43,6 +44,29 @@ public enum HarnessIcons {
     /// beside a title that already names the harness, such as the widgets.
     public static func logo(for harness: String) -> Icon? {
         HarnessMark(harness).icon.flatMap { icon(for: $0) }
+    }
+
+    /// The logo loaded and ready to draw: `isTemplate` for a mono mark and
+    /// the declared size capped, so no view paints it bigger than a tile
+    /// whatever its SVG declares.
+    public static func image(for harness: String) -> (image: NSImage, isColor: Bool)? {
+        guard let icon = logo(for: harness), let image = NSImage(contentsOf: icon.url) else { return nil }
+        image.isTemplate = !icon.isColor
+        return (image.limitingDeclaredSize(), icon.isColor)
+    }
+}
+
+extension NSImage {
+    /// The image with its declared size capped at `side` points, aspect
+    /// kept. An SVG that gives a viewBox but no width or height declares
+    /// that box in points — Devin's harness logo is 512, Pi's 800 — and a
+    /// view that draws at the declared size, such as a Menu's button label,
+    /// paints it that big whatever frame the view itself has.
+    @discardableResult
+    public func limitingDeclaredSize(to side: CGFloat = 24) -> NSImage {
+        let scale = min(1, side / max(size.width, size.height))
+        if scale < 1 { size = NSSize(width: size.width * scale, height: size.height * scale) }
+        return self
     }
 }
 

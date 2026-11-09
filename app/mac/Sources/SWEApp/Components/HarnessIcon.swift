@@ -43,10 +43,9 @@ struct HarnessIcon: View {
 
     @MainActor static func image(for harness: String) -> (NSImage, Bool)? {
         if let cached = cache[harness] { return cached }
-        guard let icon = HarnessIcons.logo(for: harness), let image = NSImage(contentsOf: icon.url) else { return nil }
-        image.isTemplate = !icon.isColor
-        cache[harness] = (image, icon.isColor)
-        return (image, icon.isColor)
+        guard let (image, isColor) = HarnessIcons.image(for: harness) else { return nil }
+        cache[harness] = (image, isColor)
+        return (image, isColor)
     }
 
 }
