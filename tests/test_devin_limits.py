@@ -4,6 +4,8 @@ import datetime as dt
 import gzip
 import os
 import unittest
+from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from swe.harness.devin_limits import free_model_reset
@@ -17,6 +19,9 @@ def epoch(value):
 
 class DevinFreeLimitsTest(unittest.TestCase):
     def setUp(self):
+        # Parsing tests drive time explicitly; machine load must not
+        # consume their optional scan budget.
+        self.enterContext(patch("swe.harness.devin_limits.time.monotonic", return_value=0.0))
         self.root = temp_dir(self)
         self.credentials = self.root / "devin/credentials.toml"
         self.logs = self.credentials.parent / "cli/logs"
@@ -96,6 +101,88 @@ class DevinFreeLimitsTest(unittest.TestCase):
         os.utime(old, (self.now - 8 * 86400, self.now - 8 * 86400))
         self.write("other.log", self.error())
         self.assertEqual(self.read(), 0)
+
+    def test_aggregate_byte_budget_bounds_multiple_gzip_logs(self):
+        for i in range(3):
+            self.write(f"devin_{i}.log.gz", "padding\n" * 100)
+        opened = []
+        sizes = []
+        original_open = gzip.open
+
+        @contextmanager
+        def measured_open(path, mode):
+            opened.append(path)
+            with original_open(path, mode) as stream:
+                class Reader:
+                    def read(self, count):
+                        chunk = stream.read(count)
+                        sizes.append(len(chunk))
+                        return chunk
+                yield Reader()
+
+        with patch("swe.harness.devin_limits._SCAN_MAX_BYTES", 1000), \
+             patch("swe.harness.devin_limits._READ_CHUNK_BYTES", 64), \
+             patch("swe.harness.devin_limits.gzip.open", side_effect=measured_open):
+            self.assertEqual(self.read(), 0)
+        self.assertEqual(len(opened), 2)
+        self.assertEqual(sum(sizes), 1000)
+        self.assertLessEqual(max(sizes), 64)
+
+    def test_time_budget_stops_inflation_between_chunks(self):
+        self.write("devin_large.log.gz", "padding\n" * 100)
+        clock = [0.0]
+        reads = []
+        original_open = gzip.open
+
+        @contextmanager
+        def slow_open(path, mode):
+            with original_open(path, mode) as stream:
+                class Reader:
+                    def read(self, count):
+                        clock[0] += 0.06
+                        reads.append(count)
+                        return stream.read(count)
+                yield Reader()
+
+        with patch("swe.harness.devin_limits.time.monotonic", side_effect=lambda: clock[0]), \
+             patch("swe.harness.devin_limits._READ_CHUNK_BYTES", 64), \
+             patch("swe.harness.devin_limits.gzip.open", side_effect=slow_open):
+            self.assertEqual(self.read(), 0)
+        self.assertEqual(reads, [64, 64])
+
+    def test_time_budget_includes_directory_discovery_and_parsing(self):
+        self.write("devin_test.log", self.error())
+        with patch("swe.harness.devin_limits.time.monotonic", side_effect=[0, 0, 1]):
+            self.assertEqual(self.read(), 0)
+
+        from swe.harness import devin_limits
+        clock = [0.0]
+        pattern = devin_limits._ERROR
+
+        def slow_parse(line):
+            clock[0] = 1.0
+            return pattern.search(line)
+
+        # Finding an error on the final line must not publish evidence
+        # after the parse budget expires, either.
+        with patch("swe.harness.devin_limits.time.monotonic", side_effect=lambda: clock[0]), \
+             patch("swe.harness.devin_limits._ERROR") as error:
+            error.search.side_effect = slow_parse
+            self.assertEqual(self.read(), 0)
+
+    def test_paid_reading_returns_without_scanning_near_caller_deadline(self):
+        from swe.harness.rate_limits import _fetch_devin
+        from tests.test_rate_limits import DevinFetcherTest
+
+        with patch("swe.harness.rate_limits._read_devin_credentials", return_value=("fake", "https://example.com")), \
+             patch("swe.harness.rate_limits._fetch_json", return_value=DevinFetcherTest._SAMPLE_RESPONSE), \
+             patch("swe.harness.rate_limits._fetch_cutoff", SimpleNamespace(at=10.1)), \
+             patch("swe.harness.devin_limits.time.monotonic", return_value=10.0), \
+             patch("swe.harness.devin_limits.Path.iterdir") as scan:
+            info = _fetch_devin(str(self.credentials))
+        self.assertEqual(info.used_percent, 4)
+        self.assertEqual(info.free_model_reset_at, 0)
+        scan.assert_not_called()
 
     def test_fetch_preserves_paid_quota_and_uses_accounts_own_logs(self):
         from swe.harness.rate_limits import _fetch_devin
