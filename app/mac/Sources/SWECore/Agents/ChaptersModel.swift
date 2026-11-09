@@ -2164,19 +2164,7 @@ public final class ChaptersModel {
 
     /// Every .md path under `folder` in the current tree.
     private func files(under folder: String) -> [String] {
-        func collect(_ node: ChapterNode) -> [String] {
-            node.isFolder ? node.children.flatMap(collect) : [node.path]
-        }
-        func find(_ nodes: [ChapterNode]) -> ChapterNode? {
-            for node in nodes {
-                if node.isFolder && node.path == folder { return node }
-                if let deep = find(node.children) { return deep }
-            }
-            return nil
-        }
-        return folder.isEmpty
-            ? tree.flatMap(collect)
-            : find(tree).map(collect) ?? []
+        ChapterTree.files(under: folder, in: tree)
     }
 
     /// The read-only document for one generated output, kept per path so

@@ -73,7 +73,9 @@ outline — folders group chapters, files not in the index read muted —
 with a `+` menu to create a chapter or folder (the sheet validates the
 path and can include the chapter in AGENTS.md right away). Select a
 chapter to edit it in the Raw or Rich editor; every save runs
-`swe instructions build`. A View AGENTS.md button opens the compiled file
+`swe instructions build`. A Targets strip above the editor shows which
+harnesses get the open chapter and why, and its chips change the
+chapter's rule with the same writes as the Compile tab. A View AGENTS.md button opens the compiled file
 in a centre popup (Rich or Raw, build state, Rebuild); its dot follows
 builds made in a terminal. Before `index.txt` exists, the Edit tab edits
 the flat `~/.swe/AGENTS.md` and offers Convert to chapters, which runs

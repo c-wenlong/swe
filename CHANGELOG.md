@@ -34,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [MCP configuration docs](https://docs.devin.ai/cli/extensibility/mcp/configuration)),
   not the unverified `~/.devin/mcp.json` guess. `swe mcp list` shows a
   Devin column once the harness is registered.
+- **Harness targets beside the chapter editor (Mac).** The AGENTS.md
+  page's Edit tab shows a Targets strip above the open chapter: a logo
+  and name chip per harness, bright when it gets the chapter, a line
+  saying why (no rule, an `only` or `except` rule in targets.json, or
+  off in index.txt), and a folder line when every chapter in its folder
+  shares the same targets. Clicking a chip or the In AGENTS.md checkbox
+  writes the same index.txt and targets.json edits as the Compile tab,
+  through the same save queue, so both tabs always agree. Compilation
+  rules are unchanged.
 
 
 ### Security
