@@ -64,10 +64,10 @@
 
 <h2>Legend: four states</h2>
 <div class="card">
-  <span class="swatch"><img src="normal/red.svg" alt="red arrow"> Critical failure <code>red #fa3228</code></span>
-  <span class="swatch"><img src="normal/yellow.svg" alt="yellow arrow"> Partial failure <code>yellow #ffd200</code></span>
-  <span class="swatch"><img src="normal/green.svg" alt="green arrow"> Fully operational <code>green #14e63c</code></span>
-  <span class="swatch"><img src="normal/grey.svg" alt="grey arrow"> Interrupted <code>grey #8a8a93</code></span>
+  <span class="swatch"><img src="normal/red.svg" alt=""> Critical failure <code>red #fa3228</code></span>
+  <span class="swatch"><img src="normal/yellow.svg" alt=""> Partial failure <code>yellow #ffd200</code></span>
+  <span class="swatch"><img src="normal/green.svg" alt=""> Fully operational <code>green #14e63c</code></span>
+  <span class="swatch"><img src="normal/grey.svg" alt=""> Interrupted <code>grey #8a8a93</code></span>
 </div>
 
 <h2>Service status page</h2>
@@ -88,15 +88,15 @@
   <div class="card">
     <h3>With arrows: icon carries the state, text stays for a11y</h3>
     <div class="svc"><span class="logo">AI</span><span class="name">Anthropic</span>
-      <span class="health"><img src="normal/green.svg" alt="operational">Operational</span></div>
+      <span class="health"><img src="normal/green.svg" alt="">Operational</span></div>
     <div class="svc"><span class="logo">OA</span><span class="name">OpenAI</span>
-      <span class="health c-minor"><img src="normal/yellow.svg" alt="minor incident">Minor incident</span></div>
+      <span class="health c-minor"><img src="normal/yellow.svg" alt="">Minor incident</span></div>
     <div class="prob">Elevated API error rates: investigating</div>
     <div class="svc"><span class="logo">GH</span><span class="name">GitHub</span>
-      <span class="health c-major"><img src="normal/red.svg" alt="major outage">Major outage</span></div>
+      <span class="health c-major"><img src="normal/red.svg" alt="">Major outage</span></div>
     <div class="prob">Actions and Actions runners unavailable</div>
     <div class="svc"><span class="logo">Cx</span><span class="name">Cursor</span>
-      <span class="health"><img src="normal/green.svg" alt="operational">Operational</span></div>
+      <span class="health"><img src="normal/green.svg" alt="">Operational</span></div>
   </div>
 </div>
 <p class="note">Same density, but the chevron shape adds a second visual channel besides color (color-blind safe pairing with the label).</p>
@@ -113,7 +113,7 @@
     <span class="agg"><img src="normal/red.svg" alt="worst: major outage" style="height:16px">
       <span style="font-size:13px">Service status</span></span>
     <h3 style="margin-top:14px">Option B: three-arrow motif, worst lit</h3>
-    <span class="agg"><img src="normal/red.svg" style="height:16px"><img class="dim" src="normal/yellow.svg" style="height:16px"><img class="dim" src="normal/green.svg" style="height:16px">
+    <span class="agg"><span role="img" aria-label="worst: major outage" style="display:inline-flex"><img src="normal/red.svg" alt="" style="height:16px"><img class="dim" src="normal/yellow.svg" alt="" style="height:16px"><img class="dim" src="normal/green.svg" alt="" style="height:16px"></span>
       <span style="font-size:13px">Service status</span></span>
   </div>
 </div>
@@ -128,9 +128,9 @@
   </div>
   <div class="card">
     <h3>With arrows</h3>
-    <div class="svc"><img src="normal/green.svg" style="width:12px"><span class="name">API</span><span style="font-size:12px; color:var(--muted)">Operational</span></div>
-    <div class="svc"><img src="normal/yellow.svg" style="width:12px"><span class="name">Git operations</span><span style="font-size:12px; color:var(--muted)">Degraded</span></div>
-    <div class="svc"><img src="normal/red.svg" style="width:12px"><span class="name">Actions</span><span style="font-size:12px; color:var(--muted)">Outage</span></div>
+    <div class="svc"><img src="normal/green.svg" alt="" style="width:12px"><span class="name">API</span><span style="font-size:12px; color:var(--muted)">Operational</span></div>
+    <div class="svc"><img src="normal/yellow.svg" alt="" style="width:12px"><span class="name">Git operations</span><span style="font-size:12px; color:var(--muted)">Degraded</span></div>
+    <div class="svc"><img src="normal/red.svg" alt="" style="width:12px"><span class="name">Actions</span><span style="font-size:12px; color:var(--muted)">Outage</span></div>
   </div>
 </div>
 
@@ -142,16 +142,16 @@
       <tr><td class="sess-title">Fix login redirect loop</td><td><span class="st"><span class="dot" style="background:var(--green)"></span>Active</span></td></tr>
       <tr><td class="sess-title">Refactor MCP sync</td><td><span class="st"><span class="dot" style="background:var(--yellow)"></span>Waiting</span></td></tr>
       <tr><td class="sess-title">Migrate tests to shard runner</td><td><span class="st"><span class="dot" style="background:var(--red)"></span>Error</span></td></tr>
-      <tr><td class="sess-title">Update docs site</td><td><span class="st" style="color:var(--muted)"><img src="normal/grey.svg">Interrupted</span></td></tr>
+      <tr><td class="sess-title">Update docs site</td><td><span class="st" style="color:var(--muted)"><img src="normal/grey.svg" alt="">Interrupted</span></td></tr>
     </table>
   </div>
   <div class="card">
     <h3>With arrows (error/waiting only: active stays a dot?)</h3>
     <table class="sessions">
-      <tr><td class="sess-title">Fix login redirect loop</td><td><span class="st"><img src="normal/green.svg">Active</span></td></tr>
-      <tr><td class="sess-title">Refactor MCP sync</td><td><span class="st" style="color:var(--yellow)"><img src="normal/yellow.svg">Waiting</span></td></tr>
-      <tr><td class="sess-title">Migrate tests to shard runner</td><td><span class="st" style="color:var(--red)"><img src="normal/red.svg">Error</span></td></tr>
-      <tr><td class="sess-title">Update docs site</td><td><span class="st" style="color:var(--muted)"><img src="normal/grey.svg">Interrupted</span></td></tr>
+      <tr><td class="sess-title">Fix login redirect loop</td><td><span class="st"><img src="normal/green.svg" alt="">Active</span></td></tr>
+      <tr><td class="sess-title">Refactor MCP sync</td><td><span class="st" style="color:var(--yellow)"><img src="normal/yellow.svg" alt="">Waiting</span></td></tr>
+      <tr><td class="sess-title">Migrate tests to shard runner</td><td><span class="st" style="color:var(--red)"><img src="normal/red.svg" alt="">Error</span></td></tr>
+      <tr><td class="sess-title">Update docs site</td><td><span class="st" style="color:var(--muted)"><img src="normal/grey.svg" alt="">Interrupted</span></td></tr>
     </table>
     <p class="note">Semantic mismatch: "Active" isn't "operational". Shown for comparison: service status is the better fit.</p>
   </div>
