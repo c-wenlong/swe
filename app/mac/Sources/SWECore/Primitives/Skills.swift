@@ -642,7 +642,7 @@ public final class SkillsModel {
             switch root.link {
             case .linked:
                 // Off converts the whole-folder link to an except selection.
-                return (root, .linked, on, true)
+                return (root, on ? .linked : .selection, on, true)
             case .selection:
                 // The per-skill toggle works inside the selection — no
                 // flattening either way.

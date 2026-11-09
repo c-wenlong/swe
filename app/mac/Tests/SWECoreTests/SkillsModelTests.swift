@@ -265,7 +265,7 @@ let inventoryJSON = #"""
         let alpha = try #require(model.allSkills.first)
         #expect(alpha.adoptedFrom == "codex")
         #expect(model.chips(for: alpha).map { ($0.link, $0.on, $0.toggleable) }
-            .map { "\($0.0)|\($0.1)|\($0.2)" } == ["linked|false|true"])
+            .map { "\($0.0)|\($0.1)|\($0.2)" } == ["selection|false|true"])
     }
 
     @Test func rootStatesMapToLinkedSelectionNotLinkedAndBlocked() {
