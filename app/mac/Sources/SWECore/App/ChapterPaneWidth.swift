@@ -9,6 +9,8 @@ public enum ChapterPaneWidth {
     public static let maximum = 560.0
     /// The narrowest editor at 100% text zoom.
     public static let editorMinimum = 780.0
+    /// The gap between the pane and the editor, kept out of the editor's share.
+    public static let dividerWidth = 12.0
     /// One keyboard or VoiceOver step.
     public static let step = 20.0
 
@@ -21,7 +23,7 @@ public enum ChapterPaneWidth {
         let low = minimum * zoom
         var high = maximum * max(zoom, 1)
         if let available, available.isFinite {
-            high = min(high, available - editorMinimum * zoom)
+            high = min(high, available - dividerWidth - editorMinimum * zoom)
         }
         guard !width.isNaN else { return max(low, min(standard * zoom, high)) }
         return max(low, min(width, high))

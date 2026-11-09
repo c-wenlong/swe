@@ -19,8 +19,9 @@ import Testing
 
     @Test func theEditorKeepsItsMinimumInANarrowWindow() {
         let available = 1100.0
-        #expect(ChapterPaneWidth.clamped(500, available: available)
-            == available - ChapterPaneWidth.editorMinimum)
+        let pane = ChapterPaneWidth.clamped(500, available: available)
+        #expect(available - ChapterPaneWidth.dividerWidth - pane
+            == ChapterPaneWidth.editorMinimum)
     }
 
     @Test func aTooNarrowContainerKeepsThePaneAtItsMinimum() {

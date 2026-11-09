@@ -9,7 +9,7 @@ enum AgentsMdLayout {
     static let paneWidthKey = "agentsMd.chapterPaneWidth"
     static let focusKey = "agentsMd.editorFocus"
     /// Gap left of and right of the divider's hairline.
-    static let dividerWidth: CGFloat = 12
+    static let dividerWidth = CGFloat(ChapterPaneWidth.dividerWidth)
     static let focusAnimation: Animation = .smooth(duration: 0.25)
 }
 
