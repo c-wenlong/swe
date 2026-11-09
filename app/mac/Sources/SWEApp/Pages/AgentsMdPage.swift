@@ -31,6 +31,9 @@ struct AgentsMdPage: View {
                                (Scope.project, "Project")],
                      selection: $scope, style: .underline)
                 Spacer(minLength: 8)
+                if app.chapters.chapterMode {
+                    DraftsMenu { scope = .edit }
+                }
                 if scope == .edit && app.chapters.chapterMode {
                     ViewCompiledButton(onOpenChapter: { _ in scope = .edit })
                 }
@@ -1860,6 +1863,7 @@ private struct ViewCompiledButton: View {
                 Circle().fill(stateColor)
                     .frame(width: Theme.statusDot, height: Theme.statusDot)
                 Text("View AGENTS.md").font(Theme.bodySmall)
+                CompiledSizeLabel(path: outputPath)
             }
         }
         .secondaryButton()
@@ -1922,6 +1926,7 @@ private struct CompiledOutputSheet: View {
                     }
                 }
                 stateLabel
+                CompiledSizeLabel(path: path, detailed: true)
                 Spacer(minLength: 8)
                 Tabs(options: [("rich", "Rich"), ("raw", "Raw")], selection: $mode,
                      style: .segmented)

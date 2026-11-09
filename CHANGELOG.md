@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **AGENTS.md page: drafts list and compiled size (macOS app).** A
+  "Drafts (N)" menu beside the Edit/Compile tabs lists every chapter with
+  unsaved changes and jumps to it; it appears only while there are drafts.
+  The View AGENTS.md button and popup now show the generated file's size in
+  KiB as last built, per harness output on the Compile tab. Part of #1894.
+
 - **Devin is a verified MCP sync target.** `swe mcp sync` writes
   `~/.config/devin/mcp_config.json` (Devin CLI v3000.3+ /
   [MCP configuration docs](https://docs.devin.ai/cli/extensibility/mcp/configuration)),

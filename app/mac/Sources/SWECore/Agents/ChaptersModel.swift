@@ -1026,6 +1026,15 @@ public final class ChaptersModel {
         return resolved
     }
 
+    /// Chapters holding unsaved text, in compile order; the drafts list.
+    public var draftNames: [String] {
+        var order: [String] = []
+        if case .loaded(let check) = status {
+            order = check.entries?.map(\.name) ?? check.uniqueChapters.map(\.name)
+        }
+        return ChapterDrafts.ordered(documents.filter { $0.value.isDirty }.map(\.key), by: order)
+    }
+
     public func isDirty(_ name: String) -> Bool { documents[name]?.isDirty ?? false }
 
     /// Reload chapters and the output preview that changed with nothing
