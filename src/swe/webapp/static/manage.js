@@ -884,6 +884,12 @@ function accountCard(h, machine) {
     status = LIMIT_HARNESSES.has(h.name) ? "No reading yet" : "No usage limits to read";
   } else if (rl.status === "ok") {
     body = readingWindows(rl).map((w) => windowRow(h.name, w, now)).join("");
+    if (h.name === "devin") {
+      const real = Date.now() / 1000;
+      const blocked = rl.free_model_reset_at > real;
+      const freeStatus = blocked ? `Limit reached · resets ${Fmt.resetIn(rl.free_model_reset_at, real)}` : "Unknown";
+      body += `<div class="limit-extra" title="Devin does not report the remaining free-model allowance. A reached limit appears after the CLI logs it."><span class="caption">Free models</span><span>${esc(freeStatus)}</span></div>`;
+    }
     if (rl.on_demand) {
       const [value, detail] = Fmt.onDemand(rl.on_demand);
       body += `<div class="limit-extra"><span class="caption limit-label-wrap">On-demand${meterInfoBtn(Fmt.meterInfo(h.name, "on_demand"), "On-demand", `${h.name}:on_demand`)}</span><span>${esc(value)} · <span class="caption">${esc(detail)}</span></span></div>`;

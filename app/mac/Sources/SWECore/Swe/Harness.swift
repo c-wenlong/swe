@@ -145,6 +145,12 @@ public struct RateLimit: Codable, Sendable, Equatable {
     /// db, Devin's userStatus); nil from an older swe or a credential
     /// that names no account.
     public let email: String?
+    /// Last observed free-model block; nil means unknown, never unlimited.
+    public let freeModelResetAt: Date?
+
+    public func freeModelLimitReached(now: Date) -> Bool {
+        freeModelResetAt.map { $0 > now } ?? false
+    }
 
     /// On-demand usage as swe reports it, worded the way `cursor-agent
     /// usage` words it: a value and a one-line detail.
@@ -254,12 +260,13 @@ public struct RateLimit: Codable, Sendable, Equatable {
         case status, usedPercent, remainingPercent, limitReached, resetAt, window
         case windowSeconds, planType, remainingUnits, totalUnits, fetchedAt, windows
         case extraUsageUSD = "extraUsageUsd"
-        case onDemand, email
+        case onDemand, email, freeModelResetAt
     }
 
     /// For tests and previews; the app only ever decodes these from swe.
     init(status: Status, usedPercent: Int, window: String? = nil, resetAt: Date? = nil,
-         planType: String? = nil, fetchedAt: Date? = nil, windows: [Window]? = nil) {
+         planType: String? = nil, fetchedAt: Date? = nil, windows: [Window]? = nil,
+         freeModelResetAt: Date? = nil) {
         self.status = status
         self.usedPercent = usedPercent
         remainingPercent = 100 - usedPercent
@@ -275,6 +282,7 @@ public struct RateLimit: Codable, Sendable, Equatable {
         extraUsageUSD = nil
         onDemand = nil
         email = nil
+        self.freeModelResetAt = freeModelResetAt
     }
 
     /// Every field tolerates a malformed value: one bad field degrades to
@@ -306,5 +314,6 @@ public struct RateLimit: Codable, Sendable, Equatable {
         let address = ((try? c.decodeIfPresent(String.self, forKey: .email)) ?? nil)?
             .trimmingCharacters(in: .whitespaces)
         email = address?.isEmpty == false ? address : nil
+        freeModelResetAt = (try? c.decodeIfPresent(Date.self, forKey: .freeModelResetAt)) ?? nil
     }
 }

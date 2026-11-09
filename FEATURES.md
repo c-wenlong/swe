@@ -47,7 +47,7 @@ Status words:
 
 | Feature | Mac | Web | iOS | Notes |
 | --- | --- | --- | --- | --- |
-| Accounts | yes | part | part | Web: limit cards per starred harness and machine. SWE account profiles, history and Open app / Terminal are Mac-only. A failed read's "Action needed" state, Fix sheet and banner are Mac-only too; web cards still word only `no_reading`, not `issue.remedy`. iOS: the Usage tab's Limits section shows the same limit cards per harness and machine. Mac and web: a meter worth explaining (Cursor's windows and on-demand) gets an "i" mark; Mac keeps only the VoiceOver note (the pinned-tip pop-ups were removed), web still pins the note open on click |
+| Accounts | yes | part | part | All clients: Devin's free-model status is separate from paid quota, showing a reached limit and reset from local CLI logs, otherwise Unknown; no remaining percentage is reported. Mac also shows it in the menu bar; CLI adds `free:blocked` while active. Web: limit cards per starred harness and machine. SWE account profiles, history and Open app / Terminal are Mac-only. A failed read's "Action needed" state, Fix sheet and banner are Mac-only too; web cards still word only `no_reading`, not `issue.remedy`. iOS: the Usage tab's Limits section shows the same limit cards per harness and machine. Mac and web: a meter worth explaining (Cursor's windows and on-demand) gets an "i" mark; Mac keeps only the VoiceOver note (the pinned-tip pop-ups were removed), web still pins the note open on click |
 | Harnesses | yes | yes | - | Web: star, archive, restore, edit, detect, add |
 | Compute | yes | part | planned | Web: auto clean writes the hub's config; Quit, Clean up and fan control stay Mac-only. iOS P9 wants the Compute samplers carried over the hub |
 
