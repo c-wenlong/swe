@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SWE arrows: status mockup</title>
+<style>
+  :root {
+    --bg: #18181c; --panel: #1f1f24; --border: #2e2e35;
+    --text: #ececec; --muted: #9a9aa3; --faint: #6e6e77;
+    --red: #fa3228; --yellow: #ffd200; --green: #14e63c;
+    --accent: #3b82f6;
+  }
+  * { box-sizing: border-box; }
+  :root { --grey: #8a8a93; }
+  body { margin: 0; padding: 32px; background: var(--bg); color: var(--text);
+         font: 14px/1.5 -apple-system, "SF Pro Text", system-ui, sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+       color: var(--faint); margin: 32px 0 10px; }
+  .note { color: var(--faint); font-size: 12px; margin: 6px 0 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+
+  .card { background: var(--panel); border: 1px solid var(--border);
+          border-radius: 10px; padding: 14px 16px; }
+  .card h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--muted); }
+
+  .svc { display: flex; align-items: center; gap: 10px; padding: 8px 0;
+         border-top: 1px solid var(--border); }
+  .svc:first-of-type { border-top: 0; }
+  .svc .logo { width: 16px; height: 16px; border-radius: 4px; background: #2c2c33;
+               display: inline-flex; align-items: center; justify-content: center;
+               font-size: 9px; color: var(--muted); flex: none; }
+  .svc .name { flex: 1; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
+  .health { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+  .health img { width: 14px; height: 14px; flex: none; }
+  .c-operational { color: var(--text); }
+  .c-minor { color: var(--yellow); } .c-major, .c-critical { color: var(--red); }
+  .c-maint { color: var(--yellow); }
+  .prob { color: var(--faint); font-size: 12px; padding-left: 26px; margin-top: -4px; padding-bottom: 4px; }
+
+  .agg { display: inline-flex; align-items: center; gap: 8px; }
+  .agg img { height: 18px; }
+  .dim { opacity: .22; filter: grayscale(.5); }
+
+  table.sessions { width: 100%; border-collapse: collapse; }
+  table.sessions td { padding: 7px 8px; border-top: 1px solid var(--border); font-size: 13px; }
+  table.sessions td:first-child { border-top: 0; }
+  .sess-title { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #2c2c33; color: var(--muted); }
+  .st { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+  .st img { width: 12px; height: 12px; }
+
+  .swatch { display: inline-flex; align-items: center; gap: 8px; margin-right: 18px; font-size: 13px; }
+  .swatch img { width: 16px; height: 16px; }
+  code { background: #2c2c33; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>State arrows mockup</h1>
+<p class="sub">Proposed replacements for colored dots / text badges, using <code>assets/swe-arrows</code>. Left column: today. Right: with arrows.</p>
+
+<h2>Legend: four states</h2>
+<div class="card">
+  <span class="swatch"><img src="normal/red.svg" alt="red arrow"> Critical failure <code>red #fa3228</code></span>
+  <span class="swatch"><img src="normal/yellow.svg" alt="yellow arrow"> Partial failure <code>yellow #ffd200</code></span>
+  <span class="swatch"><img src="normal/green.svg" alt="green arrow"> Fully operational <code>green #14e63c</code></span>
+  <span class="swatch"><img src="normal/grey.svg" alt="grey arrow"> Interrupted <code>grey #8a8a93</code></span>
+</div>
+
+<h2>Service status page</h2>
+<div class="grid">
+  <div class="card">
+    <h3>Today: dot + text</h3>
+    <div class="svc"><span class="logo">AI</span><span class="name">Anthropic</span>
+      <span class="health"><span class="dot" style="background:var(--green)"></span>Operational</span></div>
+    <div class="svc"><span class="logo">OA</span><span class="name">OpenAI</span>
+      <span class="health"><span class="dot" style="background:var(--yellow)"></span>Minor incident</span></div>
+    <div class="prob">Elevated API error rates: investigating</div>
+    <div class="svc"><span class="logo">GH</span><span class="name">GitHub</span>
+      <span class="health"><span class="dot" style="background:var(--red)"></span>Major outage</span></div>
+    <div class="prob">Actions and Actions runners unavailable</div>
+    <div class="svc"><span class="logo">Cx</span><span class="name">Cursor</span>
+      <span class="health"><span class="dot" style="background:var(--green)"></span>Operational</span></div>
+  </div>
+  <div class="card">
+    <h3>With arrows: icon carries the state, text stays for a11y</h3>
+    <div class="svc"><span class="logo">AI</span><span class="name">Anthropic</span>
+      <span class="health"><img src="normal/green.svg" alt="operational">Operational</span></div>
+    <div class="svc"><span class="logo">OA</span><span class="name">OpenAI</span>
+      <span class="health c-minor"><img src="normal/yellow.svg" alt="minor incident">Minor incident</span></div>
+    <div class="prob">Elevated API error rates: investigating</div>
+    <div class="svc"><span class="logo">GH</span><span class="name">GitHub</span>
+      <span class="health c-major"><img src="normal/red.svg" alt="major outage">Major outage</span></div>
+    <div class="prob">Actions and Actions runners unavailable</div>
+    <div class="svc"><span class="logo">Cx</span><span class="name">Cursor</span>
+      <span class="health"><img src="normal/green.svg" alt="operational">Operational</span></div>
+  </div>
+</div>
+<p class="note">Same density, but the chevron shape adds a second visual channel besides color (color-blind safe pairing with the label).</p>
+
+<h2>Aggregate "worst state" indicator (sidebar / menu bar)</h2>
+<div class="grid">
+  <div class="card">
+    <h3>Today: single worst-state dot</h3>
+    <span class="agg"><span class="dot" style="background:var(--red); width:10px; height:10px"></span>
+      <span style="font-size:13px">Service status</span></span>
+  </div>
+  <div class="card">
+    <h3>Option A: single arrow</h3>
+    <span class="agg"><img src="normal/red.svg" alt="worst: major outage" style="height:16px">
+      <span style="font-size:13px">Service status</span></span>
+    <h3 style="margin-top:14px">Option B: three-arrow motif, worst lit</h3>
+    <span class="agg"><img src="normal/red.svg" style="height:16px"><img class="dim" src="normal/yellow.svg" style="height:16px"><img class="dim" src="normal/green.svg" style="height:16px">
+      <span style="font-size:13px">Service status</span></span>
+  </div>
+</div>
+
+<h2>Component list (status details sheet)</h2>
+<div class="grid">
+  <div class="card">
+    <h3>Today</h3>
+    <div class="svc"><span class="dot" style="background:var(--green); width:6px; height:6px"></span><span class="name">API</span><span style="font-size:12px; color:var(--muted)">Operational</span></div>
+    <div class="svc"><span class="dot" style="background:var(--yellow); width:6px; height:6px"></span><span class="name">Git operations</span><span style="font-size:12px; color:var(--muted)">Degraded</span></div>
+    <div class="svc"><span class="dot" style="background:var(--red); width:6px; height:6px"></span><span class="name">Actions</span><span style="font-size:12px; color:var(--muted)">Outage</span></div>
+  </div>
+  <div class="card">
+    <h3>With arrows</h3>
+    <div class="svc"><img src="normal/green.svg" style="width:12px"><span class="name">API</span><span style="font-size:12px; color:var(--muted)">Operational</span></div>
+    <div class="svc"><img src="normal/yellow.svg" style="width:12px"><span class="name">Git operations</span><span style="font-size:12px; color:var(--muted)">Degraded</span></div>
+    <div class="svc"><img src="normal/red.svg" style="width:12px"><span class="name">Actions</span><span style="font-size:12px; color:var(--muted)">Outage</span></div>
+  </div>
+</div>
+
+<h2>Sessions list</h2>
+<div class="grid">
+  <div class="card">
+    <h3>Today: dot + badge text</h3>
+    <table class="sessions">
+      <tr><td class="sess-title">Fix login redirect loop</td><td><span class="st"><span class="dot" style="background:var(--green)"></span>Active</span></td></tr>
+      <tr><td class="sess-title">Refactor MCP sync</td><td><span class="st"><span class="dot" style="background:var(--yellow)"></span>Waiting</span></td></tr>
+      <tr><td class="sess-title">Migrate tests to shard runner</td><td><span class="st"><span class="dot" style="background:var(--red)"></span>Error</span></td></tr>
+      <tr><td class="sess-title">Update docs site</td><td><span class="st" style="color:var(--muted)"><img src="normal/grey.svg">Interrupted</span></td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>With arrows (error/waiting only: active stays a dot?)</h3>
+    <table class="sessions">
+      <tr><td class="sess-title">Fix login redirect loop</td><td><span class="st"><img src="normal/green.svg">Active</span></td></tr>
+      <tr><td class="sess-title">Refactor MCP sync</td><td><span class="st" style="color:var(--yellow)"><img src="normal/yellow.svg">Waiting</span></td></tr>
+      <tr><td class="sess-title">Migrate tests to shard runner</td><td><span class="st" style="color:var(--red)"><img src="normal/red.svg">Error</span></td></tr>
+      <tr><td class="sess-title">Update docs site</td><td><span class="st" style="color:var(--muted)"><img src="normal/grey.svg">Interrupted</span></td></tr>
+    </table>
+    <p class="note">Semantic mismatch: "Active" isn't "operational". Shown for comparison: service status is the better fit.</p>
+  </div>
+</div>
+
+<h2>Row asset (all three states at a glance)</h2>
+<div class="card">
+  <img src="normal/row.svg" alt="three state arrows" style="height:24px">
+
+</div>
+</body>
+</html>
