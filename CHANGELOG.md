@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Devin is a verified MCP sync target.** `swe mcp sync` writes
+  `~/.config/devin/mcp_config.json` (Devin CLI v3000.3+ /
+  [MCP configuration docs](https://docs.devin.ai/cli/extensibility/mcp/configuration)),
+  not the unverified `~/.devin/mcp.json` guess. `swe mcp list` shows a
+  Devin column once the harness is registered.
+
+
 ### Security
 
 - **A task link can no longer point the hub's `gh` at any repo.**

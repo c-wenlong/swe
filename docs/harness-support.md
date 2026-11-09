@@ -24,7 +24,7 @@ ZCode, which `swe install` knows but discovery does not.
 | Kilo | Yes | Yes | Yes | No | Yes |
 | OpenCode | Yes | Yes | Yes | No | Yes |
 | Droid | Yes | Yes | Yes | No | Yes |
-| Devin | Yes | Yes | Yes | No | Partial |
+| Devin | Yes | Yes | Yes | No | Yes |
 | Crush | Yes | Yes | Yes | No | Partial |
 | Qwen Code | Yes | Yes | Yes | No | Partial |
 | Mistral Vibe | Yes | No | Yes | No | Partial |
@@ -60,7 +60,10 @@ Notes:
 - **MCP, Partial:** these harnesses sync through the conventional
   `~/.<name>/mcp.json` path, which SWE cannot confirm the harness
   actually reads. Claude, Cursor, Copilot, Cline, Gemini, OpenCode, Kilo,
-  Codex and Droid have verified config locations instead.
+  Codex, Droid and Devin have verified config locations instead.
+  Devin's is `~/.config/devin/mcp_config.json`
+  ([docs](https://docs.devin.ai/cli/extensibility/mcp/configuration)),
+  not the unverified `~/.devin/mcp.json` guess.
 - **Skills without instructions:** Mistral Vibe, Forge, Augment, Continue,
   Pi, Kiro and Grok get the shared skills link but no `AGENTS.md` link.
 - **Jules, Mastracode and ZCode:** install-only. They are not in the
