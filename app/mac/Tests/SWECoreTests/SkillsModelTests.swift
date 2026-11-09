@@ -196,9 +196,76 @@ let inventoryJSON = #"""
         let alpha = try #require(model.allSkills.first)
         #expect(alpha.source == .shared)
         #expect(alpha.description == "Does the alpha thing")
+        // A swe from before adoption ships neither field.
+        #expect(alpha.adoptedFrom == nil)
+        #expect(alpha.conflict == false)
         // An unknown source from a newer swe still loads.
         #expect(model.allSkills[3].source == .harness)
         #expect(model.allSkills[3].harnesses.isEmpty)
+    }
+
+    @Test func aSkillInAnAdoptableRootIsPendingAdoption() async throws {
+        // Only a harness-local skill in a folder the next init still
+        // visits waits on adoption: ignored and skipped roots and
+        // archived harnesses are left alone, and a folder no listed root
+        // owns (like ~/.agents/skills) is no harness's to take.
+        let json = #"""
+        {"shared_dir": "/h/.swe/skills",
+         "harnesses": [
+          {"name": "codex", "label": "codex", "path": "/h/.codex/skills",
+           "state": "keep", "detail": "1 of 2 skills exist nowhere else"},
+          {"name": "cursor", "label": "cursor", "path": "/h/.cursor/skills",
+           "state": "ignored", "detail": ".linkignore"},
+          {"name": "gemini", "label": "gemini", "path": "/h/.gemini/skills",
+           "state": "skipped", "detail": "not installed"},
+          {"name": "hermes", "label": "hermes", "path": "/h/.hermes/skills",
+           "state": "keep", "detail": "x", "archived": true}
+         ],
+         "skills": [
+          {"name": "a", "path": "/h/.codex/skills/a", "root": "codex",
+           "source": "harness", "harnesses": ["codex"]},
+          {"name": "b", "path": "/h/.cursor/skills/b", "root": "cursor",
+           "source": "harness", "harnesses": []},
+          {"name": "c", "path": "/h/.gemini/skills/c", "root": "gemini",
+           "source": "harness", "harnesses": []},
+          {"name": "d", "path": "/h/.hermes/skills/d", "root": "hermes",
+           "source": "harness", "harnesses": []},
+          {"name": "e", "path": "/h/.agents/skills/e", "root": "agents",
+           "source": "harness", "harnesses": []},
+          {"name": "s", "path": "/h/.swe/skills/s", "root": "shared",
+           "source": "shared", "harnesses": []}
+         ]}
+        """#
+        let (model, _) = model([(["skills", "--json"], ok(json))])
+        await model.load()
+        let pending = ["a": true, "b": false, "c": false, "d": false, "e": false, "s": false]
+        for skill in model.allSkills {
+            #expect(model.pendingAdoption(skill) == pending[skill.name])
+        }
+    }
+
+    @Test func aLinkedRootMarkedOffForASkillReadsOffButStillToggles() async throws {
+        // The scoped-off mark an adoption leaves can arrive on a root
+        // still reporting `linked`: its `disabled` list wins over the
+        // whole-folder default, and the chip stays a switch because
+        // `swe skills enable` converts the folder for it.
+        let json = #"""
+        {"shared_dir": "/h/.swe/skills",
+         "harnesses": [
+          {"name": "claude", "label": "claude", "path": "/h/.claude/skills",
+           "state": "linked", "mode": "all", "enabled": [], "disabled": ["alpha"]}
+         ],
+         "skills": [
+          {"name": "alpha", "path": "/h/.swe/skills/alpha", "root": "shared",
+           "source": "shared", "harnesses": [], "adopted_from": "codex"}
+         ]}
+        """#
+        let (model, _) = model([(["skills", "--json"], ok(json))])
+        await model.load()
+        let alpha = try #require(model.allSkills.first)
+        #expect(alpha.adoptedFrom == "codex")
+        #expect(model.chips(for: alpha).map { ($0.link, $0.on, $0.toggleable) }
+            .map { "\($0.0)|\($0.1)|\($0.2)" } == ["linked|false|true"])
     }
 
     @Test func rootStatesMapToLinkedSelectionNotLinkedAndBlocked() {

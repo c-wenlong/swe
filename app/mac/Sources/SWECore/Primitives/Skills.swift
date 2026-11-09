@@ -148,18 +148,31 @@ public struct Skill: Codable, Sendable, Equatable, Identifiable {
     public let source: Source
     /// Harnesses that load it.
     public let harnesses: [String]
+    /// The harness a swe adoption moved the skill out of into the shared
+    /// library (`adopted_from`, #1882); nil for one added straight to the
+    /// library or still harness-local.
+    public let adoptedFrom: String?
+    /// The same name sits in another harness's folder with different
+    /// content; adoption picked a deterministic donor and keeps the copies
+    /// apart (`conflict`).
+    public let conflict: Bool
 
     public init(name: String, description: String = "", path: String, root: String,
-                source: Source, harnesses: [String]) {
+                source: Source, harnesses: [String], adoptedFrom: String? = nil,
+                conflict: Bool = false) {
         self.name = name
         self.description = description
         self.path = path
         self.root = root
         self.source = source
         self.harnesses = harnesses
+        self.adoptedFrom = adoptedFrom
+        self.conflict = conflict
     }
 
-    enum CodingKeys: String, CodingKey { case name, description, path, root, source, harnesses }
+    enum CodingKeys: String, CodingKey {
+        case name, description, path, root, source, harnesses, adoptedFrom, conflict
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -170,6 +183,8 @@ public struct Skill: Codable, Sendable, Equatable, Identifiable {
         // A source a newer swe adds reads as the plainest one, not a failure.
         source = (try? c.decode(Source.self, forKey: .source)) ?? .harness
         harnesses = try c.decodeIfPresent([String].self, forKey: .harnesses) ?? []
+        adoptedFrom = try c.decodeIfPresent(String.self, forKey: .adoptedFrom)
+        conflict = try c.decodeIfPresent(Bool.self, forKey: .conflict) ?? false
     }
 }
 
@@ -449,6 +464,17 @@ public final class SkillsModel {
         roots.first { skill.path == $0.path || skill.path.hasPrefix($0.path + "/") }
     }
 
+    /// Whether the next `swe init` or link pass adopts this harness-local
+    /// skill into the shared library (#1882): it sits in a real harness
+    /// folder that pass still visits, so never an ignored or skipped one
+    /// and never an archived harness's, which swe init leaves alone. A
+    /// folder outside the listed roots (like `~/.agents/skills`) is no
+    /// harness's to take.
+    public func pendingAdoption(_ skill: Skill) -> Bool {
+        guard skill.source == .harness, let root = rootHolding(skill) else { return false }
+        return !root.archived && root.state != "ignored" && root.state != "skipped"
+    }
+
     /// What "Link all" can safely take on: loose folders that cost nothing
     /// to point at the shared root. `skipped` holds the ones a person
     /// should look at (a folder with unique skills, an explicit keep, a
@@ -606,7 +632,10 @@ public final class SkillsModel {
             // signal — good enough, since those chips can't flip anyway.
             let on: Bool
             switch root.link {
-            case .linked: on = true
+            // A whole-folder link loads every shared skill, so a
+            // `disabled` entry on one is the scoped-off mark an adoption
+            // left (#1882), honoured however the root reports its state.
+            case .linked: on = !root.disabled.contains(skill.name)
             case .selection: on = root.enabled.contains(skill.name)
             case .notLinked, .blocked: on = seeing.contains(root.name)
             }

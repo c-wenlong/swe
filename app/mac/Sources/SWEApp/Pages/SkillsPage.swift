@@ -731,9 +731,21 @@ private struct SkillGridRow: View {
                    uniquingKeysWith: { a, _ in a })
     }
 
-    /// The description first, the folder only when it is all the row has.
+    /// The description first, the folder only when it is all the row has;
+    /// then the quiet marks: where an adopted skill came from, the
+    /// adoption a harness-private one is waiting on, and a name conflict
+    /// swe keeps the copies of apart.
     private var secondary: String {
-        skill.description.isEmpty ? displayPath(skill.path) : skill.description
+        var text = skill.description.isEmpty ? displayPath(skill.path) : skill.description
+        if let donor = skill.adoptedFrom {
+            text += " · added from \(HarnessMark(donor).name)"
+        } else if model.pendingAdoption(skill) {
+            text += " · adopts into the shared library on the next swe init"
+        }
+        if skill.conflict {
+            text += " · another harness holds a different copy of this name"
+        }
+        return text
     }
 
     var body: some View {
@@ -839,7 +851,9 @@ private struct SkillGridRow: View {
     private var privateTip: String {
         switch skill.source {
         case .harness:
-            "A private copy \(HarnessMark(skill.root).name) manages, outside the shared library. Right-click the row to move it to shared and switch it per folder."
+            model.pendingAdoption(skill)
+                ? "A private copy \(HarnessMark(skill.root).name) manages; the next swe init adopts it into the shared library. Right-click the row to move it now and switch it per folder."
+                : "A private copy \(HarnessMark(skill.root).name) manages, outside the shared library. Right-click the row to move it to shared and switch it per folder."
         case .builtin:
             "Built into the harness itself, so nothing here can switch it."
         default:
@@ -900,6 +914,18 @@ private struct SkillCell: View {
         }
     }
 
+    /// The P mark's tip: what the copy is, and whether a move or the next
+    /// init's adoption carries it into the shared library.
+    private var privateMarkTip: String {
+        var tip = "Private copy in \(name) at \(displayPath(skill.path))."
+        if model.pendingAdoption(skill) {
+            tip += " The next swe init adopts it into the shared library."
+        } else {
+            tip += " Move it to the shared library to switch it per folder."
+        }
+        return tip
+    }
+
     /// A private copy or a harness-owned skill a folder sees: no per
     /// skill switch exists for those, so the mark only reports.
     @ViewBuilder private var staticMark: some View {
@@ -910,8 +936,8 @@ private struct SkillCell: View {
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(Theme.accentTint, in: .rect(cornerRadius: 5))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .hoverTip("Private copy in \(name) at \(displayPath(skill.path)). Move it to the shared library to switch it per folder.",
-                          pinsOnClick: false)
+                .hoverTip(privateMarkTip, pinsOnClick: false)
+                .help(privateMarkTip)
         } else {
             check
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -963,6 +989,12 @@ private struct SkillLinksBlock: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(note).font(Theme.caption).foregroundStyle(Theme.textSecondary)
+            if skill.conflict {
+                Label("Another harness's folder holds a different copy of this name; swe keeps the copies separate and never merges them.",
+                      systemImage: "exclamationmark.triangle")
+                    .font(Theme.caption).foregroundStyle(Theme.warningText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             let chips = model.chips(for: skill)
             if !chips.isEmpty {
                 FlowLayout(spacing: 6, lineSpacing: 6) {
@@ -1000,15 +1032,21 @@ private struct SkillLinksBlock: View {
     private var note: String {
         switch skill.source {
         case .shared:
-            "In the shared library. Every harness whose folder is linked loads it."
+            if let donor = skill.adoptedFrom {
+                "In the shared library, added from \(HarnessMark(donor).name). Every harness whose folder is linked loads it."
+            } else {
+                "In the shared library. Every harness whose folder is linked loads it."
+            }
         case .plugin:
             "Shipped by a plugin, so only \(skill.harnesses.first.map { HarnessMark($0).name } ?? "its harness") loads it."
         case .builtin:
             "Built into \(skill.harnesses.first.map { HarnessMark($0).name } ?? "its harness")."
         case .harness:
-            skill.harnesses.isEmpty
+            (skill.harnesses.isEmpty
                 ? "In \(skill.root)'s own folder, which no linked harness reads."
-                : "In \(skill.root)'s own folder, outside the shared library."
+                : "In \(skill.root)'s own folder, outside the shared library.")
+                + (model.pendingAdoption(skill)
+                    ? " The next swe init adopts it into the shared library." : "")
         case .catalog:
             "In the \(skill.root) catalog. Harnesses load it only once it is moved or linked into a skills folder."
         case .project:

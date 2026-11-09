@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "data": {
+    "shared_dir": "/tmp/swe-fixture-home/.swe/skills",
+    "harnesses": [
+      {
+        "name": "claude",
+        "label": "claude",
+        "path": "/tmp/swe-fixture-home/.claude/skills",
+        "state": "selection",
+        "detail": "2 of 3 shared linked",
+        "mode": "only",
+        "enabled": ["adopted-skill", "diverged-skill"],
+        "disabled": [],
+        "archived": false
+      },
+      {
+        "name": "codex",
+        "label": "codex",
+        "path": "/tmp/swe-fixture-home/.codex/skills",
+        "state": "selection",
+        "detail": "1 of 3 shared linked",
+        "mode": "except",
+        "enabled": ["fixture-skill"],
+        "disabled": ["adopted-skill", "diverged-skill"],
+        "archived": false
+      },
+      {
+        "name": "cursor",
+        "label": "cursor",
+        "path": "/tmp/swe-fixture-home/.cursor/skills",
+        "state": "keep",
+        "detail": "1 of 1 skills exist nowhere else",
+        "mode": "none",
+        "enabled": [],
+        "disabled": [],
+        "archived": false
+      }
+    ],
+    "skills": [
+      {
+        "name": "fixture-skill",
+        "description": "A shared skill that was always in the library",
+        "path": "/private/tmp/swe-fixture-home/.swe/skills/fixture-skill",
+        "root": "shared",
+        "source": "shared",
+        "harnesses": ["codex"]
+      },
+      {
+        "name": "adopted-skill",
+        "description": "Pulled out of Claude Code's own folder",
+        "path": "/private/tmp/swe-fixture-home/.swe/skills/adopted-skill",
+        "root": "shared",
+        "source": "shared",
+        "harnesses": ["claude"],
+        "adopted_from": "claude",
+        "conflict": false
+      },
+      {
+        "name": "diverged-skill",
+        "description": "The same name sat in two harness folders with different content",
+        "path": "/private/tmp/swe-fixture-home/.swe/skills/diverged-skill",
+        "root": "shared",
+        "source": "shared",
+        "harnesses": ["claude"],
+        "adopted_from": "claude",
+        "conflict": true
+      },
+      {
+        "name": "pending-skill",
+        "description": "",
+        "path": "/tmp/swe-fixture-home/.cursor/skills/pending-skill",
+        "root": "cursor",
+        "source": "harness",
+        "harnesses": ["cursor"]
+      }
+    ]
+  }
+}
