@@ -113,11 +113,18 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a><a href="https://github.com/c-wenlong/swe/compare/v1.2.2...HEAD">Unreleased</a></h2>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
-<li><strong>Devin is a verified MCP sync target.</strong> <code>swe mcp sync</code> writes
+<li><p><strong>AGENTS.md page: drafts list and compiled size (macOS app).</strong> A
+&quot;Drafts (N)&quot; menu beside the Edit/Compile tabs lists every chapter with
+unsaved changes and jumps to it; it appears only while there are drafts.
+The View AGENTS.md button and popup now show the generated file's size in
+KiB as last built, per harness output on the Compile tab. Part of #1894.</p>
+</li>
+<li><p><strong>Devin is a verified MCP sync target.</strong> <code>swe mcp sync</code> writes
 <code>~/.config/devin/mcp_config.json</code> (Devin CLI v3000.3+ /
 <a href="https://docs.devin.ai/cli/extensibility/mcp/configuration">MCP configuration docs</a>),
 not the unverified <code>~/.devin/mcp.json</code> guess. <code>swe mcp list</code> shows a
-Devin column once the harness is registered.</li>
+Devin column once the harness is registered.</p>
+</li>
 </ul>
 <h3 id="security"><a class="anchor" href="#security"></a>Security</h3>
 <ul>
