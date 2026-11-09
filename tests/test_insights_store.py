@@ -37,11 +37,14 @@ class SchemaTests(_Home):
     def test_fresh_store_has_the_schema(self):
         conn = self.db()
         meta = dict(conn.execute("SELECT key, value FROM meta"))
-        self.assertEqual(meta["schema_version"], "1")
+        self.assertEqual(meta["schema_version"], str(store.SCHEMA_VERSION))
         tables = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
         self.assertTrue(
             {"meta", "session_metrics", "daily_rollup", "findings"} <= tables)
+        cols = {r[1] for r in conn.execute(
+            "PRAGMA table_info(session_metrics)")}
+        self.assertIn("source_rev", cols)
         self.assertEqual(
             conn.execute("PRAGMA journal_mode").fetchone()[0], "wal")
 
@@ -59,7 +62,9 @@ class SchemaTests(_Home):
         conn = sqlite3.connect(path)
         conn.execute(
             "CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        conn.execute("INSERT INTO meta VALUES ('schema_version', '2')")
+        conn.execute(
+            "INSERT INTO meta VALUES ('schema_version', ?)",
+            (str(store.SCHEMA_VERSION + 1),))
         conn.commit()
         conn.close()
         before = path.read_bytes()
@@ -67,13 +72,57 @@ class SchemaTests(_Home):
             store.open_store(path)
         self.assertEqual(path.read_bytes(), before)
 
+    def test_a_v1_store_migrates_and_keeps_its_rows(self):
+        path = store.db_path(self.home)
+        path.parent.mkdir(parents=True)
+        conn = sqlite3.connect(path)
+        conn.execute(
+            "CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute(
+            "CREATE TABLE session_metrics("
+            " session_id TEXT PRIMARY KEY, harness TEXT NOT NULL,"
+            " first_ts INTEGER, n_messages INTEGER NOT NULL DEFAULT 0,"
+            " n_tool_calls INTEGER NOT NULL DEFAULT 0,"
+            " n_tool_errors INTEGER NOT NULL DEFAULT 0,"
+            " n_ack_unblocks INTEGER NOT NULL DEFAULT 0,"
+            " n_guard_refusals INTEGER NOT NULL DEFAULT 0,"
+            " n_timeouts INTEGER NOT NULL DEFAULT 0,"
+            " n_mcp_errors INTEGER NOT NULL DEFAULT 0,"
+            " is_probe INTEGER NOT NULL DEFAULT 0,"
+            " is_dead INTEGER NOT NULL DEFAULT 0,"
+            " machine_share REAL,"
+            " outcome INTEGER, first_pass INTEGER,"
+            " causes TEXT, score_confidence TEXT)")
+        conn.execute(
+            "INSERT INTO session_metrics(session_id, harness, n_messages,"
+            " outcome) VALUES ('s1', 'claude', 9, 4)")
+        conn.execute("INSERT INTO meta VALUES ('schema_version', '1')")
+        conn.commit()
+        conn.close()
+        conn = self.db()
+        meta = dict(conn.execute("SELECT key, value FROM meta"))
+        self.assertEqual(meta["schema_version"], "2")
+        row = dict(conn.execute(
+            "SELECT * FROM session_metrics WHERE session_id='s1'").fetchone())
+        self.assertEqual(row["n_messages"], 9)
+        self.assertEqual(row["outcome"], 4)
+        self.assertEqual(row["source_rev"], 0)
+        # rev 0 matches no real fingerprint: the next T0 pass re-measures
+        # it once, then settles.
+        store.upsert_counters(conn, metrics("s1", source_rev=7))
+        conn.commit()
+        row = dict(conn.execute(
+            "SELECT source_rev, outcome FROM session_metrics"
+            " WHERE session_id='s1'").fetchone())
+        self.assertEqual((row["source_rev"], row["outcome"]), (7, 4))
+
     def test_a_torn_file_is_rebuilt(self):
         path = store.db_path(self.home)
         path.parent.mkdir(parents=True)
         path.write_bytes(b"this is not sqlite" * 100)
         conn = self.db()
         meta = dict(conn.execute("SELECT key, value FROM meta"))
-        self.assertEqual(meta["schema_version"], "1")
+        self.assertEqual(meta["schema_version"], str(store.SCHEMA_VERSION))
 
 
 class MetricsTests(_Home):
