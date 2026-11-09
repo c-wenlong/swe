@@ -13,7 +13,11 @@ struct ChapterTargetsStrip: View {
 
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var error: String?
+    /// The last refusal and the chapter it was about: the strip keeps its
+    /// state across selections, and a write can finish after the user
+    /// opens another chapter, so it only shows for its own chapter.
+    @State private var failure: (chapter: String, message: String)?
+    private var error: String? { failure?.chapter == name ? failure?.message : nil }
     /// The harnesses (and "" for the index checkbox) with a write in
     /// flight, so a second click can't compute from the stale state.
     @State private var pending: Set<String> = []
@@ -58,9 +62,6 @@ struct ChapterTargetsStrip: View {
                 }
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: receipts)
-            // A different chapter starts clean: the last one's refusal
-            // isn't about this one.
-            .onChange(of: name) { _, _ in error = nil }
         }
     }
 
@@ -115,9 +116,10 @@ struct ChapterTargetsStrip: View {
         pending.insert(harness)
         let swe = app.swe
         let chapters = app.chapters
+        let chapter = name
         Task {
-            error = await chapters.setReceipt(name: name, harness: harness,
-                                              want: want, swe: swe)
+            report(await chapters.setReceipt(name: chapter, harness: harness,
+                                             want: want, swe: swe), for: chapter)
             pending.remove(harness)
         }
     }
@@ -126,9 +128,21 @@ struct ChapterTargetsStrip: View {
         pending.insert("")
         let swe = app.swe
         let chapters = app.chapters
+        let chapter = name
         Task {
-            error = await chapters.setIncluded(name: name, on: on, swe: swe)
+            report(await chapters.setIncluded(name: chapter, on: on, swe: swe),
+                   for: chapter)
             pending.remove("")
+        }
+    }
+
+    /// A write's outcome for the chapter it changed: a refusal is kept
+    /// against that chapter, a success clears only that chapter's refusal.
+    private func report(_ problem: String?, for chapter: String) {
+        if let problem {
+            failure = (chapter, problem)
+        } else if failure?.chapter == chapter {
+            failure = nil
         }
     }
 }
