@@ -812,7 +812,12 @@ public final class ChaptersModel {
     /// they keep the read-compare-write conflict check.
     @ObservationIgnored private var indexDocument: InstructionDocument?
     /// Open chapter editors by index name, kept for the page's lifetime.
-    @ObservationIgnored private var documents: [String: InstructionDocument] = [:]
+    @ObservationIgnored private var documents: [String: InstructionDocument] = [:] {
+        didSet { documentsRevision += 1 }
+    }
+    /// Bumps whenever `documents` gains or loses an editor, so views
+    /// reading `draftNames` re-run (the dictionary itself is not observed).
+    private var documentsRevision = 0
     /// A build request that arrived while one ran, collapsed into one rerun.
     @ObservationIgnored private var buildAgain = false
     @ObservationIgnored private var generation = 0
@@ -1028,6 +1033,7 @@ public final class ChaptersModel {
 
     /// Chapters holding unsaved text, in compile order; the drafts list.
     public var draftNames: [String] {
+        _ = documentsRevision
         var order: [String] = []
         if case .loaded(let check) = status {
             order = check.entries?.map(\.name) ?? check.uniqueChapters.map(\.name)
