@@ -21,6 +21,15 @@ const WINDOWS = [["today", "Today"], ["7d", "7 days"], ["30d", "30 days"], ["90d
   ["365d", "365 days"], ["all", "All time"]];
 const DAY_FOLD = 10;
 const STATUS_BADGE = { active: "Active", approval: "Approval", error: "Error", interrupted: "Interrupted", followup: "Waiting" };
+/* The quiver state arrows shipped beside the page (state-<kind>.svg). */
+const STATUS_ARROW = { active: "green", approval: "yellow", error: "red", interrupted: "grey", followup: "yellow" };
+function statusBadge(status) {
+  const title = STATUS_BADGE[status];
+  if (!title) return "";
+  const arrow = STATUS_ARROW[status];
+  const img = arrow ? `<img class="badge-arrow" src="state-${arrow}.svg" alt="" aria-hidden="true">` : "";
+  return `<span class="badge status-${status}">${img}${title}</span>`;
+}
 // Transcript search waits for a pause in typing and a query this long.
 const SEARCH_DEBOUNCE_MS = 250;
 const SEARCH_MIN_CHARS = 2;
@@ -406,7 +415,7 @@ function sessionsSkeleton() {
 }
 
 function sessionRow(r) {
-  const badge = (STATUS_BADGE[r.status] ? `<span class="badge status-${r.status}">${STATUS_BADGE[r.status]}</span>` : "")
+  const badge = statusBadge(r.status)
     + (r.ownership === "attached" ? '<span class="badge ownership-attached" title="Runs under SWE: you can send to it">Attached</span>' : "")
     + (r.kept ? '<span class="badge" title="Detached, still running in tmux">Kept</span>' : "");
   const time = new Date(r.last_active_at * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
@@ -473,7 +482,7 @@ function openSheet(r) {
     sessionsPage.data && sessionsPage.data.open_terminal);
   sheet.innerHTML = `<form method="dialog" class="sheet-body">
     <div class="sheet-title">${Fmt.logo(r.harness)}<span>${esc(r.title || r.id || "Untitled")}</span>
-      ${STATUS_BADGE[r.status] ? `<span class="badge status-${r.status}">${STATUS_BADGE[r.status]}</span>` : ""}</div>
+      ${statusBadge(r.status)}</div>
     <div class="fields">
       ${field("Harness", esc(Fmt.harnessName(r.harness)))}
       ${field("Machine", esc(r.machine || ""))}

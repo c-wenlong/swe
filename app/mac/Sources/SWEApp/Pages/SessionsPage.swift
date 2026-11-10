@@ -924,11 +924,9 @@ private struct SessionRail: View {
                                 // Named for VoiceOver only: a .help inside the
                                 // RailRow's button label never shows, and a
                                 // hover tip's tap would take the row's click.
-                                if let color = Self.dotColor(row.session.status),
+                                if let kind = Self.arrowKind(row.session.status),
                                    let title = StatusBadge.title(row.session.status) {
-                                    Circle().fill(color)
-                                        .frame(width: Theme.statusDot, height: Theme.statusDot)
-                                        .accessibilityLabel(title)
+                                    StateArrow(kind: kind, size: 9, label: title)
                                 }
                             }
                         }
@@ -943,14 +941,14 @@ private struct SessionRail: View {
             .strokeBorder(Theme.border, lineWidth: Theme.hairline))
     }
 
-    /// The list's badge colours as a rail dot; nothing for a finished
+    /// The list's badge states as a quiver arrow; nothing for a finished
     /// session.
-    private static func dotColor(_ status: String?) -> Color? {
+    private static func arrowKind(_ status: String?) -> StateArrows.Kind? {
         switch status {
-        case "active": Theme.success
-        case "followup": Theme.warning
-        case "error": Theme.danger
-        case "interrupted": Theme.textMuted
+        case "active": .green
+        case "followup": .yellow
+        case "error": .red
+        case "interrupted": .grey
         default: nil
         }
     }

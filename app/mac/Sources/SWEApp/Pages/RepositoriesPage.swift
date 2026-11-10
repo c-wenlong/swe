@@ -490,8 +490,8 @@ private struct RepoRail: View {
         } row: { pin in
             RailRow(selected: model.shownRepo == pin.name,
                     select: { model.shownRepo = pin.name }) {
-                Circle().fill(dotColor(model.ciState(pin.name)))
-                    .frame(width: Theme.statusDot, height: Theme.statusDot)
+                StateArrow(kind: arrowKind(model.ciState(pin.name)), size: 9,
+                           label: Self.ciLabel(model.ciState(pin.name)))
                 Text(pin.name.split(separator: "/").last.map(String.init) ?? pin.name)
                     .font(Theme.nav)
                     .lineLimit(1).truncationMode(.middle)
@@ -508,12 +508,21 @@ private struct RepoRail: View {
         }
     }
 
-    private func dotColor(_ state: GhPr.Checks?) -> Color {
+    private func arrowKind(_ state: GhPr.Checks?) -> StateArrows.Kind {
         switch state {
-        case .failing: Theme.danger
-        case .passing: Theme.success
-        case .running: Theme.warning
-        default: Theme.borderStrong
+        case .failing: .red
+        case .passing: .green
+        case .running: .yellow
+        default: .grey
+        }
+    }
+
+    private static func ciLabel(_ state: GhPr.Checks?) -> String {
+        switch state {
+        case .failing: "Checks failing"
+        case .passing: "Checks passing"
+        case .running: "Checks running"
+        default: "No check state"
         }
     }
 }

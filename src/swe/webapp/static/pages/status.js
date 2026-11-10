@@ -264,6 +264,18 @@ function statusDetailNote(s) {
 
 const COMPONENT_LIMIT = 5, INCIDENT_LIMIT = 3;
 
+/* The quiver state arrows (state-<kind>.svg beside the page): red for a
+ * critical failure, yellow for partial failure, green for fully
+ * operational, grey for maintenance or unknown. Mirrors the Mac's
+ * StateArrows.Kind mapping. */
+const HEALTH_ARROW = { operational: "green", minor: "yellow", major: "red", critical: "red" };
+const COMPONENT_ARROW = { degraded: "yellow", partial_outage: "yellow", major_outage: "red" };
+function stateArrow(kind, cls = "health-arrow") {
+  return `<img class="${cls}" src="state-${kind}.svg" alt="" aria-hidden="true">`;
+}
+function healthArrow(health) { return HEALTH_ARROW[health] || "grey"; }
+function componentArrow(state) { return COMPONENT_ARROW[state] || "grey"; }
+
 function statusCard(raw) {
   const p = statusPage;
   const s = statusView(raw);
@@ -288,7 +300,7 @@ function statusCard(raw) {
         ${safeHref(s.page_url) ? `<a class="status-open" href="${safeHref(s.page_url)}" target="_blank" rel="noopener noreferrer"
           title="${esc(s.page_url)}" aria-label="Open the ${esc(s.name)} status page">${statusIcon("open")}</a>` : ""}${remove}</div>
       <div class="status-health-block">
-        <div class="status-health"><span class="health-dot health-${esc(s.health || "unknown")}" aria-hidden="true"></span>
+        <div class="status-health">${stateArrow(healthArrow(s.health))}
           <span class="${s.health ? "" : "muted"}">${esc(label)}</span></div>
         ${s.note ? `<div class="caption muted">${esc(s.note)}</div>` : ""}
       </div>
@@ -355,7 +367,7 @@ function statusDetails(s) {
   if (summary) out += `<div class="caption">${esc(summary)}</div>`;
   if (s.components.length) {
     out += `<div class="status-components">${s.components.slice(0, COMPONENT_LIMIT).map((c) => `
-      <div class="status-component"><span class="component-dot component-${esc(c.state)}" aria-hidden="true"></span>
+      <div class="status-component">${stateArrow(componentArrow(c.state), "component-arrow")}
         <span class="status-component-name" title="${esc(c.name)}">${esc(c.name)}</span>
         <span class="status-component-state">${esc(c.state_title)}</span></div>`).join("")}
       ${s.components.length > COMPONENT_LIMIT
