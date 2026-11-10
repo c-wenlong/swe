@@ -141,7 +141,8 @@ struct CompileView: View {
     var onOpenChapter: ((String) -> Void)? = nil
 
     @Environment(AppModel.self) private var app
-    /// nil or "" means the All-harnesses view; otherwise a registry name.
+    /// Comma-joined harness names (`CompileFilter`); "" or several names
+    /// is the All-harnesses view, one linked name is that harness's view.
     @AppStorage("agentsMd.compile.filter") private var filter = ""
     @State private var error: String?
 
@@ -158,7 +159,9 @@ struct CompileView: View {
         check.rule(for: name)
     }
 
-    private var harness: String? { filter.isEmpty ? nil : filter }
+    private var harness: String? {
+        CompileFilter.harness(stored: filter, known: harnesses)
+    }
 
     private func receives(_ name: String) -> Bool {
         CompileToggle.receives(state: state(for: name), rule: rule(for: name),
@@ -277,8 +280,10 @@ struct CompileView: View {
 
     private func chip(_ name: String?, title: String,
                       link: InitCheck.Link? = nil, mark: String? = nil) -> some View {
-        let selected = (name ?? "") == filter
-        return Button { filter = name ?? "" } label: {
+        let selected = name == harness
+        return Button {
+            filter = CompileFilter.serialise(name.map { [$0] } ?? [])
+        } label: {
             HStack(spacing: 5) {
                 if let link {
                     Circle().fill(link.state == .linked ? Theme.success

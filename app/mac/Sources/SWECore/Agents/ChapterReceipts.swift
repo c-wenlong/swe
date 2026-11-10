@@ -189,3 +189,36 @@ public struct ChapterReceipts: Equatable, Sendable {
         return "Same targets as all \(folder.count) chapters in \(folder.path)/, as a folder checkbox in Compile sets them."
     }
 }
+
+/// The Compile tab's harness filter as stored under
+/// `agentsMd.compile.filter`: a comma-joined list of harness names, ""
+/// for none. A single name (the only form older builds wrote) is a
+/// one-item list, so old values keep working.
+public enum CompileFilter {
+    /// The stored names in order, trimmed, without empties or repeats.
+    public static func parse(_ stored: String) -> [String] {
+        normalise(stored.split(separator: ",").map(String.init))
+    }
+
+    /// The value to store for `names`; `parse` reads it back unchanged.
+    public static func serialise(_ names: [String]) -> String {
+        normalise(names).joined(separator: ",")
+    }
+
+    /// The one harness the tab shows, or nil for the All view: the stored
+    /// names that are still linked (`known`, or all of them before the
+    /// link report loads) must come down to exactly one.
+    public static func harness(stored: String, known: [String]) -> String? {
+        let names = parse(stored).filter { known.isEmpty || known.contains($0) }
+        return names.count == 1 ? names[0] : nil
+    }
+
+    private static func normalise(_ names: [String]) -> [String] {
+        var out: [String] = []
+        for name in names.map({ $0.trimmingCharacters(in: .whitespaces) })
+        where !name.isEmpty && !out.contains(name) {
+            out.append(name)
+        }
+        return out
+    }
+}
