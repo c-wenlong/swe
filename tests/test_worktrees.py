@@ -357,7 +357,7 @@ class WorktreeCases(unittest.TestCase):
               "untracked", "locked", "lock_reason", "harness"}
 
     def test_list_json_contract(self):
-        rc, doc = self.cli("list", "--repo", self.fx.root)
+        rc, doc = self.cli("list", f"--repo={self.fx.root}")
         self.assertEqual(rc, 0)
         self.assertEqual(doc["schema"], 1)
         data = doc["data"]
@@ -451,7 +451,7 @@ class WorktreeCases(unittest.TestCase):
         self.assertEqual(doc["error"]["code"], "not_safe")
 
     def test_add_branch_new_and_pr(self):
-        rc, doc = self.cli("add", self.fx.root, "--branch", "feat/fresh", "--new")
+        rc, doc = self.cli("add", self.fx.root, "--branch=feat/fresh", "--new")
         self.assertEqual(rc, 0, doc)
         w = doc["data"]["worktree"]
         expected = os.path.join(os.path.dirname(self.fx.root), "widget-worktrees",
@@ -500,6 +500,33 @@ class WorktreeCases(unittest.TestCase):
                      "unlock", "move", "prune", "slim", "WorktreeError"):
             self.assertTrue(hasattr(pkg, name), name)
 
+    def test_squash_branch_with_later_commits_keeps_its_branch(self):
+        Path(self.squash, "later.txt").write_text("after merge\n")
+        run("add", ".", cwd=self.squash)
+        run("commit", "-qm", "after merge", cwd=self.squash)
+        rc, doc = self.cli("remove", self.squash, "--delete-branch")
+        self.assertEqual(rc, 0, doc)
+        self.assertFalse(doc["data"]["branch_deleted"])  # tip is past the PR head
+        run("rev-parse", "--verify", "feat/squash", cwd=self.fx.root)
+
+    def test_branch_switch_after_scan_is_caught(self):
+        with self.fx.env():
+            got = self.fx.scan(self.settings)
+            run("checkout", "-q", "-b", "feat/next", cwd=self.squash)
+            plan = actions.prune(list(got.values()), settings=self.settings,
+                                 apply=True, home=self.fx.home)
+        self.assertTrue(os.path.isdir(self.squash))
+        reasons = {r["path"]: r["reason"] for r in plan.skipped}
+        self.assertIn("moved since the scan", reasons[self.squash])
+
+    def test_auto_skips_repo_wide_steps_when_off(self):
+        with self.fx.env():
+            got = self.fx.scan(self.settings)
+            plan = actions.prune(list(got.values()), settings=self.settings,
+                                 apply=True, auto=True, delete_branches=True,
+                                 home=self.fx.home)
+        self.assertEqual((plan.acted, plan.branches), ([], []))
+
     def test_bad_flags(self):
         rc, doc = self.cli("prune", f"--repo={self.fx.root}", "--include=open-pr")
         self.assertEqual((rc, doc["error"]["code"]), (2, "bad_args"))
@@ -532,9 +559,28 @@ class HarnessFolders(unittest.TestCase):
         self.assertEqual(got[pr_path].location, "swe")
         self.assertEqual(got[pr_path].state, MERGED_CLEAN)
         self.assertEqual(got[pr_path].pr["number"], 7)
+        # A commit past the merged PR's head lives only in that checkout.
+        Path(pr_path, "extra.txt").write_text("x")
+        run("add", ".", cwd=pr_path)
+        run("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "extra", cwd=pr_path)
+        fx.gh_data = {"#7": pr(7, "MERGED", run("rev-parse", "main", cwd=fx.root))}
+        with fx.env():
+            discover.clear_cache()
+            found = discover.Discovery(home=fx.home, cwd=str(fx.base), settings=settings)
+            found.scope_everywhere()
+            again = {w.path: w for w in found.collect()}
+            classify_all(list(again.values()), PrLookup(), settings, fx.home)
+        self.assertEqual(again[pr_path].state, NO_PR)
 
 
 class Parsing(unittest.TestCase):
+    def test_porcelain_z(self):
+        rows = discover.parse_porcelain(
+            "worktree /r\0HEAD a\0branch refs/heads/main\0\0"
+            "worktree /odd\tname\0HEAD b\0detached\0locked why\0\0")
+        self.assertEqual(rows[1]["path"], "/odd\tname")
+        self.assertEqual(rows[1]["lock_reason"], "why")
+
     def test_porcelain(self):
         rows = discover.parse_porcelain(
             "worktree /r\nHEAD a\nbranch refs/heads/main\n\n"
@@ -562,9 +608,6 @@ class Parsing(unittest.TestCase):
         self.assertEqual(sizing.human(None), "-")
         self.assertEqual(sizing.human(2 * 1024 * 1024), "2.0 GB")
 
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class HumanOutput(unittest.TestCase):
@@ -629,7 +672,7 @@ class HumanOutput(unittest.TestCase):
         self.assertEqual(rc, 0, text)
         self.assertIn("Created", text)
         made = os.path.join(os.path.dirname(self.fx.root), "widget-worktrees", "feat-x")
-        rc, text = self.run_cli("lock", made, "--reason", "busy")
+        rc, text = self.run_cli("lock", made, "--reason=busy")
         self.assertIn("Locked", text)
         rc, text = self.run_cli("list", "--no-size")
         self.assertIn("locked: busy", text)
@@ -659,7 +702,7 @@ class HumanOutput(unittest.TestCase):
         self.assertIn("Log:", text)
         self.assertTrue(os.path.isdir(self.dirty))
         with mock.patch("swe.prompt.read_line", return_value="y"):
-            rc, text = self.run_cli("prune", "--include", "merged-dirty", "--yes",
+            rc, text = self.run_cli("prune", "--include=merged-dirty", "--yes",
                                     isatty=True)
         self.assertFalse(os.path.exists(self.dirty))
         rc, text = self.run_cli("slim")
@@ -673,17 +716,30 @@ class HumanOutput(unittest.TestCase):
         self.assertEqual(rc, 2)
 
     def test_lock_is_exclusive(self):
-        lock = actions.RunLock(self.fx.home)
-        with lock:
+        with actions.RunLock(self.fx.home) as held:
+            self.assertTrue(held.held)
             with self.assertRaises(actions.Busy):
                 with actions.RunLock(self.fx.home):
                     pass
-        # A lock left by a dead process is broken.
-        lock.dir.mkdir(parents=True)
-        (lock.dir / "pid").write_text("999999")
-        with actions.RunLock(self.fx.home) as again:
+        self.assertFalse(held.held)
+        with actions.RunLock(self.fx.home) as again:  # released on exit
             self.assertTrue(again.held)
-        self.assertFalse(lock.dir.exists())
+
+    def test_space_form_is_refused(self):
+        rc, text = self.run_cli("lock", self.none, "--reason", "busy")
+        self.assertEqual(rc, 2)
+        self.assertIn("--reason=<value>", text)
+        rc, _ = self.run_cli("slim", "--days=\u00b2")
+        self.assertEqual(rc, 2)
+
+    def test_broken_config_refuses(self):
+        cfg = self.fx.home / ".swe" / "config" / "config.json"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text("{not json")
+        with self.fx.env(), mock.patch("os.getcwd", return_value=self.fx.root):
+            with self.assertRaises(WorktreeError) as caught:
+                api.prune(home=self.fx.home, repo=self.fx.root)
+        self.assertEqual(caught.exception.code, "bad_config")
 
     def test_settings_by_path_key(self):
         settings = Settings({"worktree": {"repos": {
@@ -694,3 +750,7 @@ class HumanOutput(unittest.TestCase):
                                   common_dir="/x/.git")
         self.assertTrue(settings.auto_prune(home_repo))
         self.assertEqual(Settings({"worktree": "bad"}).roots(), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

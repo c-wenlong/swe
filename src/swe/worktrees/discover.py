@@ -75,7 +75,7 @@ def repo_for_common_dir(common: str) -> Repo | None:
     if common in _REPO_CACHE:
         return _REPO_CACHE[common]
     repo = None
-    listing = gitio.out(["--git-dir", common, "worktree", "list", "--porcelain"])
+    listing = gitio.out(["--git-dir", common, "worktree", "list", "--porcelain", "-z"])
     if listing is not None:
         first = parse_porcelain(listing)
         if first:
@@ -94,10 +94,13 @@ def clear_cache() -> None:
 
 
 def parse_porcelain(text: str) -> list[dict]:
-    """`git worktree list --porcelain` records, main checkout first."""
+    """`git worktree list --porcelain [-z]` records, main checkout first."""
     rows: list[dict] = []
     row: dict | None = None
-    for line in text.splitlines():
+    # -z output: NUL after every field, an empty field between records,
+    # and paths unquoted (plain output quotes tabs, newlines, backslashes).
+    lines = text.split("\0") if "\0" in text else text.splitlines()
+    for line in lines:
         if line.startswith("worktree "):
             row = {"path": line[9:]}
             rows.append(row)
@@ -279,7 +282,7 @@ class Discovery:
     def collect(self) -> list[Worktree]:
         for repo in list(self.repos.values()):
             listing = gitio.out(["--git-dir", repo.common_dir, "worktree",
-                                 "list", "--porcelain"])
+                                 "list", "--porcelain", "-z"])
             rows = parse_porcelain(listing or "")
             if rows and not repo.bare:
                 self._add_registered(repo, rows[0])  # the main checkout, state main

@@ -203,7 +203,15 @@ def _classify(wt: Worktree, lookup: PrLookup, settings: Settings,
         if state == "OPEN":
             wt.state, wt.reason = OPEN_PR, f"PR #{number} is open"
         elif state == "MERGED":
-            wt.state, wt.reason = merged_state, f"PR #{number} merged"
+            pr_head = pr.get("headRefOid")
+            on_main = bool(repo.main_ref and wt.head and gitio.is_ancestor(
+                repo.common_dir, wt.head, repo.main_ref))
+            if wt.head and (wt.head == pr_head or on_main):
+                wt.state, wt.reason = merged_state, f"PR #{number} merged"
+            else:
+                # New commits past the PR head live only in this checkout.
+                wt.state = NO_PR
+                wt.reason = f"PR #{number} merged, but HEAD has commits past its head"
         else:
             wt.state, wt.reason = NO_PR, f"PR #{number} closed without merging"
     elif repo is not None and repo.main_ref and wt.head and gitio.is_ancestor(

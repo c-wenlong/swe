@@ -35,10 +35,15 @@ class Settings:
         self.home = home
 
     @classmethod
-    def load(cls, home: Path | None = None) -> "Settings":
+    def load(cls, home: Path | None = None, strict: bool = False) -> "Settings":
+        """``strict`` raises ``ValueError`` when config.json exists but is
+        unreadable or not a JSON object, so protections never vanish
+        silently; otherwise such a file reads as no settings."""
         try:
-            data = configuration.load_config(paths.config_file_for(home))
-        except configuration.ConfigurationError:
+            data = configuration.read_json_object(paths.config_file_for(home))
+        except configuration.ConfigurationError as exc:
+            if strict:
+                raise ValueError(f"{exc}; fix it before swe wt changes anything") from None
             data = {}
         return cls(data, home)
 

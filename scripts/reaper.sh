@@ -15,7 +15,7 @@
 #     --days=N    staleness threshold for rebuildable dirs (default: 14)
 #     REPO_PATH   any path inside the repo (default: this script's repo)
 #
-# It runs, from REPO_PATH:
+# It runs, scoped to REPO_PATH and from the caller's own directory:
 #   swe wt prune [--yes] --delete-branches   merged-clean worktrees, then the
 #                                            merged local branches they leave
 #   swe wt slim  [--yes] --days=N            ignored build/.venv/node_modules
@@ -57,12 +57,16 @@ SRC="$(cd "$SCRIPT_DIR/../src" && pwd -P)"
 TARGET="${REPO_ARG:-$SCRIPT_DIR}"
 [[ -d "$TARGET" ]] || die "no such directory: $TARGET"
 git -C "$TARGET" rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository: $TARGET"
-cd "$TARGET"
+TARGET="$(cd "$TARGET" && pwd -P)"
+# Stay in the caller's directory: swe wt never removes the worktree you
+# are standing in, and the repo goes in as an explicit scope instead.
 
-swe() { PYTHONPATH="$SRC${PYTHONPATH:+:$PYTHONPATH}" python3 -m swe.cli "$@"; }
+# -P keeps the target repo (or this cwd) off sys.path, so a swe/ package
+# inside it can never shadow the trusted source in $SRC.
+swe() { PYTHONPATH="$SRC${PYTHONPATH:+:$PYTHONPATH}" python3 -P -m swe.cli "$@"; }
 
 yes=()
 [[ $APPLY -eq 1 ]] && yes=(--yes)
 
-swe wt prune "${yes[@]+"${yes[@]}"}" --delete-branches
-swe wt slim "${yes[@]+"${yes[@]}"}" "--days=$DAYS"
+swe wt prune "--repo=$TARGET" "${yes[@]+"${yes[@]}"}" --delete-branches
+swe wt slim "--repo=$TARGET" "${yes[@]+"${yes[@]}"}" "--days=$DAYS"

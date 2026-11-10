@@ -70,53 +70,34 @@ class Busy(RuntimeError):
 
 
 class RunLock:
-    """A mkdir lock with the owner's pid inside, as reaper.sh took: atomic
-    everywhere, and a lock whose pid is dead is broken safely."""
+    """A non-blocking ``flock`` on ``~/.swe/cache/worktree.lock``. The
+    kernel drops it when the holder exits, so there is no stale lock to
+    break and no window where two runs both think they own it."""
 
     def __init__(self, home: Path | None = None):
-        self.dir = paths.cache_dir_for(home) / "worktree.lock"
-        self.held = False
+        self.file = paths.cache_dir_for(home) / "worktree.lock"
+        self.handle = None
 
     def __enter__(self):
-        self.dir.parent.mkdir(parents=True, exist_ok=True)
-        for _ in range(2):
-            try:
-                self.dir.mkdir()
-                (self.dir / "pid").write_text(str(os.getpid()))
-                self.held = True
-                return self
-            except FileExistsError:
-                pid = self._owner()
-                if pid and _alive(pid):
-                    raise Busy(f"another swe wt run holds {self.dir} (pid {pid})")
-                try:
-                    old = time.time() - self.dir.stat().st_mtime > 6 * 3600
-                except OSError:
-                    old = True
-                if pid is None and not old:
-                    raise Busy(f"another swe wt run holds {self.dir}")
-                shutil.rmtree(self.dir, ignore_errors=True)
-        raise Busy(f"could not take {self.dir}")
-
-    def _owner(self) -> int | None:
+        import fcntl
+        self.file.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(self.file, "a+")
         try:
-            return int((self.dir / "pid").read_text().strip())
-        except (OSError, ValueError):
-            return None
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            handle.close()
+            raise Busy(f"another swe wt run holds {self.file}") from None
+        self.handle = handle
+        return self
+
+    @property
+    def held(self) -> bool:
+        return self.handle is not None
 
     def __exit__(self, *exc):
-        if self.held and self._owner() == os.getpid():
-            shutil.rmtree(self.dir, ignore_errors=True)
-
-
-def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+        if self.handle is not None:
+            self.handle.close()  # closing the file releases the flock
+            self.handle = None
 
 
 # ------------------------------------------------------------------ prune
@@ -162,8 +143,11 @@ def prune(worktrees: list[Worktree], *, settings: Settings, apply: bool = False,
                                           f"(worktree.repos.{wt.repo.name if wt.repo else '?'}.auto_prune)"))
         else:
             chosen.append(wt)
-    repos = {w.repo.common_dir: w.repo for w in worktrees if w.repo}
-    stale = [w for w in worktrees if w.state == ORPHANED and w.registered]
+    repos = {w.repo.common_dir: w.repo for w in worktrees if w.repo
+             and (not auto or settings.auto_prune(w.repo))}
+    # --auto acts only in repos that opted in, repo-wide steps included.
+    stale = [w for w in worktrees if w.state == ORPHANED and w.registered
+             and w.repo and w.repo.common_dir in repos]
 
     if not apply:
         for wt in chosen:
@@ -181,10 +165,17 @@ def prune(worktrees: list[Worktree], *, settings: Settings, apply: bool = False,
         if wt.state == MERGED_DIRTY and not (confirm and confirm(wt)):
             plan.skipped.append(_skip(wt, "merged-dirty and not confirmed"))
             continue
-        was = wt.state
+        was, was_branch, was_head = wt.state, wt.branch, wt.head
         # Read the state again right before acting: a session may have
-        # written to it, or a PR may have been reopened, since the scan.
+        # written to it, switched branch, committed, or a PR may have been
+        # reopened since the scan.
+        wt.branch = gitio.out(["-C", wt.path, "symbolic-ref", "--quiet", "--short", "HEAD"]) or None
+        wt.head = gitio.out(["-C", wt.path, "rev-parse", "HEAD"])
+        wt.detached = wt.branch is None
         classify(wt, fresh, settings, home)
+        if (wt.branch, wt.head) != (was_branch, was_head):
+            plan.skipped.append(_skip(wt, "its branch or HEAD moved since the scan"))
+            continue
         if wt.state != was or wt.state not in allowed or wt.hold:
             plan.skipped.append(_skip(wt, f"state changed to {wt.state} since the scan"
                                           + (f" ({wt.hold})" if wt.hold else "")))
@@ -198,6 +189,8 @@ def prune(worktrees: list[Worktree], *, settings: Settings, apply: bool = False,
         plan.acted.append(_row(wt))
         plan.estimated_kb += wt.size_kb or 0
     for repo in repos.values():
+        if not any(w.repo and w.repo.common_dir == repo.common_dir for w in removed + stale):
+            continue
         rc, out, _ = gitio.git(["--git-dir", repo.common_dir, "worktree",
                                 "prune", "-v"])
         if rc == 0:
@@ -216,7 +209,7 @@ def prune(worktrees: list[Worktree], *, settings: Settings, apply: bool = False,
 def _checked_out(repo: Repo) -> set[str]:
     from swe.worktrees.discover import parse_porcelain
     listing = gitio.out(["--git-dir", repo.common_dir, "worktree", "list",
-                         "--porcelain"]) or ""
+                         "--porcelain", "-z"]) or ""
     return {r["branch"] for r in parse_porcelain(listing) if r.get("branch")}
 
 

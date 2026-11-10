@@ -14,6 +14,8 @@ import sys
 import time
 
 from swe.console import c, tilde
+from swe.flags import expand_value_flags
+from swe.github.gh import digits
 from swe.json_output import SCHEMA, emit
 from swe.table import Table
 from swe.worktrees import api, sizing
@@ -21,7 +23,7 @@ from swe.worktrees.api import WorktreeError
 from swe.worktrees.models import (MAIN, MERGED_CLEAN, MERGED_DIRTY, NO_PR,
                                   OPEN_PR, ORPHANED, PROTECTED, UNKNOWN)
 
-# Value flags per subcommand; both --name=value and --name value parse.
+# Value flags per subcommand, written --name=value (expand_value_flags).
 VALUE_FLAGS = {
     "list": {"--repo", "--root"},
     "show": set(),
@@ -44,6 +46,7 @@ BOOL_FLAGS = {
     "prune": {"--all", "--yes", "--delete-branches", "--auto"},
     "slim": {"--all", "--yes"},
 }
+ALL_VALUE_FLAGS = set().union(*VALUE_FLAGS.values())
 POSITIONALS = {"list": (0, 0), "show": (1, 1), "add": (1, 1), "remove": (1, 1),
                "lock": (1, 1), "unlock": (1, 1), "move": (2, 2),
                "prune": (0, 0), "slim": (0, 1)}
@@ -58,29 +61,30 @@ STATE_COLOR = {MERGED_CLEAN: "green", MERGED_DIRTY: "yellow", OPEN_PR: "cyan",
 
 
 def parse(sub: str, args: list[str]) -> tuple[dict, list[str], set[str]]:
-    """``(values, positionals, booleans)``; raises ``WorktreeError("bad_args")``."""
+    """``(values, positionals, booleans)``; raises ``WorktreeError("bad_args")``.
+    Value flags are ``--name=value`` only, as everywhere in swe."""
+    flags = {a for a in args if a in BOOL_FLAGS[sub]}
+    rest = [a for a in args if a not in BOOL_FLAGS[sub]]
+    try:
+        rest = expand_value_flags(rest, ALL_VALUE_FLAGS)
+    except ValueError as exc:
+        raise WorktreeError("bad_args", str(exc)) from None
     values: dict[str, list[str]] = {}
     positionals: list[str] = []
-    flags: set[str] = set()
     i = 0
-    while i < len(args):
-        arg = args[i]
-        name, sep, value = arg.partition("=")
-        if arg in BOOL_FLAGS[sub]:
-            flags.add(arg)
-        elif name in VALUE_FLAGS[sub]:
-            if not sep:
-                if i + 1 >= len(args) or args[i + 1].startswith("--"):
-                    raise WorktreeError("bad_args", f"{name} takes a value: {name}=<value>")
-                i += 1
-                value = args[i]
-            if not value:
-                raise WorktreeError("bad_args", f"{name} takes a value: {name}=<value>")
-            values.setdefault(name, []).append(value)
-        elif arg.startswith("-"):
+    while i < len(rest):
+        arg = rest[i]
+        if arg in ALL_VALUE_FLAGS:
+            if arg not in VALUE_FLAGS[sub]:
+                raise WorktreeError("bad_args", f"swe wt {sub} does not take {arg}")
+            if not rest[i + 1]:
+                raise WorktreeError("bad_args", f"{arg} takes a value: {arg}=<value>")
+            values.setdefault(arg, []).append(rest[i + 1])
+            i += 2
+            continue
+        if arg.startswith("-"):
             raise WorktreeError("bad_args", f"swe wt {sub} does not take {arg}")
-        else:
-            positionals.append(arg)
+        positionals.append(arg)
         i += 1
     lo, hi = POSITIONALS[sub]
     if not lo <= len(positionals) <= hi:
@@ -398,7 +402,7 @@ def _cmd_prune(values, pos, flags, json_view) -> int:
 
 def _cmd_slim(values, pos, flags, json_view) -> int:
     days = _one_value(values, "--days")
-    if days is not None and not days.isdigit():
+    if days is not None and not digits(days):
         raise WorktreeError("bad_args", f"--days must be a whole number of days, got {days}")
     if pos and ("--all" in flags or _repos(values)):
         raise WorktreeError("bad_args", "pass a PATH or a scope (--all, --repo), not both")

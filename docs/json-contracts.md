@@ -296,9 +296,10 @@ Pinned for the Mac and web Worktrees pages; the Python API in
 `unlock`, `move`, `prune`, `slim`) returns the same `data` dicts and
 raises `WorktreeError(code, message)`. A failure prints
 `{"schema": 1, "error": {"code", "message"}}` on stdout and exits 1 (2 for
-`bad_args`). Codes: `bad_args`, `not_a_repo`, `not_found`, `not_safe`,
-`exists`, `git_failed`, `gh_unavailable`, `busy`. Value flags take
-`--name=value` or `--name value`.
+`bad_args`). Codes: `bad_args`, `bad_config` (config.json exists but
+cannot be read, so protections are unknown), `not_a_repo`, `not_found`,
+`not_safe`, `exists`, `git_failed`, `io_error`, `gh_unavailable`, `busy`.
+Value flags are `--name=value` only, as everywhere in swe.
 
 The worktree object `W`: `{path, repo, main_checkout, branch, head, state,
 pr, last_commit_at, size_bytes, rebuildable_bytes, dirty, untracked,

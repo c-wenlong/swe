@@ -22,8 +22,8 @@ from swe.worktrees.models import (MAIN, MERGED_CLEAN, MERGED_DIRTY, ORPHANED,
                                   PROTECTED, STATES, Worktree)
 from swe.worktrees.settings import Settings
 
-ERROR_CODES = ("bad_args", "not_a_repo", "not_found", "not_safe", "exists",
-               "git_failed", "gh_unavailable", "busy")
+ERROR_CODES = ("bad_args", "bad_config", "not_a_repo", "not_found", "not_safe",
+               "exists", "git_failed", "io_error", "gh_unavailable", "busy")
 
 
 class WorktreeError(Exception):
@@ -41,6 +41,15 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def load_settings(home: Path | None = None) -> Settings:
+    """The ``worktree`` config, read strictly: a config.json that exists
+    but cannot be read would otherwise drop every protect entry."""
+    try:
+        return Settings.load(home, strict=True)
+    except ValueError as exc:
+        raise WorktreeError("bad_config", str(exc)) from None
+
+
 def _real(path: str) -> str:
     return os.path.realpath(os.path.expanduser(path))
 
@@ -51,7 +60,7 @@ def scan(*, cwd: str | None = None, all: bool = False,
          repos: list[str] | None = None, home: Path | None = None,
          settings: Settings | None = None) -> tuple[Settings, dict, list[Worktree]]:
     """Discover and classify. ``scope`` is ``{"scope", "repos", "roots"}``."""
-    settings = settings or Settings.load(home)
+    settings = settings or load_settings(home)
     discover.clear_cache()
     found = discover.Discovery(home=home, cwd=cwd, settings=settings)
     if repos:
@@ -119,7 +128,7 @@ def _one(path: str, home: Path | None = None, sizes: bool = True,
         raise WorktreeError("not_a_repo", f"not inside a git worktree: {path}")
     top = gitio.out(["-C", target, "rev-parse", "--show-toplevel"])
     top = _real(top) if top else target
-    settings = settings or Settings.load(home)
+    settings = settings or load_settings(home)
     found = discover.Discovery(home=home, cwd=os.getcwd(), settings=settings)
     found.add_repo(repo)
     worktrees = {w.path: w for w in found.collect()}
@@ -156,7 +165,7 @@ def add(repo_path: str, branch: str | None = None, new: bool = False,
     from ``base`` or the default branch) or a PR's head (``pr``)."""
     if bool(branch) == bool(pr):
         raise WorktreeError("bad_args", "pass exactly one of --branch=B or --pr=N")
-    if pr is not None and not str(pr).isdigit():
+    if pr is not None and not gh.digits(str(pr)):
         raise WorktreeError("bad_args", f"--pr takes a PR number, not {pr}")
     if (new or base) and not branch:
         raise WorktreeError("bad_args", "--new and --base go with --branch")
@@ -179,18 +188,33 @@ def add(repo_path: str, branch: str | None = None, new: bool = False,
                 raise WorktreeError("gh_unavailable", got.error or "gh is not installed")
             elif got.status == "not-found":
                 raise WorktreeError("not_found", f"no PR #{number} in {repo.slug}")
-        branch = head_name or f"pr-{number}"
         target = _real(path) if path else _default_path(repo.root, f"pr-{number}")
         if os.path.exists(target):
             raise WorktreeError("exists", f"{target} already exists")
-        exists = gitio.out(git_dir + ["rev-parse", "--verify", "--quiet",
-                                      f"refs/heads/{branch}"])
-        if not exists:
-            _git_or_raise(git_dir + ["fetch", "origin",
-                                     f"refs/pull/{number}/head:refs/heads/{branch}"],
-                          f"fetching PR #{number}")
+        # Always fetch the PR's own head: a local branch with the same name
+        # may be stale or unrelated (a fork PR from its main, say).
+        _git_or_raise(git_dir + ["fetch", "--no-write-fetch-head", "origin",
+                                 f"+refs/pull/{number}/head:refs/swe/pr/{number}"],
+                      f"fetching PR #{number}")
+        sha = gitio.out(git_dir + ["rev-parse", f"refs/swe/pr/{number}"])
+        default = (repo.main_ref or "").split("/")[-1]
+        names = [n for n in (head_name, f"pr-{number}")
+                 if n and n not in (default, "main", "master")]
+        branch = None
+        for name in names:
+            tip = gitio.out(git_dir + ["rev-parse", "--verify", "--quiet",
+                                       f"refs/heads/{name}"])
+            if not tip or tip == sha:
+                branch, create = name, not tip
+                break
+        if branch is None:
+            raise WorktreeError("exists", f"local branches {', '.join(names)} already "
+                                f"exist at other commits than PR #{number}'s head")
+        if create:
+            _git_or_raise(git_dir + ["branch", branch, sha], f"creating {branch}")
         _git_or_raise(["-C", repo.root, "worktree", "add", target, branch],
                       "git worktree add")
+        gitio.git(git_dir + ["update-ref", "-d", f"refs/swe/pr/{number}"])
     else:
         target = _real(path) if path else _default_path(repo.root, branch)
         if os.path.exists(target):
@@ -223,7 +247,7 @@ def remove(path: str, force: bool = False, delete_branch: bool = False,
            home: Path | None = None) -> dict:
     """Remove one worktree with ``git worktree remove``. Anything but
     ``merged-clean`` needs ``force``; main and protected never go."""
-    settings = Settings.load(home)
+    settings = load_settings(home)
     target = _real(path)
     if not os.path.exists(target):
         # A registered worktree whose folder is gone: drop the entry.
@@ -286,7 +310,11 @@ def _delete_branch(wt: Worktree) -> bool:
     default = (wt.repo.main_ref or "").split("/")[-1]
     if wt.branch in (default, "main", "master"):
         return False
-    merged = wt.pr and wt.pr.get("state") == "MERGED"
+    # -D only when nothing on the branch is beyond what merged: its tip is
+    # the merged PR's head (the squash case) or already on main.
+    tip = gitio.out(["--git-dir", wt.repo.common_dir, "rev-parse", f"refs/heads/{wt.branch}"])
+    merged = bool(wt.pr and wt.pr.get("state") == "MERGED" and tip
+                  and wt.pr.get("head") == tip)
     flag = "-D" if merged else "-d"
     rc, _, _ = gitio.git(["--git-dir", wt.repo.common_dir, "branch", flag, wt.branch])
     return rc == 0
@@ -319,7 +347,11 @@ def move(path: str, new_path: str, home: Path | None = None) -> dict:
         raise WorktreeError("exists", f"{new_path} already exists")
     if wt.locked:
         raise WorktreeError("not_safe", f"{wt.path} is locked; unlock it first")
-    os.makedirs(os.path.dirname(target), exist_ok=True)
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+    except OSError as exc:
+        raise WorktreeError("io_error", f"cannot create {os.path.dirname(target)}: "
+                            f"{exc.strerror or exc}") from None
     _git_or_raise(["-C", wt.repo.root, "worktree", "move", wt.path, target],
                   "git worktree move")
     return show(target, home)

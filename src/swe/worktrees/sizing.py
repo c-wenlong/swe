@@ -85,7 +85,9 @@ def measure(wt: Worktree, sizes: bool = True) -> Worktree:
     if wt.state == ORPHANED and not os.path.isdir(wt.path):
         return wt
     dirs = rebuildable_dirs(wt.path)
-    kb = du_kb([wt.path, *dirs]) if sizes else {}
+    # Separate du runs: GNU du prints nothing for a folder it already
+    # counted under an earlier argument, so root-then-children loses them.
+    kb = {**du_kb([wt.path]), **du_kb(dirs)} if sizes else {}
     wt.size_kb = kb.get(wt.path) if sizes else None
     wt.rebuildable = [{"path": d, "kb": kb.get(d)} for d in dirs]
     return wt
