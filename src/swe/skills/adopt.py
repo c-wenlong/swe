@@ -21,6 +21,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from swe.configuration import CorruptConfigurationError
 from swe.paths import backup_tree, skills_dir_for
 from swe.skills.layout import (
     SkillLayoutError,
@@ -103,7 +104,10 @@ def _candidates(path: Path, root_real: Path, label: str) -> list[_Candidate]:
             real = folder.resolve()
         except (OSError, RuntimeError):
             continue
-        if not real.is_relative_to(root_real):
+        # Strictly below the root: a misplaced SKILL.md sitting at the
+        # root itself would otherwise make the whole skills directory a
+        # candidate and the move would take every folder in it.
+        if not real.is_relative_to(root_real) or real == root_real:
             continue
         # ``folder`` may be the symlink spelling of a dir whose real path
         # the walk skipped as a dupe (link order decides which came
@@ -131,21 +135,56 @@ def _same_skill(private_md: Path, shared_md: Path) -> bool:
     return same(private_md, shared_md)
 
 
+def _link_escapes(folder: Path) -> bool:
+    """A relative symlink under ``folder`` whose target leaves the folder.
+
+    Moving the folder changes where such a link lands: ``assets ->
+    ../common`` resolved inside the harness root but would aim inside
+    ~/.swe/skills after adoption. A skill carrying one stays private
+    rather than move somewhere its links no longer mean the same thing.
+    """
+    for dirpath, dirnames, filenames in os.walk(folder):
+        for entry in (Path(dirpath) / n for n in dirnames + filenames):
+            if not entry.is_symlink():
+                continue
+            try:
+                target = Path(os.readlink(entry))
+            except OSError:
+                continue
+            if target.is_absolute():
+                continue
+            dest = Path(os.path.normpath(str(entry.parent / target)))
+            if not dest.is_relative_to(folder):
+                return True
+    return False
+
+
+def _except_disabled(cand: _Candidate, name: str) -> bool:
+    """An ``except`` record that disabled ``name`` chose the private copy."""
+    record = selection_record_at(cand.root)
+    if record is None:
+        return False
+    mode, intent = selection_intent(record)
+    return mode == "except" and name in intent
+
+
 def _plan_actions(
     home: Path,
     skills_statuses,
     shared: Path,
     shared_resolved: Path,
     only: str | None,
+    archived: frozenset | set = frozenset(),
 ) -> tuple[list[tuple], list]:
     """Pair (actions, donor statuses). Each action is a tuple whose head is
     its kind: ("adopt", cand), ("dedupe", cand), ("conflict", name, [labels])."""
+    from swe.init.layout import registry_name
+
     donors = [
         s for s in skills_statuses
         if s.state in ("keep", "selection")
+        and registry_name(s.label) not in archived   # archived means unmanaged
     ]
-    from swe.init.layout import registry_name
-
     donors.sort(key=lambda s: (registry_name(s.label), str(s.path)))
     seen_folders: set[Path] = set()
     groups: dict[str, list[_Candidate]] = {}
@@ -185,6 +224,18 @@ def _plan_actions(
         holders.sort(key=lambda c: (c.label, str(c.folder)))
         slot = shared / name
         slot_md = slot / "SKILL.md"
+        # A folder whose relative links would escape after the move is
+        # never adopted or deduped — deleting or relocating it breaks the
+        # links — it stays private and is reported instead.
+        pinned = [c for c in holders if _link_escapes(c.folder)]
+        for cand in pinned:
+            actions.append((
+                "conflict", name, [cand.label],
+                "contains a relative link that would break after the move",
+            ))
+        holders = [c for c in holders if c not in pinned]
+        if not holders:
+            continue
         if os.path.lexists(slot):
             # The shared tree already holds this name: never overwritten.
             # Identical private copies fold into links; different content
@@ -198,7 +249,11 @@ def _plan_actions(
                 continue
             for cand in holders:
                 if _same_skill(cand.md, slot_md):
-                    actions.append(("dedupe", cand, slot))
+                    # Same skip rule as the real pass: an except record
+                    # that disabled the name keeps its private copy, so a
+                    # dry run must not promise a swap that never happens.
+                    if not _except_disabled(cand, name):
+                        actions.append(("dedupe", cand, slot))
                 else:
                     actions.append((
                         "conflict", name, [cand.label],
@@ -209,7 +264,8 @@ def _plan_actions(
         actions.append(("adopt", donor, slot))
         for cand in holders[1:]:
             if _same_skill(cand.md, donor.md):
-                actions.append(("dedupe", cand, slot))
+                if not _except_disabled(cand, name):
+                    actions.append(("dedupe", cand, slot))
             else:
                 actions.append((
                     "conflict", name, [cand.label],
@@ -233,15 +289,19 @@ def _claim_intent(cand: _Candidate, name: str) -> None:
     record_selection(cand.label, cand.root, mode, intent)
 
 
-def _drop_link_aimed_at(link: Path, target: Path) -> bool:
-    """Unlink ``link`` when it aims at ``target`` (normpath, one hop)."""
+def _drop_link_aimed_at(link: Path, targets: set[Path]) -> bool:
+    """Unlink ``link`` when it aims at any of ``targets`` (normpath, one hop).
+
+    Both spellings of a shared folder count — the literal path and its
+    resolved one — because a hand-made link can use either.
+    """
     try:
         pointed = Path(os.readlink(link))
     except OSError:
         return False
     if not pointed.is_absolute():
         pointed = link.parent / pointed
-    if Path(os.path.normpath(str(pointed))) != Path(os.path.normpath(str(target))):
+    if Path(os.path.normpath(str(pointed))) not in targets:
         return False
     try:
         link.unlink()
@@ -259,14 +319,13 @@ def _dedupe(cand: _Candidate, name: str, slot: Path, home: Path) -> bool:
     backed up and swapped.
     """
     record = selection_record_at(cand.root)
-    if record is not None:
-        mode, intent = selection_intent(record)
-        if mode == "except" and name in intent:
-            return False
+    if _except_disabled(cand, name):
+        return False
     backup_tree(cand.folder, home)
     shutil.rmtree(cand.folder)
     cand.folder.symlink_to(slot, target_is_directory=True)
     if record is not None:
+        mode, intent = selection_intent(record)
         if mode == "except":
             intent.discard(name)
         else:
@@ -302,8 +361,14 @@ def adopt_harness_skills(
 
         _, skills_statuses = plan(home)
 
+    # Archived harnesses are unmanaged: plan keeps some of their states
+    # (linked, selection) untouched, so neither the donor pick nor the
+    # mark-off pass may trust a state alone to mean "safe to change".
+    from swe.init.layout import archived_names, load_registry
+
+    archived = archived_names(load_registry(home))
     actions, _donors = _plan_actions(
-        home, skills_statuses, shared, shared_resolved, only)
+        home, skills_statuses, shared, shared_resolved, only, archived)
     result = AdoptionResult(dry_run=dry_run)
     if dry_run:
         for action in actions:
@@ -343,26 +408,42 @@ def adopt_harness_skills(
                 shutil.move(str(cand.folder), str(slot))
                 try:
                     cand.folder.symlink_to(slot, target_is_directory=True)
-                except OSError:
-                    # Roll the move back rather than leave the donor
-                    # without its skill.
-                    shutil.move(str(slot), str(cand.folder))
+                    _claim_intent(cand, name)
+                    record_adopted(name, cand.label)
+                except Exception:
+                    # Any failure after the move — the link-back or a
+                    # record save — must leave a clean state, not a moved
+                    # skill the mark-off pass never heard of. Put the
+                    # folder back and report the pass's own failure.
+                    if cand.folder.is_symlink():
+                        cand.folder.unlink()
+                    elif os.path.lexists(cand.folder):
+                        raise
+                    if os.path.lexists(slot):
+                        shutil.move(str(slot), str(cand.folder))
                     raise
-                _claim_intent(cand, name)
-                record_adopted(name, cand.label)
                 adopted_names.add(name)
                 kept.setdefault(cand.root, set()).add(name)
                 result.adopted.append({"name": name, "from": cand.label})
             else:  # dedupe
+                if not os.path.lexists(slot):
+                    # The move this link would have depended on never
+                    # landed: deleting the copy now would leave nothing.
+                    result.failed.append({
+                        "name": name,
+                        "error": f"{slot} is missing — the adoption it "
+                                 "depended on did not land"})
+                    continue
                 if _dedupe(cand, name, slot, home):
                     kept.setdefault(cand.root, set()).add(name)
                     result.deduped.append({"name": name, "harness": cand.label})
-        except OSError as exc:
+        except (OSError, SkillLayoutError, CorruptConfigurationError) as exc:
             result.failed.append({"name": name, "error": str(exc)})
 
     if adopted_names:
         result.held_off = _mark_off(
-            adopted_names, kept, skills_statuses, shared, shared_resolved)
+            adopted_names, kept, skills_statuses, shared, shared_resolved,
+            archived, result.failed)
     return result
 
 
@@ -372,6 +453,8 @@ def _mark_off(
     skills_statuses,
     shared: Path,
     shared_resolved: Path,
+    archived: set,
+    failed: list[dict],
 ) -> list[dict]:
     """Mark adopted names off in every root that did not donate them.
 
@@ -381,11 +464,12 @@ def _mark_off(
     ``disabled``/off ``enabled``. A hand-made link for the name that
     already resolved into shared was dead weight before and would
     suddenly go live — it is removed. Missing roots, file roots and
-    roots the user asked swe to leave alone (``ignored``/``skipped``)
-    are never touched.
+    roots the user asked swe to leave alone (``ignored``/``skipped``,
+    archived harnesses) are never touched.
     """
     from swe.init.layout import (
         _chain_lands_on,
+        _links_into,
         registry_name,
         shared_skill_dirs,
         skill_root_links,
@@ -393,14 +477,30 @@ def _mark_off(
 
     held: dict[str, set[str]] = {}
     shared_dirs = shared_skill_dirs(shared)
+    # ``kept`` keys are donor paths as found; the same physical root under
+    # a second spelling (a linked parent dir) must count as kept too, or
+    # the mark-off would strip that spelling's link-back.
+    kept_real: dict[Path, set[str]] = {}
+    for path, held_names in kept.items():
+        try:
+            kept_real.setdefault(path.resolve(), set()).update(held_names)
+        except (OSError, RuntimeError):
+            pass
     for status in skills_statuses:
         if status.state in ("ignored", "skipped"):
             continue
         path = status.path
+        label = registry_name(status.label)
+        if label in archived:
+            continue
         off = names - kept.get(path, set())
+        if off:
+            try:
+                off -= kept_real.get(path.resolve(), set())
+            except (OSError, RuntimeError):
+                pass
         if not off or path == shared:
             continue
-        label = registry_name(status.label)
         marked: set[str] = set()
         if path.is_symlink():
             if not _chain_lands_on(path, shared):
@@ -408,18 +508,44 @@ def _mark_off(
             # A whole-root link sees every shared folder; convert it to
             # an except selection that links everything but the adopted
             # names — the same move set_skill_enabled makes for a manual
-            # disable.
+            # disable. Build the replacement beside the link and swap it
+            # in one rename, so a mid-build failure leaves the working
+            # link untouched instead of a half-linked directory.
+            tmp = path.parent / f".{path.name}.adopt-{os.getpid()}"
             try:
-                path.unlink()
-                path.mkdir()
+                raw_target = os.readlink(path)   # keep for rollback
+                shutil.rmtree(tmp, ignore_errors=True)
+                tmp.mkdir()
                 for dname, dpath in shared_dirs.items():
                     if dname not in off:
-                        (path / dname).symlink_to(
+                        (tmp / dname).symlink_to(
                             dpath, target_is_directory=True)
-                record_selection(label, path, "except", sorted(off))
-                marked = set(off)
-            except OSError:
+                # rename() will not replace a symlink that resolves to a
+                # directory, so the swap unlinks first; a failed rename
+                # re-links the original spelling.
+                path.unlink()
+                try:
+                    os.rename(tmp, path)
+                except OSError:
+                    path.symlink_to(raw_target, target_is_directory=True)
+                    raise
+            except OSError as exc:
+                shutil.rmtree(tmp, ignore_errors=True)
+                failed.append({
+                    "name": ", ".join(sorted(off)),
+                    "error": f"could not convert the {label} skills root: {exc}"})
                 continue
+            try:
+                record_selection(label, path, "except", sorted(off))
+            except (OSError, CorruptConfigurationError) as exc:
+                # The on-disk shape already keeps the adopted names out;
+                # the lost record means a later sync will not re-derive
+                # it, so the failure is reported, not swallowed.
+                failed.append({
+                    "name": ", ".join(sorted(off)),
+                    "error": f"converted the {label} skills root but its "
+                             f"selection record failed to save: {exc}"})
+            marked = set(off)
         elif path.is_dir():
             record = selection_record_at(path)
             if record is not None:
@@ -428,9 +554,19 @@ def _mark_off(
                 if new != intent:
                     record_selection(label, path, mode, new)
                     marked |= new - intent if mode == "except" else intent - new
+            # Top-level selection links plus anything deeper, like an
+            # adopt link-back at root/cat/name — either can resolve into
+            # shared under its literal or resolved spelling.
             links = skill_root_links(path, shared)
-            for n in sorted(off & set(links)):
-                if _drop_link_aimed_at(links[n], shared / n):
+            deep = _links_into(path, shared)
+            for n in sorted(off):
+                targets = {
+                    Path(os.path.normpath(str(base / n)))
+                    for base in (shared, shared_resolved)
+                }
+                aimed = [links[n]] if n in links else []
+                aimed += [p for p in deep if p.name == n]
+                if any(_drop_link_aimed_at(p, targets) for p in aimed):
                     marked.add(n)
         if marked:
             held[label] = held.get(label, set()) | marked

@@ -595,12 +595,28 @@ def remove_skill(
     except (OSError, RuntimeError):
         shared_resolved = shared
 
-    folder = find_skill_directory(name, SHARED_LABEL, home=home, cwd=cwd)
-    # folder.parent is compared unresolved: a shared skill vendored in by
-    # a symlink resolves OUT of the tree, yet removing its link is the
-    # point. Discovery walks the resolved shared root, so a top-level
-    # skill's folder always parents to it directly.
-    if folder.parent != shared_resolved:
+    try:
+        folder = find_skill_directory(name, SHARED_LABEL, home=home, cwd=cwd)
+    except SkillLayoutError:
+        # discover_skills does not descend into a top-level entry that is
+        # itself a link (shared/foo -> elsewhere), so a vendored-in skill
+        # is looked up directly before giving up.
+        candidate = shared / name
+        if not (
+            os.path.lexists(candidate)
+            and candidate.is_dir()
+            and (candidate / "SKILL.md").is_file()
+        ):
+            raise
+        folder = candidate
+    # The parent is compared resolved: a shared skill vendored in by a
+    # symlink resolves OUT of the tree, yet removing its link is the
+    # point, and the direct lookup above produces the literal spelling.
+    try:
+        parent = folder.parent.resolve()
+    except (OSError, RuntimeError):
+        parent = folder.parent
+    if parent != shared_resolved:
         raise SkillLayoutError(
             f"{name} is nested in {folder.parent.name}, not a top-level "
             "shared skill; remove the skill it belongs to instead"
@@ -614,28 +630,36 @@ def remove_skill(
     }
 
     from swe.init.layout import (
+        _links_into,
         discover_skill_roots,
         skill_root_label,
-        skill_root_links,
     )
 
+    # The backup comes first: links are only safe to drop once the skill
+    # is known to survive removal. A failed remove must not strand a
+    # still-installed skill with no harness links.
+    backup = backup_tree(folder, home)
+
     dropped: list[str] = []
+    dropped_links: list[tuple[Path, str]] = []
     private_left: list[str] = []
     for root in discover_skill_roots(home):
         if root.is_symlink() or not root.is_dir():
             continue
         label = skill_root_label(root, home)
-        for link in skill_root_links(root, shared).values():
+        for link in _links_into(root, shared):
             try:
-                pointed = Path(os.readlink(link))
+                raw = os.readlink(link)
             except OSError:
                 continue
+            pointed = Path(raw)
             if not pointed.is_absolute():
                 pointed = link.parent / pointed
             if Path(os.path.normpath(str(pointed))) not in targets:
                 continue
             try:
                 link.unlink()
+                dropped_links.append((link, raw))
                 dropped.append(label)
             except OSError:
                 pass
@@ -647,11 +671,18 @@ def remove_skill(
         ):
             private_left.append(label)
 
-    backup = backup_tree(folder, home)
-    if folder.is_symlink():
-        folder.unlink()
-    else:
-        shutil.rmtree(folder)
+    try:
+        if folder.is_symlink():
+            folder.unlink()
+        else:
+            shutil.rmtree(folder)
+    except OSError:
+        for link, raw in dropped_links:
+            try:
+                link.symlink_to(raw)
+            except OSError:
+                pass
+        raise
     # Provenance and selection records for the name would otherwise steer
     # a later adopt or reconcile on a skill that no longer exists.
     from swe.skills.layout import purge_skill_state

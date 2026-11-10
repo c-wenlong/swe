@@ -427,6 +427,38 @@ def skill_root_links(root: Path, shared: Path) -> dict[str, Path]:
     return out
 
 
+def _links_into(root: Path, shared: Path) -> list[Path]:
+    """Every symlink anywhere under ``root`` aiming into ``shared``.
+
+    ``skill_root_links`` scans only the top level, the shape a selection
+    manages. Adoption's link-back can sit deeper (``root/cat/name``), and
+    so can a hand-made link: this walks the real tree — ``os.walk`` does
+    not descend through the links it lists — applying the same one-hop
+    normpath test at every depth.
+    """
+    import os
+
+    try:
+        shared_resolved = shared.resolve()
+    except (OSError, RuntimeError):
+        return []
+    out: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        for entry in (Path(dirpath) / n for n in dirnames + filenames):
+            if not entry.is_symlink():
+                continue
+            try:
+                target = Path(os.readlink(entry))
+            except OSError:
+                continue
+            if not target.is_absolute():
+                target = entry.parent / target
+            target = Path(os.path.normpath(target))
+            if target.is_relative_to(shared) or target.is_relative_to(shared_resolved):
+                out.append(entry)
+    return out
+
+
 def _selection_detail(path: Path, shared: Path, links: dict[str, Path]) -> str:
     """The classify detail for a selection root: what the links cover."""
     shared_names = set(shared_skill_dirs(shared))
@@ -541,13 +573,19 @@ def _tree_is_empty(root: Path, skip: frozenset[str] = frozenset()) -> bool:
     return True
 
 
-def _skill_manifest(skill_dir: Path) -> dict[str, int] | None:
-    """relpath -> size for every file under one skill dir; None if unreadable."""
+def _skill_manifest(skill_dir: Path) -> dict[str, tuple[int, bool]] | None:
+    """relpath -> (size, executable) for every file under one skill dir.
+
+    The exec bit counts: two copies that differ only in a helper losing
+    its +x are not the same skill — the dedupe that swaps one for the
+    other would silently break whatever runs the helper. None if
+    unreadable.
+    """
     try:
         return {
-            p.relative_to(skill_dir).as_posix(): p.stat().st_size
+            p.relative_to(skill_dir).as_posix(): (st.st_size, bool(st.st_mode & 0o111))
             for p in skill_dir.rglob("*")
-            if p.is_file()
+            if p.is_file() and (st := p.stat())
         }
     except OSError:
         return None
@@ -649,7 +687,15 @@ def classify_skill_root(path: Path, home: Path | None = None) -> tuple[str, str]
         from swe.skills.layout import selection_record_at
 
         if selection_record_at(path) is None:
-            links = None
+            # An adopt link-back can sit below the top level
+            # (root/cat/name -> shared/name): the walk below follows it,
+            # reads a private copy identical to shared, and the absorb
+            # would then swap the root for a whole-folder link that
+            # exposes every shared skill. Any link into shared at any
+            # depth means this root is a selection's business, never an
+            # absorb's.
+            deep = _links_into(path, shared)
+            links = {p.name: p for p in deep} if deep else None
     if links is not None:
         return "selection", _selection_detail(path, shared, links)
 

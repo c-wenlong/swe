@@ -374,9 +374,10 @@ def cmd_skills_adopt(args):
         print(c("red", f"  {exc}"), file=error_stream(json_view))
         return 1
     if json_view:
-        return emit(AdoptReply(
+        emit(AdoptReply(
             result.adopted, result.deduped, result.conflicts,
             result.failed, result.held_off, result.dry_run).to_json())
+        return 1 if result.failed else 0
     _print_adopt_result(result)
     return 1 if result.failed else 0
 
