@@ -181,7 +181,10 @@ public struct PluginExploreIndex: Sendable, Equatable {
                         && registration?.location.map { location in
                             market.path.map { resolve(location) == resolve($0) } ?? false
                         } == true
-                    return (harness, managed && usesHub ? catalog.actions(for: plugin, in: harness) : [])
+                    let offered = catalog.actions(for: plugin, in: harness)
+                    // Existing installs remain controllable before adoption;
+                    // only installing from a source requires SWE ownership.
+                    return (harness, managed && usesHub ? offered : offered.filter { $0.verb != .install })
                 })
                 rows.append(ExploreRow(plugin: plugin, isHub: managed, skills: skills,
                                        actions: actions, haystack: haystack))

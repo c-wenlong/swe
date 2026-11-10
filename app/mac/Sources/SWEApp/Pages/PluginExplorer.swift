@@ -227,7 +227,7 @@ private struct PluginTable: View {
     var openPlugin: (ExplorePlugin) -> Void
 
     static let nameMinWidth: CGFloat = 220
-    static let sourceWidth: CGFloat = 96
+    static let sourceWidth: CGFloat = 128
     static let cellWidth: CGFloat = 84
     /// One column's footprint for the reorder maths: separator plus cell.
     static let pitch: CGFloat = 1 + cellWidth
@@ -409,6 +409,7 @@ private struct PluginColumnHeader: View {
     /// VoiceOver and keyboard reorder, one slot in a direction (-1, +1).
     var move: (Int) -> Void
     @State private var hovering = false
+    @State private var open = false
     /// True only while the grip's gesture is live: resets on cancel.
     @GestureState private var down = false
 
@@ -423,24 +424,38 @@ private struct PluginColumnHeader: View {
         }
     }
 
-    @ViewBuilder private var columnMenu: some View {
-        Button("Disable all in \(name)") { confirmBatch(batch(.disable)) }
-            .disabled(busy || batch(.disable).isEmpty)
-        Button("Enable all in \(name)") { confirmBatch(batch(.enable)) }
-            .disabled(busy || batch(.enable).isEmpty)
+    private var columnActions: [PopupAction] {
+        guard !busy else { return [] }
+        var actions: [PopupAction] = []
+        if !batch(.disable).isEmpty {
+            actions.append(.init(id: "off", title: "Disable all in \(name)", symbol: "power"))
+        }
+        if !batch(.enable).isEmpty {
+            actions.append(.init(id: "on", title: "Enable all in \(name)", symbol: "power"))
+        }
+        return actions
+    }
+
+    private func chooseColumnAction(_ id: String) {
+        confirmBatch(batch(id == "off" ? .disable : .enable))
     }
 
     var body: some View {
-        Menu { columnMenu } label: {
+        Button { if !columnActions.isEmpty { open.toggle() } } label: {
             HarnessMarkView(harness: harness)
                 .frame(width: width)
                 .contentShape(.rect)
         }
-        .menuStyle(.button)
         .buttonStyle(.plain)
-        .menuIndicator(.hidden)
         .fixedSize()
-        .contextMenu { columnMenu }
+        .popover(isPresented: $open) {
+            ActionOptionList(actions: columnActions) { id in
+                open = false
+                DispatchQueue.main.async { chooseColumnAction(id) }
+            }
+            .onExitCommand { open = false }
+        }
+        .modifier(ActionContextMenu(actions: columnActions, choose: chooseColumnAction))
         .overlay(alignment: .leading) {
             Image(systemName: "line.3.horizontal")
                 .font(Theme.font(size: 9, weight: .bold))
@@ -548,7 +563,7 @@ private struct PluginGridRow: View {
         .contentShape(.rect)
         .onHover { hovering = $0 }
         .accessibilityLabel("\(shown), \(accessibilityLabelSuffix)")
-        .contextMenu { rowMenu }
+        .modifier(ActionContextMenu(actions: rowActions, choose: chooseRowAction))
     }
 
     /// The ref when a display name covers the name, else the description,
@@ -566,7 +581,7 @@ private struct PluginGridRow: View {
             Button("Import to SWE") { confirm(PluginAction(verb: .adopt, ref: plugin.ref, harness: "swe")) }
                 .font(Theme.caption)
                 .disabled(busy)
-                .help("Copy the installed files into SWE before managing this plugin")
+                .help("Copy the installed files into SWE to own and edit them")
         } else {
             Text("swe")
                 .font(Theme.font(size: 10, weight: .semibold))
@@ -578,21 +593,49 @@ private struct PluginGridRow: View {
         }
     }
 
-    /// The row's right click: the master switch's two directions as menu
-    /// items, the rename a folder-sourced marketplace allows, and the
-    /// plugin's folder in Finder.
-    @ViewBuilder private var rowMenu: some View {
-        Button("Turn off everywhere") { confirmBatch(disables) }
-            .disabled(disables.isEmpty)
-        Button("Turn on everywhere") { confirmBatch(enables) }
-            .disabled(enables.isEmpty)
-        if canRename(plugin.marketplace) {
-            Button("Rename marketplace…") { onRename(plugin.marketplace) }
+    private var removals: [PluginAction] {
+        harnesses.compactMap { harness in
+            entry.row.actions[harness]?.first { $0.verb == .uninstall }
         }
-        if let path = plugin.sourcePath {
-            Button("Show in Finder") {
+    }
+
+    private var rowActions: [PopupAction] {
+        guard !busy else { return [] }
+        var actions: [PopupAction] = []
+        if !disables.isEmpty { actions.append(.init(id: "off", title: "Turn off everywhere", symbol: "power")) }
+        if !enables.isEmpty { actions.append(.init(id: "on", title: "Turn on everywhere", symbol: "power")) }
+        if !entry.row.isHub {
+            actions.append(.init(id: "import", title: "Import to SWE…", symbol: "square.and.arrow.down"))
+        }
+        if canRename(plugin.marketplace) {
+            actions.append(.init(id: "rename", title: "Rename marketplace…", symbol: "pencil"))
+        }
+        if plugin.sourcePath != nil {
+            actions.append(.init(id: "finder", title: "Show in Finder", symbol: "folder"))
+        }
+        for action in removals {
+            actions.append(.init(id: action.id, title: "Remove from \(HarnessMark(action.harness).name)…",
+                                 symbol: "trash", destructive: true))
+        }
+        if removals.count > 1 {
+            actions.append(.init(id: "remove-all", title: "Remove from all harnesses…", symbol: "trash", destructive: true))
+        }
+        return actions
+    }
+
+    private func chooseRowAction(_ id: String) {
+        switch id {
+        case "off": confirmBatch(disables)
+        case "on": confirmBatch(enables)
+        case "import": confirm(PluginAction(verb: .adopt, ref: plugin.ref, harness: "swe"))
+        case "rename": onRename(plugin.marketplace)
+        case "finder":
+            if let path = plugin.sourcePath {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
             }
+        case "remove-all": confirmBatch(removals)
+        default:
+            if let action = removals.first(where: { $0.id == id }) { confirm(action) }
         }
     }
 
@@ -613,7 +656,6 @@ private struct PluginGridRow: View {
     }
 
     private func masterTip(on: Bool) -> String {
-        if !entry.row.isHub { return "Import into SWE to manage this plugin." }
         if on {
             return disables.isEmpty
                 ? "On, but no harness here can disable it."
@@ -643,6 +685,8 @@ private struct PluginCell: View {
     var busy: Bool
     var confirm: (PluginAction) -> Void
 
+    @State private var open = false
+
     private var name: String { HarnessMark(harness).name }
 
     var body: some View {
@@ -655,18 +699,24 @@ private struct PluginCell: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .hoverTip(help(for: state), pinsOnClick: false)
             } else {
-                Menu {
-                    ForEach(actions) { action in
-                        Button(action.menuTitle) { confirm(action) }
-                    }
-                } label: {
+                Button { open.toggle() } label: {
                     mark(state.status)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .contentShape(.rect)
                 }
-                .menuStyle(.button)
-                .menuIndicator(.hidden)
                 .buttonStyle(.plain)
+                .popover(isPresented: $open) {
+                    ActionOptionList(actions: actions.map { action in
+                        PopupAction(id: action.id, title: action.menuTitle,
+                                    symbol: action.verb == .uninstall ? "trash" : "power",
+                                    destructive: action.verb == .uninstall)
+                    }) { id in
+                        guard let action = actions.first(where: { $0.id == id }) else { return }
+                        open = false
+                        DispatchQueue.main.async { confirm(action) }
+                    }
+                    .onExitCommand { open = false }
+                }
                 .disabled(busy)
                 .hoverTip(help(for: state) + " Click for actions.", pinsOnClick: false)
             }

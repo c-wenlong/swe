@@ -467,7 +467,10 @@ def explore(home: Path) -> dict:
                            if managed and r.get("source_type") == "directory"
                            and r.get("location") and market.get("path")
                            and Path(r["location"]).resolve() == Path(market["path"]).resolve()]
-            row = _plugin(plugin, names, [h for h in catalog["actions"] if h in deployments])
+            row = _plugin(plugin, names, catalog["actions"])
+            for harness, state in row["harnesses"].items():
+                if harness not in deployments:
+                    state["actions"] = [a for a in state["actions"] if a != "install"]
             row["managed"] = managed
             if not managed:
                 row["harnesses"]["swe"] = {"status": "absent", "actions": ["import"],

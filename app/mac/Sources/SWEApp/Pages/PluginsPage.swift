@@ -25,7 +25,7 @@ struct PluginsPage: View {
     var body: some View {
         @Bindable var app = app
         Page(title: "Plugins",
-             subtitle: "Local plugins managed by SWE. Import harness copies into SWE before managing them.",
+             subtitle: "Switch installed plugins on or off in each harness. Import into SWE to own and edit their files.",
              back: app.pluginsTab == .explore && detailOpen
                 ? ("Back to all plugins", { app.navReselects += 1 }) : nil) {
             switch app.pluginsTab {
@@ -104,7 +104,8 @@ struct PluginsPage: View {
         .confirmationDialog(batchQuestion,
                             isPresented: .init(get: { confirmingBatch != nil }, set: { if !$0 { confirmingBatch = nil } }),
                             presenting: confirmingBatch) { actions in
-            Button("Run all") { Task { await runBatch(actions) } }
+            Button(actions.first?.verb == .uninstall ? "Remove all" : "Run all",
+                   role: actions.first?.verb == .uninstall ? .destructive : nil) { Task { await runBatch(actions) } }
             Button("Cancel", role: .cancel) {}
         } message: { actions in
             Text("One at a time, stopping at the first that fails:\n\n"
