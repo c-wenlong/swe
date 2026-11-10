@@ -8,6 +8,8 @@ struct StoredReading: Codable, Equatable {
     /// When the provider answered, kept as is when the reading is reused.
     var fetchedAt: Date
     var monthlyCredits: MonthlyCredits? = nil
+    /// Billing-only throttle; regular usage can still refresh.
+    var monthlyRetryAt: Date? = nil
 }
 
 /// The last failed fetch, kept so a launch can show "couldn't refresh" and
@@ -75,6 +77,14 @@ struct UsageCacheStore {
             // Keep the later of the two: a copy that saved an older (or no)
             // cooldown must not shorten one another copy just recorded.
             next.cooldownUntil = until
+            entry = next
+        }
+        if var next = entry, var reading = next.reading,
+           let current = accounts[Self.id(key)], current.fingerprint == next.fingerprint,
+           let until = current.reading?.monthlyRetryAt, until > now(),
+           until > (reading.monthlyRetryAt ?? .distantPast) {
+            reading.monthlyRetryAt = until
+            next.reading = reading
             entry = next
         }
         accounts[Self.id(key)] = entry

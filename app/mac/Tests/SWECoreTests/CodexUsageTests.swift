@@ -132,6 +132,29 @@ import Testing
         #expect(monthly.credits == MonthlyCredits(used: used, limit: cap))
     }
 
+    @Test func billingRetryAfterSurvivesRestartAndForcedRefresh() async {
+        let h = UsageHarness()
+        h.files.set("\(codexHome)/auth.json", codexAuthJSON())
+        let standard = Data(#"{"plan_type":"education","rate_limit":{"primary_window":{"used_percent":53}}}"#.utf8)
+        h.transport.reply(200, body: standard)
+        h.transport.reply(429, headers: ["Retry-After": "3600"])
+        let first = await h.makeService().usage(for: codexKey, force: true)
+        #expect(first.status == .ok)
+        #expect(first.windows.map(\.label) == ["5h"])
+        h.clock.advance(600)
+        h.transport.reply(200, body: standard)
+        let refreshed = await h.makeService().usage(for: codexKey, force: true)
+        #expect(refreshed.status == .ok)
+        #expect(h.transport.requests.count == 3)
+        h.clock.advance(3001)
+        h.transport.reply(200, body: standard)
+        h.transport.reply(200, body: Data(#"{"effective_monthly_limit":{"limit":700},"current_month_usage":350}"#.utf8))
+        let resumed = await h.makeService().usage(for: codexKey, force: true)
+        #expect(h.transport.requests.count == 5)
+        #expect(resumed.windows.last?.usedPercent == 50)
+        #expect(resumed.monthlyCredits == MonthlyCredits(used: 350, limit: 700))
+    }
+
     @Test func unavailableMonthlyBillingKeepsTheOtherWindows() async {
         let h = UsageHarness()
         h.files.set("\(codexHome)/auth.json", codexAuthJSON())
