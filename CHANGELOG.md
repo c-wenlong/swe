@@ -353,6 +353,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `swe list` also pick up `~/.codex/archived_sessions/` now: archiving a
   thread moves its rollout there, and an archived session still ran.
 
+- **`swe init` no longer re-asks about a harness it already
+  registered.** A skills root discovered under an aliased label
+  (`~/.vibe/skills` is "vibe", the binary behind `mistral-vibe`) was
+  filed in `harness.json` under that label, while every "is this root
+  known?" check translates the label to the canonical registry key —
+  so the entry never matched and the "New skills folders found" picker
+  came back on every run, most visibly inside `darwin-rebuild`
+  activations. Registration now writes the canonical key and absorbs a
+  stale label-keyed entry, and the known, archived and disabled-name
+  checks all count a key's canonical name too, so an entry an older
+  init filed as `vibe` still reads as registered.
+
 ### Added
 
 - **Devin free-model limit status.** Accounts and the Mac menu bar show

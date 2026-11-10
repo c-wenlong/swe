@@ -60,6 +60,10 @@ def new_harnesses(skills: list[LinkStatus], registry: dict) -> list[LinkStatus]:
         for entry in registry.values()
         for alias in aliases_of(entry)
     }
+    # An entry filed under a discovered label ("vibe") rather than the
+    # canonical key ("mistral-vibe") counts as known under both names,
+    # or the same root would be offered again on every run.
+    known |= {registry_name(name) for name in list(known)}
     known |= {registry_name(label) for label in HARNESS_SIGNATURES}
     known |= {
         registry_name(skill_root_label(sig.skills, registry=registry))
@@ -181,7 +185,14 @@ def register(
                 "file": home_relative(instruction_target(root, filename), home),
             }
         entry["capabilities"] = capabilities
-        registry[label] = {**registry.get(label, {}), **entry}
+        # Entries are keyed by the canonical registry name: a discovered
+        # "vibe" label files as "mistral-vibe", matching the catalog and
+        # REGISTRY_ALIASES. A stale entry under the raw label is absorbed.
+        name = registry_name(label)
+        merged = {**registry.get(label, {}), **registry.get(name, {}), **entry}
+        if name != label:
+            registry.pop(label, None)
+        registry[name] = merged
     for label, root in declined.items():
         entry = _entry(label, root, home, now)
         entry["state"] = "archived"
@@ -193,9 +204,12 @@ def register(
         entry["capabilities"] = {
             "skills": {"supported": True, "root": home_relative(root, home)},
         }
-        merged = {**registry.get(label, {}), **entry}
+        name = registry_name(label)
+        merged = {**registry.get(label, {}), **registry.get(name, {}), **entry}
         merged.pop("pin", None)  # archived and starred are exclusive
-        registry[label] = merged
+        if name != label:
+            registry.pop(label, None)
+        registry[name] = merged
     config_dir.mkdir(parents=True, exist_ok=True)
     target = config_dir / "harness.json"
     # registry_text is save_registry's own encoding, trailing newline

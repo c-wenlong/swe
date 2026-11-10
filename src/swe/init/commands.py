@@ -471,6 +471,9 @@ def run_init(home: Path, *, check_only: bool = False, force: bool = False,
         for entry in registry.values()
         for alias in aliases_of(entry)
     }
+    # A non-canonical key ("vibe") covers its canonical name
+    # ("mistral-vibe"), the name a translated label is compared against.
+    registered |= {registry_name(name) for name in list(registered)}
     instructions = [
         s for s in instructions
         if not (s.state == "skipped" and registry_name(s.label) not in registered)
