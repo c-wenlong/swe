@@ -1008,13 +1008,17 @@ private struct ChaptersEditor: View {
         let chapters = app.chapters
         return Strip {
             HStack(spacing: 6) {
+                // Whole at the pane's narrowest: "+N not compiled" gives
+                // way first.
                 Text("Chapters").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1).fixedSize()
                 // The count is the compiled chapters, the same M as the
                 // editor's "Chapter N of M"; files index.txt leaves out
                 // (the folder's README.md, say) are counted apart.
                 let compiledCount = check.chapters.count
                 let uncompiled = uncompiledFileCount(chapters.tree)
                 Text("\(compiledCount)").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    .lineLimit(1).fixedSize()
                     .hoverTip("\(compiledCount) chapters compiled into AGENTS.md", replacesLabel: false)
                 if uncompiled > 0 {
                     Text("+\(uncompiled) not compiled")
@@ -2370,35 +2374,18 @@ struct InstructionEditor: View {
     @State private var mode = UserDefaults.standard.string(forKey: Self.modeKey) ?? "raw"
     @State private var richFocused = false
     @State private var richFocusToken = 0
+    /// The card's width, to fold the header's labels away when narrow.
+    @State private var width: CGFloat = 0
+
+    /// Icon-only header buttons: the card is too narrow for their labels
+    /// beside the title (a 900 pt window with the chapter pane open).
+    private var compact: Bool {
+        EditorHeader.isCompact(width: Double(width), zoom: TextZoomModel.shared.zoom)
+    }
 
     var body: some View {
         Card(title: title, subtitle: subtitle, monoSubtitle: monoSubtitle) {
-            HStack(spacing: 8) {
-                if !readOnly && !rawOnly {
-                    Tabs(options: [("raw", "Raw"), ("rich", "Rich")], selection: $mode, style: .segmented)
-                }
-                if document.isDirty {
-                    HStack(spacing: 5) {
-                        Circle().fill(Theme.warning).frame(width: Theme.statusDot, height: Theme.statusDot)
-                        Text("Unsaved").font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-                if !readOnly {
-                    Button("Revert") { Task { await document.revert(); error = nil } }
-                        .secondaryButton()
-                        .disabled(!document.isDirty)
-                    Button("Save") { save(overwrite: false) }
-                        .primaryButton()
-                        .keyboardShortcut("s", modifiers: .command)
-                        .disabled(!document.isDirty || document.changedOnDisk)
-                }
-                if let close {
-                    Button("Close") { close() }
-                        .secondaryButton()
-                        .keyboardShortcut(.cancelAction)
-                }
-            }
+            header
         } content: {
             switch document.state {
             case .loading:
@@ -2411,6 +2398,62 @@ struct InstructionEditor: View {
                 editorContent
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+    }
+
+    /// Mode tabs, the Unsaved dot and the buttons. Labels never wrap: a
+    /// narrow card shows the buttons as icons (named by `.help` and
+    /// VoiceOver) and the Unsaved dot without its word.
+    private var header: some View {
+        HStack(spacing: 8) {
+            if !readOnly && !rawOnly {
+                Tabs(options: [("raw", "Raw"), ("rich", "Rich")], selection: $mode, style: .segmented)
+            }
+            if document.isDirty {
+                HStack(spacing: 5) {
+                    Circle().fill(Theme.warning).frame(width: Theme.statusDot, height: Theme.statusDot)
+                    if !compact {
+                        Text("Unsaved").font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Unsaved")
+                .help(compact ? "Unsaved changes" : "")
+            }
+            if !readOnly {
+                headerButton("Revert", icon: "arrow.uturn.backward") {
+                    Task { await document.revert(); error = nil }
+                }
+                .secondaryButton()
+                .disabled(!document.isDirty)
+                headerButton("Save", icon: "square.and.arrow.down") { save(overwrite: false) }
+                    .primaryButton()
+                    .keyboardShortcut("s", modifiers: .command)
+                    .disabled(!document.isDirty || document.changedOnDisk)
+            }
+            if let close {
+                headerButton("Close", icon: "xmark") { close() }
+                    .secondaryButton()
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .lineLimit(1)
+        .fixedSize()
+    }
+
+    /// A header button: its word, or only its icon when `compact`. The
+    /// word stays the accessibility label and the tooltip either way.
+    private func headerButton(_ title: String, icon: String,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            if compact {
+                Label(title, systemImage: icon).labelStyle(.iconOnly)
+            } else {
+                Text(title)
+            }
+        }
+        .help(compact ? title : "")
+        .accessibilityLabel(title)
     }
 
     /// The ready state: the changed-on-disk banner, a save error, and the

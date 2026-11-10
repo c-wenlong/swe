@@ -91,6 +91,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **AGENTS.md editor header no longer wraps at narrow widths (Mac).** In a
+  900 pt window the Edit tab's Revert, Save and Close buttons wrapped
+  mid-word ("Rever t"). A narrow editor now shows them as icons (named in
+  the tooltip and to VoiceOver) and the Unsaved marker as a dot, and the
+  Chapters heading stays whole; wider windows keep the words.
 - **The Mac app no longer offers to trash a skill's SKILL.md by
   itself.** A skill's Contents card put a trash button on its main
   SKILL.md (and on each skill folder's SKILL.md in a plugin), though a

@@ -33,3 +33,20 @@ import Testing
         #expect(ChapterPaneWidth.clamped(.infinity) == ChapterPaneWidth.maximum)
     }
 }
+
+@Suite struct EditorHeaderTests {
+    @Test func aNarrowCardGoesCompact() {
+        #expect(EditorHeader.isCompact(width: 500))
+        #expect(!EditorHeader.isCompact(width: 900))
+    }
+
+    @Test func anUnmeasuredCardKeepsItsWords() {
+        #expect(!EditorHeader.isCompact(width: 0))
+    }
+
+    @Test func theThresholdScalesWithTextZoom() {
+        let width = EditorHeader.compactBelow + 50
+        #expect(!EditorHeader.isCompact(width: width))
+        #expect(EditorHeader.isCompact(width: width, zoom: 1.5))
+    }
+}
