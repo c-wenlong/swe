@@ -105,6 +105,14 @@ def _candidates(path: Path, root_real: Path, label: str) -> list[_Candidate]:
             continue
         if not real.is_relative_to(root_real):
             continue
+        # ``folder`` may be the symlink spelling of a dir whose real path
+        # the walk skipped as a dupe (link order decides which came
+        # first). Moving a link moves the link, so adopt the dir it
+        # stands for — the link-back at the real path keeps every
+        # spelling resolving.
+        if folder.is_symlink():
+            folder = real
+            md = folder / "SKILL.md"
         skill, _desc = parse_skill_md(md)
         out.append(_Candidate(folder, md, folder.name, skill, path, label))
     # A folder nested inside another candidate's folder rides along when
@@ -336,13 +344,6 @@ def adopt_harness_skills(
                     # without its skill.
                     shutil.move(str(slot), str(cand.folder))
                     raise
-                # A now-empty grouping dir (root/cat after cat/foo moved)
-                # is litter, not content.
-                if cand.folder.parent != cand.root:
-                    try:
-                        cand.folder.parent.rmdir()
-                    except OSError:
-                        pass
                 _claim_intent(cand, name)
                 record_adopted(name, cand.label)
                 adopted_names.add(name)
@@ -381,6 +382,7 @@ def _mark_off(
     """
     from swe.init.layout import (
         _chain_lands_on,
+        registry_name,
         shared_skill_dirs,
         skill_root_links,
     )
@@ -394,7 +396,7 @@ def _mark_off(
         off = names - kept.get(path, set())
         if not off or path == shared:
             continue
-        label = status.label
+        label = registry_name(status.label)
         marked: set[str] = set()
         if path.is_symlink():
             if not _chain_lands_on(path, shared):
@@ -421,7 +423,7 @@ def _mark_off(
                 new = intent | off if mode == "except" else intent - off
                 if new != intent:
                     record_selection(label, path, mode, new)
-                    marked |= off if mode == "except" else (intent - new)
+                    marked |= new - intent if mode == "except" else intent - new
             links = skill_root_links(path, shared)
             for n in sorted(off & set(links)):
                 if _drop_link_aimed_at(links[n], shared / n):

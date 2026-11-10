@@ -243,8 +243,12 @@ def installed_skills(home: Path | None = None, cwd: Path | None = None) -> dict:
     roots = _plan_skill_roots(home)
     archived = archived_names(load_registry(home))
     shared = paths.skills_dir_for(home)
-    from swe.init.layout import shared_skill_dirs, skill_root_links
-    from swe.skills.layout import selection_intent, selection_record_at
+    from swe.init.layout import _same_skill, shared_skill_dirs, skill_root_links
+    from swe.skills.layout import (
+        selection_intent,
+        selection_record_at,
+        skill_adopted_map,
+    )
 
     shared_names = set(shared_skill_dirs(shared))
     harnesses = []
@@ -357,6 +361,26 @@ def installed_skills(home: Path | None = None, cwd: Path | None = None) -> dict:
             "harnesses": sorted(seen_by),
         })
     skills.sort(key=lambda s: (s["name"].lower(), s["path"]))
+    # Adoption provenance lives in skill_links.json by folder name; a
+    # conflict is a same-named private copy in a harness root whose bytes
+    # differ from the shared one — the row adoption refused to merge.
+    adopted = skill_adopted_map()
+    by_name: dict[str, list[dict]] = {}
+    for row in skills:
+        by_name.setdefault(row["name"], []).append(row)
+    for row in skills:
+        if row["source"] != "shared":
+            continue
+        donor = adopted.get(Path(row["path"]).name)
+        if donor is not None:
+            row["adopted_from"] = donor
+        shared_md = Path(row["path"]) / "SKILL.md"
+        for other in by_name.get(row["name"], []):
+            if other["source"] != "harness":
+                continue
+            if not _same_skill(Path(other["path"]) / "SKILL.md", shared_md):
+                row["conflict"] = True
+                break
     return {
         "shared_dir": str(paths.skills_dir_for(home)),
         "harnesses": harnesses,

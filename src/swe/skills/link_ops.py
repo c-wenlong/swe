@@ -606,7 +606,12 @@ def remove_skill(
             "shared skill; remove the skill it belongs to instead"
         )
     fname = folder.name
-    target = Path(os.path.normpath(str(shared_resolved / fname)))
+    # A link can spell the target with either the literal shared path or
+    # its resolved one (/var vs /private/var on macOS); both are swe's.
+    targets = {
+        Path(os.path.normpath(str(base / fname)))
+        for base in (shared, shared_resolved)
+    }
 
     from swe.init.layout import (
         discover_skill_roots,
@@ -627,7 +632,7 @@ def remove_skill(
                 continue
             if not pointed.is_absolute():
                 pointed = link.parent / pointed
-            if Path(os.path.normpath(str(pointed))) != target:
+            if Path(os.path.normpath(str(pointed))) not in targets:
                 continue
             try:
                 link.unlink()
