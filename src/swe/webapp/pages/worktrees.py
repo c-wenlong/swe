@@ -2,7 +2,7 @@
 
 ``GET /v1/app/worktrees`` is ``swe wt list``: ``scope=all`` (the default)
 lists every worktree of every repo the hub knows, ``scope=repo&repo=<path>``
-one repo's. The reply is the list's own JSON (``scope``, ``generated_at``,
+one repo's (``repo=`` of the API). The reply is the list's own JSON (``scope``, ``generated_at``,
 ``worktrees``) plus the hub's ``machine`` name.
 
 ``GET /v1/app/worktrees?worktree=<path>`` is ``swe wt show``: ``{"worktree": W}``.
@@ -17,13 +17,14 @@ command's JSON, unchanged:
 | ``lock`` | ``path``, optional ``reason`` | ``swe wt lock`` |
 | ``unlock`` | ``path`` | ``swe wt unlock`` |
 | ``move`` | ``path``, ``new_path`` | ``swe wt move`` |
-| ``prune`` | ``all``, ``yes``, ``include``, ``branch`` | ``swe wt prune`` |
-| ``slim`` | ``path`` or ``all``, ``yes`` | ``swe wt slim`` |
+| ``prune`` | ``all`` or ``repo``; ``yes`` with ``paths``; ``include``, ``branch`` | ``swe wt prune`` |
+| ``slim`` | ``path``, or ``all`` or ``repo``; ``yes``, ``days`` | ``swe wt slim`` |
 
 Nothing destructive runs unless the body says so: ``force``, ``yes`` and
 ``delete_branch`` count only when they are the JSON value ``true``, so a
 string like ``"false"`` or a stray ``1`` never turns one on. ``prune`` and
-``slim`` are dry runs until ``yes`` is true. A ``WorktreeError`` becomes a
+``slim`` are dry runs until ``yes`` is true, and a ``prune`` with ``yes`` must
+name the previewed ``paths``: it refuses (409 ``changed``) when more would go. A ``WorktreeError`` becomes a
 ``PageError`` with the same code and message.
 
 ``swe.worktrees`` is imported when a request needs it, so the page loads
@@ -39,19 +40,16 @@ from typing import Any
 
 from swe.webapp.pages import PageError
 
-# ``WorktreeError.code`` to an HTTP status. A code not listed is the
-# caller's fault until proven otherwise: 400.
+# ``WorktreeError.code`` to an HTTP status: the closed set swe.worktrees
+# raises (docs/json-contracts.md, "swe wt shapes").
 _STATUS = {
+    "bad_args": 400,
+    "not_a_repo": 404,
     "not_found": 404,
-    "no_repo": 404,
     "not_safe": 409,
-    "protected": 409,
-    "refused": 409,
-    "locked": 409,
     "exists": 409,
     "busy": 409,
     "gh_unavailable": 503,
-    "unavailable": 503,
     "git_failed": 502,
 }
 
@@ -73,14 +71,15 @@ def _raise(wt, exc: Exception) -> None:
     """Re-raise ``exc`` as a PageError when it is a WorktreeError."""
     code = str(getattr(exc, "code", "") or "worktree_error")
     message = str(getattr(exc, "message", "") or exc)
-    raise PageError(_STATUS.get(code, 400), code, message) from exc
+    raise PageError(_STATUS.get(code, 500), code, message) from exc
 
 
-def _call(fn_name: str, *args, **kwargs) -> dict:
-    """``swe.worktrees.<fn_name>(...)`` with a WorktreeError as PageError."""
+def _call(ctx, fn_name: str, *args, **kwargs) -> dict:
+    """``swe.worktrees.<fn_name>(..., home=<the hub's home>)`` with a
+    WorktreeError as PageError."""
     wt = _api()
     try:
-        return getattr(wt, fn_name)(*args, **kwargs)
+        return getattr(wt, fn_name)(*args, home=getattr(ctx, "home", None), **kwargs)
     except wt.WorktreeError as exc:
         _raise(wt, exc)
     raise AssertionError("unreachable")  # pragma: no cover
@@ -125,7 +124,7 @@ def get(ctx, args: dict) -> dict:
     if worktree:
         if not Path(worktree).is_absolute():
             raise PageError(400, "bad_request", "worktree must be an absolute path.")
-        return _call("show", worktree)
+        return _call(ctx, "show", worktree)
     scope = args.get("scope") or "all"
     if scope not in ("all", "repo"):
         raise PageError(400, "bad_request", "scope must be all or repo.")
@@ -134,8 +133,10 @@ def get(ctx, args: dict) -> dict:
         raise PageError(400, "bad_request", "scope=repo needs repo=<path>.")
     if repo and not Path(repo).is_absolute():
         raise PageError(400, "bad_request", "repo must be an absolute path.")
-    data = _call("list_worktrees", cwd=repo if scope == "repo" else None,
-                 all=scope == "all", home=getattr(ctx, "home", None))
+    if scope == "repo":
+        data = _call(ctx, "list_worktrees", repo=repo)
+    else:
+        data = _call(ctx, "list_worktrees", all=True)
     out = dict(data)
     out["machine"] = (getattr(ctx, "machine", None) or {}).get("name")
     return out
@@ -174,42 +175,72 @@ def _add(ctx, body: dict) -> dict:
         raise PageError(400, "bad_request", "base only applies to a new branch.")
     path = _path(body, "path", required=False)
     if pr is not None:
-        return _call("add", repo, pr=pr, path=path)
-    return _call("add", repo, branch=branch, new=new, base=base, path=path)
+        return _call(ctx, "add", repo, pr=pr, path=path)
+    return _call(ctx, "add", repo, branch=branch, new=new, base=base, path=path)
 
 
 def _remove(ctx, body: dict) -> dict:
     path = _path(body)
-    return _call("remove", path, force=_flag(body, "force"),
+    return _call(ctx, "remove", path, force=_flag(body, "force"),
                  delete_branch=_flag(body, "delete_branch"))
 
 
 def _lock(ctx, body: dict) -> dict:
-    return _call("lock", _path(body), reason=_text(body, "reason"))
+    return _call(ctx, "lock", _path(body), reason=_text(body, "reason"))
 
 
 def _unlock(ctx, body: dict) -> dict:
-    return _call("unlock", _path(body))
+    return _call(ctx, "unlock", _path(body))
 
 
 def _move(ctx, body: dict) -> dict:
-    return _call("move", _path(body), _path(body, "new_path"))
+    return _call(ctx, "move", _path(body), _path(body, "new_path"))
+
+
+def _scope(body: dict) -> dict:
+    """``all`` (every repo) or ``repo`` (one), never neither: with neither
+    the API would scan the hub process's own working directory."""
+    every = _flag(body, "all")
+    repo = _path(body, "repo", required=False)
+    if every == (repo is not None):
+        raise PageError(400, "bad_request", "Give all, or one repo path, not both and not neither.")
+    return {"repo": repo} if repo else {"all": True}
 
 
 def _prune(ctx, body: dict) -> dict:
     include = body.get("include")
     if include is not None and include != "merged-dirty":
         raise PageError(400, "bad_request", "include can only be merged-dirty.")
-    return _call("prune", all=_flag(body, "all"), yes=_flag(body, "yes"),
-                 include=include, branch=_text(body, "branch"))
+    args = dict(_scope(body), include=include, branch=_text(body, "branch"))
+    if not _flag(body, "yes"):
+        return _call(ctx, "prune", yes=False, **args)
+    # Deleting takes the paths the person saw in the preview, and only
+    # those can go. merged-clean worktrees have no per-item gate in the
+    # API, so a changed list is refused here and previewed again.
+    paths = body.get("paths")
+    if (not isinstance(paths, list) or not paths
+            or not all(isinstance(p, str) and Path(p).is_absolute() for p in paths)):
+        raise PageError(400, "bad_request", "yes needs paths: the worktrees the preview listed.")
+    previewed = set(paths)
+    dry = _call(ctx, "prune", yes=False, **args)
+    extra = [c.get("path") for c in dry.get("candidates", []) if c.get("path") not in previewed]
+    if extra:
+        raise PageError(409, "changed", "The list changed since the preview "
+                        f"({len(extra)} more would be deleted). Preview again.")
+    return _call(ctx, "prune", yes=True, confirm=lambda wt: wt.path in previewed, **args)
 
 
 def _slim(ctx, body: dict) -> dict:
-    every = _flag(body, "all")
     path = _path(body, "path", required=False)
-    if every == (path is not None):
-        raise PageError(400, "bad_request", "Give one worktree path, or all, not both and not neither.")
-    return _call("slim", path, all=every, yes=_flag(body, "yes"))
+    days = body.get("days")
+    if days is not None and (isinstance(days, bool) or not isinstance(days, int) or days < 0):
+        raise PageError(400, "bad_request", "days must be a whole number of days.")
+    extra = {} if days is None else {"days": days}
+    if path is not None:
+        if _flag(body, "all") or body.get("repo"):
+            raise PageError(400, "bad_request", "Give one worktree path, or a scope, not both.")
+        return _call(ctx, "slim", path, yes=_flag(body, "yes"), **extra)
+    return _call(ctx, "slim", yes=_flag(body, "yes"), **_scope(body), **extra)
 
 
 _ACTIONS: dict[str, Any] = {

@@ -19,6 +19,7 @@ from swe.webapp.pages import worktrees as page
 
 from tests.test_remote_hub import HubBase
 
+HOME = Path("/home/x")
 SCRIPT = Path(__file__).resolve().parents[1] / "src/swe/webapp/static/pages/worktrees.js"
 
 
@@ -89,14 +90,13 @@ class _Stubbed:
 class TestRead(_Stubbed, unittest.TestCase):
     def test_list_is_all_repos_by_default(self):
         d = page.get(self.ctx, {})
-        self.assertEqual(self.last(), ("list_worktrees", (), {"cwd": None, "all": True, "home": Path("/home/x")}))
+        self.assertEqual(self.last(), ("list_worktrees", (), {"all": True, "home": HOME}))
         self.assertEqual((d["scope"], d["machine"]), ("all", "hub-box"))
         self.assertEqual([w["branch"] for w in d["worktrees"]], ["main", "feat/a"])
 
-    def test_scope_repo_passes_the_checkout_as_cwd(self):
+    def test_scope_repo_passes_the_checkout_as_repo(self):
         page.get(self.ctx, {"scope": "repo", "repo": "/r/main"})
-        self.assertEqual(self.last()[2]["cwd"], "/r/main")
-        self.assertFalse(self.last()[2]["all"])
+        self.assertEqual(self.last(), ("list_worktrees", (), {"repo": "/r/main", "home": HOME}))
 
     def test_scope_repo_needs_a_repo_and_scope_is_checked(self):
         for args in ({"scope": "repo"}, {"scope": "nope"}, {"repo": "relative/path"}):
@@ -107,7 +107,7 @@ class TestRead(_Stubbed, unittest.TestCase):
 
     def test_show(self):
         d = page.get(self.ctx, {"worktree": "/r/wt/a"})
-        self.assertEqual(self.last(), ("show", ("/r/wt/a",), {}))
+        self.assertEqual(self.last(), ("show", ("/r/wt/a",), {"home": HOME}))
         self.assertEqual(d["worktree"]["path"], "/r/wt/a")
 
     def test_show_refuses_a_relative_path(self):
@@ -123,16 +123,16 @@ class TestWrites(_Stubbed, unittest.TestCase):
     def test_add_existing_branch(self):
         d = self.post("add", {"repo": "/r/main", "branch": "feat/b", "path": "/r/wt/b"})
         self.assertEqual(self.last(), ("add", ("/r/main",),
-                                       {"branch": "feat/b", "new": False, "base": None, "path": "/r/wt/b"}))
+                                       {"branch": "feat/b", "new": False, "base": None, "path": "/r/wt/b", "home": HOME}))
         self.assertEqual(d["worktree"]["path"], "/r/wt/new")
 
     def test_add_new_branch_with_base(self):
         self.post("add", {"repo": "/r/main", "branch": "feat/c", "new": True, "base": "origin/main"})
-        self.assertEqual(self.last()[2], {"branch": "feat/c", "new": True, "base": "origin/main", "path": None})
+        self.assertEqual(self.last()[2], {"branch": "feat/c", "new": True, "base": "origin/main", "path": None, "home": HOME})
 
     def test_add_a_pull_request(self):
         self.post("add", {"repo": "/r/main", "pr": 42})
-        self.assertEqual(self.last(), ("add", ("/r/main",), {"pr": 42, "path": None}))
+        self.assertEqual(self.last(), ("add", ("/r/main",), {"pr": 42, "path": None, "home": HOME}))
 
     def test_add_refusals(self):
         bad = [
@@ -155,13 +155,13 @@ class TestWrites(_Stubbed, unittest.TestCase):
 
     def test_remove_never_forces_unless_asked(self):
         self.post("remove", {"path": "/r/wt/a"})
-        self.assertEqual(self.last(), ("remove", ("/r/wt/a",), {"force": False, "delete_branch": False}))
+        self.assertEqual(self.last(), ("remove", ("/r/wt/a",), {"force": False, "delete_branch": False, "home": HOME}))
         for sneaky in ("true", 1, "yes", [True]):
             with self.subTest(force=sneaky), self.assertRaises(PageError):
                 self.post("remove", {"path": "/r/wt/a", "force": sneaky})
         self.assertEqual(len(self.wt.calls), 1)
         self.post("remove", {"path": "/r/wt/a", "force": True, "delete_branch": True})
-        self.assertEqual(self.last()[2], {"force": True, "delete_branch": True})
+        self.assertEqual(self.last()[2], {"force": True, "delete_branch": True, "home": HOME})
 
     def test_remove_needs_an_absolute_path(self):
         for body in ({}, {"path": ""}, {"path": "rel/x"}, {"path": 5}):
@@ -171,33 +171,55 @@ class TestWrites(_Stubbed, unittest.TestCase):
 
     def test_lock_unlock_move(self):
         self.post("lock", {"path": "/r/wt/a", "reason": "  agent running "})
-        self.assertEqual(self.last(), ("lock", ("/r/wt/a",), {"reason": "agent running"}))
+        self.assertEqual(self.last(), ("lock", ("/r/wt/a",), {"reason": "agent running", "home": HOME}))
         self.post("lock", {"path": "/r/wt/a", "reason": ""})
-        self.assertEqual(self.last()[2], {"reason": None})
+        self.assertEqual(self.last()[2], {"reason": None, "home": HOME})
         self.post("unlock", {"path": "/r/wt/a"})
-        self.assertEqual(self.last(), ("unlock", ("/r/wt/a",), {}))
+        self.assertEqual(self.last(), ("unlock", ("/r/wt/a",), {"home": HOME}))
         self.post("move", {"path": "/r/wt/a", "new_path": "/r/wt/z"})
-        self.assertEqual(self.last(), ("move", ("/r/wt/a", "/r/wt/z"), {}))
+        self.assertEqual(self.last(), ("move", ("/r/wt/a", "/r/wt/z"), {"home": HOME}))
         with self.assertRaises(PageError):
             self.post("move", {"path": "/r/wt/a", "new_path": "z"})
 
     def test_prune_is_a_dry_run_until_yes_is_true(self):
         d = self.post("prune", {"all": True})
-        self.assertEqual(self.last()[2], {"all": True, "yes": False, "include": None, "branch": None})
+        self.assertEqual(self.last()[2], {"all": True, "yes": False, "include": None, "branch": None, "home": HOME})
         self.assertTrue(d["dry_run"])
-        d = self.post("prune", {"all": True, "yes": True, "include": "merged-dirty", "branch": "feat/a"})
-        self.assertEqual(self.last()[2], {"all": True, "yes": True, "include": "merged-dirty", "branch": "feat/a"})
-        self.assertFalse(d["dry_run"])
-        for body in ({"yes": "true"}, {"include": "no-pr"}, {"all": "1"}):
+        d = self.post("prune", {"repo": "/r/main", "include": "merged-dirty"})
+        self.assertEqual(self.last()[2]["repo"], "/r/main")
+        self.assertNotIn("all", self.last()[2])
+        for body in ({"yes": "true"}, {"include": "no-pr", "all": True}, {"all": "1"}, {}, {"all": True, "repo": "/r/main"}):
             with self.subTest(body=body), self.assertRaises(PageError):
                 self.post("prune", body)
 
-    def test_slim_one_or_all_never_both(self):
+    def test_prune_yes_needs_the_previewed_paths_and_gates_dirty_ones(self):
+        for body in ({"all": True, "yes": True}, {"all": True, "yes": True, "paths": []},
+                     {"all": True, "yes": True, "paths": ["rel"]}):
+            with self.subTest(body=body), self.assertRaises(PageError):
+                self.post("prune", body)
+        self.assertEqual(self.wt.calls, [])
+        d = self.post("prune", {"all": True, "yes": True, "include": "merged-dirty", "paths": ["/r/wt/a"]})
+        self.assertFalse(d["dry_run"])
+        # A dry run first, then the real one with a confirm that knows the preview.
+        self.assertEqual([c[2]["yes"] for c in self.wt.calls], [False, True])
+        confirm = self.last()[2]["confirm"]
+        self.assertTrue(confirm(SimpleNamespace(path="/r/wt/a")))
+        self.assertFalse(confirm(SimpleNamespace(path="/r/wt/other")))
+
+    def test_prune_refuses_when_more_would_go_than_the_preview_showed(self):
+        with self.assertRaises(PageError) as cm:
+            self.post("prune", {"all": True, "yes": True, "paths": ["/r/wt/else"]})
+        self.assertEqual((cm.exception.status, cm.exception.code), (409, "changed"))
+        self.assertEqual([c[2]["yes"] for c in self.wt.calls], [False])
+
+    def test_slim_one_or_a_scope_never_both(self):
         self.post("slim", {"path": "/r/wt/a"})
-        self.assertEqual(self.last(), ("slim", ("/r/wt/a",), {"all": False, "yes": False}))
-        self.post("slim", {"all": True, "yes": True})
-        self.assertEqual(self.last(), ("slim", (None,), {"all": True, "yes": True}))
-        for body in ({}, {"path": "/r/wt/a", "all": True}):
+        self.assertEqual(self.last(), ("slim", ("/r/wt/a",), {"yes": False, "home": HOME}))
+        self.post("slim", {"all": True, "yes": True, "days": 7})
+        self.assertEqual(self.last(), ("slim", (), {"yes": True, "all": True, "days": 7, "home": HOME}))
+        self.post("slim", {"repo": "/r/main"})
+        self.assertEqual(self.last()[2]["repo"], "/r/main")
+        for body in ({}, {"path": "/r/wt/a", "all": True}, {"all": True, "days": -1}, {"all": True, "days": "3"}):
             with self.subTest(body=body), self.assertRaises(PageError):
                 self.post("slim", body)
 
@@ -230,12 +252,14 @@ class TestErrors(unittest.TestCase):
 
     def test_worktree_error_becomes_a_page_error_with_its_code_and_message(self):
         ctx = SimpleNamespace(home=None, machine={})
-        exc = self.run_error("not_safe", lambda: page.post(ctx, "remove", {"path": "/r/wt/a"}))
-        self.assertEqual((exc.status, exc.code, exc.message), (409, "not_safe", "the not_safe message"))
+        want = {"bad_args": 400, "not_a_repo": 404, "not_found": 404, "not_safe": 409, "exists": 409,
+                "busy": 409, "gh_unavailable": 503, "git_failed": 502}
+        for code, status in want.items():
+            with self.subTest(code=code):
+                exc = self.run_error(code, lambda: page.post(ctx, "remove", {"path": "/r/wt/a"}))
+                self.assertEqual((exc.status, exc.code, exc.message), (status, code, f"the {code} message"))
         exc = self.run_error("not_found", lambda: page.get(ctx, {"worktree": "/r/gone"}))
         self.assertEqual((exc.status, exc.code), (404, "not_found"))
-        exc = self.run_error("something_new", lambda: page.get(ctx, {}))
-        self.assertEqual((exc.status, exc.code), (400, "something_new"))
 
     def test_a_build_without_the_package_answers_503(self):
         with patch.dict(sys.modules, {"swe.worktrees": None}), self.assertRaises(PageError) as cm:
@@ -293,7 +317,7 @@ class TestRoute(HubBase):
         err = json.loads(data)["error"]
         self.assertEqual(err["code"], "not_safe")
         self.assertIn("force", err["message"])
-        self.assertEqual(self.wt.calls[-1][2], {"force": False, "delete_branch": False})
+        self.assertEqual(self.wt.calls[-1][2], {"force": False, "delete_branch": False, "home": self.srv.home})
 
 
 NODE = shutil.which("node")
@@ -314,8 +338,9 @@ const doc = {
 let reply = { status: 200, data: { removed: '/r/wt/a', freed_bytes: 1 } };
 const globals = {
   registerPage() {}, esc: (s) => String(s == null ? '' : s), safeHref: (u) => u || '',
-  Fmt: { relative: () => 'now', tilde: (p) => p, markView: () => '', copyIcon: () => '', copyTick() {} },
-  Sk: { bar: () => '', pill: () => '' }, pageHeader: () => '', icon: () => '',
+  Fmt: { relative: () => 'now', tilde: (p) => p, markView: () => '', copyIcon: () => '', copyTick() {},
+    shellWord: (s) => s, logo: (h) => `<img alt="${h}">`, harnessName: (h) => h },
+  Sk: { bar: () => '', pill: () => '' }, pageHeader: () => '', icon: (n) => `<svg data-icon="${n}"></svg>`,
   api: async () => ({ status: 200, data: {} }),
   apiPost: async (path, body) => { posts.push([path, body]); return reply; },
   failText: () => 'failed', bodySheet: () => null, bindRefresh() {}, pageError() {}, bindSearch() {},
@@ -365,7 +390,7 @@ console.log(JSON.stringify({{
   canDelete: ws.map(api.wtCanDelete),
 }}));
 """)
-        self.assertEqual(out["bytes"], ["0 B", "1023 B", "1.5 KB", "10 MB", "5.0 GB", "unknown size"])
+        self.assertEqual(out["bytes"], ["0 B", "1023 B", "1.5 KB", "10 MB", "5.0 GB", "Not measured"])
         self.assertEqual(out["groups"], [["acme/app", ["main", "feat/new", "feat/old"]], ["acme/other", ["main"]]])
         self.assertEqual(out["merged"], ["feat/old"])
         self.assertEqual(out["locked"], ["feat/new"])
@@ -412,7 +437,7 @@ const out = {{ disabledAtOpen: els['wt-d-go'].disabled }};
         self.assertIn("Deleted", out["done"])
 
     def test_delete_of_an_unmerged_worktree_is_blocked_until_force_is_ticked(self):
-        for state in ("merged-dirty", "open-pr", "no-pr", "orphaned", "unknown"):
+        for state in ("merged-dirty", "open-pr", "no-pr", "unknown"):
             with self.subTest(state=state):
                 self._force, self._branch = False, False
                 out = self.delete_flow(state)
@@ -425,8 +450,8 @@ const out = {{ disabledAtOpen: els['wt-d-go'].disabled }};
                 self.assertEqual(out["posts"], [["/v1/app/worktrees/remove",
                                                  {"path": "/r/wt/a", "force": True, "delete_branch": True}]])
 
-    def test_main_and_protected_have_no_delete(self):
-        for state in ("main", "protected"):
+    def test_main_protected_and_orphaned_have_no_delete(self):
+        for state in ("main", "protected", "orphaned"):
             with self.subTest(state=state):
                 self._force, self._branch = True, False
                 out = self.node(f"""
@@ -438,6 +463,30 @@ api.wtOpenDelete(w);
 console.log(JSON.stringify({{ shown, rowHasDelete: api.wtRows(w).includes('data-wt="delete"'), posts }}));
 """)
                 self.assertEqual((out["shown"], out["rowHasDelete"], out["posts"]), (False, False, []))
+
+    def test_rows_show_labels_orphan_note_hold_and_unmeasured_sizes(self):
+        ws = json.dumps([
+            _w("/r/o", None, "orphaned", head="d52bcc353aa1", harness="codex"),
+            _w("/r/h", "feat/h", "merged-clean", hold="locked", harness="swe-pr", size_bytes=None),
+            _w("/r/c", "feat/c", "no-pr", harness="claude"),
+        ])
+        out = self.node(f"""
+const {{ api }} = h;
+const rows = {ws}.map(api.wtRows);
+console.log(JSON.stringify(rows));
+""")
+        orphan, hold, claude = out
+        self.assertNotIn('data-wt="delete"', orphan)
+        self.assertIn("git worktree prune", orphan)
+        self.assertIn('data-wt-copy="git -C /r/main worktree prune"', orphan)
+        self.assertIn(">Codex<", orphan)
+        self.assertIn("Clean up keeps it: locked", hold)
+        self.assertIn("Not measured", hold)
+        self.assertIn(">swe PR checkout<", hold)
+        self.assertIn('data-icon="worktrees"', hold)
+        self.assertIn(">Claude Code<", claude)
+        self.assertIn('<img alt="claude">', claude)
+        self.assertNotIn(">CLI<", claude)
 
     def test_a_locked_worktree_cannot_be_deleted_from_the_sheet(self):
         self._force, self._branch = False, False

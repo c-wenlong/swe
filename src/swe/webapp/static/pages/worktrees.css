@@ -46,12 +46,19 @@
   border-top: 1px solid var(--row-divider); border-radius: 6px; transition: background .15s;
 }
 .wt-row:hover { background: var(--row-hover); }
-.wt-main { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-width: 0; color: var(--text-primary); text-decoration: none; }
+.wt-body { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.wt-main { display: flex; flex-direction: column; gap: 4px; flex: 0 1 auto; min-width: 0; color: var(--text-primary); text-decoration: none; }
 .wt-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.wt-title .name { font-weight: 600; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; word-break: break-all; }
+.wt-title .name { font-weight: 600; font-size: 14px; word-break: break-all; }
 .wt-meta { display: flex; align-items: center; gap: 4px 14px; flex-wrap: wrap; }
 .wt-mark { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.wt-mark img.logo { width: 14px; height: 14px; }
+.wt-mark img.logo, .wt-glyph svg { width: 14px; height: 14px; }
+.wt-glyph { display: inline-flex; }
+.wt-notes { display: flex; flex-direction: column; gap: 4px; }
+.wt-orphan { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wt-orphan .icon-button { width: 24px; height: 24px; border-radius: 6px; }
+.wt-orphan .icon-button svg { width: 12px; height: 12px; }
+.wt-orphan code { color: var(--text-primary); }
 .wt-side { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
 .wt-actions { display: flex; align-items: center; gap: 6px; }
 .wt-actions .icon-button { width: 30px; height: 30px; }
@@ -102,7 +109,7 @@ dialog.wt-sheet[open]::backdrop { animation: wt-fade .18s ease-out; }
 .wt-list { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; display: flex; flex-direction: column; border-top: 1px solid var(--row-divider); }
 .wt-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--row-divider); }
 .wt-list-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.wt-list-main .name { font-weight: 600; font-size: 13px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.wt-list-main .name { font-weight: 600; font-size: 13px; }
 .wt-list-main .badge { align-self: flex-start; }
 .wt-skipped summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
 .wt-skipped .wt-list { margin-top: 8px; }

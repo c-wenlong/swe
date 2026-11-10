@@ -40,10 +40,11 @@ const WT_RISK = {
   "merged-dirty": "It is merged, but it has uncommitted changes that exist nowhere else.",
   "open-pr": "Its pull request is still open, so commits made here may not be pushed anywhere.",
   "no-pr": "It has no pull request, so its commits may exist only in this folder.",
-  orphaned: "swe can't match it to a branch or pull request, so it can't tell what would be lost.",
   unknown: "swe couldn't tell whether it is merged, so it can't say what would be lost.",
 };
-const WT_HARNESS = { "swe-pr": "swe pr", other: "Other" };
+/* The Mac app's harness labels: always an icon and the name. */
+const WT_HARNESS = { claude: "Claude Code", codex: "Codex", devin: "Devin", "swe-pr": "swe PR checkout", other: "Other" };
+const WT_HARNESS_ICON = { "swe-pr": "worktrees", other: "harnesses" };
 
 const WT_PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
 const WT_LOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
@@ -58,7 +59,7 @@ const wtDetailLink = (path) => `#/worktrees?path=${encodeURIComponent(path)}`;
 
 /* 1024-based, as `du` reports: "840 MB", "1.2 GB". */
 function wtBytes(n) {
-  if (n == null || !isFinite(n)) return "unknown size";
+  if (n == null || !isFinite(n)) return "Not measured";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let v = Math.max(0, n), i = 0;
   while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
@@ -79,7 +80,9 @@ const wtShort = (sha) => String(sha || "").slice(0, 8);
 const wtBase = (path) => String(path || "").replace(/\/+$/, "").split("/").pop() || path;
 const wtCount = (n, one, many) => `${n} ${n === 1 ? one : many || one + "s"}`;
 const wtBranchName = (w) => w.branch || `detached at ${wtShort(w.head)}`;
-const wtCanDelete = (w) => w.state !== "main" && w.state !== "protected";
+/* swe never deletes a folder git no longer lists, so an orphan has no Delete. */
+const wtCanDelete = (w) => !["main", "protected", "orphaned"].includes(w.state);
+const wtPruneCommand = (w) => `git -C ${Fmt.shellWord(w.main_checkout || ".")} worktree prune`;
 
 function wtStateBadge(state) {
   const s = WT_STATES[state] || { label: state || "Unknown", arrow: "grey" };
@@ -104,12 +107,14 @@ function wtPrLink(w) {
 }
 
 function wtHarness(h) {
-  if (["claude", "codex", "devin"].includes(h)) return Fmt.markView(h, "wt-mark");
-  return `<span class="wt-mark">${esc(WT_HARNESS[h] || h || "Other")}</span>`;
+  const label = WT_HARNESS[h] || Fmt.harnessName(h) || "Other";
+  const mark = WT_HARNESS_ICON[h] ? `<span class="wt-glyph">${icon(WT_HARNESS_ICON[h])}</span>`
+    : Fmt.logo(h, "logo");
+  return `<span class="wt-mark" title="${esc(label)}">${mark}<span>${esc(label)}</span></span>`;
 }
 
 function wtSizeText(w) {
-  if (w.size_bytes == null) return "unknown size";
+  if (w.size_bytes == null) return "Not measured";
   const re = w.rebuildable_bytes;
   return re ? `${wtBytes(w.size_bytes)}, ${wtBytes(re)} rebuildable` : wtBytes(w.size_bytes);
 }
@@ -163,6 +168,8 @@ function wtGroups(list) {
 function wtSum(list, key) {
   return list.reduce((n, w) => n + (Number(w[key]) || 0), 0);
 }
+/* A sum as text: "Not measured" when no row has the number. */
+const wtSumText = (list, key) => (list.some((w) => w[key] != null) ? wtBytes(wtSum(list, key)) : "Not measured");
 
 /* ----------------------------------------------------------------- pages */
 
@@ -230,9 +237,9 @@ function wtSummaryHtml(list) {
   return `<div class="card wt-summary">
     <div class="wt-stats">
       ${stat("Worktrees", String(list.length), wtCount(repos, "repo"))}
-      ${stat("Total size", wtBytes(wtSum(list, "size_bytes")), "by du, an estimate")}
-      ${stat("Merged and clean", String(clean.length), clean.length ? `${wtBytes(wtSum(clean, "size_bytes"))} to reclaim` : "nothing to clean")}
-      ${stat("Rebuildable", wtBytes(wtSum(list, "rebuildable_bytes")), "node_modules, caches and similar")}
+      ${stat("Total size", wtSumText(list, "size_bytes"), "by du, an estimate")}
+      ${stat("Merged and clean", String(clean.length), clean.length ? `${wtSumText(clean, "size_bytes")} to reclaim` : "nothing to clean")}
+      ${stat("Rebuildable", wtSumText(list, "rebuildable_bytes"), "node_modules, caches and similar")}
     </div>
     <div class="wt-bulk">
       <button class="btn hairline wt-button" type="button" data-wt-bulk="prune"${clean.length || dirty.length ? "" : " disabled"}
@@ -254,18 +261,28 @@ function wtChipsHtml(list) {
     aria-pressed="${p.state === key}">${esc(label)}<span class="num">${n}</span></button>`).join("");
 }
 
+/* What to do about an orphan: git has to forget it, and swe won't delete folders itself. */
+function wtOrphanNote(w) {
+  return `<span class="caption wt-orphan">Run <code class="wt-path">git worktree prune</code> in the main checkout.
+    <button type="button" class="icon-button wt-copy" data-wt-copy="${esc(wtPruneCommand(w))}" aria-label="Copy the git worktree prune command" title="Copy the command">${Fmt.copyIcon()}</button></span>`;
+}
+
 function wtRowHtml(w) {
   const actions = [];
   actions.push(`<button type="button" class="icon-button wt-copy" data-wt-copy="${esc(w.path)}" aria-label="Copy path" title="Copy path">${Fmt.copyIcon()}</button>`);
   if (w.rebuildable_bytes) actions.push(`<button type="button" class="btn hairline secondary" data-wt="slim" data-path="${esc(w.path)}" title="Delete what a build can recreate">Slim</button>`);
   if (wtCanDelete(w)) actions.push(`<button type="button" class="btn hairline secondary danger-text" data-wt="delete" data-path="${esc(w.path)}">Delete…</button>`);
-  return `<div class="wt-row">
+  const notes = [];
+  if (w.state === "orphaned") notes.push(wtOrphanNote(w));
+  if (w.hold) notes.push(`<span class="caption wt-hold">Clean up keeps it: ${esc(w.hold)}</span>`);
+  return `<div class="wt-row"><div class="wt-body">
     <a class="wt-main" href="${wtRoute(wtDetailLink(w.path))}" title="Open ${esc(wtBranchName(w))}">
       <span class="wt-title"><span class="name">${esc(wtBranchName(w))}</span>
         ${wtStateBadge(w.state)}${wtLockBadge(w)}${w.dirty && w.state !== "merged-dirty" ? '<span class="badge">Uncommitted changes</span>' : ""}</span>
       <code class="wt-path" title="${esc(w.path)}">${esc(wtTilde(w.path))}</code>
       <span class="wt-meta caption"><span>Last commit ${esc(wtAgo(w.last_commit_at))}</span><span class="num">${esc(wtSizeText(w))}</span>${wtHarness(w.harness)}</span>
     </a>
+    ${notes.length ? `<div class="wt-notes">${notes.join("")}</div>` : ""}</div>
     <span class="wt-side">${wtPrLink(w)}<span class="wt-actions">${actions.join("")}</span></span>
   </div>`;
 }
@@ -279,7 +296,7 @@ function wtGroupsHtml(list) {
   }
   return wtGroups(shown).map((g) => `<div class="card wt-group">
     <div class="wt-group-head"><span class="card-title">${esc(g.title)}</span>
-      <span class="caption">${esc(wtCount(g.rows.length, "worktree"))}, ${esc(wtBytes(wtSum(g.rows, "size_bytes")))}</span>
+      <span class="caption">${esc(wtCount(g.rows.length, "worktree"))}, ${esc(wtSumText(g.rows, "size_bytes"))}</span>
       <code class="wt-path wt-group-path" title="${esc(g.key)}">${esc(wtTilde(g.key))}</code></div>
     <div class="wt-rows">${g.rows.map(wtRowHtml).join("")}</div></div>`).join("");
 }
@@ -392,7 +409,8 @@ function wtKv(label, valueHtml) {
 function paintWtDetail(w) {
   const back = `<a class="wt-back" href="#/worktrees">‹ Worktrees</a>`;
   const canDelete = wtCanDelete(w);
-  const buttons = [
+  const orphan = w.state === "orphaned";
+  const buttons = orphan ? `<button class="btn hairline wt-button" type="button" data-wt-copy="${esc(w.path)}">${Fmt.copyIcon()}Copy path</button>` : [
     w.locked
       ? `<button class="btn hairline wt-button" type="button" data-wt="unlock" data-path="${esc(w.path)}">Unlock</button>`
       : `<button class="btn hairline wt-button" type="button" data-wt="lock" data-path="${esc(w.path)}">Lock…</button>`,
@@ -401,7 +419,7 @@ function paintWtDetail(w) {
     `<button class="btn hairline wt-button" type="button" data-wt-copy="${esc(w.path)}">${Fmt.copyIcon()}Copy path</button>`,
     canDelete ? `<button class="btn hairline wt-button danger-text" type="button" data-wt="delete" data-path="${esc(w.path)}">Delete…</button>` : "",
   ].join("");
-  const protectedNote = !canDelete ? `<p class="caption">${w.state === "main"
+  const protectedNote = orphan ? `<div class="wt-notes">${wtOrphanNote(w)}</div>` : !canDelete ? `<p class="caption">${w.state === "main"
     ? "This is the repo's main checkout, so swe won't delete it."
     : "This worktree is protected, so swe won't delete it."}</p>` : "";
   const dirty = w.dirty || w.untracked
@@ -415,16 +433,18 @@ function paintWtDetail(w) {
         <div class="wt-title"><span class="name">${esc(wtBranchName(w))}</span>${wtStateBadge(w.state)}${wtLockBadge(w)}${wtPrLink(w)}</div>
         <div class="wt-actions wt-detail-actions">${buttons}</div>
         ${protectedNote}
+        ${w.hold ? `<p class="caption wt-hold">Clean up keeps it: ${esc(w.hold)}</p>` : ""}
         ${w.locked && w.lock_reason ? `<p class="caption">Locked: ${esc(w.lock_reason)}</p>` : ""}
       </div>
       <div class="card wt-details">
+        ${w.reason ? wtKv("Why", esc(w.reason)) : ""}
         ${wtKv("Path", `<code class="wt-path">${esc(w.path)}</code>`)}
         ${wtKv("Repo", esc(w.repo || "No GitHub remote"))}
         ${wtKv("Main checkout", `<code class="wt-path">${esc(w.main_checkout || "")}</code>`)}
         ${wtKv("Branch", esc(w.branch || "Detached"))}
         ${wtKv("Head", `<code class="wt-path">${esc(wtShort(w.head))}</code>`)}
         ${wtKv("Last commit", `${esc(wtAgo(w.last_commit_at))}${when ? ` <span class="caption">(${esc(new Date(when * 1000).toLocaleString())})</span>` : ""}`)}
-        ${wtKv("Size", `<span class="num">${esc(wtBytes(w.size_bytes))}</span>${w.rebuildable_bytes ? ` <span class="caption">(${esc(wtBytes(w.rebuildable_bytes))} rebuildable)</span>` : ""}`)}
+        ${wtKv("Size", `<span class="num">${esc(wtBytes(w.size_bytes))}</span>${w.size_bytes != null && w.rebuildable_bytes ? ` <span class="caption">(${esc(wtBytes(w.rebuildable_bytes))} rebuildable)</span>` : ""}`)}
         ${wtKv("Working tree", esc(dirty))}
         ${wtKv("Harness", wtHarness(w.harness))}
       </div>
@@ -514,9 +534,9 @@ function wtOpenNew() {
     <div class="wt-field"><span class="wt-label" id="wt-n-mode-label">Check out</span>
       <div class="wt-segs" role="radiogroup" aria-labelledby="wt-n-mode-label">${seg("existing", "Existing branch", true)}${seg("new", "New branch", false)}${seg("pr", "Pull request", false)}</div></div>
     <label class="wt-field" id="wt-n-branch-row"><span class="wt-label" id="wt-n-branch-label">Branch</span>
-      <input class="field wt-mono" id="wt-n-branch" type="text" autocomplete="off" spellcheck="false" placeholder="feature/login"></label>
+      <input class="field" id="wt-n-branch" type="text" autocomplete="off" spellcheck="false" placeholder="feature/login"></label>
     <label class="wt-field" id="wt-n-base-row" hidden><span class="wt-label">Base</span>
-      <input class="field wt-mono" id="wt-n-base" type="text" autocomplete="off" spellcheck="false" placeholder="The repo's default branch"></label>
+      <input class="field" id="wt-n-base" type="text" autocomplete="off" spellcheck="false" placeholder="The repo's default branch"></label>
     <label class="wt-field" id="wt-n-pr-row" hidden><span class="wt-label">Pull request number</span>
       <input class="field" id="wt-n-pr" type="text" inputmode="numeric" autocomplete="off" placeholder="1234"></label>
     <label class="wt-field"><span class="wt-label">Folder <span class="caption">(optional)</span></span>
@@ -608,11 +628,11 @@ function wtOpenDelete(w) {
     <div class="sheet-title">Delete this worktree?</div>
     <p class="caption">This deletes:</p>
     <ul class="wt-delete-list">
-      <li>The folder <code class="wt-path">${esc(w.path)}</code> and everything in it (${esc(wtBytes(w.size_bytes))}).</li>
-      <li id="wt-d-branch-line" hidden>The local branch <code class="wt-path">${esc(w.branch || "")}</code>.</li>
+      <li>The folder <code class="wt-path">${esc(w.path)}</code> and everything in it ${w.size_bytes != null ? ` (${esc(wtBytes(w.size_bytes))})` : ""}.</li>
+      <li id="wt-d-branch-line" hidden>The local branch <strong>${esc(w.branch || "")}</strong>.</li>
     </ul>
     ${lost.length ? `<p class="note">It holds ${esc(lost.join(" and "))}.</p>` : ""}
-    ${w.branch ? `<label class="wt-check"><input type="checkbox" id="wt-d-branch"><span>Also delete the branch <code class="wt-path">${esc(w.branch)}</code></span></label>` : ""}
+    ${w.branch ? `<label class="wt-check"><input type="checkbox" id="wt-d-branch"><span>Also delete the branch <strong>${esc(w.branch)}</strong></span></label>` : ""}
     ${w.locked ? `<p class="note">This worktree is locked${w.lock_reason ? ` (${esc(w.lock_reason)})` : ""}. Unlock it first.</p>` : ""}
     ${needsForce ? `<div class="wt-risk"><p class="note">${esc(WT_STATES[w.state] ? `State: ${WT_STATES[w.state].label}. ` : "")}${esc(risk)}</p>
       <label class="wt-check"><input type="checkbox" id="wt-d-force"><span>I understand. Delete it anyway, even though it is not merged and clean.</span></label></div>` : ""}
@@ -738,11 +758,14 @@ function wtOpenMove(w) {
   input.setSelectionRange(input.value.length, input.value.length);
 }
 
+/* The scope a bulk action covers: the repo filter's repo, else every repo. */
+const wtScope = () => (wtPage.repo ? { repo: wtPage.repo } : { all: true });
+
 /* ---- Slim: preview what a build can recreate, then confirm. */
 
 async function wtOpenSlim(w) {
-  const title = w ? `Slim ${wtBranchName(w)}` : "Slim every worktree";
-  const body = w ? { path: w.path } : { all: true };
+  const title = w ? `Slim ${wtBranchName(w)}` : wtPage.repo ? "Slim this repo's worktrees" : "Slim every worktree";
+  const body = w ? { path: w.path } : wtScope();
   const h = wtShow(`<div class="sheet-title">${esc(title)}</div>
     <div class="wt-loading" role="status"><span class="spinner" aria-hidden="true"></span><span>Measuring what a build can recreate…</span></div>
     <div class="sheet-actions"><button class="btn hairline wt-button" type="button" id="wt-cancel">Cancel</button></div>`);
@@ -763,7 +786,7 @@ async function wtOpenSlim(w) {
   const total = data.freed_bytes != null ? data.freed_bytes : wtSum(dirs, "bytes");
   h.sheet.querySelector(".sheet-body").innerHTML = `<form id="wt-s-form">
     <div class="sheet-title">${esc(title)}</div>
-    <p class="caption">These ${wtCount(dirs.length, "folder")} can be rebuilt by installing or building again. Deleting them frees ${esc(wtBytes(total))}. Your source files stay.</p>
+    <p class="caption">These ${wtCount(dirs.length, "folder")} can be rebuilt by installing or building again. Deleting them frees ${esc(wtBytes(total))}. Your source files stay.${data.days ? ` Folders changed in the last ${esc(wtCount(data.days, "day"))} are kept.` : ""}</p>
     <ul class="wt-list">${dirs.map((d) => `<li><code class="wt-path">${esc(wtTilde(d.path))}</code><span class="num caption">${esc(wtBytes(d.bytes))}</span></li>`).join("")}</ul>
     <p class="error" id="wt-sheet-error" role="alert" hidden></p>
     <div class="sheet-actions">
@@ -801,8 +824,8 @@ function wtOpenPrune() {
   wtPrunePreview(h, false);
 }
 
-async function wtPrunePreview(h, includeDirty) {
-  const body = { all: true };
+async function wtPrunePreview(h, includeDirty, notice) {
+  const body = wtScope();
   if (includeDirty) body.include = "merged-dirty";
   const { status, data } = await wtPost("prune", body);
   if (!wtLive(h)) return;
@@ -820,6 +843,7 @@ async function wtPrunePreview(h, includeDirty) {
   const total = wtSum(cands, "size_bytes");
   frame(`<form id="wt-p-form">
     <div class="sheet-title">Clean up merged worktrees</div>
+    ${notice ? `<p class="note" role="status">${esc(notice)}</p>` : ""}
     ${cands.length
       ? `<p class="caption">These ${wtCount(cands.length, "worktree")} are merged. Deleting them frees about ${esc(wtBytes(data.freed_bytes != null && data.freed_bytes > 0 ? data.freed_bytes : total))}. Branches stay.</p>
          <ul class="wt-list">${cands.map((c) => `<li><span class="wt-list-main"><span class="name">${esc(wtBranchName(c))}</span>
@@ -850,8 +874,8 @@ async function wtPrunePreview(h, includeDirty) {
     const go = wtById("wt-p-go");
     go.disabled = true;
     go.textContent = "Deleting…";
-    // `yes` comes only from this confirm, after the dry run above.
-    const reply = await wtPost("prune", { ...body, yes: true });
+    // `yes` comes only from this confirm, with the paths the preview listed.
+    const reply = await wtPost("prune", { ...body, yes: true, paths: cands.map((c) => c.path) });
     if (!wtLive(h)) return;
     h.sheet.dataset.working = "";
     if (reply.status === 200 && reply.data) {
@@ -859,6 +883,10 @@ async function wtPrunePreview(h, includeDirty) {
       const n = (reply.data.removed || []).length, left = (reply.data.skipped || []).length;
       wtDone(`Deleted ${wtCount(n, "worktree")}, freed ${wtBytes(reply.data.freed_bytes)}${left ? `. ${wtCount(left, "worktree")} skipped` : ""}.`, null);
       return;
+    }
+    // More would go than the preview showed: look again instead of deleting.
+    if (reply.status === 409 && reply.data && reply.data.error && reply.data.error.code === "changed") {
+      return wtPrunePreview(h, includeDirty, reply.data.error.message);
     }
     go.disabled = false;
     go.textContent = `Delete ${wtCount(cands.length, "worktree")}`;
