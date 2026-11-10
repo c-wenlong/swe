@@ -44,6 +44,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the same save queue, so both tabs always agree. Compilation
   rules are unchanged.
 
+### Changed
+
+- **Mac Accounts now groups accounts into horizontally scrolling provider columns.**
+  Narrow cards keep the plan visible, with usage rings and settings beneath. Click a
+  card to smoothly expand its readings; drag provider columns horizontally to save their order.
+  Expanded cards put settings beside the launch buttons and wrap their status text.
+
 
 ### Security
 
