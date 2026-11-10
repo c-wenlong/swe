@@ -8,6 +8,8 @@ the CLI acts on the files that were just read):
 
   claude  claude plugin install|uninstall|enable|disable <ref>
   codex   codex plugin add|remove <ref>
+  devin   devin plugins remove <unique-name> --yes
+  opencode global file discovery: move to/from SWE storage or remove the entry
 
 Codex has no enable verb: the flag lives only in ``[plugins."<ref>"]
 enabled`` in ``~/.codex/config.toml``. The stdlib reads TOML but cannot write
@@ -33,7 +35,7 @@ from pathlib import Path
 from swe.find.plugin_drift import _harness_env, took_too_long
 from swe.paths import cache_dir_for, expand_user
 from swe.plugins.models import ActionResult
-from swe.plugins.catalog import ACTIONABLE, READERS, _public
+from swe.plugins.catalog import ACTIONABLE, CONTROLLABLE, READERS, _public
 
 ACTIONS = ("install", "uninstall", "enable", "disable")
 
@@ -76,6 +78,8 @@ def plugin_state(home: Path, harness: str, ref: str) -> dict:
     errors: list = []
     view = READERS[harness](home, errors)
     if view is None:
+        if harness == "devin" and not errors:
+            return {"registered": False, "installed": False, "enabled": None, "version": None}
         detail = errors[0]["detail"] if errors else f"{harness} is not set up in {home}"
         raise ActionError(detail)
     _name, market = split_ref(ref)
@@ -98,8 +102,12 @@ def _tail(*streams: str | None) -> str:
 
 def _run(home: Path, argv: list[str], run, timeout: int = 300) -> subprocess.CompletedProcess:
     try:
+        env = _harness_env(home)
+        if argv[0] == "devin":
+            for key in ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "DEVIN_CONFIG_DIR"):
+                env.pop(key, None)
         done = run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                   timeout=timeout, env=_harness_env(home))
+                   timeout=timeout, env=env, **({"cwd": home} if argv[0] == "devin" else {}))
     except FileNotFoundError:
         raise ActionError(f"{argv[0]} is not on PATH") from None
     except subprocess.TimeoutExpired:
@@ -136,8 +144,13 @@ def plugin_action(home: Path, action: str, ref: str, harness: str, run=None,
     harness CLI gets ``timeout`` seconds."""
     if action not in ACTIONS:
         raise ActionError(f"unknown action {action!r}; use one of {', '.join(ACTIONS)}")
-    if harness not in ACTIONABLE:
-        raise ActionError(f"--harness must be one of {', '.join(ACTIONABLE)}, not {harness!r}")
+    if harness not in CONTROLLABLE:
+        raise ActionError(f"--harness must be one of {', '.join(CONTROLLABLE)}, not {harness!r}")
+    if harness == "opencode":
+        from swe.plugins.local import local_action
+        return local_action(home, action, ref)
+    if harness == "devin" and action != "uninstall":
+        raise ActionError("Devin supports uninstall here; it has no native per-plugin enable/disable command")
     split_ref(ref)
     run = run or subprocess.run
     before = plugin_state(home, harness, ref)
@@ -146,8 +159,17 @@ def plugin_action(home: Path, action: str, ref: str, harness: str, run=None,
     edited = None
     output = ""
     if reason is None:
-        verb = _VERBS[harness].get(action)
-        if verb is not None:
+        verb = _VERBS.get(harness, {}).get(action)
+        if harness == "devin":
+            view = READERS[harness](home, [])
+            if view is None or action not in view.allowed_actions.get(ref, []):
+                raise ActionError("Devin removal is unavailable for ambiguous names or a custom store")
+            name, _ = split_ref(ref)
+            argv = ["devin", "plugins", "remove", name, "--yes"]
+            done = _run(home, argv, run, timeout)
+            ran.append(argv)
+            output = _tail(done.stdout, done.stderr)
+        elif verb is not None:
             argv = [harness, "plugin", verb, ref]
             done = _run(home, argv, run, timeout)
             ran.append(argv)

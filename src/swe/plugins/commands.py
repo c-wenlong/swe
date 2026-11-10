@@ -13,7 +13,7 @@ from swe.console import c, sanitize, truncate
 from swe.flags import expand_value_flags
 from swe.json_output import emit, error_stream, take_json_flag
 from swe.plugins.actions import ACTIONS, ActionError, plugin_action
-from swe.plugins.catalog import ACTIONABLE, build_catalog
+from swe.plugins.catalog import ACTIONABLE, CONTROLLABLE, build_catalog
 from swe.table import Table
 
 SUBCOMMANDS = ("catalog", "marketplace", "info", "import", *ACTIONS)
@@ -161,9 +161,9 @@ def _action(action: str, rest: list[str], json_view: bool, fail) -> int:
             i += 1
     if len(refs) != 1:
         return fail(c("red", f"Usage: swe plugins {action} <plugin>@<marketplace> "
-                             f"--harness={'|'.join(ACTIONABLE)}"))
+                             f"--harness={'|'.join(CONTROLLABLE)}"))
     if harness is None:
-        return fail(c("red", f"--harness is required: --harness={'|'.join(ACTIONABLE)}"))
+        return fail(c("red", f"--harness is required: --harness={'|'.join(CONTROLLABLE)}"))
     try:
         result = plugin_action(Path.home(), action, refs[0], harness)
     except ActionError as exc:
@@ -194,7 +194,7 @@ def _installed_counts(market: dict, harnesses: list[str]) -> str:
 def _render_marketplaces(data: dict) -> None:
     markets = data["marketplaces"]
     if not markets:
-        print(c("dim", "\n  No plugin marketplaces registered in claude, codex or cursor.\n"))
+        print(c("dim", "\n  No plugin sources or installations found.\n"))
         return
     harnesses = data["harnesses"]
     table = Table()

@@ -259,3 +259,13 @@ resumes) and left in place.
 ### Imported plugins
 
 `swe plugins import <ref>` writes a local marketplace at `plugins/<marketplace>/.claude-plugin/marketplace.json` and an independent plugin copy at `plugins/<marketplace>/plugins/<name>` (or appends to an existing hub marketplace). It never overwrites a declared plugin. These are ordinary hub sources, with no new database or persistent rendering cache. Mac local inventory and action arrays are derived off the main actor per catalog/skills revision.
+
+### Disabled OpenCode file plugins
+
+`data/plugin-disabled/opencode/<sha256-of-absolute-discovery-root>/<filename>`
+holds files or directories suspended from OpenCode's global discovery folder.
+Re-enabling moves the original entry back; there is no second metadata record.
+Active/disabled name collisions refuse actions. Registry `capabilities.plugins.root`
+wins over the default `~/.config/opencode/plugins`. Both locations must be on
+the same filesystem; a failed rename leaves the source intact. Removal deletes
+only the selected discovery entry (a symlink itself, never its target).

@@ -292,7 +292,11 @@ The CLI side of remote also speaks `--json`:
   `failures` for parsers that crashed.
 - `PluginCatalog`: `harnesses`, `actions`, `marketplaces` (each with
   `harnesses` metadata and `plugins`), `errors`. Plugin `components` keys
-  like `mcp_servers` stay snake_case in saved snapshots.
+  like `mcp_servers` stay snake_case in saved snapshots. Per-harness state may
+  include `allowed_actions`: an explicit list of supported verbs. Empty or
+  malformed lists offer no actions; absent retains legacy state-based actions.
+  Devin offers only native removal; OpenCode file plugins offer on/off/removal.
+  File plugins may have a file (rather than directory) in `path`.
 - No `--json` output carries secret values; MCP env/header values arrive
   as key names only.
 

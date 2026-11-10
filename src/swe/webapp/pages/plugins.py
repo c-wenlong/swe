@@ -62,7 +62,7 @@ DRIFT_STATES = {
 INSTALLED = {"enabled", "disabled", "installed", "cached"}
 
 # HarnessMark names the source headings use.
-_NAMES = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"}
+_NAMES = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor", "devin": "Devin", "opencode": "OpenCode"}
 
 
 def get(ctx, args: dict) -> dict:
@@ -337,6 +337,9 @@ def status(state: dict | None) -> str:
     cached or absent."""
     if not state:
         return "absent"
+    if "allowed_actions" in state:
+        allowed = state["allowed_actions"]
+        return [v for v in ("enable", "disable", "uninstall") if v in allowed] if isinstance(allowed, list) else []
     installed, enabled = state.get("installed"), state.get("enabled")
     if installed is True:
         return "enabled" if enabled is True else "disabled" if enabled is False else "installed"
@@ -393,6 +396,9 @@ def harness_actions(state: dict | None, actionable: bool) -> list[str]:
     install only from a marketplace that harness lists."""
     if not actionable or not state:
         return []
+    if "allowed_actions" in state:
+        allowed = state["allowed_actions"]
+        return [v for v in ("enable", "disable", "uninstall") if v in allowed] if isinstance(allowed, list) else []
     installed, enabled = state.get("installed"), state.get("enabled")
     if installed is True:
         return ["disable", "uninstall"] if enabled is True else (

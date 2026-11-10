@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Devin and OpenCode plugin controls.** Devin resolved installs can be removed through its native CLI. OpenCode global file plugins can be suspended into SWE storage, restored, imported, and removed. Controls are available on Mac, web and CLI; Devin has no per-plugin toggle, and OpenCode package/project controls remain unsupported.
+
 - **`swe worktree` (alias `swe wt`) manages git worktrees across repos.**
   `swe wt list` lists every linked worktree in the current repo, or with
   `--all` in every repo swe knows (`worktree.roots` in config, `swe gh`

@@ -27,7 +27,7 @@ def local_plugin(market: dict, plugin: dict) -> bool:
     for state in plugin.get("harnesses", {}).values():
         if state.get("installed") is False:
             continue
-        if any(Path(p).is_dir() for p in [state.get("path"), *state.get("copies", [])] if p):
+        if any((Path(p).exists() or Path(p).is_symlink()) for p in [state.get("path"), *state.get("copies", [])] if p):
             return True
     return False
 
@@ -50,7 +50,7 @@ def import_plugin(home: Path, ref: str) -> dict:
                       if s.get("installed") is not False]
         candidates += [p for s in plugin["harnesses"].values()
                        if s.get("installed") is not False for p in s.get("copies", [])]
-        source = next((Path(p) for p in candidates if p and Path(p).is_dir()), None)
+        source = next((Path(p) for p in candidates if p and Path(p).exists()), None)
         if source is None:
             raise ActionError("The plugin's installed files are missing; refresh and try again")
         root = plugins_dir_for(home)
@@ -78,6 +78,8 @@ def import_plugin(home: Path, ref: str) -> dict:
         # Dereference links to make an independent copy, but never copy a
         # link outside the installed plugin (credentials, sibling caches).
         resolved_source = source.resolve()
+        if source.is_symlink() and source.is_file():
+            raise ActionError("Materialize the plugin file symlink before importing")
         for base, dirs, files in os.walk(source, followlinks=False):
             for part in dirs + files:
                 path = Path(base) / part
@@ -88,7 +90,11 @@ def import_plugin(home: Path, ref: str) -> dict:
         try:
             with tempfile.TemporaryDirectory(prefix=".import-", dir=root) as scratch:
                 stage = Path(scratch)
-                shutil.copytree(source, stage / "plugin", ignore=shutil.ignore_patterns(".git"))
+                if source.is_file():
+                    (stage / "plugin").mkdir()
+                    shutil.copy2(source, stage / "plugin" / source.name)
+                else:
+                    shutil.copytree(source, stage / "plugin", ignore=shutil.ignore_patterns(".git"))
                 data["plugins"].append({"name": name, "source": f"./plugins/{name}"})
                 (stage / "marketplace.json").write_text(json.dumps(data, indent=2) + "\n")
                 if not target_market.exists():

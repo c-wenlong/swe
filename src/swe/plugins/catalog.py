@@ -3,7 +3,8 @@
 ``swe find plugins`` lists what is installed and ``swe skills hub`` what
 ``~/.swe/plugins`` offers. This is the third view the app's Plugins page
 needs: the whole catalog of every marketplace Claude Code, Codex or Cursor
-knows about, each plugin with its install and enable state per harness.
+knows about, plus Devin resolved installs and OpenCode global file plugins,
+each with its install and enable state per harness.
 
 Where each harness keeps things (read from files only, never the network):
 
@@ -34,7 +35,10 @@ locations with any credentials stripped from URLs.
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -49,12 +53,13 @@ from swe.find.plugins import (
 )
 from swe.paths import plugins_dir_for
 
-HARNESSES = ("claude", "codex", "cursor")
+HARNESSES = ("claude", "codex", "cursor", "devin", "opencode")
+CONTROLLABLE = ("claude", "codex", "devin", "opencode")
 # Harnesses whose CLI swe can drive for install, uninstall, enable, disable.
 ACTIONABLE = ("claude", "codex")
 
 # Where a plugin keeps its own manifest, per harness format.
-_PLUGIN_MANIFESTS = (".claude-plugin", ".codex-plugin", ".cursor-plugin", ".plugin")
+_PLUGIN_MANIFESTS = (".devin-plugin", ".claude-plugin", ".codex-plugin", ".cursor-plugin", ".plugin")
 
 
 @dataclass
@@ -86,6 +91,7 @@ class View:
     cache: Path | None        # <cache>/<marketplace>/<plugin>/<version>
     installs_known: bool = True
     scopes: dict = field(default_factory=dict)   # claude: ref -> every scope with a record
+    allowed_actions: dict = field(default_factory=dict)  # ref -> supported verbs
 
 
 def _err(errors: list, harness: str, detail: str, marketplace: str | None = None,
@@ -357,7 +363,69 @@ def read_cursor(home: Path, errors: list) -> View | None:
     return View("cursor", markets, {}, {}, cache, installs_known=False)
 
 
-READERS = {"claude": read_claude, "codex": read_codex, "cursor": read_cursor}
+def read_devin(home: Path, errors: list) -> View | None:
+    from swe.find.plugins import _devin_cache_dir
+    from swe.harness.registry import load_registry_if_present
+
+    reg = load_registry_if_present()
+    if not _plugin_capable(reg, "devin"):
+        return None
+    default = home / PLUGIN_FALLBACK["devin"]
+    root = _plugin_root(reg, "devin", home) or default
+    if not root.exists():
+        return None
+    lock = _read_json(root / "lock.json")
+    if lock is _BROKEN or not isinstance(lock.get("resolved"), list):
+        _err(errors, "devin", "Cannot read the resolved plugin lock", path=root / "lock.json")
+        return None
+    rows = []
+    for entry in lock["resolved"]:
+        if not isinstance(entry, dict):
+            continue
+        spec = entry.get("spec") if isinstance(entry.get("spec"), dict) else {}
+        name = entry.get("name") or spec.get("bundleId")
+        identity = entry.get("identity")
+        if isinstance(name, str) and name and isinstance(identity, str) and identity:
+            rows.append((name, identity, entry))
+    names = Counter(name for name, _identity, _entry in rows)
+    view = View("devin", {}, {}, {}, None)
+    for name, identity, entry in rows:
+        # Identity/source labels may contain URL syntax; keep these refs opaque,
+        # never turn them into a CLI argument. Native remove takes only the name.
+        market = "devin-" + hashlib.sha256(identity.encode()).hexdigest()[:12]
+        ref = f"{name}@{market}"
+        view.installs[ref] = Install(str(entry.get("version_dir") or ""), _devin_cache_dir(root, entry))
+        # A resolved lock is not a load-time policy decision. No on/off claim.
+        view.allowed_actions[ref] = (["uninstall"] if names[name] == 1
+                                      and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]*", name)
+                                      and root.resolve() == default.resolve() else [])
+    return view
+
+
+def read_opencode(home: Path, errors: list) -> View | None:
+    from swe.plugins.local import local_plugins
+
+    rows = local_plugins(home)
+    if not rows:
+        return None
+    view = View("opencode", {}, {}, {}, None)
+    counts = Counter(p.ref for p in rows)
+    entries = []
+    for plugin in rows:
+        name, _, market = plugin.ref.rpartition("@")
+        view.installs[plugin.ref] = Install(None, plugin.path)
+        # Presence describes discovery only; project configuration can override it.
+        view.enabled[plugin.ref] = plugin.enabled
+        view.allowed_actions[plugin.ref] = (["disable" if plugin.enabled else "enable", "uninstall"]
+                                           if counts[plugin.ref] == 1 else [])
+        entries.append({"name": name, "displayName": plugin.name,
+                        "description": "Global OpenCode file plugin"})
+    view.markets["opencode-local"] = Market("opencode-local", "file", "", None, entries=entries)
+    return view
+
+
+READERS = {"claude": read_claude, "codex": read_codex, "cursor": read_cursor,
+           "devin": read_devin, "opencode": read_opencode}
 
 
 def read_views(home: Path, errors: list, harnesses=HARNESSES) -> dict:
@@ -507,7 +575,9 @@ def _harness_state(view: View, record: _Record, plugin: _Plugin, ref: str) -> di
     inst = view.installs.get(ref)
     path = None
     if inst is not None:
-        if inst.path is not None and inst.path.is_dir() and inst.path not in copy_paths:
+        present = inst.path is not None and (inst.path.is_dir() or (
+            view.harness == "opencode" and (inst.path.exists() or inst.path.is_symlink())))
+        if present and inst.path not in copy_paths:
             copy_paths.append(inst.path)
         # Claude reads a directory-marketplace plugin from the folder itself
         # (`claude plugin update` says "read from its folder"); the cache copy
@@ -516,7 +586,7 @@ def _harness_state(view: View, record: _Record, plugin: _Plugin, ref: str) -> di
         if view.harness == "claude" and market is not None \
                 and market.source_type == "directory" and live is not None:
             path = live
-        elif inst.path is not None and inst.path.is_dir():
+        elif present:
             path = inst.path
     return {
         "available": available,
@@ -526,6 +596,8 @@ def _harness_state(view: View, record: _Record, plugin: _Plugin, ref: str) -> di
         "scopes": view.scopes.get(ref, []),
         "path": str(path) if path is not None else None,
         "copies": [str(p) for p in copy_paths],
+        **({"allowed_actions": view.allowed_actions.get(ref, [])}
+           if view.harness in ("devin", "opencode") else {}),
     }
 
 
@@ -659,7 +731,7 @@ def build_catalog(home: Path | None = None) -> dict:
         })
     return {
         "harnesses": list(views),
-        "actions": [h for h in ACTIONABLE if h in views],
+        "actions": [h for h in CONTROLLABLE if h in views],
         "marketplaces": out,
         "errors": errors,
     }

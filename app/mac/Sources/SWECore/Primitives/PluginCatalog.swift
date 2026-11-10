@@ -7,12 +7,12 @@ import Observation
 /// has registered or `~/.swe/plugins` holds, installed or not, with each
 /// harness's state.
 public struct PluginCatalog: SnapshotValue {
-    /// 2: version 1 was a catalog bundled with the skills, never released.
-    public static let snapshotVersion = 2
+    /// 3: per-plugin action masks and additional harness controls.
+    public static let snapshotVersion = 3
 
     /// The harnesses swe read, in its order.
     public let harnesses: [String]
-    /// The harnesses swe can install, uninstall, enable and disable in.
+    /// Harnesses with controls; per-state masks may restrict the available verbs.
     public let actions: [String]
     public let marketplaces: [PluginMarketplace]
     /// What swe could not read, in its words.
@@ -57,6 +57,11 @@ public struct PluginCatalog: SnapshotValue {
     /// state swe does not know.
     public func actions(for plugin: CatalogPlugin, in harness: String) -> [PluginAction] {
         guard actions.contains(harness), let state = plugin.harnesses[harness] else { return [] }
+        if let allowed = state.allowedActions {
+            return allowed.compactMap { PluginAction.Verb(rawValue: $0) }
+                .filter { [.enable, .disable, .uninstall].contains($0) }
+                .map { PluginAction(verb: $0, ref: plugin.ref, harness: harness) }
+        }
         let verbs: [PluginAction.Verb]
         switch state.installed {
         case true?:
@@ -291,6 +296,8 @@ public struct PluginHarnessState: Codable, Sendable, Equatable {
     public let path: String?
     /// Every cached copy.
     public let copies: [String]
+    /// A harness may offer only a subset of the standard controls. Nil is legacy.
+    public let allowedActions: [String]?
 
     public enum Status: Sendable, Equatable {
         case enabled, disabled, installed, available, cached, absent
@@ -308,7 +315,8 @@ public struct PluginHarnessState: Codable, Sendable, Equatable {
     }
 
     public init(available: Bool, installed: Bool?, enabled: Bool? = nil, version: String? = nil,
-                scopes: [String] = [], path: String? = nil, copies: [String] = []) {
+                scopes: [String] = [], path: String? = nil, copies: [String] = [], allowedActions: [String]? = nil) {
+        self.allowedActions = allowedActions
         self.available = available
         self.installed = installed
         self.enabled = enabled
@@ -318,7 +326,7 @@ public struct PluginHarnessState: Codable, Sendable, Equatable {
         self.copies = copies
     }
 
-    enum CodingKeys: String, CodingKey { case available, installed, enabled, version, scopes, path, copies }
+    enum CodingKeys: String, CodingKey { case available, installed, enabled, version, scopes, path, copies, allowedActions }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -329,6 +337,8 @@ public struct PluginHarnessState: Codable, Sendable, Equatable {
         scopes = (try? c.decodeIfPresent([String].self, forKey: .scopes)) ?? []
         path = try? c.decodeIfPresent(String.self, forKey: .path)
         copies = (try? c.decodeIfPresent([String].self, forKey: .copies)) ?? []
+        allowedActions = c.contains(.allowedActions)
+            ? ((try? c.decode([String].self, forKey: .allowedActions)) ?? []) : nil
     }
 
     public var status: Status {
@@ -459,6 +469,8 @@ public struct PluginAction: Sendable, Hashable, Identifiable {
     public var command: String {
         switch (harness, verb) {
         case (_, .adopt): "swe plugins import \(ref)"
+        case ("devin", _), ("opencode", _):
+            "swe plugins \(verb.rawValue) \(ref) --harness=\(harness)"
         case ("codex", .install): "codex plugin add \(ref)"
         case ("codex", .uninstall): "codex plugin remove \(ref)"
         case ("codex", .enable), ("codex", .disable):
@@ -477,6 +489,12 @@ public struct PluginAction: Sendable, Hashable, Identifiable {
     /// "Install tool@kit in Claude Code?", for the confirmation.
     public var question: String {
         if verb == .adopt { return "Import \(ref) into SWE?" }
+        if harness == "devin" && verb == .uninstall {
+            return "Remove \(ref) from Devin, including your personal cloud plugins?"
+        }
+        if harness == "opencode" {
+            return "\(verb.title) global OpenCode file plugin \(ref)?"
+        }
         let name = HarnessMark(harness).name
         return "\(verb.title) \(ref) \(verb == .uninstall ? "from" : "in") \(name)?"
     }
