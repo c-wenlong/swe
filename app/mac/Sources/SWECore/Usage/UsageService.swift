@@ -167,15 +167,35 @@ public actor UsageService {
 
         switch http.statusCode {
         case 200..<300:
-            guard let parsed = parse(data, key: key, credential: credential, now: answered) else {
+            guard var parsed = parse(data, key: key, credential: credential, now: answered) else {
                 let status = UsageStatus.error("unexpected response from the usage API")
                 store.save(failed(status, entry: entry, reading: reading,
                                   credential: credential, at: answered), for: key)
                 return result(status, reading: reading, credential: credential)
             }
-            let fresh = StoredReading(plan: parsed.plan, email: parsed.email, windows: parsed.windows, fetchedAt: answered, monthlyCredits: parsed.monthlyCredits)
+            // Billing has its own persisted cooldown: refreshing the regular
+            // windows must not bypass a Retry-After from the monthly endpoint.
+            var monthlyRetryAt = entry?.monthlyRetryAt
+            if key.provider == .codex, !parsed.windows.contains(where: { $0.label == "30d" }),
+               (monthlyRetryAt ?? .distantPast) <= now(),
+               let request = CodexUsageAPI.monthlyRequest(credential, plan: parsed.plan),
+               let (monthlyData, monthlyHTTP) = try? await transport.send(request) {
+                if (200..<300).contains(monthlyHTTP.statusCode),
+                   let monthly = CodexUsageAPI.parseMonthly(monthlyData) {
+                    parsed.windows.append(monthly.window)
+                    parsed.monthlyCredits = monthly.credits
+                    monthlyRetryAt = nil
+                } else if monthlyHTTP.statusCode == 429 {
+                    let received = now()
+                    let asked = RetryAfter.date(monthlyHTTP.value(forHTTPHeaderField: "Retry-After"), now: received)
+                    let wait = asked.map { $0.timeIntervalSince(received) } ?? Self.defaultCooldown
+                    monthlyRetryAt = received.addingTimeInterval(min(max(wait, Self.cooldownRange.lowerBound), Self.cooldownRange.upperBound))
+                }
+            }
+            let fresh = StoredReading(plan: parsed.plan, email: parsed.email, windows: parsed.windows,
+                                      fetchedAt: answered, monthlyCredits: parsed.monthlyCredits)
             store.save(StoredAccount(fingerprint: credential.fingerprint, reading: fresh,
-                                     cooldownUntil: nil, lastFailure: nil), for: key)
+                                     cooldownUntil: nil, lastFailure: nil, monthlyRetryAt: monthlyRetryAt), for: key)
             return result(.ok, reading: fresh, credential: credential, isStale: false)
         case 401:
             store.save(failed(.expired, entry: entry, reading: reading,

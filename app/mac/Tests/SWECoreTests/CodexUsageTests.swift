@@ -99,6 +99,104 @@ import Testing
         #expect(parsed.monthlyCredits == nil)
     }
 
+    @Test func educationMonthlyAllowanceComesFromWorkspaceBilling() async throws {
+        let h = UsageHarness()
+        h.files.set("\(codexHome)/auth.json", codexAuthJSON())
+        h.transport.reply(200, body: Data(#"{"plan_type":"education","rate_limit":{"primary_window":{"used_percent":53}},"spend_control":{"reached":false,"individual_limit":null}}"#.utf8))
+        h.transport.reply(200, body: Data(#"{"balance_unit":"credit","effective_monthly_limit":{"limit":700,"enforcement_mode":"HARD_CAP","limit_mode":"amount_credits"},"current_month_usage":502.99}"#.utf8))
+        let service = h.makeService()
+        let usage = await service.usage(for: codexKey, force: true)
+        #expect(usage.windows.map(\.label) == ["5h", "30d"])
+        #expect(abs((usage.windows.last?.usedPercent ?? 0) - 71.8557) < 0.001)
+        #expect(usage.monthlyCredits == MonthlyCredits(used: 502.99, limit: 700))
+        let request = try #require(h.transport.requests.last)
+        #expect(request.url?.path == "/backend-api/accounts/acct-123/spend-controls/current-user/monthly-usage")
+        #expect(request.value(forHTTPHeaderField: "ChatGPT-Account-Id") == "acct-123")
+        let cached = await service.cachedUsage(for: codexKey)
+        #expect(cached?.windows == usage.windows)
+        #expect(cached?.monthlyCredits == usage.monthlyCredits)
+    }
+
+    @Test func typedDollarLimitsDoNotBecomeCredits() throws {
+        let body = #"{"balance_unit":"usd","effective_monthly_limit":{"limit_amount":{"unit":"usd","amount":"28"}},"current_month_usage":7}"#
+        let monthly = try #require(CodexUsageAPI.parseMonthly(Data(body.utf8)))
+        #expect(monthly.window.usedPercent == 25)
+        #expect(monthly.credits == nil)
+    }
+
+    @Test(arguments: [(0.0, 0.0), (700.0, 701.0)])
+    func zeroAndExceededLimitsAreClamped(cap: Double, used: Double) throws {
+        let body = "{\"effective_monthly_limit\":{\"limit\":\(cap)},\"current_month_usage\":\(used)}"
+        let monthly = try #require(CodexUsageAPI.parseMonthly(Data(body.utf8)))
+        #expect(monthly.window.usedPercent == 100)
+        #expect(monthly.credits == MonthlyCredits(used: used, limit: cap))
+    }
+
+    @Test func concurrentFailureCannotEraseBillingCooldownWithoutAReading() throws {
+        let h = UsageHarness()
+        let store = UsageCacheStore(url: h.cacheURL, now: { usageEpoch })
+        let until = usageEpoch.addingTimeInterval(3600)
+        store.save(StoredAccount(fingerprint: "login", reading: nil, cooldownUntil: nil,
+                                 lastFailure: nil, monthlyRetryAt: until), for: codexKey)
+        // A concurrent request started before the first response and failed.
+        store.save(StoredAccount(fingerprint: "login", reading: nil, cooldownUntil: nil,
+                                 lastFailure: StoredFailure(at: usageEpoch, status: .error("offline"))), for: codexKey)
+        let kept = try #require(store.entry(for: codexKey))
+        #expect(kept.reading == nil)
+        #expect(kept.monthlyRetryAt == until)
+        // A successful refresh cannot shorten a later wait saved elsewhere.
+        store.save(StoredAccount(fingerprint: "login", reading: nil, cooldownUntil: nil,
+                                 lastFailure: nil, monthlyRetryAt: until.addingTimeInterval(-600)), for: codexKey)
+        #expect(store.entry(for: codexKey)?.monthlyRetryAt == until)
+        // A genuinely new login starts clean.
+        store.save(StoredAccount(fingerprint: "new-login", reading: nil, cooldownUntil: nil,
+                                 lastFailure: nil), for: codexKey)
+        #expect(store.entry(for: codexKey)?.monthlyRetryAt == nil)
+    }
+
+    @Test func billingRetryAfterSurvivesRestartAndForcedRefresh() async {
+        let h = UsageHarness()
+        h.files.set("\(codexHome)/auth.json", codexAuthJSON())
+        let standard = Data(#"{"plan_type":"education","rate_limit":{"primary_window":{"used_percent":53}}}"#.utf8)
+        h.transport.reply(200, body: standard)
+        h.transport.reply(429, headers: ["Retry-After": "3600"])
+        let first = await h.makeService().usage(for: codexKey, force: true)
+        #expect(first.status == .ok)
+        #expect(first.windows.map(\.label) == ["5h"])
+        h.clock.advance(600)
+        h.transport.reply(200, body: standard)
+        let refreshed = await h.makeService().usage(for: codexKey, force: true)
+        #expect(refreshed.status == .ok)
+        #expect(h.transport.requests.count == 3)
+        h.clock.advance(3001)
+        h.transport.reply(200, body: standard)
+        h.transport.reply(200, body: Data(#"{"effective_monthly_limit":{"limit":700},"current_month_usage":350}"#.utf8))
+        let resumed = await h.makeService().usage(for: codexKey, force: true)
+        #expect(h.transport.requests.count == 5)
+        #expect(resumed.windows.last?.usedPercent == 50)
+        #expect(resumed.monthlyCredits == MonthlyCredits(used: 350, limit: 700))
+    }
+
+    @Test func unavailableMonthlyBillingKeepsTheOtherWindows() async {
+        let h = UsageHarness()
+        h.files.set("\(codexHome)/auth.json", codexAuthJSON())
+        h.transport.reply(200, body: Data(#"{"plan_type":"education","rate_limit":{"primary_window":{"used_percent":53}}}"#.utf8))
+        h.transport.reply(403)
+        let usage = await h.makeService().usage(for: codexKey, force: true)
+        #expect(usage.status == .ok)
+        #expect(usage.windows.map(\.label) == ["5h"])
+    }
+
+    @Test(arguments: [
+        #"{"effective_monthly_limit":{"limit":700,"limit_mode":"unlimited_platform_max"},"current_month_usage":5}"#,
+        #"{"effective_monthly_limit":{"limit":-1},"current_month_usage":5}"#,
+        #"{"balance_unit":"usd","effective_monthly_limit":{"limit":700},"current_month_usage":5}"#,
+        #"{"effective_monthly_limit":{"limit":700},"current_month_usage":true}"#,
+    ])
+    func invalidMonthlyBillingIsHidden(body: String) {
+        #expect(CodexUsageAPI.parseMonthly(Data(body.utf8)) == nil)
+    }
+
     @Test(arguments: [
         ("education", "Education"), ("edu", "Edu"), ("edu_plus", "Edu Plus"), ("edu_pro", "Edu Pro"),
         ("pro", "Pro 20x"), ("self_serve_business_prolite", "Business 5x"),

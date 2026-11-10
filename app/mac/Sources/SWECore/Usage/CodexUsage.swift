@@ -66,6 +66,43 @@ enum CodexUsageAPI {
         return MonthlyCredits(used: used, limit: cap)
     }
 
+    /// Workspace billing can expose a monthly allowance even when wham/usage
+    /// sends spend_control.individual_limit = null (notably education seats).
+    static func monthlyRequest(_ credential: UsageCredential, plan: String?) -> URLRequest? {
+        let workspace = ["edu", "education", "business", "enterprise", "team"]
+            .contains { (plan ?? "").lowercased().hasPrefix($0) }
+        guard workspace, let account = credential.accountID, !account.isEmpty else { return nil }
+        var result = request(credential)
+        result.url = URL(string: "https://chatgpt.com/backend-api/accounts")!
+            .appendingPathComponent(account)
+            .appendingPathComponent("spend-controls/current-user/monthly-usage")
+        return result
+    }
+
+    struct MonthlyReading {
+        var window: UsageWindow
+        var credits: MonthlyCredits?
+    }
+
+    static func parseMonthly(_ data: Data) -> MonthlyReading? {
+        guard let body = UsageJSON.object(data),
+              let limit = body["effective_monthly_limit"] as? [String: Any],
+              UsageJSON.string(limit["limit_mode"]) != "unlimited_platform_max",
+              let used = UsageJSON.number(body["current_month_usage"]), used >= 0 else { return nil }
+        let unit = UsageJSON.string(body["balance_unit"]) ?? "credit"
+        let amount = limit["limit_amount"] as? [String: Any]
+        let cap: Double?
+        if let amount, UsageJSON.string(amount["unit"]) == unit {
+            cap = UsageJSON.number(amount["amount"])
+        } else {
+            cap = unit == "credit" ? UsageJSON.number(limit["limit"]) : nil
+        }
+        guard let cap, cap >= 0 else { return nil }
+        return MonthlyReading(
+            window: UsageWindow(label: "30d", usedPercent: cap == 0 ? 100 : min(100, (used / cap) * 100), resetsAt: nil),
+            credits: unit == "credit" ? MonthlyCredits(used: used, limit: cap) : nil)
+    }
+
     /// One window, labelled by its length rather than its slot: Codex can move
     /// a sole weekly limit into the primary slot.
     private static func window(_ value: Any?, slot: String, prefix: String, now: Date) -> [UsageWindow] {
