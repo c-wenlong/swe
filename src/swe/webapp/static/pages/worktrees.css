@@ -73,6 +73,8 @@ a.badge.wt-pr:hover { background: var(--hover); }
 .wt-back { display: inline-block; margin: -8px 0 12px; font-size: 13px; color: var(--text-secondary); text-decoration: none; }
 .wt-back:hover { color: var(--text-primary); }
 .wt-head { gap: 10px; }
+.wt-head > p { margin: 0; }
+.wt-head > p + p { margin-top: -6px; }
 .wt-head .name { font-size: 16px; }
 .wt-detail-actions { flex-wrap: wrap; }
 .wt-details { gap: 10px; }

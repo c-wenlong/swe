@@ -253,11 +253,13 @@ class TestErrors(unittest.TestCase):
     def test_worktree_error_becomes_a_page_error_with_its_code_and_message(self):
         ctx = SimpleNamespace(home=None, machine={})
         want = {"bad_args": 400, "not_a_repo": 404, "not_found": 404, "not_safe": 409, "exists": 409,
-                "busy": 409, "gh_unavailable": 503, "git_failed": 502}
+                "busy": 409, "gh_unavailable": 503, "git_failed": 502, "bad_config": 500, "io_error": 500}
         for code, status in want.items():
             with self.subTest(code=code):
                 exc = self.run_error(code, lambda: page.post(ctx, "remove", {"path": "/r/wt/a"}))
-                self.assertEqual((exc.status, exc.code, exc.message), (status, code, f"the {code} message"))
+                self.assertEqual((exc.status, exc.code), (status, code))
+                want_msg = "swe's worktree settings are invalid: the bad_config message" if code == "bad_config" else f"the {code} message"
+                self.assertEqual(exc.message, want_msg)
         exc = self.run_error("not_found", lambda: page.get(ctx, {"worktree": "/r/gone"}))
         self.assertEqual((exc.status, exc.code), (404, "not_found"))
 
@@ -469,13 +471,14 @@ console.log(JSON.stringify({{ shown, rowHasDelete: api.wtRows(w).includes('data-
             _w("/r/o", None, "orphaned", head="d52bcc353aa1", harness="codex"),
             _w("/r/h", "feat/h", "merged-clean", hold="locked", harness="swe-pr", size_bytes=None),
             _w("/r/c", "feat/c", "no-pr", harness="claude"),
+            _w("/r/l", "feat/l", "merged-clean", locked=True),
         ])
         out = self.node(f"""
 const {{ api }} = h;
 const rows = {ws}.map(api.wtRows);
 console.log(JSON.stringify(rows));
 """)
-        orphan, hold, claude = out
+        orphan, hold, claude, locked = out
         self.assertNotIn('data-wt="delete"', orphan)
         self.assertIn("git worktree prune", orphan)
         self.assertIn('data-wt-copy="git -C /r/main worktree prune"', orphan)
@@ -487,6 +490,7 @@ console.log(JSON.stringify(rows));
         self.assertIn(">Claude Code<", claude)
         self.assertIn('<img alt="claude">', claude)
         self.assertNotIn(">CLI<", claude)
+        self.assertIn('data-wt="delete" data-path="/r/l" disabled title="Unlock first"', locked)
 
     def test_a_locked_worktree_cannot_be_deleted_from_the_sheet(self):
         self._force, self._branch = False, False

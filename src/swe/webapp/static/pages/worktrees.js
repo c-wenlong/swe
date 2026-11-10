@@ -229,7 +229,8 @@ function wtNoticeHtml() {
       p.notice.to ? `<a class="wt-notice-link" href="${wtRoute(p.notice.to)}">Open</a>` : ""}</div>` : ""}`;
 }
 function wtSummaryHtml(list) {
-  const clean = list.filter((w) => w.state === "merged-clean");
+  // What Clean up would take: not one prune holds back (locked, in use, a recent detached HEAD).
+  const clean = list.filter((w) => w.state === "merged-clean" && !w.hold);
   const dirty = list.filter((w) => w.state === "merged-dirty");
   const stat = (label, value, sub) => `<div class="wt-stat"><div class="caption">${esc(label)}</div>
     <div class="wt-stat-value num">${esc(value)}</div>${sub ? `<div class="caption">${esc(sub)}</div>` : ""}</div>`;
@@ -271,7 +272,7 @@ function wtRowHtml(w) {
   const actions = [];
   actions.push(`<button type="button" class="icon-button wt-copy" data-wt-copy="${esc(w.path)}" aria-label="Copy path" title="Copy path">${Fmt.copyIcon()}</button>`);
   if (w.rebuildable_bytes) actions.push(`<button type="button" class="btn hairline secondary" data-wt="slim" data-path="${esc(w.path)}" title="Delete what a build can recreate">Slim</button>`);
-  if (wtCanDelete(w)) actions.push(`<button type="button" class="btn hairline secondary danger-text" data-wt="delete" data-path="${esc(w.path)}">Delete…</button>`);
+  if (wtCanDelete(w)) actions.push(`<button type="button" class="btn hairline secondary danger-text" data-wt="delete" data-path="${esc(w.path)}"${w.locked ? ' disabled title="Unlock first"' : ""}>Delete…</button>`);
   const notes = [];
   if (w.state === "orphaned") notes.push(wtOrphanNote(w));
   if (w.hold) notes.push(`<span class="caption wt-hold">Clean up keeps it: ${esc(w.hold)}</span>`);
@@ -414,10 +415,10 @@ function paintWtDetail(w) {
     w.locked
       ? `<button class="btn hairline wt-button" type="button" data-wt="unlock" data-path="${esc(w.path)}">Unlock</button>`
       : `<button class="btn hairline wt-button" type="button" data-wt="lock" data-path="${esc(w.path)}">Lock…</button>`,
-    w.state !== "main" ? `<button class="btn hairline wt-button" type="button" data-wt="move" data-path="${esc(w.path)}">Move…</button>` : "",
+    w.state !== "main" ? `<button class="btn hairline wt-button" type="button" data-wt="move" data-path="${esc(w.path)}"${w.locked ? ' disabled title="Unlock first"' : ""}>Move…</button>` : "",
     `<button class="btn hairline wt-button" type="button" data-wt="slim" data-path="${esc(w.path)}"${w.rebuildable_bytes ? "" : " disabled"}>Slim…</button>`,
     `<button class="btn hairline wt-button" type="button" data-wt-copy="${esc(w.path)}">${Fmt.copyIcon()}Copy path</button>`,
-    canDelete ? `<button class="btn hairline wt-button danger-text" type="button" data-wt="delete" data-path="${esc(w.path)}">Delete…</button>` : "",
+    canDelete ? `<button class="btn hairline wt-button danger-text" type="button" data-wt="delete" data-path="${esc(w.path)}"${w.locked ? ' disabled title="Unlock first"' : ""}>Delete…</button>` : "",
   ].join("");
   const protectedNote = orphan ? `<div class="wt-notes">${wtOrphanNote(w)}</div>` : !canDelete ? `<p class="caption">${w.state === "main"
     ? "This is the repo's main checkout, so swe won't delete it."
@@ -432,9 +433,10 @@ function paintWtDetail(w) {
       <div class="card wt-head">
         <div class="wt-title"><span class="name">${esc(wtBranchName(w))}</span>${wtStateBadge(w.state)}${wtLockBadge(w)}${wtPrLink(w)}</div>
         <div class="wt-actions wt-detail-actions">${buttons}</div>
-        ${protectedNote}
-        ${w.hold ? `<p class="caption wt-hold">Clean up keeps it: ${esc(w.hold)}</p>` : ""}
-        ${w.locked && w.lock_reason ? `<p class="caption">Locked: ${esc(w.lock_reason)}</p>` : ""}
+        ${[protectedNote,
+          w.locked && canDelete ? '<p class="caption">Unlock first to move or delete it.</p>' : "",
+          w.locked && w.lock_reason ? `<p class="caption">Locked: ${esc(w.lock_reason)}</p>` : "",
+          w.hold ? `<p class="caption wt-hold">Clean up keeps it: ${esc(w.hold)}</p>` : ""].filter(Boolean).join("")}
       </div>
       <div class="card wt-details">
         ${w.reason ? wtKv("Why", esc(w.reason)) : ""}
@@ -857,8 +859,8 @@ async function wtPrunePreview(h, includeDirty, notice) {
       <ul class="wt-list">${skipped.map((s) => `<li><code class="wt-path">${esc(wtTilde(s.path))}</code><span class="caption">${esc(s.reason || "")}</span></li>`).join("")}</ul></details>` : ""}
     <p class="error" id="wt-sheet-error" role="alert" hidden></p>
     <div class="sheet-actions">
-      <button class="btn hairline wt-button" type="button" id="wt-cancel">Cancel</button>
-      <button class="btn hairline wt-button danger" type="submit" id="wt-p-go"${cands.length ? "" : " disabled"}>Delete ${esc(wtCount(cands.length, "worktree"))}</button>
+      <button class="btn hairline wt-button" type="button" id="wt-cancel">${cands.length ? "Cancel" : "Close"}</button>
+      ${cands.length ? `<button class="btn hairline wt-button danger" type="submit" id="wt-p-go">Delete ${esc(wtCount(cands.length, "worktree"))}</button>` : ""}
     </div></form>`);
   wtById("wt-cancel").onclick = () => h.sheet.close();
   const dirty = wtById("wt-p-dirty");

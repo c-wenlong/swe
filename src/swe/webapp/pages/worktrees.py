@@ -51,6 +51,8 @@ _STATUS = {
     "busy": 409,
     "gh_unavailable": 503,
     "git_failed": 502,
+    "bad_config": 500,
+    "io_error": 500,
 }
 
 # One write at a time: each one runs git against the same repos, and a
@@ -71,6 +73,8 @@ def _raise(wt, exc: Exception) -> None:
     """Re-raise ``exc`` as a PageError when it is a WorktreeError."""
     code = str(getattr(exc, "code", "") or "worktree_error")
     message = str(getattr(exc, "message", "") or exc)
+    if code == "bad_config":
+        message = f"swe's worktree settings are invalid: {message}"
     raise PageError(_STATUS.get(code, 500), code, message) from exc
 
 
