@@ -7,7 +7,7 @@ import Testing
         #expect(SidebarGroup.usage.sections == [.overview, .sessions, .calendar, .pricing])
         #expect(SidebarGroup.github.sections == [.repositories, .tasks, .inbox])
         #expect(SidebarGroup.manage.sections == [.accounts, .harnesses, .compute])
-        #expect(SidebarGroup.primitives.sections == [.plugins, .skills, .agentsMd, .mcpServers, .hooks, .models])
+        #expect(SidebarGroup.primitives.sections == [.plugins, .skills, .agentsMd, .mcpServers, .hooks, .worktrees, .models])
         #expect(SidebarGroup.system.sections == [.menuBar, .widgets, .serviceStatus, .settings])
     }
 
@@ -21,6 +21,10 @@ import Testing
         #expect(AppSection.serviceStatus.title == "Service status")
         #expect(AppSection.menuBar.title == "Menu bar")
         #expect(AppSection.widgets.title == "Widgets")
+        #expect(AppSection.worktrees.title == "Worktrees")
+        #expect(AppSection.worktrees.symbol == "arrow.triangle.branch")
+        #expect(AppSection.worktrees.group == .primitives)
+        #expect(!AppSection.worktrees.isCore)
     }
 
     @Test func arrowKeysWalkTheSidebarInOrderAcrossGroups() {
@@ -33,9 +37,10 @@ import Testing
         #expect(AppSection.inbox.step(1) == .accounts)
         #expect(AppSection.accounts.step(-1) == .inbox)
         #expect(AppSection.pricing.step(-1) == .calendar)
-        // Models closes the Primitives group.
+        // Models closes the Primitives group, Worktrees sits before it.
         #expect(AppSection.mcpServers.step(1) == .hooks)
-        #expect(AppSection.hooks.step(1) == .models)
+        #expect(AppSection.hooks.step(1) == .worktrees)
+        #expect(AppSection.worktrees.step(1) == .models)
         #expect(AppSection.models.step(1) == .menuBar)
         // The ends stay put.
         #expect(AppSection.overview.step(-1) == .overview)

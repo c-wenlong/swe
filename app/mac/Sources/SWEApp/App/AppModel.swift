@@ -66,6 +66,9 @@ final class AppModel {
     /// A hook's `harness|source` row key the Hooks page opens in its
     /// panel, then clears.
     var pendingHook: String?
+    /// A worktree path the Worktrees page opens in its detail pane, then
+    /// clears.
+    var pendingWorktree: String?
 
     /// A hub session key whose chat the Sessions page opens next, then
     /// clears. Set through `openSessionChat(key:)`.
@@ -530,6 +533,9 @@ final class AppModel {
     /// states and the check's findings. It asks for the current swe per
     /// call, so a path change needs no rebuild here.
     let hooks: HooksModel
+    /// The Worktrees page's list, from `swe wt list`. A debug build started
+    /// with `SWE_WT_FIXTURE` answers from `WorktreesFixture` instead.
+    let worktrees: WorktreesModel
     /// Every plugin in every marketplace: the Plugins page's Explore tab,
     /// and what the Skills page moves plugin skills out by.
     let pluginCatalog: PluginCatalogModel
@@ -889,6 +895,7 @@ final class AppModel {
         plugins = PluginsModel(snapshots: SnapshotFile(url: swe.appending(path: "cache/plugins.json")),
                                work: pluginWork)
         hooks = HooksModel(snapshots: SnapshotFile(url: swe.appending(path: "cache/hooks.json")))
+        worktrees = WorktreesModel(client: WorktreesDebug.fixtureClient())
         pluginCatalog = PluginCatalogModel(snapshots: SnapshotFile(url: swe.appending(path: "cache/plugin-catalog.json")),
                                            work: pluginWork)
         updates = UpdatesModel(

@@ -2,7 +2,7 @@
 public enum AppSection: String, CaseIterable, Identifiable, Hashable, Sendable {
     case overview, sessions, calendar, pricing
     case repositories, tasks, inbox
-    case accounts, harnesses, compute, skills, agentsMd, mcpServers, plugins, hooks, models
+    case accounts, harnesses, compute, skills, agentsMd, mcpServers, plugins, hooks, worktrees, models
     case menuBar, widgets, serviceStatus, settings
 
     public var id: String { rawValue }
@@ -24,6 +24,7 @@ public enum AppSection: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .mcpServers: "MCP servers"
         case .plugins: "Plugins"
         case .hooks: "Hooks"
+        case .worktrees: "Worktrees"
         case .models: "Models"
         case .menuBar: "Menu bar"
         case .widgets: "Widgets"
@@ -50,6 +51,7 @@ public enum AppSection: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .mcpServers: "powerplug"
         case .plugins: "puzzlepiece.extension"
         case .hooks: "bolt"
+        case .worktrees: "arrow.triangle.branch"
         case .models: "cube.transparent"
         case .menuBar: "menubar.rectangle"
         case .widgets: "square.grid.2x2"
@@ -97,7 +99,7 @@ public enum SidebarGroup: CaseIterable, Identifiable, Sendable {
         case .usage: [.overview, .sessions, .calendar, .pricing]
         case .github: [.repositories, .tasks, .inbox]
         case .manage: [.accounts, .harnesses, .compute]
-        case .primitives: [.plugins, .skills, .agentsMd, .mcpServers, .hooks, .models]
+        case .primitives: [.plugins, .skills, .agentsMd, .mcpServers, .hooks, .worktrees, .models]
         case .system: [.menuBar, .widgets, .serviceStatus, .settings]
         }
     }

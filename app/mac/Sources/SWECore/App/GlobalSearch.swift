@@ -7,7 +7,7 @@ import Foundation
 public struct GlobalSearchItem: Identifiable, Hashable, Sendable {
     /// The chip the row's trailing edge shows.
     public enum Kind: String, CaseIterable, Sendable {
-        case page, tab, session, harness, repo, task, skill, plugin, server, hook
+        case page, tab, session, harness, repo, task, skill, plugin, server, hook, worktree
 
         public var title: String {
             switch self {
@@ -21,6 +21,7 @@ public struct GlobalSearchItem: Identifiable, Hashable, Sendable {
             case .plugin: "Plugin"
             case .server: "Server"
             case .hook: "Hook"
+            case .worktree: "Worktree"
             }
         }
 
@@ -37,6 +38,7 @@ public struct GlobalSearchItem: Identifiable, Hashable, Sendable {
             case .plugin: 7
             case .server: 8
             case .hook: 9
+            case .worktree: 10
             }
         }
     }
@@ -75,6 +77,8 @@ public struct GlobalSearchItem: Identifiable, Hashable, Sendable {
         case server(name: String)
         /// A hook's `harness|source` row key and its harness tab pick.
         case hook(key: String, harness: String)
+        /// A worktree's detail on the Worktrees page, by its path.
+        case worktree(path: String)
     }
 
     public var id: String

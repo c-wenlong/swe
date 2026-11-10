@@ -116,7 +116,7 @@ import Testing
         // Each one goes back where the default layout puts it, inside its
         // own group — not at the end of the list.
         #expect(model.sections(in: .usage) == [.overview, .sessions, .calendar, .pricing])
-        #expect(model.sections(in: .primitives) == [.plugins, .skills, .agentsMd, .mcpServers, .hooks, .models])
+        #expect(model.sections(in: .primitives) == [.plugins, .skills, .agentsMd, .mcpServers, .hooks, .worktrees, .models])
     }
 
     @Test func aMissingPageJoinsItsGroupNotItsNeighbour() {
@@ -131,7 +131,7 @@ import Testing
         store.set(saved, forKey: "sidebarOrder")
         let model = SidebarVisibilityModel(store: store)
         #expect(model.sections(in: .manage) == [.compute, .accounts, .harnesses])
-        #expect(model.sections(in: .primitives) == [.plugins, .skills, .agentsMd, .mcpServers, .hooks, .models])
+        #expect(model.sections(in: .primitives) == [.plugins, .skills, .agentsMd, .mcpServers, .hooks, .worktrees, .models])
         // Arrow keys never cross a group boundary.
         #expect(model.step(.compute, by: 1) == .accounts)
         #expect(model.step(.harnesses, by: 1) == .plugins)
@@ -179,6 +179,15 @@ import Testing
         #expect(model.shortcutNumber(of: .harnesses) == 9)
         #expect(model.shortcutNumber(of: .compute) == nil)
         #expect(model.shortcutNumber(of: .plugins) == nil)
+    }
+
+    @Test func worktreesCanBeHiddenLikeTheOtherPrimitives() {
+        let model = SidebarVisibilityModel(store: MemoryStore())
+        #expect(model.sections(in: .primitives).contains(.worktrees))
+        #expect(model.shortcutNumber(of: .worktrees) == nil)
+        model.setEnabled(.worktrees, false)
+        #expect(model.sections(in: .primitives) == [.plugins, .skills, .agentsMd, .mcpServers, .hooks, .models])
+        #expect(model.step(.hooks, by: 1) == .models)
     }
 
     @Test func hiddenPagesGiveTheirNumberToTheNextShownPage() {
