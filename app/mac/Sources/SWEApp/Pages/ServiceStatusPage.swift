@@ -520,9 +520,9 @@ private struct ServiceDetailsSheet: View {
     }
 }
 
-/// The overall state as TokenTracker shows it: an 8pt dot in the state's
-/// colour and the label beside it. The label stays neutral, since amber
-/// and green text at this size fall well short of 4.5:1 on white.
+/// The overall state: the quiver arrow in the state's colour and the
+/// label beside it. The label stays neutral, since amber and green text
+/// at this size fall well short of 4.5:1 on white.
 struct HealthLabel: View {
     var health: ServiceHealth?
     var isLoading = false
@@ -542,22 +542,22 @@ struct HealthLabel: View {
     }
 }
 
-/// The state's colour on its own, for the card label and the menu bar line.
+/// The state as a quiver arrow on its own, for the card label and the
+/// menu bar line.
 struct HealthDot: View {
     var health: ServiceHealth?
-    var size: CGFloat = 8
+    var size: CGFloat = 10
 
     var body: some View {
-        Circle().fill(color).frame(width: size, height: size).accessibilityHidden(true)
+        StateArrow(kind: kind, size: size)
     }
 
-    private var color: Color {
+    private var kind: StateArrows.Kind {
         switch health {
-        case .operational: Theme.success
-        case .maintenance: Theme.textSecondary
-        case .minor: Theme.warning
-        case .major, .critical: Theme.danger
-        case nil: Theme.borderStrong
+        case .operational: .green
+        case .minor: .yellow
+        case .major, .critical: .red
+        case .maintenance, nil: .grey
         }
     }
 }
@@ -567,7 +567,7 @@ private struct ComponentRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle().fill(color).frame(width: 6, height: 6).accessibilityHidden(true)
+            StateArrow(kind: kind, size: 8)
             Text(component.name).foregroundStyle(Theme.textPrimary).lineLimit(1)
             Spacer(minLength: 8)
             Text(component.state.title).foregroundStyle(Theme.textSecondary)
@@ -575,11 +575,11 @@ private struct ComponentRow: View {
         .font(Theme.caption)
     }
 
-    private var color: Color {
+    private var kind: StateArrows.Kind {
         switch component.state {
-        case .maintenance: Theme.textSecondary
-        case .degraded: Theme.warning
-        case .partialOutage, .majorOutage: Theme.danger
+        case .degraded, .partialOutage: .yellow
+        case .majorOutage: .red
+        case .maintenance: .grey
         }
     }
 }

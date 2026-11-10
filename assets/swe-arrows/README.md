@@ -1,7 +1,7 @@
 # SWE state arrows
 
-Source artwork for future status indicators. These assets are not wired into
-any client screen yet.
+Artwork for the status indicators every client draws. `AGENTS.md` and the
+FEATURES.md ported-logic table hold the state mapping.
 
 | Colour | Intended state |
 | --- | --- |
@@ -20,8 +20,9 @@ retain the original three-colour logo motif; grey is a standalone state.
 is an illustrative proposal, not a capture of the current app.
 
 The four normal SVGs are copied into Mac resources, the iOS asset catalog and
-web static files. The Mac also has a resource lookup and a decorative SwiftUI
-view ready for later adoption.
+web static files. Each client draws them through its own indicator: the Mac's
+`StateArrow` view, iOS's `StatusDot`, and the web's `state-<color>.svg` images
+on the service-status page and session badges.
 
 `arrows.py` is the original export script, kept as a source reference. It is
 not a build step: it uses its original `/workspace` output path and a Linux
