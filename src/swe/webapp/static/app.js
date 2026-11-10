@@ -136,6 +136,7 @@ const ICON = {
   agents: '<path d="M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6"/>',
   mcp: '<path d="M9 3v5M15 3v5M7 8h10v4a5 5 0 0 1-10 0zM12 17v4"/>',
   hooks: '<path d="m13 2-9 12h6l-1 8 9-12h-6z"/>',
+  worktrees: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 4-4 5-12 7"/>',
   models: '<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9"/>',
   menubar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18"/>',
   widgets: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
@@ -153,7 +154,7 @@ const SIDEBAR = [
   ["Usage", [["overview", "Overview"], ["sessions", "Sessions"], ["calendar", "Calendar"], ["pricing", "Pricing"]]],
   ["GitHub", [["repositories", "Repositories"], ["tasks", "Tasks"], ["inbox", "Inbox"]]],
   ["Manage", [["accounts", "Accounts"], ["harnesses", "Harnesses"], ["compute", "Compute"]]],
-  ["Primitives", [["plugins", "Plugins"], ["skills", "Skills"], ["agents", "AGENTS.md"], ["mcp", "MCP servers"], ["hooks", "Hooks"], ["models", "Models"]]],
+  ["Primitives", [["plugins", "Plugins"], ["skills", "Skills"], ["agents", "AGENTS.md"], ["mcp", "MCP servers"], ["hooks", "Hooks"], ["worktrees", "Worktrees"], ["models", "Models"]]],
   ["System", [["menubar", "Menu bar"], ["widgets", "Widgets"], ["status", "Service status"], ["settings", "Settings"]]],
 ];
 

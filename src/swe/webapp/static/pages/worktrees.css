@@ -1,0 +1,125 @@
+/* Worktrees page: summary strip, state chips, repo groups with rows, the
+ * detail view and the sheets. Reuses the shared .card/.badge/.caption/
+ * .btn/.field/.sheet classes from styles.css; the mono face is only for
+ * paths, branch names and shas. */
+
+.wt-button:disabled { opacity: .55; }
+.wt-button svg { width: 12px; height: 12px; }
+.wt-mono, .wt-path {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.wt-path { background: none; padding: 0; font-size: 12px; color: var(--text-secondary); word-break: break-all; }
+
+/* Notices */
+.wt-banner { padding: 12px 16px; flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; animation: wt-in .2s ease-out; }
+.wt-banner .error { margin: 0; }
+.wt-ok { border-color: color-mix(in srgb, var(--success) 40%, var(--border)); }
+.wt-notice-link { color: var(--link); font-size: 13px; }
+
+/* Summary */
+.wt-summary { gap: 16px; }
+.wt-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.wt-stat { background: var(--subtle); border-radius: var(--block-radius); padding: 10px 12px; min-width: 0; }
+.wt-stat-value { font-size: 20px; font-weight: 600; margin: 2px 0; }
+.wt-bulk { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Search and state chips */
+.wt-filters { align-items: center; }
+.wt-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.wt-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--card);
+  color: var(--text-secondary); font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.wt-chip:hover { background: var(--hover); color: var(--text-primary); }
+.wt-chip[aria-pressed="true"] { background: var(--selected); color: var(--text-primary); border-color: var(--border-strong); }
+.wt-chip .num { color: var(--text-muted); font-weight: 400; }
+
+/* Groups and rows */
+.wt-group { gap: 0; animation: wt-in .2s ease-out; }
+.wt-group-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding-bottom: 8px; }
+.wt-group-path { margin-left: auto; }
+.wt-rows { display: flex; flex-direction: column; }
+.wt-row {
+  display: flex; align-items: center; gap: 12px; padding: 10px 6px; margin: 0 -6px;
+  border-top: 1px solid var(--row-divider); border-radius: 6px; transition: background .15s;
+}
+.wt-row:hover { background: var(--row-hover); }
+.wt-main { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-width: 0; color: var(--text-primary); text-decoration: none; }
+.wt-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wt-title .name { font-weight: 600; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; word-break: break-all; }
+.wt-meta { display: flex; align-items: center; gap: 4px 14px; flex-wrap: wrap; }
+.wt-mark { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.wt-mark img.logo { width: 14px; height: 14px; }
+.wt-side { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.wt-actions { display: flex; align-items: center; gap: 6px; }
+.wt-actions .icon-button { width: 30px; height: 30px; }
+.wt-actions .btn.secondary { height: 30px; }
+.badge.wt-locked svg { width: 11px; height: 11px; }
+a.badge.wt-pr { color: var(--link); text-decoration: none; transition: background .15s; }
+a.badge.wt-pr:hover { background: var(--hover); }
+.wt-empty { text-align: center; }
+.wt-empty .empty { margin-bottom: 10px; }
+
+/* Detail */
+.wt-back { display: inline-block; margin: -8px 0 12px; font-size: 13px; color: var(--text-secondary); text-decoration: none; }
+.wt-back:hover { color: var(--text-primary); }
+.wt-head { gap: 10px; }
+.wt-head .name { font-size: 16px; }
+.wt-detail-actions { flex-wrap: wrap; }
+.wt-details { gap: 10px; }
+.wt-kv { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; font-size: 13px; align-items: baseline; }
+
+/* Sheets */
+dialog.wt-sheet { width: min(480px, calc(100vw - 32px)); }
+dialog.wt-sheet.wt-wide { width: min(640px, calc(100vw - 32px)); }
+dialog.wt-sheet[open] { animation: wt-pop .18s ease-out; }
+dialog.wt-sheet[open]::backdrop { animation: wt-fade .18s ease-out; }
+.wt-sheet form { display: flex; flex-direction: column; gap: 14px; }
+.wt-field { display: flex; flex-direction: column; gap: 4px; }
+.wt-field[hidden], .wt-field .field[hidden] { display: none; }
+.wt-label { font-size: 12px; color: var(--text-secondary); }
+.wt-segs { display: flex; gap: 4px; flex-wrap: wrap; }
+.wt-seg { position: relative; }
+.wt-seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.wt-seg span {
+  display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: var(--control-radius);
+  border: 1px solid var(--border); font-size: 13px; color: var(--text-secondary); transition: background .15s, color .15s;
+}
+.wt-seg:hover span { background: var(--hover); }
+.wt-seg:has(input:checked) span { background: var(--selected); color: var(--text-primary); border-color: var(--border-strong); }
+.wt-seg:has(input:focus-visible) span { outline: 1px solid var(--interactive); outline-offset: 2px; }
+.wt-check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; cursor: pointer; }
+.wt-check input { margin-top: 2px; }
+.wt-delete-list { margin: 0; padding-left: 18px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.wt-delete-list li[hidden] { display: none; }
+.wt-risk { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--border); background: var(--subtle); border-radius: var(--block-radius); padding: 10px 12px; }
+.wt-risk .note { margin: 0; }
+.wt-sheet .note { margin: 0; }
+.wt-sheet .caption { margin: 0; }
+.wt-loading { display: flex; align-items: center; gap: 10px; color: var(--text-secondary); font-size: 13px; }
+.wt-list { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; display: flex; flex-direction: column; border-top: 1px solid var(--row-divider); }
+.wt-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--row-divider); }
+.wt-list-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wt-list-main .name { font-weight: 600; font-size: 13px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.wt-list-main .badge { align-self: flex-start; }
+.wt-skipped summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+.wt-skipped .wt-list { margin-top: 8px; }
+
+@keyframes wt-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes wt-pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes wt-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .wt-banner, .wt-group, dialog.wt-sheet[open], dialog.wt-sheet[open]::backdrop { animation: none; }
+  .wt-chip, .wt-row, .wt-seg span, a.badge.wt-pr { transition: none; }
+}
+
+@media (max-width: 720px) {
+  .wt-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wt-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .wt-side { justify-content: space-between; flex-wrap: wrap; }
+  .wt-group-path { margin-left: 0; flex-basis: 100%; }
+  .wt-kv { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .wt-detail-actions .btn { flex: 1 1 auto; }
+}
