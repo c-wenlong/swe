@@ -213,13 +213,18 @@ def add(repo_path: str, branch: str | None = None, new: bool = False,
         if branch is None:
             raise WorktreeError("exists", f"local branches {', '.join(names)} already "
                                 f"exist at other commits than PR #{number}'s head")
+        # Remember which PR this is: a pr-N fallback name matches no PR head,
+        # and classify looks the PR up by this number. A branch made here has
+        # no link to lose, so it is linked first; an existing branch's link
+        # changes only once its checkout exists.
+        link = git_dir + ["config", f"branch.{branch}.swe-pr", str(number)]
         if create:
             _git_or_raise(git_dir + ["branch", branch, sha], f"creating {branch}")
-        # Remember which PR this is: a pr-N fallback name matches no PR head,
-        # and classify reads this to look the PR up by number.
-        gitio.git(git_dir + ["config", f"branch.{branch}.swe-pr", str(number)])
+            _git_or_raise(link, f"linking {branch} to PR #{number}")
         _git_or_raise(["-C", repo.root, "worktree", "add", target, branch],
                       "git worktree add")
+        if not create:
+            _git_or_raise(link, f"linking {branch} to PR #{number}")
         gitio.git(git_dir + ["update-ref", "-d", f"refs/swe/pr/{number}"])
     else:
         target = _real(path) if path else _default_path(repo.root, branch)

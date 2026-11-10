@@ -483,6 +483,11 @@ class WorktreeCases(unittest.TestCase):
         w = doc["data"]["worktree"]
         self.assertEqual(w["branch"], "pr-10")
         self.assertEqual((w["state"], w["pr"]["number"]), (OPEN_PR, 10))
+        # Another PR whose head is named pr-10 never overrides the saved link.
+        self.fx.gh_data["pr-10"] = [pr(99, "MERGED", sha)]
+        rc, doc = self.cli("show", w["path"])
+        self.assertEqual(doc["data"]["worktree"]["pr"]["number"], 10)
+        self.assertEqual(doc["data"]["worktree"]["state"], OPEN_PR)
 
     def test_slim_explicit_path(self):
         mods = Path(self.squash, "node_modules")
