@@ -407,6 +407,7 @@ def prune(cwd: str | None = None, all: bool = False, yes: bool = False,
         "registrations": plan.registrations,
         "log": plan.log,
         "scope": scope["scope"],
+        "repos": scope["repos"],
     }
 
 
