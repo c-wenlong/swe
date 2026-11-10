@@ -169,6 +169,9 @@ def add(repo_path: str, branch: str | None = None, new: bool = False,
         raise WorktreeError("bad_args", f"--pr takes a PR number, not {pr}")
     if (new or base) and not branch:
         raise WorktreeError("bad_args", "--new and --base go with --branch")
+    # Read settings before touching git: a broken config must fail the
+    # call before it leaves a checkout behind.
+    settings = load_settings(home)
     root = _real(repo_path)
     repo = discover.find_repo(root) if os.path.isdir(root) else None
     if repo is None:
@@ -210,10 +213,18 @@ def add(repo_path: str, branch: str | None = None, new: bool = False,
         if branch is None:
             raise WorktreeError("exists", f"local branches {', '.join(names)} already "
                                 f"exist at other commits than PR #{number}'s head")
+        # Remember which PR this is: a pr-N fallback name matches no PR head,
+        # and classify looks the PR up by this number. A branch made here has
+        # no link to lose, so it is linked first; an existing branch's link
+        # changes only once its checkout exists.
+        link = git_dir + ["config", f"branch.{branch}.swe-pr", str(number)]
         if create:
             _git_or_raise(git_dir + ["branch", branch, sha], f"creating {branch}")
+            _git_or_raise(link, f"linking {branch} to PR #{number}")
         _git_or_raise(["-C", repo.root, "worktree", "add", target, branch],
                       "git worktree add")
+        if not create:
+            _git_or_raise(link, f"linking {branch} to PR #{number}")
         gitio.git(git_dir + ["update-ref", "-d", f"refs/swe/pr/{number}"])
     else:
         target = _real(path) if path else _default_path(repo.root, branch)
@@ -233,7 +244,7 @@ def add(repo_path: str, branch: str | None = None, new: bool = False,
                                     f"no local branch {branch} (pass --new to create it)")
             _git_or_raise(["-C", repo.root, "worktree", "add", target, branch],
                           "git worktree add")
-    return {"worktree": _one(target, home).to_json()}
+    return {"worktree": _one(target, home, settings=settings).to_json()}
 
 
 def _refuse_special(wt: Worktree, verb: str) -> None:
@@ -401,6 +412,7 @@ def prune(cwd: str | None = None, all: bool = False, yes: bool = False,
         "registrations": plan.registrations,
         "log": plan.log,
         "scope": scope["scope"],
+        "repos": scope["repos"],
     }
 
 

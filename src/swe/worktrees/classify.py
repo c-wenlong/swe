@@ -168,7 +168,31 @@ def _classify(wt: Worktree, lookup: PrLookup, settings: Settings,
         if wt.branch in (default, "main", "master"):
             wt.state, wt.reason = NO_PR, f"on the default branch {wt.branch}"
             return wt
-        prs, err = lookup.for_branch(repo.slug, wt.branch)
+        linked = gitio.out(["--git-dir", repo.common_dir, "config", "--get",
+                            f"branch.{wt.branch}.swe-pr"])
+        if linked and gh.digits(linked):
+            # Made by `swe wt add --pr=N`: that PR's merge counts, never the
+            # merge of another PR that shares the branch's name. An open PR
+            # under the name still keeps it (a newer PR from this branch),
+            # and a merged link only counts while HEAD is that PR's head.
+            pr, err = lookup.for_number(repo.slug, int(linked))
+            named, err2 = lookup.for_branch(repo.slug, wt.branch)
+            if pr is None or named is None:
+                prs, err = None, err or err2
+            else:
+                prs = [pr] + [p for p in named if p.get("state") == "OPEN"]
+                on_main = bool(repo.main_ref and wt.head and gitio.is_ancestor(
+                    repo.common_dir, wt.head, repo.main_ref))
+                if (pr.get("state") == "MERGED" and not on_main
+                        and wt.head != pr.get("headRefOid")):
+                    prs = [p for p in prs if p is not pr]
+                    if not prs:
+                        wt.state = NO_PR
+                        wt.reason = (f"PR #{linked} merged, but HEAD has commits "
+                                     "past its head")
+                        return wt
+        else:
+            prs, err = lookup.for_branch(repo.slug, wt.branch)
         if prs is None:
             wt.state, wt.reason = UNKNOWN, f"gh could not list PRs: {err}"
             return wt

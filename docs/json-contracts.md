@@ -329,7 +329,7 @@ extras: `detached`, `changes`, `reason` (why it has its state), `hold`
 | `show PATH` · `lock PATH [--reason=R]` · `unlock PATH` · `move PATH NEW_PATH` | `{worktree: W}` |
 | `add REPO (--branch=B [--new] [--base=REF] \| --pr=N) [--path=P]` | `{worktree: W}`; default path `../<repo folder>-worktrees/<branch, / as ->` (`pr-<N>`) |
 | `remove PATH [--force] [--delete-branch]` | `{removed, freed_bytes, branch_deleted}`; main and protected are always `not_safe`, anything else not `merged-clean` (or locked) without `--force` too |
-| `prune [--all] [--repo=PATH] [--yes] [--include=merged-dirty] [--branch=B] [--auto] [--delete-branches]` | `{dry_run, candidates: [W], removed: [path], skipped: [{path, reason, state}], freed_bytes, estimated_bytes, branches: [{repo, branch, reason, error?}], registrations, log, scope}`; on a dry run `removed` is empty and `freed_bytes` the `du` estimate, with `--yes` it is free space measured before and after |
+| `prune [--all] [--repo=PATH] [--yes] [--include=merged-dirty] [--branch=B] [--auto] [--delete-branches]` | `{dry_run, candidates: [W], removed: [path], skipped: [{path, reason, state}], freed_bytes, estimated_bytes, branches: [{repo, branch, reason, error?}], registrations, log, scope, repos}`; on a dry run `removed` is empty and `freed_bytes` the `du` estimate, with `--yes` it is free space measured before and after |
 | `slim [PATH \| --all \| --repo=PATH] [--days=N] [--yes]` | `{dry_run, dirs: [{path, bytes, worktree}], freed_bytes, estimated_bytes, days, skipped, log}`; `--days` defaults to 14 for a scope, 0 for a PATH |
 
 ### `swe gh` shapes
