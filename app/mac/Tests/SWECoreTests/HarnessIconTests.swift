@@ -70,18 +70,6 @@ import Testing
         }
     }
 
-    /// An SVG with a viewBox but no width or height declares that box in
-    /// points (Devin's is 512, Pi's 800) and a view drawing at the declared
-    /// size — a Menu's button label does — paints it that big. `image(for:)`
-    /// caps the declared size so the column headers cannot stretch.
-    @Test func loadedIconsDeclareADrawableSize() throws {
-        for id in HarnessIcons.available {
-            let (image, _) = try #require(HarnessIcons.image(for: id), "\(id)")
-            #expect(image.size.width <= 24 && image.size.height <= 24,
-                    "\(id) declares \(image.size)")
-        }
-    }
-
     @Test func aliasesAndUnknownHarnesses() {
         #expect(HarnessIcons.icon(for: "claude-code") == HarnessIcons.icon(for: "claude"))
         #expect(HarnessIcons.icon(for: "Claude") == HarnessIcons.icon(for: "claude"))

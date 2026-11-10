@@ -31,7 +31,11 @@ struct AgentsMdPage: View {
                                (Scope.project, "Project")],
                      selection: $scope, style: .underline)
                 Spacer(minLength: 8)
+                if app.chapters.chapterMode {
+                    DraftsMenu { scope = .edit }
+                }
                 if scope == .edit && app.chapters.chapterMode {
+                    EditorFocusButton()
                     ViewCompiledButton(onOpenChapter: { _ in scope = .edit })
                 }
             }
@@ -79,7 +83,9 @@ private struct GlobalInstructions: View {
             ErrorCard(message: message)
         case .loaded(let report):
             VStack(alignment: .leading, spacing: 12) {
-                LinksStrip(report: report)
+                FocusCollapsible(enabled: chapters.chapterMode) {
+                    LinksStrip(report: report)
+                }
                 switch chapters.status {
                 case .loaded(let check) where check.indexExists:
                     ChaptersEditor(check: check)
@@ -129,42 +135,33 @@ private struct CompileInstructions: View {
 /// What the filter compiles down to: the Include outline with every
 /// file's checkbox, and the Order list of active chapters with per-harness
 /// chips in All view.
-private struct CompileView: View {
+struct CompileView: View {
     var check: InstructionsCheck
     var report: InitCheck
     var onOpenChapter: ((String) -> Void)? = nil
 
     @Environment(AppModel.self) private var app
-    /// nil or "" means the All-harnesses view; otherwise a registry name.
+    /// Comma-joined harness names (`CompileFilter`); "" or several names
+    /// is the All-harnesses view, one linked name is that harness's view.
     @AppStorage("agentsMd.compile.filter") private var filter = ""
     @State private var error: String?
 
     /// Every harness name the link report shows, first-seen order.
-    private var harnesses: [String] {
-        var seen: [String] = []
-        for row in report.instructionRows where !seen.contains(row.name) {
-            seen.append(row.name)
-        }
-        return seen
-    }
+    private var harnesses: [String] { report.instructionHarnessNames }
 
-    /// state/rule lookups for a file's AGENTS_MD-relative path.
+    /// state/rule lookups for a file's AGENTS_MD-relative path, shared
+    /// with the Edit tab's targets strip (`ChapterReceipts` in SWECore).
     private func state(for name: String) -> CompileState {
-        if check.chapters.contains(where: { $0.name == name }) { return .on }
-        if let entries = check.entries {
-            return entries.contains { $0.name == name && !$0.enabled } ? .off : .unlisted
-        }
-        return .unlisted
+        check.compileState(of: name)
     }
 
     private func rule(for name: String) -> [String: [String]]? {
-        guard let chapter = check.chapters.first(where: { $0.name == name }) else { return nil }
-        if let only = chapter.only { return ["only": only] }
-        if let except = chapter.except { return ["except": except] }
-        return nil
+        check.rule(for: name)
     }
 
-    private var harness: String? { filter.isEmpty ? nil : filter }
+    private var harness: String? {
+        CompileFilter.harness(stored: filter, known: harnesses)
+    }
 
     private func receives(_ name: String) -> Bool {
         CompileToggle.receives(state: state(for: name), rule: rule(for: name),
@@ -270,7 +267,7 @@ private struct CompileView: View {
 
     /// A harness's logo only, falling back to the full mark where a
     /// harness has no icon — the name text follows separately.
-    private static func markIcon(_ name: String, size: CGFloat) -> some View {
+    static func markIcon(_ name: String, size: CGFloat) -> some View {
         let mark = HarnessMark(name)
         return Group {
             if let icon = mark.icon {
@@ -283,8 +280,10 @@ private struct CompileView: View {
 
     private func chip(_ name: String?, title: String,
                       link: InitCheck.Link? = nil, mark: String? = nil) -> some View {
-        let selected = (name ?? "") == filter
-        return Button { filter = name ?? "" } label: {
+        let selected = name == harness
+        return Button {
+            filter = CompileFilter.serialise(name.map { [$0] } ?? [])
+        } label: {
             HStack(spacing: 5) {
                 if let link {
                     Circle().fill(link.state == .linked ? Theme.success
@@ -551,7 +550,7 @@ private struct CompileView: View {
     }
 
     /// A checkbox that can also show the folder's mixed dash.
-    private struct TriBox: View {
+    struct TriBox: View {
         var tri: CompileToggle.TriState
         var toggle: () -> Void
 
@@ -935,18 +934,23 @@ private struct ChaptersEditor: View {
     @State private var moveError: String?
     /// The live file drag: targets, gaps and the dragged row's travel.
     @State private var railDrag = ChapterRailDrag()
+    /// The outline's search text, keyboard cursor and focus.
+    @State private var nav = OutlineNav()
+    @FocusState private var outlineFocused: Bool
     /// The selected chapter's document once its path is checked off the
     /// main actor; nil `document` means the path leaves AGENTS_MD.
     @State private var opened: (name: String, document: InstructionDocument?)?
 
     var body: some View {
         let chapters = app.chapters
-        HStack(alignment: .top, spacing: 12) {
+        ChapterPaneSplit {
             rail
+        } editor: {
             VStack(alignment: .leading, spacing: 12) {
                 if let name = chapters.selected {
                     if let document = chapters.openDocument(named: name)
                         ?? (opened?.name == name ? opened?.document : nil) {
+                        ChapterTargetsStrip(name: name, check: check)
                         InstructionEditor(
                             document: document,
                             title: name,
@@ -1004,13 +1008,17 @@ private struct ChaptersEditor: View {
         let chapters = app.chapters
         return Strip {
             HStack(spacing: 6) {
+                // Whole at the pane's narrowest: "+N not compiled" gives
+                // way first.
                 Text("Chapters").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1).fixedSize()
                 // The count is the compiled chapters, the same M as the
                 // editor's "Chapter N of M"; files index.txt leaves out
                 // (the folder's README.md, say) are counted apart.
                 let compiledCount = check.chapters.count
                 let uncompiled = uncompiledFileCount(chapters.tree)
                 Text("\(compiledCount)").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    .lineLimit(1).fixedSize()
                     .hoverTip("\(compiledCount) chapters compiled into AGENTS.md", replacesLabel: false)
                 if uncompiled > 0 {
                     Text("+\(uncompiled) not compiled")
@@ -1035,11 +1043,19 @@ private struct ChaptersEditor: View {
                     .font(Theme.caption).foregroundStyle(Theme.dangerText)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            OutlineSearchBar(nav: nav) {
+                outlineFocused = true
+            }
+            let shown = ChapterOutline.filter(chapters.tree, query: nav.query)
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(chapters.tree) { node in
+                    if nav.searching && shown.isEmpty {
+                        OutlineNoMatches(query: nav.query)
+                    }
+                    ForEach(shown) { node in
                         OutlineNode(node: node, depth: 0, compiled: check.compiledNames,
-                                    rail: railDrag,
+                                    rail: railDrag, nav: nav,
                                     onNewChapter: { folder in
                                         creating = NewChapterSheet.Initial(folder: folder)
                                     },
@@ -1048,12 +1064,12 @@ private struct ChaptersEditor: View {
                     }
                     // Dirty drafts whose files vanished: their text is
                     // still in the editor, so the row stays selectable.
-                    ForEach(chapters.ghosts, id: \.self) { name in
-                        GhostRow(name: name, rail: railDrag)
+                    ForEach(chapters.ghosts.filter(matchesFilter), id: \.self) { name in
+                        GhostRow(name: name, rail: railDrag, nav: nav)
                     }
-                    ForEach(chapters.missing, id: \.self) { name in
+                    ForEach(chapters.missing.filter(matchesFilter), id: \.self) { name in
                         GhostRow(name: name, missing: true,
-                                 absent: chapters.absent.contains(name), rail: railDrag)
+                                 absent: chapters.absent.contains(name), rail: railDrag, nav: nav)
                     }
                     // Where a drop moves to the top level: only while a
                     // drag is live, so an accidental sideways drift can
@@ -1083,13 +1099,28 @@ private struct ChaptersEditor: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .outlineKeyboard(nav: nav, tree: shown, selected: chapters.selected,
+                             extra: (chapters.ghosts + chapters.missing).filter(matchesFilter),
+                             focus: $outlineFocused) { chapters.selected = $0 }
+            // A click anywhere in the outline hands it the keyboard.
+            .simultaneousGesture(TapGesture().onEnded { outlineFocused = true })
+            .onChange(of: nav.cursor) { _, path in
+                guard let path else { return }
+                withAnimation(.easeInOut(duration: Theme.fadeDuration)) { proxy.scrollTo(path) }
+            }
+            }
         }
-        .frame(width: 260)
         .frame(maxHeight: .infinity)
         .onAppear { app.chapters.undoManager = undoManager }
         .onChange(of: undoManager) { _, manager in
             app.chapters.undoManager = manager
         }
+    }
+
+    /// Whether a draft row's name passes the outline filter.
+    private func matchesFilter(_ name: String) -> Bool {
+        !nav.searching || name.localizedCaseInsensitiveContains(
+            nav.query.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// A file row dropped on a folder row or the top-level strip: the
@@ -1170,6 +1201,7 @@ private struct ChaptersEditor: View {
         var absent = false
         /// The live rail drag; the row measures in so it isn't a target.
         var rail: ChapterRailDrag
+        var nav: OutlineNav
         @Environment(AppModel.self) private var app
         @State private var hovering = false
 
@@ -1194,8 +1226,9 @@ private struct ChaptersEditor: View {
             .background(selected ? Theme.navActive : hovering ? Theme.hover : .clear,
                         in: .rect(cornerRadius: Theme.controlRadius))
             .contentShape(.rect)
-            .onTapGesture { chapters.selected = name }
+            .onTapGesture { nav.cursor = name; chapters.selected = name }
             .onHover { hovering = $0 }
+            .modifier(OutlineDraftCursor(nav: nav, name: name))
             .onGeometryChange(for: CGRect.self) {
                 $0.frame(in: .named("railOutline"))
             } action: { rail.frames[name] = $0 }
@@ -1224,6 +1257,7 @@ private struct ChaptersEditor: View {
         var compiled: Set<String>
         /// The rail's live drag session: targets, gaps and row travel.
         var rail: ChapterRailDrag
+        var nav: OutlineNav
         var onNewChapter: (String) -> Void
         /// The drop ended; the rail's `target` says what it meant.
         var onDrop: () -> Void
@@ -1232,10 +1266,18 @@ private struct ChaptersEditor: View {
 
         @Environment(AppModel.self) private var app
         @State private var hovering = false
-        @AppStorage private var expanded: Bool
+        @AppStorage private var storedExpanded: Bool
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        /// A filter holds every folder open without touching the stored
+        /// state, so clearing it restores the folders as they were.
+        private var expanded: Bool {
+            get { nav.searching || storedExpanded }
+            nonmutating set { if !nav.searching { storedExpanded = newValue } }
+        }
 
         init(node: ChapterNode, depth: Int, compiled: Set<String>,
-             rail: ChapterRailDrag,
+             rail: ChapterRailDrag, nav: OutlineNav,
              onNewChapter: @escaping (String) -> Void,
              onDrop: @escaping () -> Void,
              onDelete: @escaping (ChapterNode) -> Void) {
@@ -1243,11 +1285,12 @@ private struct ChaptersEditor: View {
             self.depth = depth
             self.compiled = compiled
             self.rail = rail
+            self.nav = nav
             self.onNewChapter = onNewChapter
             self.onDrop = onDrop
             self.onDelete = onDelete
             // Expanded by default; each folder's state is its own key.
-            _expanded = AppStorage(wrappedValue: true,
+            _storedExpanded = AppStorage(wrappedValue: true,
                                    ChapterFolderState.outlinePrefix + node.path)
         }
 
@@ -1259,7 +1302,7 @@ private struct ChaptersEditor: View {
                 if node.isFolder && expanded && rail.dragging != node.path {
                     ForEach(node.children) { child in
                         OutlineNode(node: child, depth: depth + 1,
-                                    compiled: compiled, rail: rail,
+                                    compiled: compiled, rail: rail, nav: nav,
                                     onNewChapter: onNewChapter,
                                     onDrop: onDrop, onDelete: onDelete)
                     }
@@ -1268,7 +1311,11 @@ private struct ChaptersEditor: View {
             // Above its later siblings, which would otherwise draw over
             // the dragged row as it travels down.
             .zIndex(rail.dragging == node.path ? 1 : 0)
+            .id(node.path)
         }
+
+        /// The keyboard cursor's ring, only while the outline has focus.
+        private var cursorRing: Bool { nav.focused && nav.cursor == node.path }
 
         /// The row's drag: a file reorders or moves, a folder nests.
         private var railGesture: some Gesture {
@@ -1290,6 +1337,7 @@ private struct ChaptersEditor: View {
             /// grows a little so the row shift marks the drop target.
             let dropTargeted = rail.target == .folder(node.path)
             let isDragged = rail.dragging == node.path
+            let landing = rail.landingFolder == node.path
             return HStack(spacing: 5) {
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
                     .font(Theme.font(size: 9, weight: .semibold))
@@ -1312,6 +1360,7 @@ private struct ChaptersEditor: View {
                     .plainButton(cornerRadius: Theme.controlRadius)
                     .hoverTip("New chapter here", replacesLabel: false)
                 }
+                OutlineGrip(visible: hovering && !nav.searching)
             }
             .padding(.leading, CGFloat(depth) * 14 + 8)
             .padding(.trailing, 8)
@@ -1326,10 +1375,20 @@ private struct ChaptersEditor: View {
                         .fill(dropTargeted ? Theme.dropTarget : hovering ? Theme.hover : .clear)
                 }
             }
+            .overlay {
+                // The folder a drop will land in: aimed at, or a gap in
+                // one of its levels.
+                RoundedRectangle(cornerRadius: Theme.controlRadius)
+                    .strokeBorder(dropTargeted || landing ? Theme.accentFill : .clear, lineWidth: 1)
+            }
+            .animation(reduceMotion ? nil : .easeInOut(duration: Theme.fadeDuration), value: landing)
+            .focusRing(cursorRing, cornerRadius: Theme.controlRadius)
             .contentShape(.rect)
-            .onTapGesture { expanded.toggle() }
+            .onTapGesture { nav.cursor = node.path; expanded.toggle() }
             .onHover { hovering = rail.dragging == nil && $0 }
-            .gesture(railGesture)
+            // Moves resolve against the whole tree, so a filtered outline
+            // (rows missing) can't be dragged.
+            .gesture(railGesture, including: nav.searching ? .subviews : .all)
             .offset(y: rail.yOffset(for: node.path))
             .animation(.easeInOut(duration: Theme.fadeDuration), value: dropTargeted)
             // Spring loading: a drag resting on this collapsed folder
@@ -1362,6 +1421,7 @@ private struct ChaptersEditor: View {
             let selected = chapters.selected == node.path
             let isCompiled = compiled.contains(node.path)
             let isDragged = rail.dragging == node.path
+            let insertionEdge = rail.insertionEdge(for: node.path)
             return HStack(spacing: 6) {
                 Text(node.name)
                     .font(Theme.nav)
@@ -1379,6 +1439,7 @@ private struct ChaptersEditor: View {
                     Text("Not compiled").font(Theme.caption).foregroundStyle(Theme.textMuted)
                         .lineLimit(1).fixedSize()
                 }
+                OutlineGrip(visible: hovering && !nav.searching)
             }
             .padding(.leading, CGFloat(depth) * 14 + 23)
             .padding(.trailing, 8).padding(.vertical, 5)
@@ -1393,9 +1454,17 @@ private struct ChaptersEditor: View {
                 }
             }
             .contentShape(.rect)
-            .onTapGesture { chapters.selected = node.path }
+            .onTapGesture { nav.cursor = node.path; chapters.selected = node.path }
             .onHover { hovering = rail.dragging == nil && $0 }
-            .gesture(railGesture)
+            .gesture(railGesture, including: nav.searching ? .subviews : .all)
+            .overlay(alignment: insertionEdge == .bottom ? .bottom : .top) {
+                if insertionEdge != nil {
+                    OutlineInsertionLine().offset(y: insertionEdge == .bottom ? 2 : -2)
+                }
+            }
+            .animation(reduceMotion ? nil : .easeInOut(duration: Theme.fadeDuration),
+                       value: insertionEdge == nil)
+            .focusRing(cursorRing, cornerRadius: Theme.controlRadius)
             .offset(y: rail.yOffset(for: node.path))
             .zIndex(isDragged ? 1 : 0)
             .animation(isDragged ? nil : .spring(response: 0.28, dampingFraction: 0.86),
@@ -1860,6 +1929,7 @@ private struct ViewCompiledButton: View {
                 Circle().fill(stateColor)
                     .frame(width: Theme.statusDot, height: Theme.statusDot)
                 Text("View AGENTS.md").font(Theme.bodySmall)
+                CompiledSizeLabel(path: outputPath)
             }
         }
         .secondaryButton()
@@ -1922,6 +1992,7 @@ private struct CompiledOutputSheet: View {
                     }
                 }
                 stateLabel
+                CompiledSizeLabel(path: path, detailed: true)
                 Spacer(minLength: 8)
                 Tabs(options: [("rich", "Rich"), ("raw", "Raw")], selection: $mode,
                      style: .segmented)
@@ -2046,7 +2117,7 @@ private struct CompiledOutputSheet: View {
 }
 
 /// A compact bordered band above the editor: a label, then what it's about.
-private struct Strip<Content: View>: View {
+struct Strip<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -2303,35 +2374,18 @@ struct InstructionEditor: View {
     @State private var mode = UserDefaults.standard.string(forKey: Self.modeKey) ?? "raw"
     @State private var richFocused = false
     @State private var richFocusToken = 0
+    /// The card's width, to fold the header's labels away when narrow.
+    @State private var width: CGFloat = 0
+
+    /// Icon-only header buttons: the card is too narrow for their labels
+    /// beside the title (a 900 pt window with the chapter pane open).
+    private var compact: Bool {
+        EditorHeader.isCompact(width: Double(width), zoom: TextZoomModel.shared.zoom)
+    }
 
     var body: some View {
         Card(title: title, subtitle: subtitle, monoSubtitle: monoSubtitle) {
-            HStack(spacing: 8) {
-                if !readOnly && !rawOnly {
-                    Tabs(options: [("raw", "Raw"), ("rich", "Rich")], selection: $mode, style: .segmented)
-                }
-                if document.isDirty {
-                    HStack(spacing: 5) {
-                        Circle().fill(Theme.warning).frame(width: Theme.statusDot, height: Theme.statusDot)
-                        Text("Unsaved").font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-                if !readOnly {
-                    Button("Revert") { Task { await document.revert(); error = nil } }
-                        .secondaryButton()
-                        .disabled(!document.isDirty)
-                    Button("Save") { save(overwrite: false) }
-                        .primaryButton()
-                        .keyboardShortcut("s", modifiers: .command)
-                        .disabled(!document.isDirty || document.changedOnDisk)
-                }
-                if let close {
-                    Button("Close") { close() }
-                        .secondaryButton()
-                        .keyboardShortcut(.cancelAction)
-                }
-            }
+            header
         } content: {
             switch document.state {
             case .loading:
@@ -2344,6 +2398,62 @@ struct InstructionEditor: View {
                 editorContent
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+    }
+
+    /// Mode tabs, the Unsaved dot and the buttons. Labels never wrap: a
+    /// narrow card shows the buttons as icons (named by `.help` and
+    /// VoiceOver) and the Unsaved dot without its word.
+    private var header: some View {
+        HStack(spacing: 8) {
+            if !readOnly && !rawOnly {
+                Tabs(options: [("raw", "Raw"), ("rich", "Rich")], selection: $mode, style: .segmented)
+            }
+            if document.isDirty {
+                HStack(spacing: 5) {
+                    Circle().fill(Theme.warning).frame(width: Theme.statusDot, height: Theme.statusDot)
+                    if !compact {
+                        Text("Unsaved").font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Unsaved")
+                .help(compact ? "Unsaved changes" : "")
+            }
+            if !readOnly {
+                headerButton("Revert", icon: "arrow.uturn.backward") {
+                    Task { await document.revert(); error = nil }
+                }
+                .secondaryButton()
+                .disabled(!document.isDirty)
+                headerButton("Save", icon: "square.and.arrow.down") { save(overwrite: false) }
+                    .primaryButton()
+                    .keyboardShortcut("s", modifiers: .command)
+                    .disabled(!document.isDirty || document.changedOnDisk)
+            }
+            if let close {
+                headerButton("Close", icon: "xmark") { close() }
+                    .secondaryButton()
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .lineLimit(1)
+        .fixedSize()
+    }
+
+    /// A header button: its word, or only its icon when `compact`. The
+    /// word stays the accessibility label and the tooltip either way.
+    private func headerButton(_ title: String, icon: String,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            if compact {
+                Label(title, systemImage: icon).labelStyle(.iconOnly)
+            } else {
+                Text(title)
+            }
+        }
+        .help(compact ? title : "")
+        .accessibilityLabel(title)
     }
 
     /// The ready state: the changed-on-disk banner, a save error, and the

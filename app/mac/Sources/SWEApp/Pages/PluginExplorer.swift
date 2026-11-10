@@ -429,11 +429,12 @@ private struct PluginColumnHeader: View {
 
     var body: some View {
         Menu { columnMenu } label: {
-            HarnessNameMark(harness: harness)
+            HarnessMarkView(harness: harness)
                 .frame(width: width)
                 .contentShape(.rect)
         }
         .menuStyle(.button)
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
         .contextMenu { columnMenu }

@@ -1,0 +1,39 @@
+{
+  "name": "SWE state arrows",
+  "source": "quiver final 6b-9",
+  "purpose": "Shared source assets for future state indicators; not yet wired into any client.",
+  "states": {
+    "critical_failure": {"color": "red", "hex": "#fa3228", "label": "Critical failure"},
+    "partial_failure": {"color": "yellow", "hex": "#ffd200", "label": "Partial failure"},
+    "operational": {"color": "green", "hex": "#14e63c", "label": "Fully operational"},
+    "interrupted": {"color": "grey", "hex": "#8a8a93", "label": "Interrupted"}
+  },
+  "normal": {
+    "svg": "normal/{color}.svg",
+    "png": "normal/{color}-{size}.png",
+    "sizes": [16, 32, 64, 128, 256, 512],
+    "row_svg": "normal/row.svg",
+    "row_png": "normal/row-{scale}x.png",
+    "row_scales": [1, 2]
+  },
+  "pixel": {
+    "svg": "pixel/{color}-{grid}.svg",
+    "png": "pixel/{color}-{grid}-{scale}x.png",
+    "grids": [8, 16, 32],
+    "scales": [1, 4, 8],
+    "row_svg": "pixel/row-{grid}.svg",
+    "row_png": "pixel/row-{grid}-{scale}x.png"
+  },
+  "preview": "arrows-preview.png",
+  "generator": {
+    "file": "arrows.py",
+    "status": "Original export script preserved as source reference, not a project build step.",
+    "requirements": ["cairosvg", "Pillow", "shapely"],
+    "portability": "Requires adapting its original /workspace paths and Linux font path before running locally."
+  },
+  "usage": {
+    "accessibility": "Pair state arrows with a text label or accessible description; do not convey state through color alone.",
+    "pixel_scaling": "Use integer scaling and nearest-neighbor interpolation for pixel assets.",
+    "client_integration": "Copy selected assets into each client's resources when adopting them; this directory is not a runtime bundle."
+  }
+}

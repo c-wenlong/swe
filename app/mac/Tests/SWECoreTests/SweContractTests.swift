@@ -95,6 +95,33 @@ import Testing
         #expect(skill.root == "shared")
         #expect(skill.source == .shared)
         #expect(skill.harnesses == ["claude"])
+        // A swe from before adoption ships neither field.
+        #expect(skill.adoptedFrom == nil)
+        #expect(skill.conflict == false)
+    }
+
+    /// `adopted_from`/`conflict` built to the shape #1882's adoption emits:
+    /// a shared skill names the harness swe moved it out of, `conflict`
+    /// marks a same-name copy held elsewhere with different content, and a
+    /// harness-local skill ships neither key (its holding root's state is
+    /// what says the next init adopts it).
+    @Test func skillsAdoptionDecodesProvenanceAndConflict() async throws {
+        let (swe, _) = try client("swe-skills-adopt")
+        let inventory = try await swe.skills()
+
+        let adopted = try #require(inventory.skills.first { $0.name == "adopted-skill" })
+        #expect(adopted.source == .shared)
+        #expect(adopted.adoptedFrom == "claude")
+        #expect(adopted.conflict == false)
+
+        let diverged = try #require(inventory.skills.first { $0.name == "diverged-skill" })
+        #expect(diverged.adoptedFrom == "claude")
+        #expect(diverged.conflict == true)
+
+        let pending = try #require(inventory.skills.first { $0.name == "pending-skill" })
+        #expect(pending.source == .harness)
+        #expect(pending.adoptedFrom == nil)
+        #expect(pending.conflict == false)
     }
 
     @Test func skillsUsageDecodesCountsAndUntracked() async throws {
