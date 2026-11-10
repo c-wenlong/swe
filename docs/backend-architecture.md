@@ -55,6 +55,7 @@ An example per layer, from the harness domain:
 | `reports/` | `commands.py` | `pipeline.py`, `transcripts.py`, `triage.py`, `batching.py`, `runners.py`, `work.py`, `followups.py`, `prompts.py`, `store.py` | `models.py`: report records |
 | `setup/` | `commands.py`, `wizard.py` | (wizard is the whole domain; allowed to print) | `models.py`: `HarnessPreview`, `McpPreview`, `SkillsPreview` |
 | `github/` | `cli.py` (`swe gh`) | `gh.py` (the only module in the package that spawns `gh`; the Copilot fetcher in `harness/rate_limits.py` runs `gh auth token` itself), `repos.py`, `manage.py`, `catalog.py`, `issues.py`, `pulls.py`, `shared.py` (the hub's cache, write lock and pins) | (no `models.py`; payloads are built in the service functions) |
+| `worktrees/` | `commands.py` (`swe worktree`, `swe wt`) | `discover.py` (worktree and repo discovery, harness folders), `classify.py` (one state per worktree from PR state through `github/gh.py`), `sizing.py` (`du` estimates, rebuildable folders, free space), `actions.py` (prune, slim, branch cleanup, run lock, logs), `settings.py` (the `worktree` config block), `gitio.py` (the package's only `git` spawner) | `models.py`: `Repo`, `Worktree` |
 
 The remaining packages sit outside that convention:
 

@@ -944,6 +944,39 @@ Source of truth  ~/.swe/mcp.json
   stores tokens. The few writes (merge, rerun, inbox read, issue comment)
   are explicit commands, never side effects of a read.
 </code></pre>
+<h3 id="swe-worktree-wt"><a class="anchor" href="#swe-worktree-wt"></a><code>swe worktree (wt)</code></h3>
+<p><em>Find, prune and slim agent worktrees</em></p>
+<pre><code class="language-text">  swe wt list [--all] [--root=PATH] [--no-size]
+                             Every linked worktree with its repo, branch,
+                             state, PR, last commit and size (du estimates).
+                             Default scope is the repo you are in; --all adds
+                             every repo swe knows (worktree.roots in config,
+                             swe gh mirrors, harness worktree folders).
+  swe wt prune               Dry run: what would go and how much it frees.
+  swe wt prune --yes         Remove merged-clean worktrees (git worktree
+                             remove --force, then git worktree prune).
+      --include=merged-dirty   Also offer merged worktrees with changes,
+                             one yes per worktree.
+      --branch=&lt;name&gt;          Only that branch's worktree: for post-merge
+                             hooks and the PR loop's cleanup step.
+      --auto                   Act (like --yes) only in repos whose config
+                             sets worktree.repos.&lt;repo&gt;.auto_prune to true.
+      --delete-branches        Also delete local branches that are merged,
+                             or whose tip is a merged PR's head. Never remote.
+  swe wt slim [--days=N] [--yes]
+                             Delete git-ignored rebuildable folders (.venv,
+                             node_modules, .next, build, dist, target,
+                             DerivedData, .build) untouched for N days
+                             (default 14) inside worktrees that are not merged.
+
+  States: merged-clean, merged-dirty, open-pr, no-pr, orphaned, unknown.
+  Merged comes from the PR on GitHub (squash merges defeat git ancestry); a
+  detached HEAD counts as merged when it is on origin/main. When gh cannot
+  answer the state is unknown, and unknown is never removed. The main
+  checkout, ~/.swe/cache/install/src, worktree.protect paths, locked
+  worktrees and the one you are in are never touched. Applied runs log to
+  ~/.swe/logs/worktree/. Every command takes --json.
+</code></pre>
 <h2 id="shell"><a class="anchor" href="#shell"></a>Shell</h2>
 <h3 id="swe-autocomplete"><a class="anchor" href="#swe-autocomplete"></a><code>swe autocomplete</code></h3>
 <p><em>Generate and inject shell completion script</em></p>

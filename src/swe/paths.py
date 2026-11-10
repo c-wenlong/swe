@@ -415,6 +415,11 @@ def worktrees_dir_for(home: Path | None = None) -> Path:
     return swe_dir_for(home) / "worktrees"
 
 
+def worktree_logs_dir_for(home: Path | None = None) -> Path:
+    """Where `swe wt prune --yes` and `swe wt slim --yes` log each run."""
+    return swe_dir_for(home) / "logs" / "worktree"
+
+
 def mcp_dir_for(home: Path | None = None) -> Path:
     return swe_dir_for(home) / MCP_SUBDIR
 
@@ -549,6 +554,10 @@ LEGACY_CONFIG_DIR = Path.home() / ".config" / "swe"
 GITIGNORE_BODY = """# Regenerable. Everything else here is worth versioning.
 cache/
 backups/
+
+# Run logs (`swe wt prune` and `swe wt slim`): this machine's worktree
+# paths, so never versioned.
+/logs/
 
 # This machine's own stores, written by the app and swe while they run: the
 # usage ledgers, the model catalog, the search index, Devin cloud sessions,

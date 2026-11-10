@@ -31,6 +31,7 @@ _PRIMARY_COMMANDS: list[tuple[str, str]] = [
     ("config", "View or update configuration"),
     ("remote", "Watch and steer sessions from a phone"),
     ("sync", "Commit, merge and push the ~/.swe hub repo"),
+    ("worktree", "Find, prune and slim agent worktrees"),
     ("report", "Summarize coding sessions"),
     ("discover", "Scan PATH for AI coding CLIs"),
     ("setup", "Onboarding wizard"),
@@ -83,6 +84,29 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
     "sync status": [
         ("--fetch", "Fetch the remote before counting"),
         ("--json", "Print the status as JSON"),
+    ],
+    "worktree list": [
+        ("--all", "Every repo swe knows, not just this one"),
+        ("--root=", "A repo, or a folder of repos, to scan"),
+        ("--no-size", "Skip du"),
+        ("--json", "Print the list as JSON"),
+    ],
+    "worktree prune": [
+        ("--yes", "Remove them (the default is a dry run)"),
+        ("--all", "Every repo swe knows, not just this one"),
+        ("--root=", "A repo, or a folder of repos, to scan"),
+        ("--include=", "merged-dirty: also offer merged worktrees with changes"),
+        ("--branch=", "Only this branch's worktree"),
+        ("--auto", "Act only where worktree.repos.<repo>.auto_prune is on"),
+        ("--delete-branches", "Also delete merged local branches"),
+        ("--json", "Print the plan as JSON"),
+    ],
+    "worktree slim": [
+        ("--yes", "Delete them (the default is a dry run)"),
+        ("--all", "Every repo swe knows, not just this one"),
+        ("--root=", "A repo, or a folder of repos, to scan"),
+        ("--days=", "Only folders untouched this long (default 14)"),
+        ("--json", "Print the plan as JSON"),
     ],
     "session index": [
         ("--on", "Let the remote hub keep the index current"),
@@ -540,6 +564,10 @@ _NESTED_FLAGS: dict[str, dict[str, str]] = {
     "list": {"edit": "list edit"},
     "session": {"index": "session index"},
     "sync": {"status": "sync status"},
+    "worktree": {"list": "worktree list", "ls": "worktree list",
+                 "prune": "worktree prune", "slim": "worktree slim"},
+    "wt": {"list": "worktree list", "ls": "worktree list",
+           "prune": "worktree prune", "slim": "worktree slim"},
     "ls": {"edit": "list edit"},
     "harness": {
         "list": "list", "ls": "list",
@@ -766,6 +794,16 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
     "session": [
         ("use", "Resume a session by index"),
         ("index", "Index transcripts for session search"),
+    ],
+    "worktree": [
+        ("list", "Every worktree with its state, PR and size"),
+        ("prune", "Remove merged worktrees (dry run unless --yes)"),
+        ("slim", "Delete rebuildable folders in unmerged worktrees"),
+    ],
+    "wt": [
+        ("list", "Every worktree with its state, PR and size"),
+        ("prune", "Remove merged worktrees (dry run unless --yes)"),
+        ("slim", "Delete rebuildable folders in unmerged worktrees"),
     ],
     "remote": [
         ("serve", "Run the hub (REST + SSE for the phone)"),

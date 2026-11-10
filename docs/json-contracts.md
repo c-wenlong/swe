@@ -38,6 +38,7 @@ and the fixture that pins the shape. Fixtures live under
 | `swe mcp info NAME --json` | `InfoReply`: the `ServerRow` fields (name, transport, scrubbed command/args/url, env_keys, header_keys, secrets_missing, in_hub, harnesses, conflict, variants, disabled_in, type, adopted_from) plus `shared` (served through the gateway), `places` (`[{place, path, state, updated}]` — one per file defining it or holding its off-mark, `state` is `on`/`off`/`hub`, `updated` the file mtime ISO or null), `health`/`health_detail` (the `mcp status` probe), `updated` (newest place mtime) and `gateway` (the live gateway `/status` row `{name, state, pid, uptime_s, starts, error, calls, calls_by_tool, call_errors, last_call}` or null when unreachable) | |
 | `swe mcp tools NAME --json` | `ToolsReply`: `{name, transport, server, protocol_version, tools: [{name, description}], error}` — `server` is the initialize result's `serverInfo`; `error` is set instead when the stdio handshake failed (also exit 1). Stdio servers only | |
 | `swe sync status [--fetch] --json` | `HubSyncStatus`: `{path, ready, problem, mode: "device"|"single", branch, machine, remote, upstream, base, ahead, behind, base_behind, changes: [{status, path, group}], groups: {group: n}, held_back: [path], fetched, fetch_error}`. Without a usable repo only `{path, ready: false, problem}`, exit 0 under `--json`. `upstream` is null until the branch is on the remote; `base` is `origin/main` in device mode, else null | `swe-sync-status.json` |
+| `swe wt list [--all] [--root=PATH] [--no-size] --json` · `swe wt prune ... --json` · `swe wt slim ... --json` | see [`swe wt` shapes](#swe-wt-shapes) | |
 | `swe sync [--dry-run] --json` | `HubSyncResult`: `{result: "synced"|"up-to-date"|"would-sync"|"conflict"|"push-failed", dry_run, mode, branch, machine, base, commit: {message, files: [{status, path, group}]} or null, merges: [{ref, commits, resolved?: [path]}], conflicts: [path], held_back: [path], would_push, pushed, push_error, relinked: {changed, linked, marketplaces, mcp, notes} or null}`. `resolved` is present only on a merge whose `config/harness.json` conflict sync merged harness by harness. Exits 1 on `conflict` and `push-failed` with the envelope still printed; a repo it can't sync at all exits 1 with the reason on stderr | `swe-sync.json`, `swe-sync-conflict.json` |
 | `swe mcp gateway status --json` | `{"enabled", "port", "installed", "pid", "reachable", "servers": [{"name", "url", "state", "pid", "uptime_s", "starts", "error", "calls", "calls_by_tool", "call_errors", "last_call"}]}` — one row per shared hub server; `state` is `running` \| `idle` (not started yet) \| `error` \| `down` (the gateway does not answer). The `calls` fields count `tools/call` replies the gateway proxied, persisted in `stats.json` beside the gateway logs, so they survive restarts. A sync report's targets also carry `via_gateway`: the servers written as the gateway's URL | |
 | `swe find plugins --json` | `PluginDriftReport` | `swe-find-plugins.json` |
@@ -287,6 +288,36 @@ The CLI side of remote also speaks `--json`:
   like `mcp_servers` stay snake_case in saved snapshots.
 - No `--json` output carries secret values; MCP env/header values arrive
   as key names only.
+
+### `swe wt` shapes
+
+- `swe wt list --json`: `{scope, worktrees, totals}`. `scope` is
+  `{all, roots, repos}` (`repos` the main checkouts scanned). Each
+  `worktrees[]` row is `{path, repo, repo_name, branch, head, detached,
+  locked, location, registered, state, reason, pr, last_commit, changes,
+  untracked, hold, size_kb, rebuildable_kb, rebuildable}`: `repo` the main
+  checkout (null for an orphan whose repo is gone), `repo_name` the GitHub
+  `owner/name` or the folder name, `location` one of `claude`, `swe` (a
+  `swe gh pr|issue worktree` checkout), `installer`, `sibling`, `git` or the
+  account vendor (`codex`, ...) for `~/.swe/accounts/<vendor>/...`; `state`
+  one of `merged-clean`, `merged-dirty`, `open-pr`, `no-pr`, `orphaned`,
+  `unknown`; `pr` is `{number, state, url, head, merged_at}` or null;
+  `last_commit` unix seconds; `hold` is why prune keeps it whatever its
+  state (`protected`, `main checkout`, `locked ...`, `you are inside it`, a
+  recently used detached HEAD) or null; `size_kb` and `rebuildable_kb` are
+  `du` estimates (null with `--no-size`); `rebuildable` is `[{path, kb}]`,
+  git-ignored rebuildable folders only. `totals` is `{count, by_state,
+  size_kb, rebuildable_kb, prunable, prunable_kb}`.
+- `swe wt prune --json` and `swe wt slim --json`: `{scope, action,
+  dry_run, acted, skipped, branches, registrations, estimated_kb,
+  freed_bytes, log, error}` (slim adds `days`). `acted` rows are
+  `{path, repo, branch, state, reason, size_kb, pr}` for prune and
+  `{path, folder, repo, state, size_kb}` for slim: removed, or would be on
+  a dry run. `skipped` rows carry `reason` (and `folder` for slim).
+  `branches` is `[{repo, branch, reason, error?}]` with
+  `--delete-branches`. `freed_bytes` is measured as free space before and
+  after on each volume (null on a dry run); `log` the run's file under
+  `~/.swe/logs/worktree/`, null on a dry run.
 
 ### `swe gh` shapes
 

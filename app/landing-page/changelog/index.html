@@ -113,6 +113,24 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a><a href="https://github.com/c-wenlong/swe/compare/v1.2.2...HEAD">Unreleased</a></h2>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
+<li><p><strong><code>swe worktree</code> (alias <code>swe wt</code>) finds and prunes agent worktrees.</strong>
+<code>swe wt list</code> lists every linked worktree in the current repo, or with
+<code>--all</code> in every repo swe knows (<code>worktree.roots</code> in config, <code>swe gh</code>
+mirrors, <code>~/.swe/worktrees</code>, <code>~/.swe/accounts/*/*/home/worktrees</code>), with its
+PR, last commit, <code>du</code> size and the space in rebuildable folders. States
+come from the PR, since squash merges defeat <code>git merge-base --is-ancestor</code>; when <code>gh</code> cannot answer a worktree is <code>unknown</code> and never
+removed. <code>swe wt prune</code> is a dry run until <code>--yes</code>, removes only
+<code>merged-clean</code> worktrees through <code>git worktree remove --force</code> (plus
+<code>merged-dirty</code> with <code>--include=merged-dirty</code> and a yes each), re-reads
+each state right before removing, keeps branches unless
+<code>--delete-branches</code>, reports freed space measured on the volume and logs
+to <code>~/.swe/logs/worktree/</code>. <code>--branch=&lt;name&gt;</code> and <code>--auto</code> (per-repo
+<code>auto_prune</code> in config) are for post-merge hooks. <code>swe wt slim</code> deletes
+ignored <code>.venv</code>, <code>node_modules</code>, <code>build</code> and similar folders in unmerged
+worktrees. <code>scripts/reaper.sh</code> is now a thin wrapper over <code>swe wt prune</code>
+and <code>swe wt slim</code>; it no longer prunes build folders in the main
+checkout. Closes #1909.</p>
+</li>
 <li><p><strong>Plugins are managed from SWE.</strong> The Mac and web plugin lists hide marketplace-only entries and missing installs. Import to SWE copies installed plugin files into <code>~/.swe/plugins</code> without changing a harness or overwriting SWE files. The Mac table renders rows lazily and precomputes its local inventory and action menus.</p>
 </li>
 <li><p><strong>AGENTS.md page: drafts list and compiled size (macOS app).</strong> A

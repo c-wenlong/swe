@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`swe worktree` (alias `swe wt`) finds and prunes agent worktrees.**
+  `swe wt list` lists every linked worktree in the current repo, or with
+  `--all` in every repo swe knows (`worktree.roots` in config, `swe gh`
+  mirrors, `~/.swe/worktrees`, `~/.swe/accounts/*/*/home/worktrees`), with its
+  PR, last commit, `du` size and the space in rebuildable folders. States
+  come from the PR, since squash merges defeat `git merge-base
+  --is-ancestor`; when `gh` cannot answer a worktree is `unknown` and never
+  removed. `swe wt prune` is a dry run until `--yes`, removes only
+  `merged-clean` worktrees through `git worktree remove --force` (plus
+  `merged-dirty` with `--include=merged-dirty` and a yes each), re-reads
+  each state right before removing, keeps branches unless
+  `--delete-branches`, reports freed space measured on the volume and logs
+  to `~/.swe/logs/worktree/`. `--branch=<name>` and `--auto` (per-repo
+  `auto_prune` in config) are for post-merge hooks. `swe wt slim` deletes
+  ignored `.venv`, `node_modules`, `build` and similar folders in unmerged
+  worktrees. `scripts/reaper.sh` is now a thin wrapper over `swe wt prune`
+  and `swe wt slim`; it no longer prunes build folders in the main
+  checkout. Closes #1909.
+
 - **Plugins are managed from SWE.** The Mac and web plugin lists hide marketplace-only entries and missing installs. Import to SWE copies installed plugin files into `~/.swe/plugins` without changing a harness or overwriting SWE files. The Mac table renders rows lazily and precomputes its local inventory and action menus.
 
 - **AGENTS.md page: drafts list and compiled size (macOS app).** A

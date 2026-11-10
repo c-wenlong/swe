@@ -785,6 +785,40 @@ to use their own login state and environment."""
   stores tokens. The few writes (merge, rerun, inbox read, issue comment)
   are explicit commands, never side effects of a read."""
     ),
+    "worktree": (
+        "Find, prune and slim agent worktrees",
+        f"""\
+  {c('cyan', 'swe wt list [--all] [--root=PATH] [--no-size]')}
+                             Every linked worktree with its repo, branch,
+                             state, PR, last commit and size (du estimates).
+                             Default scope is the repo you are in; --all adds
+                             every repo swe knows (worktree.roots in config,
+                             swe gh mirrors, harness worktree folders).
+  {c('cyan', 'swe wt prune')}               Dry run: what would go and how much it frees.
+  {c('cyan', 'swe wt prune --yes')}         Remove merged-clean worktrees (git worktree
+                             remove --force, then git worktree prune).
+      {c('cyan', '--include=merged-dirty')}   Also offer merged worktrees with changes,
+                             one yes per worktree.
+      {c('cyan', '--branch=<name>')}          Only that branch's worktree: for post-merge
+                             hooks and the PR loop's cleanup step.
+      {c('cyan', '--auto')}                   Act (like --yes) only in repos whose config
+                             sets worktree.repos.<repo>.auto_prune to true.
+      {c('cyan', '--delete-branches')}        Also delete local branches that are merged,
+                             or whose tip is a merged PR's head. Never remote.
+  {c('cyan', 'swe wt slim [--days=N] [--yes]')}
+                             Delete git-ignored rebuildable folders (.venv,
+                             node_modules, .next, build, dist, target,
+                             DerivedData, .build) untouched for N days
+                             (default 14) inside worktrees that are not merged.
+
+  States: {c('green', 'merged-clean')}, {c('yellow', 'merged-dirty')}, {c('cyan', 'open-pr')}, no-pr, {c('red', 'orphaned')}, unknown.
+  Merged comes from the PR on GitHub (squash merges defeat git ancestry); a
+  detached HEAD counts as merged when it is on origin/main. When gh cannot
+  answer the state is unknown, and unknown is never removed. The main
+  checkout, ~/.swe/cache/install/src, worktree.protect paths, locked
+  worktrees and the one you are in are never touched. Applied runs log to
+  ~/.swe/logs/worktree/. Every command takes --json."""
+    ),
     "remote": (
         "Watch and steer sessions from a phone",
         f"""\
@@ -945,6 +979,7 @@ COMMAND_CATEGORIES = [
     ]),
     ("GitHub", [
         ("gh",      None),
+        ("worktree", "wt"),
     ]),
     ("Shell", [
         ("autocomplete", None),

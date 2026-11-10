@@ -405,6 +405,42 @@ def validate_config(config: Mapping[str, Any]) -> list[ConfigIssue]:
                         "unknown, expected one of " + ", ".join(ACCOUNT_SYNC_PRIMITIVES)))
                 elif not isinstance(value, bool):
                     issues.append(ConfigIssue(f"accounts.sync.{name}", "must be true or false"))
+    issues += _worktree_issues(config)
+    return issues
+
+
+def _worktree_issues(config: Mapping[str, Any]) -> list[ConfigIssue]:
+    """The ``worktree`` block `swe wt` reads (see swe/worktrees/settings.py)."""
+    block = config.get("worktree", _MISSING)
+    if block is _MISSING:
+        return []
+    if not isinstance(block, Mapping):
+        return [ConfigIssue("worktree", "must be an object")]
+    issues: list[ConfigIssue] = []
+    for key in ("roots", "protect"):
+        value = block.get(key, _MISSING)
+        if value is not _MISSING and (
+                not isinstance(value, list)
+                or not all(isinstance(v, str) and v for v in value)):
+            issues.append(ConfigIssue(f"worktree.{key}", "must be a list of paths"))
+    repos = block.get("repos", _MISSING)
+    if repos is _MISSING:
+        return issues
+    if not isinstance(repos, Mapping):
+        return issues + [ConfigIssue("worktree.repos", "must be an object keyed by owner/name or path")]
+    for name, entry in repos.items():
+        where = f"worktree.repos.{name}"
+        if not isinstance(entry, Mapping):
+            issues.append(ConfigIssue(where, "must be an object"))
+            continue
+        ignore = entry.get("ignore", _MISSING)
+        if ignore is not _MISSING and (
+                not isinstance(ignore, list)
+                or not all(isinstance(v, str) for v in ignore)):
+            issues.append(ConfigIssue(f"{where}.ignore", "must be a list of glob patterns"))
+        auto = entry.get("auto_prune", _MISSING)
+        if auto is not _MISSING and not isinstance(auto, bool):
+            issues.append(ConfigIssue(f"{where}.auto_prune", "must be true or false"))
     return issues
 
 
