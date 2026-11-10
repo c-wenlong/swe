@@ -565,3 +565,132 @@ class Parsing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HumanOutput(unittest.TestCase):
+    """The terminal rendering of every subcommand, over the same fixture."""
+
+    def setUp(self):
+        self.fx = Fixture(temp_dir(self))
+        fx = self.fx
+        self.squash = fx.worktree("squash", "feat/squash")
+        self.dirty = fx.worktree("dirty", "feat/dirty")
+        Path(self.dirty, "README").write_text("changed\n")
+        self.none = fx.worktree("none", "feat/none")
+        mods = Path(self.none, "node_modules")
+        mods.mkdir()
+        (mods / "a.js").write_text("x")
+        old = time.time() - 30 * 86400
+        for p in (mods / "a.js", mods):
+            os.utime(p, (old, old))
+        fx.gh_data = {"feat/squash": [pr(1, "MERGED", fx.head(self.squash))],
+                      "feat/dirty": [pr(2, "MERGED")]}
+        # A root folder holding the repo, so --repo walks one level down.
+        self.settings = fx.settings(roots=[str(fx.base)],
+                                    repos={fx.root: {"ignore": []}})
+
+    def run_cli(self, *args, isatty=False):
+        from swe.worktrees import commands
+        out = io.StringIO()
+        with self.fx.env(), redirect_stdout(out), \
+                mock.patch.object(api.Settings, "load", return_value=self.settings), \
+                mock.patch("os.getcwd", return_value=self.fx.root), \
+                mock.patch.object(sys.stdin, "isatty", return_value=isatty), \
+                mock.patch.object(sys.stderr, "isatty", return_value=True), \
+                mock.patch("swe.console.terminal_width", return_value=200):
+            rc = commands.cmd_worktree(list(args))
+        return rc, out.getvalue()
+
+    def test_list_and_show(self):
+        rc, text = self.run_cli("list")
+        self.assertEqual(rc, 0)
+        for word in ("(main checkout)", "merged-clean", "merged-dirty", "#1",
+                     "swe wt prune --yes", "du estimates"):
+            self.assertIn(word, text)
+        rc, text = self.run_cli("ls", "--no-size", f"--repo={self.fx.base}")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("du estimates", text)
+        rc, text = self.run_cli("show", self.squash)
+        self.assertIn("PR #1 merged", text)
+        self.assertIn("harness", text)
+
+    def test_all_scope_and_help(self):
+        rc, text = self.run_cli("list", "--all", "--no-size")
+        self.assertEqual(rc, 0)
+        self.assertIn("feat/squash", text)
+        rc, text = self.run_cli("help")
+        self.assertEqual(rc, 0)
+        self.assertIn("swe wt prune", text)
+        rc, text = self.run_cli("list", "--repo=/nonexistent/place")
+        self.assertEqual(rc, 1)
+
+    def test_single_worktree_commands(self):
+        rc, text = self.run_cli("add", self.fx.root, "--branch=feat/x", "--new")
+        self.assertEqual(rc, 0, text)
+        self.assertIn("Created", text)
+        made = os.path.join(os.path.dirname(self.fx.root), "widget-worktrees", "feat-x")
+        rc, text = self.run_cli("lock", made, "--reason", "busy")
+        self.assertIn("Locked", text)
+        rc, text = self.run_cli("list", "--no-size")
+        self.assertIn("locked: busy", text)
+        rc, text = self.run_cli("unlock", made)
+        self.assertIn("Unlocked", text)
+        moved = made + "-moved"
+        rc, text = self.run_cli("mv", made, moved)
+        self.assertIn("Moved to", text)
+        rc, text = self.run_cli("rm", moved, "--force", "--delete-branch")
+        self.assertEqual(rc, 0, text)
+        self.assertIn("Removed", text)
+        rc, text = self.run_cli("remove", self.squash, "--delete-branch")
+        self.assertIn("Deleted its local branch", text)
+        rc, text = self.run_cli("remove", self.dirty)
+        self.assertEqual(rc, 1)
+        self.assertIn("--force", text)
+
+    def test_prune_and_slim_output(self):
+        rc, text = self.run_cli("prune", "--delete-branches")
+        self.assertEqual(rc, 0)
+        self.assertIn("would remove", text)
+        self.assertIn("Dry run", text)
+        self.assertIn("pass --include=merged-dirty", text)
+        rc, text = self.run_cli("prune", "--include=merged-dirty", "--yes")
+        self.assertIn("Removed 1 worktree(s)", text)
+        self.assertIn("not confirmed", text)  # no terminal, no yes
+        self.assertIn("Log:", text)
+        self.assertTrue(os.path.isdir(self.dirty))
+        with mock.patch("swe.prompt.read_line", return_value="y"):
+            rc, text = self.run_cli("prune", "--include", "merged-dirty", "--yes",
+                                    isatty=True)
+        self.assertFalse(os.path.exists(self.dirty))
+        rc, text = self.run_cli("slim")
+        self.assertIn("would delete", text)
+        rc, text = self.run_cli("slim", "--yes", "--days=7")
+        self.assertIn("Deleted 1 folder(s)", text)
+        self.assertFalse(os.path.exists(os.path.join(self.none, "node_modules")))
+        rc, text = self.run_cli("slim", self.none, "--all")
+        self.assertEqual(rc, 2)
+        rc, text = self.run_cli("slim", "--days=soon")
+        self.assertEqual(rc, 2)
+
+    def test_lock_is_exclusive(self):
+        lock = actions.RunLock(self.fx.home)
+        with lock:
+            with self.assertRaises(actions.Busy):
+                with actions.RunLock(self.fx.home):
+                    pass
+        # A lock left by a dead process is broken.
+        lock.dir.mkdir(parents=True)
+        (lock.dir / "pid").write_text("999999")
+        with actions.RunLock(self.fx.home) as again:
+            self.assertTrue(again.held)
+        self.assertFalse(lock.dir.exists())
+
+    def test_settings_by_path_key(self):
+        settings = Settings({"worktree": {"repos": {
+            "~/x": {"auto_prune": True}}}}, self.fx.home)
+        repo = discover.find_repo(self.fx.root)
+        self.assertFalse(settings.auto_prune(repo))
+        home_repo = discover.Repo(root=os.path.realpath(self.fx.home / "x"),
+                                  common_dir="/x/.git")
+        self.assertTrue(settings.auto_prune(home_repo))
+        self.assertEqual(Settings({"worktree": "bad"}).roots(), [])
