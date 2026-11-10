@@ -253,3 +253,7 @@ resumes) and left in place.
 | GPU + process samplers | `sampledAt` reuse | half the trend interval, plus 3s on-page refresh | shared sampler |
 | login shell environment | `LoginShell.cachedEnvironment` | once per launch | single shared task |
 | pricing catalog | `data/catalog/catalog.sqlite` + bundled fallback | daily, from the last good fetch's time | n/a |
+
+### Imported plugins
+
+`swe plugins import <ref>` writes a local marketplace at `plugins/<marketplace>/.claude-plugin/marketplace.json` and an independent plugin copy at `plugins/<marketplace>/plugins/<name>` (or appends to an existing hub marketplace). It never overwrites a declared plugin. These are ordinary hub sources, with no new database or persistent rendering cache. Mac local inventory and action arrays are derived off the main actor per catalog/skills revision.

@@ -237,7 +237,7 @@ class PluginsTest(_CatalogHome, unittest.TestCase):
                             "installLocation": str(clone)}
         self._write_claude()
         tool = self.plug("tool@mk")
-        self.assertEqual(tool["source_path"], str(clone / "tool"))
+        self.assertEqual(tool["source_path"], str(self.market / "tool"))
         self.assertIsNotNone(tool["drift"])
         self.assertIn("codex", tool["drift"])
 
