@@ -90,7 +90,8 @@ public struct SweClient: Sendable {
             let stderr = Self.plain(result.stderr)
             throw SweError.commandFailed(
                 status: result.status,
-                message: stderr.isEmpty && !isJSON ? Self.plain(stdoutText) : stderr)
+                message: Self.failureMessage(stderr: stderr, stdout: result.stdout,
+                                             stdoutPrefix: stdoutText, isJSON: isJSON))
         }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -119,6 +120,16 @@ public struct SweClient: Sendable {
 }
 
 extension SweClient {
+    /// What a failed run says. A reply whose error object parses is kept
+    /// whole, since the 500-byte prefix can cut a long path or git error
+    /// mid-JSON; anything else is shortened for display.
+    static func failureMessage(stderr: String, stdout: Data, stdoutPrefix: String, isJSON: Bool) -> String {
+        guard stderr.isEmpty else { return stderr }
+        let full = String(decoding: stdout, as: UTF8.self)
+        if WorktreeFailure.parse(full) != nil { return plain(full) }
+        return isJSON ? stderr : plain(stdoutPrefix)
+    }
+
     /// A swe from before --json says so in plain text instead of JSON.
     static func rejectsJSONFlag(_ text: String) -> Bool {
         let plain = plain(text)

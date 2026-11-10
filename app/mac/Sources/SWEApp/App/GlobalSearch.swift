@@ -156,6 +156,13 @@ extension AppModel {
                                           target: .hook(key: "\(hook.harness)|\(hook.id)",
                                                         harness: hook.harness)))
         }
+        for tree in worktrees.worktrees where tree.state != .main {
+            items.append(GlobalSearchItem(kind: .worktree, title: tree.title,
+                                          detail: "\(tree.repoName) · \(tree.state.title)",
+                                          symbol: "arrow.triangle.branch",
+                                          keywords: [tree.path, tree.repoName, tree.harness],
+                                          target: .worktree(path: tree.path)))
+        }
         return items
     }
 
@@ -219,6 +226,11 @@ extension AppModel {
             pendingHook = key
             UserDefaults.standard.set(harness, forKey: "hooksHarness")
             select(.hooks)
+        case .worktree(let path):
+            pendingWorktree = path
+            worktrees.query = ""
+            worktrees.stateFilter = nil
+            select(.worktrees)
         }
     }
 }
