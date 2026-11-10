@@ -394,12 +394,18 @@ def harness_actions(state: dict | None, actionable: bool) -> list[str]:
     if not actionable or not state:
         return []
     installed, enabled = state.get("installed"), state.get("enabled")
+    verbs = []
     if installed is True:
-        return ["disable", "uninstall"] if enabled is True else (
+        verbs = ["disable", "uninstall"] if enabled is True else (
             ["enable", "uninstall"] if enabled is False else ["uninstall"])
-    if installed is False and state.get("available"):
-        return ["install"]
-    return []
+    elif installed is False and state.get("available"):
+        verbs = ["install"]
+    allowed = state.get("allowed_actions")
+    if allowed is None:
+        return verbs
+    if not isinstance(allowed, list) or any(not isinstance(a, str) for a in allowed):
+        return []
+    return [verb for verb in verbs if verb in allowed]
 
 
 def _plugin(plugin: dict, names: dict, actionable=()) -> dict:
@@ -415,6 +421,7 @@ def _plugin(plugin: dict, names: dict, actionable=()) -> dict:
             "scopes": state.get("scopes") or [],
             "path": state.get("path"),
             "copies": len(state.get("copies") or []),
+            "control_detail": state.get("control_detail"),
         }
     name = plugin["name"]
     ref = plugin.get("ref") or f"{name}@{plugin['marketplace']}"

@@ -275,6 +275,8 @@ python3 scripts/docs_site.py        # --check reports stale output
 then open an <a href="https://github.com/c-wenlong/swe/issues">issue</a>. Discussions
 are not enabled on this repo, so issues are the only channel — and we're happy
 to help you find a good first task there.</p>
+<h2 id="secret-scanning"><a class="anchor" href="#secret-scanning"></a>Secret scanning</h2>
+<p>The pre-commit hook in <code>.githooks</code> runs Gitleaks on staged changes. Use <code>git -c core.hooksPath=.githooks commit</code> for a commit, or configure that hooks path for your checkout. Manage the local Gitleaks installation through dotfiles; the hook reports when it is unavailable. The Secret scan workflow runs the same scanner on the PR or push commit range, with redacted output and a pinned container image.</p>
 
 </main>
 <footer>

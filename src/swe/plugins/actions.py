@@ -33,7 +33,7 @@ from pathlib import Path
 from swe.find.plugin_drift import _harness_env, took_too_long
 from swe.paths import cache_dir_for, expand_user
 from swe.plugins.models import ActionResult
-from swe.plugins.catalog import ACTIONABLE, READERS, _public
+from swe.plugins.catalog import ACTIONABLE, CONTROLLABLE, READERS, _public
 
 ACTIONS = ("install", "uninstall", "enable", "disable")
 
@@ -136,9 +136,15 @@ def plugin_action(home: Path, action: str, ref: str, harness: str, run=None,
     harness CLI gets ``timeout`` seconds."""
     if action not in ACTIONS:
         raise ActionError(f"unknown action {action!r}; use one of {', '.join(ACTIONS)}")
-    if harness not in ACTIONABLE:
-        raise ActionError(f"--harness must be one of {', '.join(ACTIONABLE)}, not {harness!r}")
+    if harness not in CONTROLLABLE:
+        raise ActionError(f"--harness must be one of {', '.join(CONTROLLABLE)}, not {harness!r}")
     split_ref(ref)
+    if harness == "cursor":
+        from swe.plugins.cursor import CursorClient, CursorPluginError
+        try:
+            return CursorClient(home).change(action, ref)
+        except CursorPluginError as exc:
+            raise ActionError(str(exc)) from None
     run = run or subprocess.run
     before = plugin_state(home, harness, ref)
     reason = _noop_reason(action, before, harness)
@@ -196,9 +202,9 @@ def marketplace_add(home: Path, source: str, harnesses: list[str], run=None) -> 
     # Every harness is checked before any CLI runs, so a typo in the second
     # one can't leave the first registered and the command reporting failure.
     for harness in harnesses:
-        if harness not in ACTIONABLE:
+        if harness not in _VERBS:
             raise ActionError(
-                f"--harness must be one of {', '.join(ACTIONABLE)}, not {harness!r}")
+                f"--harness must be one of {', '.join(_VERBS)}, not {harness!r}")
     results = []
     for harness in harnesses:
         if harness == "claude":

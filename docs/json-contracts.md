@@ -406,3 +406,7 @@ part in order; one bad part fails the command before any fetch.
   `added_at`): `added_at` is epoch seconds; the rest are ISO 8601
   strings straight from `gh` — decode with `.iso8601`, not
   `.secondsSince1970`.
+
+### Cursor plugin controls
+
+Cursor harness state can carry `allowed_actions: [enable|disable|uninstall]` and `control_detail: string|null`. An absent allowlist keeps legacy behavior; an empty list is read-only. Cursor entries use `installed`/`enabled` only after authoritative API reads. Signed-out/unavailable state remains null and cached copies remain unknown. The existing `PluginActionResult` covers account mutations (`ran: []`, `edited: null`, with resulting installed/enabled state and a refresh note). No tokens or configured values enter catalog/action JSON.

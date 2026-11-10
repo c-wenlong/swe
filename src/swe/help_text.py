@@ -511,15 +511,15 @@ to use their own login state and environment."""
   {c('cyan', 'swe plugins import <ref>')}            Copy installed files into ~/.swe/plugins
   {c('cyan', 'swe plugins info <ref>')}              One plugin's servers, env keys, skills and calls
   {c('cyan', 'swe plugins install <ref> --harness=claude|codex')}
-  {c('cyan', 'swe plugins uninstall <ref> --harness=claude|codex')}
-  {c('cyan', 'swe plugins enable <ref> --harness=claude|codex')}
-  {c('cyan', 'swe plugins disable <ref> --harness=claude|codex')}
+  {c('cyan', 'swe plugins uninstall <ref> --harness=claude|codex|cursor')}
+  {c('cyan', 'swe plugins enable <ref> --harness=claude|codex|cursor')}
+  {c('cyan', 'swe plugins disable <ref> --harness=claude|codex|cursor')}
   {c('cyan', 'swe plugins marketplace add <source> --harness=claude,codex')}
 
   A {c('bold', 'ref')} is {c('cyan', '<plugin>@<marketplace>')}, the name both CLIs use. The catalog
   lists installed and uninstalled plugins alike, plus anything installed
-  whose marketplace has no readable manifest. It reads files only, never
-  the network: a marketplace shows what its last fetch left on disk.
+  whose marketplace has no readable manifest. Claude Code and Codex listings
+  read local files. Cursor queries its account API when credentials are available.
 
   Import copies an installed/cached plugin into SWE without changing a harness.
   Existing SWE files are never overwritten. The app lists local plugins only;
@@ -533,7 +533,12 @@ to use their own login state and environment."""
   [plugins."<ref>"] enabled in ~/.codex/config.toml, an edit swe checks
   parses back to the same file with only that flag changed. When it cannot
   prove that, it writes nothing and says what to edit by hand.
-  Cursor is read-only: it keeps no install record swe can read.
+  Cursor uses its account API for existing personal plugins. Team installations
+  stay read-only. Configured or pinned plugins offer removal only, because
+  on/off preservation is not verified for those settings. A missing login,
+  protected credentials or failed API read leaves cached plugins unknown.
+  Credential reads never open a keychain dialog. Refocus Cursor or start a
+  new Cursor CLI session after a change. Cursor source install is not supported.
 
   {c('dim', 'Collision: swe find also has a --harness, but it means active|all there.')}
   {c('dim', 'swe find plugins shows drift between ~/.swe/plugins and each harness.')}"""

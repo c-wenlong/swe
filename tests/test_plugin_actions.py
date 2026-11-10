@@ -159,7 +159,7 @@ class ClaudeTest(_ActionHome, unittest.TestCase):
             with self.assertRaisesRegex(ActionError, "not a plugin ref"):
                 self.act("install", ref=ref, run=run)
         with self.assertRaisesRegex(ActionError, "--harness must be one of claude, codex"):
-            self.act("install", harness="cursor", run=run)
+            self.act("install", harness="unknown", run=run)
         with self.assertRaisesRegex(ActionError, "unknown action"):
             self.act("update", run=run)
         self.assertEqual(run.calls, [])

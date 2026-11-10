@@ -737,6 +737,7 @@ const sameAct = (a, b) => !!a && !!b && a.verb === b.verb && a.ref === b.ref && 
 
 /* PluginAction.command: what swe will run, or the edit it will make. */
 function actionCommand(a) {
+  if (a.harness === "cursor") return `swe plugins ${a.verb} ${a.ref} --harness=cursor`;
   if (a.verb === "import") return `swe plugins import ${a.ref}`;
   if (a.harness === "codex" && a.verb === "install") return `codex plugin add ${a.ref}`;
   if (a.harness === "codex" && a.verb === "uninstall") return `codex plugin remove ${a.ref}`;

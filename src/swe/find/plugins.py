@@ -499,7 +499,17 @@ def discover_plugins(home: Path | None = None) -> list[Plugin]:
 
     if _plugin_capable(reg, "cursor"):
         root = _plugin_root(reg, "cursor", home) or (home / PLUGIN_FALLBACK["cursor"])
-        found += _from_cache_scan("cursor", root / "cache")
+        cursor_plugins = _from_cache_scan("cursor", root / "cache")
+        if cursor_plugins and root.resolve() == (home / ".cursor/plugins").resolve():
+            from swe.plugins.cursor import CursorClient, CursorPluginError
+            try:
+                remote = CursorClient(home).plugins()
+            except CursorPluginError:
+                remote = {}
+            for plugin in cursor_plugins:
+                if plugin.ref in remote:
+                    plugin.enabled = remote[plugin.ref].enabled
+        found += cursor_plugins
 
     if _plugin_capable(reg, "grok"):
         # grok's root *is* the cache — there is no ~/.grok/plugins directory

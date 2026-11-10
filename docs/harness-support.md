@@ -49,9 +49,11 @@ ZCode, which `swe install` knows but discovery does not.
 
 Notes:
 
-- **Cursor, plugins:** `swe plugins` lists Cursor's installed plugins, but
-  install, uninstall, enable and disable only run through the Claude and
-  Codex CLIs.
+- **Cursor, plugins:** personal account installs can be removed through Cursor's API;
+  unconfigured, unpinned personal plugins can also be enabled/disabled. Team
+  installs stay read-only. Cache-only state stays unknown when credentials or
+  the API are unavailable. Source/marketplace installation remains unsupported,
+  so overall setup support is Partial.
 - **Copilot, instructions:** SWE links its shared skills directory but
   has no confirmed instructions file for Copilot, so `AGENTS.md` is not
   linked there.
