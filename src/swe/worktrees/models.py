@@ -12,7 +12,13 @@ OPEN_PR = "open-pr"
 NO_PR = "no-pr"
 ORPHANED = "orphaned"
 UNKNOWN = "unknown"
-STATES = (MERGED_CLEAN, MERGED_DIRTY, OPEN_PR, NO_PR, ORPHANED, UNKNOWN)
+PROTECTED = "protected"   # ~/.swe/cache/install/src and worktree.protect
+MAIN = "main"             # the main checkout itself
+STATES = (MERGED_CLEAN, MERGED_DIRTY, OPEN_PR, NO_PR, ORPHANED, UNKNOWN,
+          PROTECTED, MAIN)
+
+# `location` -> the contract's `harness`.
+_HARNESS = {"claude": "claude", "codex": "codex", "devin": "devin", "swe": "swe-pr"}
 
 # Folders a worktree can rebuild from its lockfiles or sources. Only ones
 # git ignores are ever counted or deleted.
@@ -46,6 +52,7 @@ class Worktree:
     head: str | None = None
     detached: bool = False
     locked: bool = False
+    lock_reason: str | None = None
     location: str = "git"         # claude | swe | installer | sibling | git | <vendor>
     registered: bool = True       # git lists it (an orphan may not be)
     state: str = UNKNOWN
@@ -64,25 +71,50 @@ class Worktree:
             return None
         return sum(r.get("kb") or 0 for r in self.rebuildable)
 
+    @property
+    def harness(self) -> str:
+        return _HARNESS.get(self.location, "other")
+
+    @property
+    def dirty(self) -> bool:
+        return bool(self.changes or self.untracked)
+
     def to_json(self) -> dict:
+        """The contract's worktree object ``W`` (docs/json-contracts.md),
+        then additive extras."""
+        def size(kb):
+            return None if kb is None else kb * 1024
+        when = None
+        if self.last_commit:
+            from datetime import datetime, timezone
+            when = datetime.fromtimestamp(self.last_commit, timezone.utc).isoformat()
+        pr = None
+        if self.pr:
+            pr = {"number": self.pr.get("number"), "url": self.pr.get("url"),
+                  "state": self.pr.get("state")}
         return {
             "path": self.path,
-            "repo": self.repo.root if self.repo else None,
-            "repo_name": self.repo.name if self.repo else None,
+            "repo": self.repo.slug if self.repo else None,
+            "main_checkout": self.repo.root if self.repo else None,
             "branch": self.branch,
             "head": self.head,
-            "detached": self.detached,
+            "state": self.state,
+            "pr": pr,
+            "last_commit_at": when,
+            "size_bytes": size(self.size_kb),
+            "rebuildable_bytes": size(self.rebuildable_kb),
+            "dirty": self.dirty,
+            "untracked": self.untracked,
             "locked": self.locked,
+            "lock_reason": self.lock_reason,
+            "harness": self.harness,
+            # Extras.
+            "detached": self.detached,
+            "changes": self.changes,
+            "reason": self.reason,
+            "hold": self.hold,
             "location": self.location,
             "registered": self.registered,
-            "state": self.state,
-            "reason": self.reason,
-            "pr": self.pr,
-            "last_commit": self.last_commit,
-            "changes": self.changes,
-            "untracked": self.untracked,
-            "hold": self.hold,
-            "size_kb": self.size_kb,
-            "rebuildable_kb": self.rebuildable_kb,
-            "rebuildable": self.rebuildable,
+            "rebuildable": [{"path": r["path"], "bytes": size(r.get("kb"))}
+                            for r in self.rebuildable],
         }

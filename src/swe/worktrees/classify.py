@@ -21,8 +21,9 @@ from pathlib import Path
 from swe.github import gh
 from swe.worktrees import gitio
 from swe.worktrees.discover import pr_number_from_path
-from swe.worktrees.models import (MERGED_CLEAN, MERGED_DIRTY, NO_PR, OPEN_PR,
-                                  ORPHANED, UNKNOWN, Worktree)
+from swe.worktrees.models import (MAIN, MERGED_CLEAN, MERGED_DIRTY, NO_PR,
+                                  OPEN_PR, ORPHANED, PROTECTED, UNKNOWN,
+                                  Worktree)
 from swe.worktrees.settings import Settings
 
 # A detached HEAD that is already on main is also what a freshly made
@@ -122,8 +123,28 @@ def last_activity(wt: Worktree) -> float:
 def classify(wt: Worktree, lookup: PrLookup, settings: Settings,
              home: Path | None = None, now: float | None = None) -> Worktree:
     """Fill ``state``, ``reason``, ``pr``, ``changes``, ``untracked`` and
-    ``last_commit`` in place. Orphans keep the state discovery gave them."""
+    ``last_commit`` in place. Orphans keep the state discovery gave them;
+    the main checkout is ``main`` and a protected path ``protected``."""
     if wt.state == ORPHANED:
+        return wt
+    _classify(wt, lookup, settings, home, now)
+    if wt.hold == "main checkout":
+        wt.state, wt.pr, wt.hold = MAIN, None, None
+        wt.reason = "the main checkout"
+    elif wt.hold == "protected":
+        wt.state, wt.hold = PROTECTED, None
+        wt.reason = "protected path" + (f" ({wt.reason})" if wt.reason else "")
+    return wt
+
+
+def _classify(wt: Worktree, lookup: PrLookup, settings: Settings,
+              home: Path | None, now: float | None) -> Worktree:
+    if wt.hold == "main checkout":
+        status = worktree_status(wt.path, settings.ignore(wt.repo))
+        if status:
+            wt.changes, wt.untracked = status
+        ts = gitio.out(["-C", wt.path, "log", "-1", "--format=%ct", "HEAD"])
+        wt.last_commit = int(ts) if ts and ts.isdigit() else None
         return wt
     repo = wt.repo
     status = worktree_status(wt.path, settings.ignore(repo))

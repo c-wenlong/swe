@@ -113,13 +113,16 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h2 id="unreleased"><a class="anchor" href="#unreleased"></a><a href="https://github.com/c-wenlong/swe/compare/v1.2.2...HEAD">Unreleased</a></h2>
 <h3 id="added"><a class="anchor" href="#added"></a>Added</h3>
 <ul>
-<li><p><strong><code>swe worktree</code> (alias <code>swe wt</code>) finds and prunes agent worktrees.</strong>
+<li><p><strong><code>swe worktree</code> (alias <code>swe wt</code>) manages git worktrees across repos.</strong>
 <code>swe wt list</code> lists every linked worktree in the current repo, or with
 <code>--all</code> in every repo swe knows (<code>worktree.roots</code> in config, <code>swe gh</code>
 mirrors, <code>~/.swe/worktrees</code>, <code>~/.swe/accounts/*/*/home/worktrees</code>), with its
 PR, last commit, <code>du</code> size and the space in rebuildable folders. States
 come from the PR, since squash merges defeat <code>git merge-base --is-ancestor</code>; when <code>gh</code> cannot answer a worktree is <code>unknown</code> and never
-removed. <code>swe wt prune</code> is a dry run until <code>--yes</code>, removes only
+removed. <code>show</code>, <code>add</code> (a branch, a new branch or a PR's head),
+<code>remove</code>, <code>lock</code>, <code>unlock</code> and <code>move</code> handle one worktree; every command
+takes <code>--json</code> and the same calls are a Python API in <code>swe.worktrees</code>,
+pinned for the coming Mac and web Worktrees pages. <code>swe wt prune</code> is a dry run until <code>--yes</code>, removes only
 <code>merged-clean</code> worktrees through <code>git worktree remove --force</code> (plus
 <code>merged-dirty</code> with <code>--include=merged-dirty</code> and a yes each), re-reads
 each state right before removing, keeps branches unless

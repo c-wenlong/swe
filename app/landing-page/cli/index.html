@@ -945,13 +945,23 @@ Source of truth  ~/.swe/mcp.json
   are explicit commands, never side effects of a read.
 </code></pre>
 <h3 id="swe-worktree-wt"><a class="anchor" href="#swe-worktree-wt"></a><code>swe worktree (wt)</code></h3>
-<p><em>Find, prune and slim agent worktrees</em></p>
-<pre><code class="language-text">  swe wt list [--all] [--root=PATH] [--no-size]
-                             Every linked worktree with its repo, branch,
-                             state, PR, last commit and size (du estimates).
-                             Default scope is the repo you are in; --all adds
-                             every repo swe knows (worktree.roots in config,
-                             swe gh mirrors, harness worktree folders).
+<p><em>Find, add, remove, prune and slim git worktrees</em></p>
+<pre><code class="language-text">  swe wt list [--all] [--repo=PATH] [--no-size]
+                             Every worktree with its repo, branch, state, PR,
+                             last commit and size (du estimates). Default
+                             scope is the repo you are in; --all adds every
+                             repo swe knows (worktree.roots in config, swe gh
+                             mirrors, harness worktree folders).
+  swe wt show &lt;path&gt;         One worktree in full.
+  swe wt add &lt;repo&gt; --branch=B [--new] [--base=REF] [--path=P]
+  swe wt add &lt;repo&gt; --pr=N [--path=P]
+                             A worktree for a branch (--new creates it) or a
+                             PR's head, by default in ../&lt;repo&gt;-worktrees/.
+  swe wt remove &lt;path&gt; [--force] [--delete-branch]
+                             git worktree remove. Anything but merged-clean
+                             needs --force; main and protected never go.
+  swe wt lock &lt;path&gt; [--reason=R] / unlock &lt;path&gt;
+  swe wt move &lt;path&gt; &lt;new-path&gt;
   swe wt prune               Dry run: what would go and how much it frees.
   swe wt prune --yes         Remove merged-clean worktrees (git worktree
                              remove --force, then git worktree prune).
@@ -963,19 +973,20 @@ Source of truth  ~/.swe/mcp.json
                              sets worktree.repos.&lt;repo&gt;.auto_prune to true.
       --delete-branches        Also delete local branches that are merged,
                              or whose tip is a merged PR's head. Never remote.
-  swe wt slim [--days=N] [--yes]
+  swe wt slim [&lt;path&gt; | --all] [--days=N] [--yes]
                              Delete git-ignored rebuildable folders (.venv,
                              node_modules, .next, build, dist, target,
-                             DerivedData, .build) untouched for N days
-                             (default 14) inside worktrees that are not merged.
+                             DerivedData, .build). For a scope: unmerged
+                             worktrees, folders untouched for N days (14).
 
-  States: merged-clean, merged-dirty, open-pr, no-pr, orphaned, unknown.
-  Merged comes from the PR on GitHub (squash merges defeat git ancestry); a
-  detached HEAD counts as merged when it is on origin/main. When gh cannot
-  answer the state is unknown, and unknown is never removed. The main
-  checkout, ~/.swe/cache/install/src, worktree.protect paths, locked
-  worktrees and the one you are in are never touched. Applied runs log to
-  ~/.swe/logs/worktree/. Every command takes --json.
+  States: merged-clean, merged-dirty, open-pr, no-pr, orphaned, unknown,
+  protected, main. Merged comes from the PR on GitHub (squash merges defeat
+  git ancestry); a detached HEAD counts as merged when it is on origin/main.
+  When gh cannot answer the state is unknown, and unknown is never removed.
+  The main checkout, ~/.swe/cache/install/src and worktree.protect paths are
+  never touched; prune also skips locked worktrees and the one you are in.
+  Applied prune and slim runs log to ~/.swe/logs/worktree/. Every command
+  takes --json; a failure prints {&quot;error&quot;: {&quot;code&quot;, &quot;message&quot;}}.
 </code></pre>
 <h2 id="shell"><a class="anchor" href="#shell"></a>Shell</h2>
 <h3 id="swe-autocomplete"><a class="anchor" href="#swe-autocomplete"></a><code>swe autocomplete</code></h3>

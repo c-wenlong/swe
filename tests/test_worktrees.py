@@ -22,8 +22,10 @@ from tests._tempdir import temp_dir
 
 from swe.worktrees import actions, discover, sizing
 from swe.worktrees.classify import PrLookup, classify_all
-from swe.worktrees.models import (MERGED_CLEAN, MERGED_DIRTY, NO_PR, OPEN_PR,
-                                  ORPHANED, UNKNOWN)
+from swe.worktrees import api
+from swe.worktrees.api import WorktreeError
+from swe.worktrees.models import (MAIN, MERGED_CLEAN, MERGED_DIRTY, NO_PR,
+                                  OPEN_PR, ORPHANED, PROTECTED, UNKNOWN)
 from swe.worktrees.settings import Settings
 
 SLUG = "acme/widget"
@@ -188,7 +190,7 @@ class WorktreeCases(unittest.TestCase):
         self.assertIn("24h", got[self.fresh].hold)
         self.assertEqual(got[self.ghost].state, ORPHANED)
         self.assertFalse(got[self.ghost].registered)
-        self.assertNotIn(self.fx.root, got)  # never the main checkout
+        self.assertEqual(got[self.fx.root].state, MAIN)
         # The ancestry check the issue warns about really does say "unmerged".
         rc = subprocess.run(["git", "merge-base", "--is-ancestor", "feat/squash",
                              "origin/main"], cwd=self.fx.root).returncode
@@ -251,7 +253,7 @@ class WorktreeCases(unittest.TestCase):
                                     repos={SLUG: {"ignore": [".env.local"]}})
         with self.fx.env():
             got = self.fx.scan(settings)
-            self.assertEqual(got[self.squash].hold, "protected")
+            self.assertEqual(got[self.squash].state, PROTECTED)
             plan = actions.prune(list(got.values()), settings=settings,
                                  apply=True, home=self.fx.home)
         self.assertNotIn(self.squash, {r["path"] for r in plan.acted})
@@ -340,48 +342,171 @@ class WorktreeCases(unittest.TestCase):
         self.assertTrue(os.path.isdir(os.path.join(self.squash, "node_modules")))
         self.assertTrue(os.path.isdir(os.path.join(self.open, "build")))
 
-    def test_list_json_contract(self):
+    def cli(self, *args, settings=None):
         from swe.worktrees import commands
         out = io.StringIO()
         with self.fx.env(), redirect_stdout(out), \
-                mock.patch.object(commands.Settings, "load", return_value=self.settings):
-            discover.clear_cache()
-            rc = commands.cmd_worktree(["list", f"--root={self.fx.root}", "--json"])
+                mock.patch.object(api.Settings, "load",
+                                  return_value=settings or self.settings), \
+                mock.patch("os.getcwd", return_value=str(self.fx.base)):
+            rc = commands.cmd_worktree([*args, "--json"])
+        return rc, json.loads(out.getvalue())
+
+    W_KEYS = {"path", "repo", "main_checkout", "branch", "head", "state", "pr",
+              "last_commit_at", "size_bytes", "rebuildable_bytes", "dirty",
+              "untracked", "locked", "lock_reason", "harness"}
+
+    def test_list_json_contract(self):
+        rc, doc = self.cli("list", "--repo", self.fx.root)
         self.assertEqual(rc, 0)
-        doc = json.loads(out.getvalue())
         self.assertEqual(doc["schema"], 1)
         data = doc["data"]
-        self.assertEqual(set(data), {"scope", "worktrees", "totals"})
-        row = next(w for w in data["worktrees"] if w["path"] == self.squash)
-        for key in ("repo", "repo_name", "branch", "state", "pr", "last_commit",
-                    "size_kb", "rebuildable_kb", "hold", "location", "registered"):
-            self.assertIn(key, row)
-        self.assertEqual(row["repo_name"], SLUG)
-        self.assertEqual(row["location"], "claude")
+        self.assertEqual(data["scope"], "repo")
+        self.assertIn("generated_at", data)
+        rows = {w["path"]: w for w in data["worktrees"]}
+        row = rows[self.squash]
+        self.assertLessEqual(self.W_KEYS, set(row))
+        self.assertEqual(row["repo"], SLUG)
+        self.assertEqual(row["main_checkout"], self.fx.root)
+        self.assertEqual(row["harness"], "claude")
+        self.assertEqual(row["pr"], {"number": 1, "state": "MERGED",
+                                     "url": f"https://github.com/{SLUG}/pull/1"})
+        self.assertIsInstance(row["size_bytes"], int)
+        self.assertFalse(row["dirty"])
+        self.assertTrue(rows[self.dirty]["dirty"])
+        self.assertEqual(rows[self.fx.root]["state"], MAIN)
         self.assertEqual(data["totals"]["by_state"][MERGED_CLEAN], 4)
         self.assertEqual(data["totals"]["prunable"], 3)
 
     def test_prune_cli_dry_run_by_default(self):
-        from swe.worktrees import commands
-        out = io.StringIO()
-        with self.fx.env(), redirect_stdout(out), \
-                mock.patch.object(commands.Settings, "load", return_value=self.settings):
-            discover.clear_cache()
-            rc = commands.cmd_worktree(["prune", f"--root={self.fx.root}", "--json"])
+        rc, doc = self.cli("prune", f"--repo={self.fx.root}")
         self.assertEqual(rc, 0)
-        data = json.loads(out.getvalue())["data"]
+        data = doc["data"]
         self.assertTrue(data["dry_run"])
-        self.assertEqual(len(data["acted"]), 3)
+        self.assertEqual({w["path"] for w in data["candidates"]},
+                         {self.squash, self.ignored, self.detached})
+        self.assertEqual(data["removed"], [])
+        self.assertIsInstance(data["freed_bytes"], int)
+        self.assertTrue(all(set(r) >= {"path", "reason"} for r in data["skipped"]))
         self.assertTrue(os.path.isdir(self.squash))
 
+    def test_prune_cli_yes(self):
+        rc, doc = self.cli("prune", f"--repo={self.fx.root}", "--yes")
+        self.assertEqual(rc, 0)
+        self.assertEqual(set(doc["data"]["removed"]),
+                         {self.squash, self.ignored, self.detached})
+        self.assertFalse(os.path.exists(self.squash))
+
+    def test_show(self):
+        rc, doc = self.cli("show", self.open)
+        self.assertEqual(rc, 0)
+        self.assertEqual(doc["data"]["worktree"]["state"], OPEN_PR)
+        rc, doc = self.cli("show", os.path.join(self.open, "missing"))
+        self.assertEqual(rc, 1)
+        self.assertEqual(doc["error"]["code"], "not_found")
+
+    def test_remove_rules(self):
+        rc, doc = self.cli("remove", self.fx.root)
+        self.assertEqual((rc, doc["error"]["code"]), (1, "not_safe"))
+        rc, doc = self.cli("remove", self.open)
+        self.assertEqual((rc, doc["error"]["code"]), (1, "not_safe"))
+        self.assertTrue(os.path.isdir(self.open))
+        rc, doc = self.cli("remove", self.ghost, "--force")
+        self.assertEqual(doc["error"]["code"], "not_safe")
+        self.assertTrue(os.path.isdir(self.ghost))
+        rc, doc = self.cli("remove", self.squash, "--delete-branch")
+        self.assertEqual(rc, 0)
+        self.assertEqual(doc["data"]["removed"], self.squash)
+        self.assertIn("freed_bytes", doc["data"])
+        self.assertTrue(doc["data"]["branch_deleted"])
+        self.assertFalse(os.path.exists(self.squash))
+        rc, doc = self.cli("remove", self.open, "--force", "--delete-branch")
+        self.assertEqual(rc, 0)
+        self.assertFalse(doc["data"]["branch_deleted"])  # unmerged: -d refuses
+        run("rev-parse", "--verify", "feat/open", cwd=self.fx.root)
+
+    def test_protected_cannot_be_removed_even_forced(self):
+        settings = self.fx.settings(protect=[self.none])
+        rc, doc = self.cli("remove", self.none, "--force", settings=settings)
+        self.assertEqual(doc["error"]["code"], "not_safe")
+        self.assertTrue(os.path.isdir(self.none))
+
+    def test_lock_unlock_move(self):
+        rc, doc = self.cli("lock", self.none, "--reason=keep me")
+        self.assertEqual(rc, 0)
+        w = doc["data"]["worktree"]
+        self.assertTrue(w["locked"])
+        self.assertEqual(w["lock_reason"], "keep me")
+        rc, doc = self.cli("move", self.none, str(self.fx.base / "elsewhere"))
+        self.assertEqual(doc["error"]["code"], "not_safe")
+        rc, doc = self.cli("unlock", self.none)
+        self.assertFalse(doc["data"]["worktree"]["locked"])
+        target = os.path.realpath(self.fx.base) + "/moved/none"
+        rc, doc = self.cli("move", self.none, target)
+        self.assertEqual(rc, 0)
+        self.assertEqual(doc["data"]["worktree"]["path"], target)
+        self.assertTrue(os.path.isdir(target))
+        self.assertFalse(os.path.exists(self.none))
+        rc, doc = self.cli("move", self.fx.root, str(self.fx.base / "x"))
+        self.assertEqual(doc["error"]["code"], "not_safe")
+
+    def test_add_branch_new_and_pr(self):
+        rc, doc = self.cli("add", self.fx.root, "--branch", "feat/fresh", "--new")
+        self.assertEqual(rc, 0, doc)
+        w = doc["data"]["worktree"]
+        expected = os.path.join(os.path.dirname(self.fx.root), "widget-worktrees",
+                                "feat-fresh")
+        self.assertEqual(w["path"], expected)
+        self.assertEqual(w["branch"], "feat/fresh")
+        rc, doc = self.cli("add", self.fx.root, "--branch=feat/fresh", "--new")
+        self.assertEqual(doc["error"]["code"], "exists")
+        rc, doc = self.cli("add", self.fx.root, "--branch=nope")
+        self.assertEqual(doc["error"]["code"], "not_found")
+        rc, doc = self.cli("add", self.fx.root)
+        self.assertEqual((rc, doc["error"]["code"]), (2, "bad_args"))
+        # A PR head, fetched from refs/pull/N/head on origin.
+        origin = str(self.fx.base / "origin.git")
+        sha = self.fx.head(self.open)
+        run("push", "-q", origin, f"{sha}:refs/pull/9/head", cwd=self.fx.root)
+        self.fx.gh_data["#9"] = {**pr(9, "OPEN", sha), "headRefName": "feat/from-pr"}
+        rc, doc = self.cli("add", self.fx.root, "--pr=9",
+                           f"--path={self.fx.base}/pr9")
+        self.assertEqual(rc, 0, doc)
+        w = doc["data"]["worktree"]
+        self.assertEqual(w["branch"], "feat/from-pr")
+        self.assertEqual(w["head"], sha)
+
+    def test_slim_explicit_path(self):
+        mods = Path(self.squash, "node_modules")
+        mods.mkdir()
+        (mods / "a.js").write_text("x")
+        rc, doc = self.cli("slim", self.squash)
+        self.assertEqual(rc, 0)
+        self.assertTrue(doc["data"]["dry_run"])
+        self.assertEqual([d["path"] for d in doc["data"]["dirs"]], [str(mods)])
+        self.assertTrue(mods.is_dir())
+        rc, doc = self.cli("slim", self.squash, "--yes")
+        self.assertFalse(mods.exists())
+        self.assertTrue(os.path.isdir(self.squash))
+        rc, doc = self.cli("slim", self.fx.root)
+        self.assertEqual(doc["error"]["code"], "not_safe")
+
+    def test_python_api_raises(self):
+        with self.assertRaises(WorktreeError) as caught:
+            api.remove(str(self.fx.base / "nowhere"))
+        self.assertEqual(caught.exception.code, "not_found")
+        import swe.worktrees as pkg
+        for name in ("list_worktrees", "show", "add", "remove", "lock",
+                     "unlock", "move", "prune", "slim", "WorktreeError"):
+            self.assertTrue(hasattr(pkg, name), name)
+
     def test_bad_flags(self):
-        from swe.worktrees import commands
-        err = io.StringIO()
-        with mock.patch.object(sys, "stdout", err):
-            self.assertEqual(commands.cmd_worktree(["prune", "--include=open-pr"]), 2)
-            self.assertEqual(commands.cmd_worktree(["prune", "--branch"]), 2)
-            self.assertEqual(commands.cmd_worktree(["list", "--yes"]), 2)
-            self.assertEqual(commands.cmd_worktree(["nope"]), 2)
+        rc, doc = self.cli("prune", f"--repo={self.fx.root}", "--include=open-pr")
+        self.assertEqual((rc, doc["error"]["code"]), (2, "bad_args"))
+        self.assertEqual(self.cli("prune", "--branch")[0], 2)
+        self.assertEqual(self.cli("list", "--yes")[0], 2)
+        self.assertEqual(self.cli("nope")[0], 2)
+        self.assertEqual(self.cli("move", self.none)[0], 2)
 
 
 class HarnessFolders(unittest.TestCase):

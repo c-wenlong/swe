@@ -5,3 +5,9 @@ worktrees coding agents leave behind, across every repo and harness.
 ``sizing`` measures them, ``actions`` removes or slims them, and
 ``commands`` is the controller. ``models`` holds the one ``--json`` row.
 """
+
+from swe.worktrees.api import (WorktreeError, add, list_worktrees, lock,  # noqa: E402
+                               move, prune, remove, show, slim, unlock)
+
+__all__ = ["WorktreeError", "add", "list_worktrees", "lock", "move", "prune",
+           "remove", "show", "slim", "unlock"]

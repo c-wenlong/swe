@@ -9,14 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`swe worktree` (alias `swe wt`) finds and prunes agent worktrees.**
+- **`swe worktree` (alias `swe wt`) manages git worktrees across repos.**
   `swe wt list` lists every linked worktree in the current repo, or with
   `--all` in every repo swe knows (`worktree.roots` in config, `swe gh`
   mirrors, `~/.swe/worktrees`, `~/.swe/accounts/*/*/home/worktrees`), with its
   PR, last commit, `du` size and the space in rebuildable folders. States
   come from the PR, since squash merges defeat `git merge-base
   --is-ancestor`; when `gh` cannot answer a worktree is `unknown` and never
-  removed. `swe wt prune` is a dry run until `--yes`, removes only
+  removed. `show`, `add` (a branch, a new branch or a PR's head),
+  `remove`, `lock`, `unlock` and `move` handle one worktree; every command
+  takes `--json` and the same calls are a Python API in `swe.worktrees`,
+  pinned for the coming Mac and web Worktrees pages. `swe wt prune` is a dry run until `--yes`, removes only
   `merged-clean` worktrees through `git worktree remove --force` (plus
   `merged-dirty` with `--include=merged-dirty` and a yes each), re-reads
   each state right before removing, keeps branches unless

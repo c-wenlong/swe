@@ -114,6 +114,7 @@ def parse_porcelain(text: str) -> list[dict]:
             row["bare"] = True
         elif line.startswith("locked"):
             row["locked"] = True
+            row["lock_reason"] = line[7:].strip() or None
         elif line.startswith("prunable"):
             row["prunable"] = True
     return rows
@@ -136,7 +137,9 @@ def read_gitfile(folder: str) -> str | None:
 def harness_dirs(home: Path | None = None) -> list[str]:
     """Folders harnesses create worktrees in, outside any repo."""
     swe = paths.swe_dir_for(home)
-    found = [paths.worktrees_dir_for(home)]
+    base = Path(home or Path.home())
+    found = [paths.worktrees_dir_for(home), base / ".codex" / "worktrees",
+             base / ".devin" / "worktrees"]
     accounts = swe / "accounts"
     try:
         for vendor in sorted(accounts.iterdir()):
@@ -212,6 +215,10 @@ def location_of(path: str, home: Path | None = None) -> str:
         return "installer"
     if "/.claude/worktrees/" in path:
         return "claude"
+    if "/.codex/worktrees/" in path:
+        return "codex"
+    if "/.devin/" in path or "/.devin-" in path:
+        return "devin"
     if "-worktrees/" in path or "/worktrees/" in path:
         return "sibling"
     return "git"
@@ -273,7 +280,10 @@ class Discovery:
         for repo in list(self.repos.values()):
             listing = gitio.out(["--git-dir", repo.common_dir, "worktree",
                                  "list", "--porcelain"])
-            for row in parse_porcelain(listing or "")[1:]:
+            rows = parse_porcelain(listing or "")
+            if rows and not repo.bare:
+                self._add_registered(repo, rows[0])  # the main checkout, state main
+            for row in rows[1:]:
                 self._add_registered(repo, row)
             for folder in repo_side_dirs(repo):
                 self.extra_checkouts += checkouts_in(folder)
@@ -290,6 +300,7 @@ class Discovery:
         wt = Worktree(path=path, repo=repo, branch=row.get("branch"),
                       head=row.get("head"), detached=bool(row.get("detached")),
                       locked=bool(row.get("locked")),
+                      lock_reason=row.get("lock_reason"),
                       location=location_of(path, self.home))
         if row.get("prunable") or not os.path.isdir(raw):
             wt.state = ORPHANED
@@ -321,12 +332,12 @@ class Discovery:
     def _annotate(self) -> None:
         protect = self.settings.protect()
         for wt in self.worktrees.values():
-            if any(_inside(wt.path, p) for p in protect):
+            if wt.repo is not None and wt.path == wt.repo.root:
+                wt.hold = "main checkout"
+            elif any(_inside(wt.path, p) for p in protect):
                 wt.hold = "protected"
             elif _inside(self.cwd, wt.path):
                 wt.hold = "you are inside it"
-            elif wt.repo is not None and wt.path == wt.repo.root:
-                wt.hold = "main checkout"
             elif wt.locked:
                 wt.hold = "locked (git worktree lock)"
 

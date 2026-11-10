@@ -31,9 +31,9 @@ from typing import Callable
 from swe import paths
 from swe.worktrees import gitio, sizing
 from swe.worktrees.classify import PrLookup, classify
-from swe.worktrees.models import (MERGED_CLEAN, MERGED_DIRTY, NO_PR, OPEN_PR,
-                                  ORPHANED, REBUILDABLE, UNKNOWN, Repo,
-                                  Worktree)
+from swe.worktrees.models import (MAIN, MERGED_CLEAN, MERGED_DIRTY, NO_PR,
+                                  OPEN_PR, ORPHANED, PROTECTED, REBUILDABLE,
+                                  UNKNOWN, Repo, Worktree)
 from swe.worktrees.settings import Settings
 
 PRUNABLE_STATES = (MERGED_CLEAN, MERGED_DIRTY)
@@ -143,6 +143,8 @@ def prune(worktrees: list[Worktree], *, settings: Settings, apply: bool = False,
         worktrees = [w for w in worktrees if w.branch == branch]
     chosen: list[Worktree] = []
     for wt in worktrees:
+        if wt.state == MAIN:
+            continue
         if wt.state == ORPHANED:
             if wt.registered:
                 continue  # `git worktree prune` below drops these
@@ -289,17 +291,23 @@ def _branches(removed: list[Worktree], repos: dict[str, Repo], settings: Setting
 # ------------------------------------------------------------------ slim
 
 def slim(worktrees: list[Worktree], *, apply: bool = False, days: int = 14,
-         home: Path | None = None, now: float | None = None) -> Plan:
+         home: Path | None = None, now: float | None = None,
+         any_state: bool = False) -> Plan:
+    """``any_state`` is for one worktree the caller named: every state but
+    main, protected and orphaned, whatever its hold."""
     plan = Plan("slim", apply)
     chosen: list[tuple[Worktree, dict]] = []
     for wt in worktrees:
-        if wt.state not in SLIM_STATES:
+        if any_state:
+            if wt.state in (MAIN, PROTECTED, ORPHANED):
+                continue
+        elif wt.state not in SLIM_STATES:
             if wt.rebuildable:
                 why = ("merged: prune it instead" if wt.state in PRUNABLE_STATES
                        else wt.reason or wt.state)
                 plan.skipped.append(_skip(wt, why))
             continue
-        if wt.hold:
+        if wt.hold and not any_state:
             if wt.rebuildable:
                 plan.skipped.append(_skip(wt, wt.hold))
             continue

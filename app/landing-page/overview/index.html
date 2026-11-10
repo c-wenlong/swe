@@ -589,9 +589,9 @@ swe mcp sync opencode cursor # copy MCP servers between tools
   <td>GitHub surfaces over <code>gh</code>: <code>pr</code>, <code>issue</code>, <code>run</code>, <code>inbox</code>, <code>repo</code>, <code>board</code>, <code>sync</code>, …</td>
 </tr>
 <tr>
-  <td><code>swe worktree [list\|prune\|slim] …</code></td>
+  <td><code>swe worktree [list\|show\|add\|remove\|lock\|unlock\|move\|prune\|slim] …</code></td>
   <td><code>wt</code></td>
-  <td>Find agent worktrees across repos and harness folders, classify them by PR state, remove merged ones (<code>prune</code>, dry run unless <code>--yes</code>) and delete rebuildable folders in the rest (<code>slim</code>)</td>
+  <td>Find agent worktrees across repos and harness folders, classify them by PR state, add and remove single worktrees, remove merged ones in bulk (<code>prune</code>, dry run unless <code>--yes</code>) and delete rebuildable folders (<code>slim</code>)</td>
 </tr>
 <tr>
   <td><code>swe bug</code></td>
