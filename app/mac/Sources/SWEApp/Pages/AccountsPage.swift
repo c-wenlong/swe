@@ -413,6 +413,17 @@ struct UsageBars: View {
                 ForEach(usage.windows, id: \.label) { window in
                     UsageBar(window: window, failed: failed, asOf: usage.fetchedAt)
                 }
+                if let credits = usage.monthlyCredits {
+                    HStack {
+                        Text("Monthly credits").foregroundStyle(Theme.textSecondary)
+                        Spacer()
+                        Text("\(credits.used.formatted(.number.precision(.fractionLength(0...2)))) of \(credits.limit.formatted(.number.precision(.fractionLength(0...2)))) used")
+                            .monospacedDigit()
+                            .foregroundStyle(failed ? Theme.dangerText : Theme.textPrimary)
+                    }
+                    .font(Theme.caption)
+                    .opacity(failed ? 0.55 : 1)
+                }
             }
             .opacity(usage.isStale && !failed ? 0.55 : 1)
         }

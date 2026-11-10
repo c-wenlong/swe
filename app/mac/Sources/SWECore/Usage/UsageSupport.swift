@@ -31,6 +31,7 @@ struct ParsedUsage {
     var plan: String?
     var email: String?
     var windows: [UsageWindow]
+    var monthlyCredits: MonthlyCredits? = nil
 }
 
 enum UsageHashing {
