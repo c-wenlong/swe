@@ -319,6 +319,10 @@ def adopt_harness_skills(
 
     adopted_names: set[str] = set()
     kept: dict[Path, set[str]] = {}
+    if any(a[0] == "adopt" for a in actions):
+        # A standalone `swe skills adopt` can run before any init did:
+        # the shared tree is the destination, so it must exist.
+        shared.mkdir(parents=True, exist_ok=True)
     for action in actions:
         kind = action[0]
         if kind == "conflict":

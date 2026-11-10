@@ -214,6 +214,17 @@ class AdoptMoveTest(AdoptCase):
         with self.assertRaises(SkillLayoutError):
             adopt_harness_skills(self.home, only="nope")
 
+    def test_standalone_adopt_creates_the_shared_tree(self):
+        import shutil
+
+        shutil.rmtree(self.shared)
+        self._skill(self.home / ".claude/skills", "priv")
+
+        result = adopt_harness_skills(self.home)
+
+        self.assertEqual(result.adopted, [{"name": "priv", "from": "claude"}])
+        self.assertTrue((self.shared / "priv").is_dir())
+
     def test_dry_run_reports_without_writing(self):
         self._skill(self.home / ".claude/skills", "priv")
         self._linked()
@@ -466,6 +477,34 @@ class AdoptInitTest(AdoptCase):
         doc = check_document(self.home)
         self.assertEqual(doc["skills_adoption"]["adopted"],
                          [{"name": "priv", "from": "claude"}])
+
+    def _cmd_init(self, args):
+        from swe.init import commands as init_commands
+
+        buf = io.StringIO()
+        with mock.patch.object(Path, "home", staticmethod(lambda: self.home)), \
+                redirect_stdout(buf):
+            code = init_commands.cmd_init(list(args))
+        return code, buf.getvalue()
+
+    def test_init_drops_the_alone_warning_for_a_fully_adopted_root(self):
+        self._skill(self.home / ".claude/skills", "priv")
+
+        code, out = self._cmd_init([])
+
+        self.assertEqual(code, 0)
+        self.assertIn("Adopted 1 skill", out)
+        self.assertNotIn("exist nowhere else", out)
+
+    def test_init_keeps_the_alone_warning_for_a_root_with_a_conflict(self):
+        self._skill(self.shared, "foo", body="shared")
+        self._skill(self.home / ".claude/skills", "foo", body="private")
+
+        code, out = self._cmd_init([])
+
+        self.assertEqual(code, 0)
+        self.assertIn("exist nowhere else", out)
+        self.assertTrue((self.home / ".claude/skills/foo").is_dir())
 
 
 class AdoptInventoryTest(AdoptCase):
