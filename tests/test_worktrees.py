@@ -475,6 +475,14 @@ class WorktreeCases(unittest.TestCase):
         w = doc["data"]["worktree"]
         self.assertEqual(w["branch"], "feat/from-pr")
         self.assertEqual(w["head"], sha)
+        # A PR whose head name is taken falls back to pr-N and keeps its link.
+        run("push", "-q", origin, f"{sha}:refs/pull/10/head", cwd=self.fx.root)
+        self.fx.gh_data["#10"] = {**pr(10, "OPEN", sha), "headRefName": "main"}
+        rc, doc = self.cli("add", self.fx.root, "--pr=10")
+        self.assertEqual(rc, 0, doc)
+        w = doc["data"]["worktree"]
+        self.assertEqual(w["branch"], "pr-10")
+        self.assertEqual((w["state"], w["pr"]["number"]), (OPEN_PR, 10))
 
     def test_slim_explicit_path(self):
         mods = Path(self.squash, "node_modules")
@@ -740,6 +748,11 @@ class HumanOutput(unittest.TestCase):
             with self.assertRaises(WorktreeError) as caught:
                 api.prune(home=self.fx.home, repo=self.fx.root)
         self.assertEqual(caught.exception.code, "bad_config")
+        with self.fx.env():
+            with self.assertRaises(WorktreeError):
+                api.add(self.fx.root, branch="feat/later", new=True, home=self.fx.home)
+        self.assertFalse(os.path.exists(os.path.join(
+            os.path.dirname(self.fx.root), "widget-worktrees", "feat-later")))
 
     def test_settings_by_path_key(self):
         settings = Settings({"worktree": {"repos": {

@@ -169,6 +169,12 @@ def _classify(wt: Worktree, lookup: PrLookup, settings: Settings,
             wt.state, wt.reason = NO_PR, f"on the default branch {wt.branch}"
             return wt
         prs, err = lookup.for_branch(repo.slug, wt.branch)
+        linked = gitio.out(["--git-dir", repo.common_dir, "config", "--get",
+                            f"branch.{wt.branch}.swe-pr"])
+        if prs is not None and not prs and linked and linked.isascii() and linked.isdigit():
+            # `swe wt add --pr=N` under a pr-N name: look the PR up by number.
+            pr, err = lookup.for_number(repo.slug, int(linked))
+            prs = [pr] if pr is not None else None
         if prs is None:
             wt.state, wt.reason = UNKNOWN, f"gh could not list PRs: {err}"
             return wt

@@ -169,6 +169,9 @@ def add(repo_path: str, branch: str | None = None, new: bool = False,
         raise WorktreeError("bad_args", f"--pr takes a PR number, not {pr}")
     if (new or base) and not branch:
         raise WorktreeError("bad_args", "--new and --base go with --branch")
+    # Read settings before touching git: a broken config must fail the
+    # call before it leaves a checkout behind.
+    settings = load_settings(home)
     root = _real(repo_path)
     repo = discover.find_repo(root) if os.path.isdir(root) else None
     if repo is None:
@@ -212,6 +215,9 @@ def add(repo_path: str, branch: str | None = None, new: bool = False,
                                 f"exist at other commits than PR #{number}'s head")
         if create:
             _git_or_raise(git_dir + ["branch", branch, sha], f"creating {branch}")
+        # Remember which PR this is: a pr-N fallback name matches no PR head,
+        # and classify reads this to look the PR up by number.
+        gitio.git(git_dir + ["config", f"branch.{branch}.swe-pr", str(number)])
         _git_or_raise(["-C", repo.root, "worktree", "add", target, branch],
                       "git worktree add")
         gitio.git(git_dir + ["update-ref", "-d", f"refs/swe/pr/{number}"])
@@ -233,7 +239,7 @@ def add(repo_path: str, branch: str | None = None, new: bool = False,
                                     f"no local branch {branch} (pass --new to create it)")
             _git_or_raise(["-C", repo.root, "worktree", "add", target, branch],
                           "git worktree add")
-    return {"worktree": _one(target, home).to_json()}
+    return {"worktree": _one(target, home, settings=settings).to_json()}
 
 
 def _refuse_special(wt: Worktree, verb: str) -> None:
