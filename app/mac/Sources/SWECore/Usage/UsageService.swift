@@ -175,7 +175,7 @@ public actor UsageService {
             }
             // Billing has its own persisted cooldown: refreshing the regular
             // windows must not bypass a Retry-After from the monthly endpoint.
-            var monthlyRetryAt = reading?.monthlyRetryAt
+            var monthlyRetryAt = entry?.monthlyRetryAt
             if key.provider == .codex, !parsed.windows.contains(where: { $0.label == "30d" }),
                (monthlyRetryAt ?? .distantPast) <= now(),
                let request = CodexUsageAPI.monthlyRequest(credential, plan: parsed.plan),
@@ -193,10 +193,9 @@ public actor UsageService {
                 }
             }
             let fresh = StoredReading(plan: parsed.plan, email: parsed.email, windows: parsed.windows,
-                                      fetchedAt: answered, monthlyCredits: parsed.monthlyCredits,
-                                      monthlyRetryAt: monthlyRetryAt)
+                                      fetchedAt: answered, monthlyCredits: parsed.monthlyCredits)
             store.save(StoredAccount(fingerprint: credential.fingerprint, reading: fresh,
-                                     cooldownUntil: nil, lastFailure: nil), for: key)
+                                     cooldownUntil: nil, lastFailure: nil, monthlyRetryAt: monthlyRetryAt), for: key)
             return result(.ok, reading: fresh, credential: credential, isStale: false)
         case 401:
             store.save(failed(.expired, entry: entry, reading: reading,

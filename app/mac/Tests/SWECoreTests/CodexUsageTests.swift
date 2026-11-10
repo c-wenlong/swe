@@ -132,6 +132,28 @@ import Testing
         #expect(monthly.credits == MonthlyCredits(used: used, limit: cap))
     }
 
+    @Test func concurrentFailureCannotEraseBillingCooldownWithoutAReading() throws {
+        let h = UsageHarness()
+        let store = UsageCacheStore(url: h.cacheURL, now: { usageEpoch })
+        let until = usageEpoch.addingTimeInterval(3600)
+        store.save(StoredAccount(fingerprint: "login", reading: nil, cooldownUntil: nil,
+                                 lastFailure: nil, monthlyRetryAt: until), for: codexKey)
+        // A concurrent request started before the first response and failed.
+        store.save(StoredAccount(fingerprint: "login", reading: nil, cooldownUntil: nil,
+                                 lastFailure: StoredFailure(at: usageEpoch, status: .error("offline"))), for: codexKey)
+        let kept = try #require(store.entry(for: codexKey))
+        #expect(kept.reading == nil)
+        #expect(kept.monthlyRetryAt == until)
+        // A successful refresh cannot shorten a later wait saved elsewhere.
+        store.save(StoredAccount(fingerprint: "login", reading: nil, cooldownUntil: nil,
+                                 lastFailure: nil, monthlyRetryAt: until.addingTimeInterval(-600)), for: codexKey)
+        #expect(store.entry(for: codexKey)?.monthlyRetryAt == until)
+        // A genuinely new login starts clean.
+        store.save(StoredAccount(fingerprint: "new-login", reading: nil, cooldownUntil: nil,
+                                 lastFailure: nil), for: codexKey)
+        #expect(store.entry(for: codexKey)?.monthlyRetryAt == nil)
+    }
+
     @Test func billingRetryAfterSurvivesRestartAndForcedRefresh() async {
         let h = UsageHarness()
         h.files.set("\(codexHome)/auth.json", codexAuthJSON())
