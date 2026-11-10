@@ -93,7 +93,7 @@
   .empty { padding: 40px; text-align: center; color: var(--faint); }
 
   /* ---------- detail sheet ---------- */
-  .sheet { position: fixed; top: 0; right: -400px; width: 380px; height: 100%; background: #fff;
+  .sheet { position: fixed; top: 0; right: -400px; width: 380px; height: 100%; background: #fff; z-index: 3;
            border-left: 1px solid var(--border); transition: right .18s ease; padding: 20px; overflow: auto; }
   .sheet.open { right: 0; }
   .sheet h2 { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -263,7 +263,7 @@ function srcKey(row) {
 function srcTag(row) {
   const s = row[2];
   if (s === "swe") return `<span class="src swe">swe</span>`;
-  if (s.startsWith("plugin:")) return `<span class="src plugin">${s.slice(7).split("@")[0]}</span>`;
+  if (s.startsWith("plugin:")) return `<span class="src plugin">${esc(s.slice(7).split("@")[0])}</span>`;
   const m = HARN[s];
   return `<span class="src"><i style="background:${m.bg}">${m.ch}</i>${m.label}</span>`;
 }
@@ -275,15 +275,22 @@ function cellHtml(s) {
   return `<div class="cell" title="Not present"><span class="absent">—</span></div>`;
 }
 // Master switch: OFF marks every harness currently on (layout saved); ON restores it.
+// Only "on" counts toward the state: the switch can't mark a private copy
+// or a declared plugin off, so they must not keep it looking enabled.
 function masterOff(row) { row[9] = row[5].slice(); row[5] = row[5].map(c => c === "on" ? "off" : c); }
-function masterOn(row)  { if (row[9]) { row[5] = row[9]; row[9] = null; } }
-const masterState = row => row[5].some(c => c === "on" || c === "P" || c === "D");
+function masterOn(row)  {
+  if (row[9]) { row[5] = row[9]; row[9] = null; }
+  else row[5] = row[5].map(c => c === "off" ? "on" : c);   // nothing saved: enable every configured cell
+}
+const masterState = row => row[5].some(c => c === "on");
 const swClass = row => {
   if (!masterState(row)) return "";
-  if (isSkill() && row[2] !== "swe" && !row[2].startsWith("plugin:")) return "priv";
-  if (!isSkill() && (row[6]?.servers||[]).some(s => (s.missing||[]).length)) return "issue";
-  return "ok";
+  if (isSkill() && row[2] !== "swe" && !row[2].startsWith("plugin:")) return "on priv";
+  if (!isSkill() && (row[6]?.servers||[]).some(s => (s.missing||[]).length)) return "on issue";
+  return "on ok";
 };
+// Anything typed into a field lands in innerHTML later; keep it literal.
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 
 // ---- draggable column headers ----
 const headRow = document.getElementById("headRow");
@@ -334,13 +341,13 @@ function render() {
     n++;
     const o = row[6] || {};
     const warn = isSkill() ? o.warn : (o.servers||[]).flatMap(s=>s.missing||[])[0];
-    const upd = o.update ? ` <span class="updpill">${o.update}</span>` : "";
+    const upd = o.update ? ` <span class="updpill">${esc(o.update)}</span>` : "";
     const sub = isSkill()
-      ? (row[2] === "swe" ? row[1] : row[2].startsWith("plugin:") ? `bundled by ${row[2].slice(7)}` : `private · ~/.${row[2]}/skills/${row[0]}`)
-      : `${row[1]} · ${o.servers?.length||0} mcp${o.skills?.length ? ` · ${o.skills.length} skill${o.skills.length>1?"s":""}` : ""}`;
+      ? (row[2] === "swe" ? esc(row[1]) : row[2].startsWith("plugin:") ? `bundled by ${esc(row[2].slice(7))}` : `private · ~/.${esc(row[2])}/skills/${esc(row[0])}`)
+      : `${esc(row[1])} · ${o.servers?.length||0} mcp${o.skills?.length ? ` · ${o.skills.length} skill${o.skills.length>1?"s":""}` : ""}`;
     const tr = document.createElement("tr");
     tr.innerHTML = `<td><div class="name"><span class="sw ${swClass(row)}" title="Everywhere — click to toggle all"></span>
-      <span><span class="nm">${row[0]}</span>${warn ? ` <span class="warnpill">⚠ ${warn === "opencode copy shadows the link" ? "shadowed" : warn}</span>` : ""}${upd}
+      <span><span class="nm">${esc(row[0])}</span>${warn ? ` <span class="warnpill">⚠ ${warn === "opencode copy shadows the link" ? "shadowed" : esc(warn)}</span>` : ""}${upd}
       <div class="sub">${sub}</div></span></div></td>
       <td class="src">${srcTag(row)}</td>
       <td class="num">${row[3] || "—"}${isSkill() && o.sess ? ` <small>· ${o.sess}s</small>` : ""}</td>
@@ -375,7 +382,7 @@ function hrowHtml(h, state, action) {
   const m = HARN[h];
   const label = { on:"enabled", off:"disabled", P:"private copy", D:"declared", "-":"not present" }[state] || state;
   const path = state === "-" ? "" :
-    isSkill() ? `~/.${h}/skills/${cur[0]}` : `~/.${h}/mcp.json`;
+    isSkill() ? `~/.${h}/skills/${esc(cur[0])}` : `~/.${h}/mcp.json`;
   return `<div class="hrow"><i style="background:${m.bg}">${m.ch}</i><span class="where">${m.label}</span>
     <span>${label}${path ? ` <em>${path}</em>` : ""}</span>
     ${action ? `<button class="mini ${action.cls||""}" data-h="${h}">${action.text}</button>` : ""}</div>`;
@@ -427,15 +434,15 @@ function sheetSkill(row) {
   const sess = o?.sess || 0, warn = o?.warn;
   const isPrivate = source !== "swe" && !source.startsWith("plugin:");
   sheet.innerHTML = `
-    <h2><span class="nm">${name}</span>${srcTag(row)}<button class="x">✕</button></h2>
+    <h2><span class="nm">${esc(name)}</span>${srcTag(row)}<button class="x">✕</button></h2>
     <div class="sect">Skill</div>
     <div class="kv"><b>Enabled</b><span style="display:flex;align-items:center;gap:8px;font-family:-apple-system,system-ui,sans-serif">
       <span class="sw ${swClass(row)}" id="shSw"></span>
       <em style="font-style:normal;color:var(--faint);font-size:10px">${masterState(row) ? "on somewhere — click to mark off everywhere" : "off — click to restore"}</em></span></div>
-    <div class="kv"><b>Description</b><span id="shDesc" style="font-family:-apple-system,system-ui,sans-serif">${desc}</span></div>
-    <div class="kv"><b>Lives in</b><span>${source === "swe" ? "~/.swe/skills/" + name : source.startsWith("plugin:") ? "plugin " + source.slice(7) : "~." + source + "/skills/" + name + " (private)"}</span></div>
+    <div class="kv"><b>Description</b><span id="shDesc" style="font-family:-apple-system,system-ui,sans-serif">${esc(desc)}</span></div>
+    <div class="kv"><b>Lives in</b><span>${source === "swe" ? "~/.swe/skills/" + esc(name) : source.startsWith("plugin:") ? "plugin " + esc(source.slice(7)) : "~." + esc(source) + "/skills/" + esc(name) + " (private)"}</span></div>
     <div class="kv"><b>Used</b><span>${calls} calls · ${sess} sessions · last ${upd} ago</span></div>
-    ${warn ? `<div class="kv"><b>Conflict</b><span style="color:var(--warn)">${warn}</span></div>` : ""}
+    ${warn ? `<div class="kv"><b>Conflict</b><span style="color:var(--warn)">${esc(warn)}</span></div>` : ""}
     <div class="sect">Harnesses</div>
     ${ORDER.map(h => hrowHtml(h, cells[H.indexOf(h)], actionFor(row, h, H.indexOf(h)))).join("")}
     <div class="actions">
@@ -447,7 +454,7 @@ function sheetSkill(row) {
   sheet.querySelector("#shSw").onclick = () => { masterState(row) ? masterOff(row) : masterOn(row); render(); openSheet(row); };
   sheet.querySelector("#editBtn").onclick = () => {
     const d = sheet.querySelector("#shDesc");
-    d.innerHTML = `<input id="descIn" value="${desc.replace(/"/g,"&quot;")}" style="width:100%;border:1px solid var(--accent);border-radius:5px;padding:2px 6px;font:12px -apple-system">`;
+    d.innerHTML = `<input id="descIn" value="${esc(desc)}" style="width:100%;border:1px solid var(--accent);border-radius:5px;padding:2px 6px;font:12px -apple-system">`;
     const inp = sheet.querySelector("#descIn"); inp.focus();
     inp.onkeydown = e => { if (e.key === "Enter") { row[1] = inp.value; render(); openSheet(row); } };
   };
@@ -462,24 +469,24 @@ function sheetPlugin(row) {
   const [ref, ver, source, calls, upd, cells, o] = row;
   const missing = (o.servers||[]).flatMap(s => s.missing || []);
   sheet.innerHTML = `
-    <h2><span class="nm">${ref}</span>${srcTag(row)}<button class="x">✕</button></h2>
+    <h2><span class="nm">${esc(ref)}</span>${srcTag(row)}<button class="x">✕</button></h2>
     <div class="sect">Plugin</div>
     <div class="kv"><b>Enabled</b><span style="display:flex;align-items:center;gap:8px;font-family:-apple-system,system-ui,sans-serif">
       <span class="sw ${swClass(row)}" id="shSw"></span>
       <em style="font-style:normal;color:var(--faint);font-size:10px">${masterState(row) ? "installed somewhere" : "not installed anywhere"}</em></span></div>
-    <div class="kv"><b>Version</b><span>${ver}${o.update ? ` · <em style="font-style:normal;color:var(--accent)">${o.update} available</em>` : ""}</span></div>
-    <div class="kv"><b>Source</b><span>${source === "swe" ? "swe catalog" : `declared in ~/.${source}/mcp.json only`}</span></div>
+    <div class="kv"><b>Version</b><span>${esc(ver)}${o.update ? ` · <em style="font-style:normal;color:var(--accent)">${esc(o.update)} available</em>` : ""}</span></div>
+    <div class="kv"><b>Source</b><span>${source === "swe" ? "swe catalog" : `declared in ~/.${esc(source)}/mcp.json only`}</span></div>
     <div class="kv"><b>Used</b><span>${calls} calls · updated ${upd}</span></div>
     ${(o.servers||[]).length ? `<div class="sect">MCP servers</div>` + (o.servers||[]).map((s, si) =>
-      `<div class="hrow"><span class="where">${s.name}</span><span>${(s.keys||[]).length} env key${(s.keys||[]).length===1?"":"s"}</span></div>
+      `<div class="hrow"><span class="where">${esc(s.name)}</span><span>${(s.keys||[]).length} env key${(s.keys||[]).length===1?"":"s"}</span></div>
        ${(s.keys||[]).length ? (s.keys||[]).map(k => {
          const miss = s.missing?.includes(k);
-         return `<div class="krow"><span class="kname">${k}</span>
+         return `<div class="krow"><span class="kname">${esc(k)}</span>
            <span class="kst ${miss ? "miss" : "set"}">${miss ? "missing value" : "set · hidden"}</span>
-           <button class="mini kedit-btn" data-si="${si}" data-k="${k}">${miss ? "Set value" : "Rotate"}</button></div>
-           <div id="ke_${si}_${k}"></div>`;
+           <button class="mini kedit-btn" data-si="${si}" data-k="${esc(k)}">${miss ? "Set value" : "Rotate"}</button></div>
+           <div id="ke_${si}_${esc(k)}"></div>`;
        }).join("") : `<div class="khint">no keys declared</div>`}`).join("") : ""}
-    ${(o.skills||[]).length ? `<div class="sect">Skills</div>` + o.skills.map(s => `<div class="hrow"><span class="where">${s}</span></div>`).join("") : ""}
+    ${(o.skills||[]).length ? `<div class="sect">Skills</div>` + o.skills.map(s => `<div class="hrow"><span class="where">${esc(s)}</span></div>`).join("") : ""}
     <div class="sect">Harnesses</div>
     ${ORDER.map(h => hrowHtml(h, cells[H.indexOf(h)], actionFor(row, h, H.indexOf(h)))).join("")}
     <div class="actions">
@@ -496,7 +503,7 @@ function sheetPlugin(row) {
         ? "~/.swe/secrets.json — swe injects it when it writes each harness file"
         : `~/.${row[2]}/mcp.json — the plugin is declared there, so the value lives in that harness's own file`;
       box.innerHTML = `<div class="kedit">
-        <input type="password" placeholder="${btn.dataset.k} value" autocomplete="off">
+        <input type="password" placeholder="${esc(btn.dataset.k)} value" autocomplete="off">
         <button class="save">Save</button><button>Cancel</button></div>
         <div class="khint">stored in ${where} — write-only, never shown after saving</div>`;
       const inp = box.querySelector("input"); inp.focus();

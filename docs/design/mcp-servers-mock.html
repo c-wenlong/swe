@@ -77,7 +77,7 @@
   .sw.unknown { background: #a8a29e; }
 
   /* ---------- detail sheet ---------- */
-  .sheet { position: fixed; top: 0; right: -380px; width: 360px; height: 100%; background: #fff;
+  .sheet { position: fixed; top: 0; right: -380px; width: 360px; height: 100%; background: #fff; z-index: 3;
            border-left: 1px solid var(--border); transition: right .18s ease; padding: 20px; overflow: auto; }
   .sheet.open { right: 0; }
   .sheet h2 { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
@@ -206,7 +206,10 @@ function cellHtml(s) {
 // layout); ON restores exactly that saved layout — a harness that was
 // manually off before the master flip stays off.
 function masterOff(row) { row[5] = row[4].slice(); row[4] = row[4].map(c => (c==="on"||c==="A") ? "off" : c); }
-function masterOn(row)  { if (row[5]) { row[4] = row[5]; row[5] = null; } }
+function masterOn(row)  {
+  if (row[5]) { row[4] = row[5]; row[5] = null; }
+  else row[4] = row[4].map(c => c === "off" ? "on" : c);   // nothing saved: enable every configured cell
+}
 const masterState = row => row[4].some(c => c === "on" || c === "A");
 
 // ---- draggable column headers ----
@@ -255,7 +258,7 @@ function render() {
     n++;
     const tr = document.createElement("tr");
     const health = healthOf(name);
-    tr.innerHTML = `<td><div class="name"><span class="sw ${masterState(row) ? health === "ok" ? "ok" : health : ""}" title="Every harness — ${health === "ok" ? "healthy" : health === "error" ? "probe failed" : health === "issue" ? "missing a secret value" : "state unknown"}"></span>
+    tr.innerHTML = `<td><div class="name"><span class="sw ${masterState(row) ? "on " + health : ""}" title="Every harness — ${health === "ok" ? "healthy" : health === "error" ? "probe failed" : health === "issue" ? "missing a secret value" : "state unknown"}"></span>
       <span><span class="nm">${name}</span>${WARN.has(name) ? ` <span class="warnpill">⚠ BRAVE_API_KEY</span>` : ""}
       <div class="sub">${sub}</div></span></div></td>
       <td><span class="type ${t}">${t}</span></td>
@@ -293,7 +296,7 @@ function openSheet(name, host, sub, type) {
   document.getElementById("shDot").style.background = HEALTH_COLOR[health];
   document.getElementById("shKv").innerHTML = `
     <div class="kv"><b>Enabled</b><span style="display:flex;align-items:center;gap:8px;font-family:-apple-system,system-ui,sans-serif">
-      <span class="sw ${masterState(row) ? health : ""}" id="shSw"></span>
+      <span class="sw ${masterState(row) ? "on " + health : ""}" id="shSw"></span>
       <em style="font-style:normal;color:var(--faint);font-size:10px">${masterState(row) ? "on — click to mark off everywhere" : "off — click to restore the harnesses it was on"}</em></span></div>
     <div class="kv"><b>Transport</b><span>${sub.split(" ")[0]}</span></div>
     <div class="kv"><b>Type</b><span style="font-family:-apple-system,system-ui,sans-serif"><select id="shType" style="font-size:11.5px;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:#fff">
@@ -317,7 +320,7 @@ function openSheet(name, host, sub, type) {
   };
   document.getElementById("shSw").onclick = () => {
     masterState(row) ? masterOff(row) : masterOn(row);
-    render(); openSheet(name, host, sub, type);   // re-render sheet state
+    render(); openSheet(name, host, sub, row[3]);   // re-render sheet state with the row's current type
   };
   sheet.classList.add("open");
 }
