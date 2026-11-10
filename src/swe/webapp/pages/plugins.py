@@ -244,7 +244,11 @@ def _plugin_action(ctx, body: dict) -> dict:
             raise PageError(409, "not_offered",
                             f"Can't {verb} {ref} in {harness} now. Refresh to see what it offers.")
         try:
-            result, error = plugin_action(home, verb, ref, harness, run=_run), None
+            if verb == "import" and harness == "swe":
+                from swe.plugins.managed import import_plugin
+                result, error = import_plugin(home, ref), None
+            else:
+                result, error = plugin_action(home, verb, ref, harness, run=_run), None
         except ActionError as exc:
             result, error = None, str(exc)
         finally:
@@ -447,12 +451,27 @@ def _error(error: dict, home: Path) -> dict:
 def explore(home: Path) -> dict:
     """The Explore tab's data: the catalog's plugins once, keyed by ref,
     and the sources, marketplaces and rows that place them."""
+    from swe.plugins.managed import local_plugin, managed_plugin
+
     catalog = shared_catalog(home)
     names = display_names(home)
     plugins: dict = {}
     for market in catalog["marketplaces"]:
         for plugin in market["plugins"]:
-            row = _plugin(plugin, names, catalog["actions"])
+            if not local_plugin(market, plugin):
+                continue
+            managed = managed_plugin(market, plugin)
+            # A registered upstream marketplace is not a deployment of
+            # SWE's newly adopted source. Compilation is a separate step.
+            deployments = [h for h, r in market.get("harnesses", {}).items()
+                           if managed and r.get("source_type") == "directory"
+                           and r.get("location") and market.get("path")
+                           and Path(r["location"]).resolve() == Path(market["path"]).resolve()]
+            row = _plugin(plugin, names, [h for h in catalog["actions"] if h in deployments])
+            row["managed"] = managed
+            if not managed:
+                row["harnesses"]["swe"] = {"status": "absent", "actions": ["import"],
+                                            "version": None, "scopes": [], "path": None, "copies": 0}
             plugins.setdefault(row["ref"], row)
     return {
         "harnesses": catalog["harnesses"],
@@ -493,6 +512,8 @@ def sources(catalog: dict, plugins: dict, names: dict | None = None) -> list[dic
         registrations = market.get("harnesses") or {}
         refs = [p.get("ref") or f"{p['name']}@{market['name']}" for p in market["plugins"]]
         refs = [r for r in refs if r in plugins]
+        if not refs:
+            continue
         if market.get("hub"):
             # Both harnesses' chips: the hub is meant for every harness swe
             # acts in, so a missing one is worth seeing.

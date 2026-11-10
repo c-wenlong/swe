@@ -596,15 +596,12 @@ def build_catalog(home: Path | None = None) -> dict:
         rec = next((r for r in records.values()
                     if r.hub is not None and _real(r.hub) == real), None)
         if rec is None:
-            if market.name in records and records[market.name].harnesses:
-                _err(errors, "hub", f"{market.root} declares marketplace {market.name}, "
-                                    "a name already registered from elsewhere", market.name)
-                continue
             rec = record(market.name)
             rec.hub = market.root
-        if not rec.listings:
-            rec.listings.append(("hub", market))
-            rec.hub_origins.add("hub")
+        # A SWE-owned subset can coexist with the upstream marketplace.
+        # Keep upstream registrations for deployment drift, prefer hub bytes.
+        rec.listings.insert(0, ("hub", market))
+        rec.hub_origins.add("hub")
 
     for rec in records.values():
         for origin, market in rec.listings:
@@ -672,14 +669,16 @@ def _render_plugin(rec: _Record, plugin: _Plugin, views: dict, hub_drift: dict,
                    memo: dict) -> dict:
     ref = f"{plugin.name}@{rec.name}"
     states = {h: _harness_state(view, rec, plugin, ref) for h, view in views.items()}
-    source = next((plugin.local[o] for o in (*HARNESSES, "hub") if o in plugin.local), None)
+    source = next((plugin.local[o] for o in ("hub", *HARNESSES) if o in plugin.local), None)
     every_copy = [p for paths in plugin.copies.values() for p in paths]
     preview = source or newest(every_copy)
     loaded = next((Path(s["path"]) for s in states.values() if s["path"]), None)
-    primary = loaded or preview
-    meta = dict(plugin.meta)
+    primary = source if "hub" in plugin.local else loaded or preview
+    meta = {} if "hub" in plugin.local else dict(plugin.meta)
     if primary is not None:
         _merge_meta(meta, _plugin_json(primary))
+    if "hub" in plugin.local:
+        _merge_meta(meta, plugin.meta)
     components = count_components(primary, source) if primary is not None else {}
     mcp = mcp_server_count(primary) or mcp_server_count(source)
     if mcp:

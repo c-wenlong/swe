@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Plugins are managed from SWE.** The Mac and web plugin lists hide marketplace-only entries and missing installs. Import to SWE copies installed plugin files into `~/.swe/plugins` without changing a harness or overwriting SWE files. The Mac table renders rows lazily and precomputes its local inventory and action menus.
+
 - **AGENTS.md page: drafts list and compiled size (macOS app).** A
   "Drafts (N)" menu beside the Edit/Compile tabs lists every chapter with
   unsaved changes and jumps to it; it appears only while there are drafts.
