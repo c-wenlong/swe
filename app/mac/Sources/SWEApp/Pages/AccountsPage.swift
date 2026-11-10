@@ -314,9 +314,9 @@ private struct AccountCard: View {
         }
     }
 
-    /// Email, plan and default marker, for the name's tooltip.
+    /// Full name, email, plan and default marker, for the name's tooltip.
     private var nameDetail: String {
-        [card.usage?.email, card.usage?.plan.map(planTitle),
+        [card.profile.name, card.usage?.email, card.usage?.plan.map(planTitle),
          card.profile.isDefault ? "Default account" : nil]
             .compactMap { $0 }.joined(separator: "\n")
     }
@@ -733,9 +733,9 @@ private struct HarnessAccountCard: View {
         }
     }
 
-    /// Email and plan, for the name's tooltip.
+    /// Full name, email and plan, for the name's tooltip.
     private var nameDetail: String {
-        [row.limit?.email, row.limit?.planType.map(planTitle)]
+        [row.title, row.limit?.email, row.limit?.planType.map(planTitle)]
             .compactMap { $0 }.joined(separator: "\n")
     }
 
@@ -1072,6 +1072,10 @@ private struct SharedContentCard: View {
     let sync: AccountSyncModel
     @State private var expanded = false
 
+    private var needsAttention: Bool {
+        sync.error != nil || !(sync.report?.blocked ?? []).isEmpty
+    }
+
     var body: some View {
         CompactAccountCard(expanded: $expanded) {
             DisclosureGroup(isExpanded: $expanded) {
@@ -1110,7 +1114,16 @@ private struct SharedContentCard: View {
                     }
                 }
             } label: {
-                Text("Shared content").font(Theme.rowTitle)
+                HStack(spacing: 8) {
+                    Text("Shared content").font(Theme.rowTitle)
+                    // The details start folded, so a failed check or a
+                    // blocked file still has to show on the folded row.
+                    if !expanded, needsAttention {
+                        Label("Needs attention", systemImage: "exclamationmark.triangle.fill")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.dangerText)
+                    }
+                }
             }
         }
         .task { await sync.load() }
