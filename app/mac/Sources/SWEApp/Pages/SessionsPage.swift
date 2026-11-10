@@ -926,8 +926,7 @@ private struct SessionRail: View {
                                 // hover tip's tap would take the row's click.
                                 if let kind = Self.arrowKind(row.session.status),
                                    let title = StatusBadge.title(row.session.status) {
-                                    StateArrow(kind: kind, size: 9)
-                                        .accessibilityLabel(title)
+                                    StateArrow(kind: kind, size: 9, label: title)
                                 }
                             }
                         }
