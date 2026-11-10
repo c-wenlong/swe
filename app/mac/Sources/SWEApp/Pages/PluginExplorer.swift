@@ -2,14 +2,12 @@ import AppKit
 import SWECore
 import SwiftUI
 
-/// The Plugins page's Explore tab: every plugin in every marketplace,
-/// installed or not, with its state in each harness and the skills it
-/// ships. Actions go through `swe plugins`, each after a confirmation.
+/// The Plugins page's local inventory: SWE sources and installed files,
+/// with per-harness state. Actions go through `swe plugins`.
 struct PluginExplorer: View {
     @Environment(AppModel.self) private var app
     @Bindable var model: PluginCatalogModel
     var openHealth: () -> Void
-    var addMarketplace: () -> Void = {}
     var confirm: (PluginAction) -> Void
     /// A master or column switch's set of actions, confirmed as one batch.
     var confirmBatch: ([PluginAction]) -> Void = { _ in }
@@ -34,7 +32,7 @@ struct PluginExplorer: View {
         }
         switch model.state {
         case .idle, .loading:
-            SkeletonRows(rows: 6, shape: .plugin, label: "Reading every marketplace…")
+            SkeletonRows(rows: 6, shape: .plugin, label: "Reading local plugins…")
         case .failed(let message):
             ErrorCard(message: message)
         case .loaded:
@@ -55,15 +53,14 @@ struct PluginExplorer: View {
             } else if let index = model.index {
                 content(index)
             } else {
-                SkeletonRows(rows: 6, shape: .plugin, label: "Reading every marketplace…")
+                SkeletonRows(rows: 6, shape: .plugin, label: "Reading local plugins…")
             }
         }
     }
 
     @ViewBuilder private func content(_ index: PluginExploreIndex) -> some View {
-        let catalog = index.catalog
-        let sources = index.sources(harness: model.harness, query: model.query)
-        filters(index, shown: PluginExploreIndex.distinctPlugins(in: sources))
+        let entries = index.localEntries(harness: model.harness, query: model.query)
+        filters(index, shown: entries.count)
         if !index.problems.other.isEmpty { Card { Problems(problems: index.problems.other) } }
         if let line = index.missingNote {
             // One quiet line, not a warning each: a registration synced
@@ -72,20 +69,19 @@ struct PluginExplorer: View {
                 .font(Theme.caption).foregroundStyle(Theme.textSecondary)
                 .hoverTip(index.problems.missing.joined(separator: ", "), title: "Registered, not on this Mac")
         }
-        if index.total == 0 {
-            EmptyCard(text: index.emptyText,
-                      icon: "puzzlepiece.extension",
-                      actionTitle: "Add marketplace", action: addMarketplace)
-        } else if sources.isEmpty {
+        if index.localRefs.isEmpty {
+            EmptyCard(text: "No local plugins. Plugins stored in SWE and installed harness copies appear here.",
+                      icon: "puzzlepiece.extension")
+        } else if entries.isEmpty {
             EmptyCard(text: "No plugins match.", icon: "puzzlepiece.extension")
         } else {
             // One row per plugin, one column per harness: the same grid
             // the MCP servers page uses. A plugin under two sources shows
             // once, tagged by the first source's kind.
             Card {
-                PluginTable(entries: index.tableEntries(harness: model.harness, query: model.query),
+                PluginTable(entries: entries,
                             harnesses: index.tableHarnesses,
-                            catalog: catalog, running: model.running, busy: model.work.isBusy,
+                            running: model.running, busy: model.work.isBusy,
                             openHealth: openHealth, confirm: confirm, confirmBatch: confirmBatch,
                             canRename: { index.isEditable(marketplace: $0) },
                             onRename: { name in
@@ -135,7 +131,7 @@ struct PluginExplorer: View {
                        title: model.harness.map { HarnessMark($0).name } ?? "All")
             SearchField(prompt: "Search plugins and their skills", text: $model.query)
                 .frame(maxWidth: .infinity)
-            Text("\(shown) of \(index.total) plugins")
+            Text("\(shown) of \(index.localRefs.count) plugins")
                 .font(Theme.caption).foregroundStyle(Theme.textSecondary)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -219,7 +215,6 @@ private struct PluginTable: View {
     var entries: [ExplorePlugin]
     /// Every column, in the catalog's order plus extras a state names.
     var harnesses: [String]
-    var catalog: PluginCatalog
     var running: PluginAction?
     /// An action or a Health fix is running: one change at a time.
     var busy: Bool
@@ -232,7 +227,7 @@ private struct PluginTable: View {
     var openPlugin: (ExplorePlugin) -> Void
 
     static let nameMinWidth: CGFloat = 220
-    static let sourceWidth: CGFloat = 96
+    static let sourceWidth: CGFloat = 128
     static let cellWidth: CGFloat = 84
     /// One column's footprint for the reorder maths: separator plus cell.
     static let pitch: CGFloat = 1 + cellWidth
@@ -273,37 +268,46 @@ private struct PluginTable: View {
     private var totalWidth: CGFloat { nameWidth + Self.fixedTail(columns: ordered.count) }
 
     var body: some View {
-        ScrollView(.horizontal) {
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                Divider().overlay(Theme.border)
-                let shown = RowFold.visible(entries, limit: Self.foldLimit, expanded: showAll)
-                ForEach(Array(shown.enumerated()), id: \.element.id) { index, entry in
-                    PluginGridRow(entry: entry, harnesses: ordered, catalog: catalog,
+        Group {
+            if available >= Self.nameMinWidth + Self.fixedTail(columns: ordered.count) {
+                table
+            } else {
+                ScrollView(.horizontal) { table }
+                    .scrollIndicators(.automatic)
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
+        .onChange(of: order) { UserDefaults.standard.set(order, forKey: Self.orderKey) }
+    }
+
+    private var table: some View {
+        LazyVStack(alignment: .leading, spacing: 0) {
+            header
+            Divider().overlay(Theme.border)
+            let shown = RowFold.visible(entries, limit: Self.foldLimit, expanded: showAll)
+            ForEach(shown) { entry in
+                VStack(spacing: 0) {
+                    PluginGridRow(entry: entry, harnesses: ordered,
                                   running: running, busy: busy,
                                   openHealth: openHealth, confirm: confirm, confirmBatch: confirmBatch,
                                   canRename: canRename, onRename: onRename) { openPlugin(entry) }
-                    if index < shown.count - 1 { Divider().overlay(Theme.border) }
-                }
-                if RowFold.hiddenCount(total: entries.count, limit: Self.foldLimit) > 0 {
-                    Divider().overlay(Theme.border)
-                    ExpandRow(isExpanded: showAll,
-                              hidden: RowFold.hiddenCount(total: entries.count, limit: Self.foldLimit),
-                              help: (expand: "Show every row",
-                                     collapse: "Show only the first \(Self.foldLimit)"),
-                              edge: .inset) {
-                        withAnimation(.easeOut(duration: Theme.fadeDuration)) { showAll.toggle() }
-                    }
+                    if entry.id != shown.last?.id { Divider().overlay(Theme.border) }
                 }
             }
-            // Exactly the card's width, or the columns' minimum if wider.
-            .frame(width: max(available, Self.nameMinWidth + Self.fixedTail(columns: ordered.count)),
-                   alignment: .leading)
-            .overlay(alignment: .topLeading) { dropMarker }
+            if RowFold.hiddenCount(total: entries.count, limit: Self.foldLimit) > 0 {
+                Divider().overlay(Theme.border)
+                ExpandRow(isExpanded: showAll,
+                          hidden: RowFold.hiddenCount(total: entries.count, limit: Self.foldLimit),
+                          help: (expand: "Show every row",
+                                 collapse: "Show only the first \(Self.foldLimit)"),
+                          edge: .inset) {
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: Theme.fadeDuration)) { showAll.toggle() }
+                }
+            }
         }
-        .scrollIndicators(.automatic)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
-        .onChange(of: order) { UserDefaults.standard.set(order, forKey: Self.orderKey) }
+        .frame(width: max(available, Self.nameMinWidth + Self.fixedTail(columns: ordered.count)),
+               alignment: .leading)
+        .overlay(alignment: .topLeading) { dropMarker }
     }
 
     /// "Plugin" over the flexible name column, "Source" over the tag
@@ -313,12 +317,12 @@ private struct PluginTable: View {
             Text("Plugin")
                 .frame(minWidth: Self.nameMinWidth, maxWidth: .infinity, alignment: .leading)
             columnSeparator().padding(.bottom, -8)
-            Text("Source").frame(width: Self.sourceWidth)
+            Text("Managed by").frame(width: Self.sourceWidth)
             ForEach(ordered, id: \.self) { harness in
                 columnSeparator().padding(.bottom, -8)
                 let index = ordered.firstIndex(of: harness) ?? 0
                 PluginColumnHeader(harness: harness, width: Self.cellWidth,
-                                   entries: entries, catalog: catalog, busy: busy,
+                                   entries: entries, busy: busy,
                                    confirmBatch: confirmBatch,
                                    carriedBy: dragging == harness
                                        ? RowReorder.clamped(translation, heights: pitches, dragged: index)
@@ -394,7 +398,6 @@ private struct PluginColumnHeader: View {
     var harness: String
     var width: CGFloat
     var entries: [ExplorePlugin]
-    var catalog: PluginCatalog
     var busy: Bool
     var confirmBatch: ([PluginAction]) -> Void
     /// The pointer offset while this is the header being carried, or nil.
@@ -406,6 +409,7 @@ private struct PluginColumnHeader: View {
     /// VoiceOver and keyboard reorder, one slot in a direction (-1, +1).
     var move: (Int) -> Void
     @State private var hovering = false
+    @State private var open = false
     /// True only while the grip's gesture is live: resets on cancel.
     @GestureState private var down = false
 
@@ -415,29 +419,43 @@ private struct PluginColumnHeader: View {
     /// same way the table is: a column flips only what it shows.
     private func batch(_ verb: PluginAction.Verb) -> [PluginAction] {
         entries.compactMap { entry in
-            catalog.actions(for: entry.row.plugin, in: harness)
+            (entry.row.actions[harness] ?? [])
                 .first { $0.verb == verb }
         }
     }
 
-    @ViewBuilder private var columnMenu: some View {
-        Button("Disable all in \(name)") { confirmBatch(batch(.disable)) }
-            .disabled(busy || batch(.disable).isEmpty)
-        Button("Enable all in \(name)") { confirmBatch(batch(.enable)) }
-            .disabled(busy || batch(.enable).isEmpty)
+    private var columnActions: [PopupAction] {
+        guard !busy else { return [] }
+        var actions: [PopupAction] = []
+        if !batch(.disable).isEmpty {
+            actions.append(.init(id: "off", title: "Disable all in \(name)", symbol: "power"))
+        }
+        if !batch(.enable).isEmpty {
+            actions.append(.init(id: "on", title: "Enable all in \(name)", symbol: "power"))
+        }
+        return actions
+    }
+
+    private func chooseColumnAction(_ id: String) {
+        confirmBatch(batch(id == "off" ? .disable : .enable))
     }
 
     var body: some View {
-        Menu { columnMenu } label: {
+        Button { if !columnActions.isEmpty { open.toggle() } } label: {
             HarnessMarkView(harness: harness)
                 .frame(width: width)
                 .contentShape(.rect)
         }
-        .menuStyle(.button)
         .buttonStyle(.plain)
-        .menuIndicator(.hidden)
         .fixedSize()
-        .contextMenu { columnMenu }
+        .popover(isPresented: $open) {
+            ActionOptionList(actions: columnActions) { id in
+                open = false
+                DispatchQueue.main.async { chooseColumnAction(id) }
+            }
+            .onExitCommand { open = false }
+        }
+        .modifier(ActionContextMenu(actions: columnActions, choose: chooseColumnAction))
         .overlay(alignment: .leading) {
             Image(systemName: "line.3.horizontal")
                 .font(Theme.font(size: 9, weight: .bold))
@@ -471,7 +489,6 @@ private struct PluginGridRow: View {
     @Environment(AppModel.self) private var app
     var entry: ExplorePlugin
     var harnesses: [String]
-    var catalog: PluginCatalog
     var running: PluginAction?
     var busy: Bool
     var openHealth: () -> Void
@@ -491,13 +508,13 @@ private struct PluginGridRow: View {
     /// master switch flips the first of each it finds per harness.
     private var enables: [PluginAction] {
         harnesses.compactMap { harness in
-            catalog.actions(for: plugin, in: harness).first { $0.verb == .enable }
+            entry.row.actions[harness]?.first { $0.verb == .enable }
         }
     }
 
     private var disables: [PluginAction] {
         harnesses.compactMap { harness in
-            catalog.actions(for: plugin, in: harness).first { $0.verb == .disable }
+            entry.row.actions[harness]?.first { $0.verb == .disable }
         }
     }
 
@@ -535,7 +552,7 @@ private struct PluginGridRow: View {
             ForEach(harnesses, id: \.self) { harness in
                 columnSeparator()
                 PluginCell(harness: harness, state: plugin.harnesses[harness],
-                           actions: catalog.actions(for: plugin, in: harness),
+                           actions: entry.row.actions[harness] ?? [],
                            running: running?.ref == plugin.ref && running?.harness == harness,
                            busy: busy, confirm: confirm)
                     .frame(width: PluginTable.cellWidth)
@@ -546,7 +563,7 @@ private struct PluginGridRow: View {
         .contentShape(.rect)
         .onHover { hovering = $0 }
         .accessibilityLabel("\(shown), \(accessibilityLabelSuffix)")
-        .contextMenu { rowMenu }
+        .modifier(ActionContextMenu(actions: rowActions, choose: chooseRowAction))
     }
 
     /// The ref when a display name covers the name, else the description,
@@ -560,43 +577,65 @@ private struct PluginGridRow: View {
     /// Who manages the plugin's copy: the swe hub, the harness that
     /// registered its marketplace, or nothing a rename could reach.
     @ViewBuilder private var source: some View {
-        switch entry.source {
-        case "local":
+        if !entry.row.isHub {
+            Button("Import to SWE") { confirm(PluginAction(verb: .adopt, ref: plugin.ref, harness: "swe")) }
+                .font(Theme.caption)
+                .disabled(busy)
+                .help("Copy the installed files into SWE to own and edit them")
+        } else {
             Text("swe")
                 .font(Theme.font(size: 10, weight: .semibold))
                 .tracking(0.6)
                 .foregroundStyle(Theme.accent)
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(Theme.accentTint, in: .rect(cornerRadius: 5))
-                .hoverTip("From your SWE hub's \(plugin.marketplace) marketplace", pinsOnClick: false)
-        case "unregistered":
-            Text("unregistered")
-                .font(Theme.font(size: 10, weight: .medium))
-                .foregroundStyle(Theme.textMuted)
-                .lineLimit(1)
-                .hoverTip("Installed from a marketplace no harness registers anymore", pinsOnClick: false)
-        default:
-            HarnessMarkView(harness: entry.source, size: 14)
-                .lineLimit(1)
-                .hoverTip("From a marketplace \(HarnessMark(entry.source).name) registers", pinsOnClick: false)
+                .help("Managed in SWE's \(plugin.marketplace) marketplace")
         }
     }
 
-    /// The row's right click: the master switch's two directions as menu
-    /// items, the rename a folder-sourced marketplace allows, and the
-    /// plugin's folder in Finder.
-    @ViewBuilder private var rowMenu: some View {
-        Button("Turn off everywhere") { confirmBatch(disables) }
-            .disabled(disables.isEmpty)
-        Button("Turn on everywhere") { confirmBatch(enables) }
-            .disabled(enables.isEmpty)
-        if canRename(plugin.marketplace) {
-            Button("Rename marketplace…") { onRename(plugin.marketplace) }
+    private var removals: [PluginAction] {
+        harnesses.compactMap { harness in
+            entry.row.actions[harness]?.first { $0.verb == .uninstall }
         }
-        if let path = plugin.sourcePath {
-            Button("Show in Finder") {
+    }
+
+    private var rowActions: [PopupAction] {
+        guard !busy else { return [] }
+        var actions: [PopupAction] = []
+        if !disables.isEmpty { actions.append(.init(id: "off", title: "Turn off everywhere", symbol: "power")) }
+        if !enables.isEmpty { actions.append(.init(id: "on", title: "Turn on everywhere", symbol: "power")) }
+        if !entry.row.isHub {
+            actions.append(.init(id: "import", title: "Import to SWE…", symbol: "square.and.arrow.down"))
+        }
+        if canRename(plugin.marketplace) {
+            actions.append(.init(id: "rename", title: "Rename marketplace…", symbol: "pencil"))
+        }
+        if plugin.sourcePath != nil {
+            actions.append(.init(id: "finder", title: "Show in Finder", symbol: "folder"))
+        }
+        for action in removals {
+            actions.append(.init(id: action.id, title: "Remove from \(HarnessMark(action.harness).name)…",
+                                 symbol: "trash", destructive: true))
+        }
+        if removals.count > 1 {
+            actions.append(.init(id: "remove-all", title: "Remove from all harnesses…", symbol: "trash", destructive: true))
+        }
+        return actions
+    }
+
+    private func chooseRowAction(_ id: String) {
+        switch id {
+        case "off": confirmBatch(disables)
+        case "on": confirmBatch(enables)
+        case "import": confirm(PluginAction(verb: .adopt, ref: plugin.ref, harness: "swe"))
+        case "rename": onRename(plugin.marketplace)
+        case "finder":
+            if let path = plugin.sourcePath {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
             }
+        case "remove-all": confirmBatch(removals)
+        default:
+            if let action = removals.first(where: { $0.id == id }) { confirm(action) }
         }
     }
 
@@ -646,6 +685,8 @@ private struct PluginCell: View {
     var busy: Bool
     var confirm: (PluginAction) -> Void
 
+    @State private var open = false
+
     private var name: String { HarnessMark(harness).name }
 
     var body: some View {
@@ -658,18 +699,24 @@ private struct PluginCell: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .hoverTip(help(for: state), pinsOnClick: false)
             } else {
-                Menu {
-                    ForEach(actions) { action in
-                        Button(action.menuTitle) { confirm(action) }
-                    }
-                } label: {
+                Button { open.toggle() } label: {
                     mark(state.status)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .contentShape(.rect)
                 }
-                .menuStyle(.button)
-                .menuIndicator(.hidden)
                 .buttonStyle(.plain)
+                .popover(isPresented: $open) {
+                    ActionOptionList(actions: actions.map { action in
+                        PopupAction(id: action.id, title: action.menuTitle,
+                                    symbol: action.verb == .uninstall ? "trash" : "power",
+                                    destructive: action.verb == .uninstall)
+                    }) { id in
+                        guard let action = actions.first(where: { $0.id == id }) else { return }
+                        open = false
+                        DispatchQueue.main.async { confirm(action) }
+                    }
+                    .onExitCommand { open = false }
+                }
                 .disabled(busy)
                 .hoverTip(help(for: state) + " Click for actions.", pinsOnClick: false)
             }

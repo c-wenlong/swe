@@ -33,12 +33,19 @@ public enum UsageStatus: Sendable, Equatable, Codable {
     case error(String)
 }
 
+/// Monthly workspace credits, reported by the provider rather than converted to dollars.
+public struct MonthlyCredits: Sendable, Equatable, Codable {
+    public var used: Double
+    public var limit: Double
+}
+
 /// What one account has used, as best known right now.
 public struct AccountUsage: Sendable, Equatable, Codable {
     public var status: UsageStatus
     public var plan: String?
     public var email: String?
     public var windows: [UsageWindow]
+    public var monthlyCredits: MonthlyCredits?
     /// When the reading was actually taken. A reused reading keeps its own time.
     public var fetchedAt: Date?
     /// True when `windows` is an older reading shown because this fetch failed
@@ -51,12 +58,13 @@ public struct AccountUsage: Sendable, Equatable, Codable {
     public init(
         status: UsageStatus, plan: String? = nil, email: String? = nil,
         windows: [UsageWindow] = [], fetchedAt: Date? = nil, isStale: Bool = false,
-        signInExpiresAt: Date? = nil
+        signInExpiresAt: Date? = nil, monthlyCredits: MonthlyCredits? = nil
     ) {
         self.status = status
         self.plan = plan
         self.email = email
         self.windows = windows
+        self.monthlyCredits = monthlyCredits
         self.fetchedAt = fetchedAt
         self.isStale = isStale
         self.signInExpiresAt = signInExpiresAt

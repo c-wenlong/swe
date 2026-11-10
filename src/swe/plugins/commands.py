@@ -16,7 +16,7 @@ from swe.plugins.actions import ACTIONS, ActionError, plugin_action
 from swe.plugins.catalog import ACTIONABLE, build_catalog
 from swe.table import Table
 
-SUBCOMMANDS = ("catalog", "marketplace", "info", *ACTIONS)
+SUBCOMMANDS = ("catalog", "marketplace", "info", "import", *ACTIONS)
 _DONE = {"install": "installed", "uninstall": "uninstalled",
          "enable": "enabled", "disable": "disabled"}
 
@@ -48,11 +48,28 @@ def cmd_plugins(args) -> int:
         return _catalog(rest, json_view, fail)
     if sub == "marketplace":
         return _marketplace(rest, json_view, fail)
+    if sub == "import":
+        return _import(rest, json_view, fail)
     if sub == "info":
         return _info(rest, json_view, fail)
     if sub in ACTIONS:
         return _action(sub, rest, json_view, fail)
     return fail(c("red", f"Unknown subcommand: {sub}. Use one of {', '.join(SUBCOMMANDS)}."))
+
+
+def _import(rest: list[str], json_view: bool, fail) -> int:
+    from swe.plugins.managed import import_plugin
+
+    if len(rest) != 1 or rest[0].startswith("-"):
+        return fail("Usage: swe plugins import <plugin>@<marketplace> [--json]")
+    try:
+        result = import_plugin(Path.home(), rest[0])
+    except ActionError as exc:
+        return fail(str(exc))
+    if json_view:
+        return emit(result)
+    print(f"  {result['ref']}: {result['detail'] or 'imported into SWE'}")
+    return 0
 
 
 def _marketplace(rest: list[str], json_view: bool, fail) -> int:

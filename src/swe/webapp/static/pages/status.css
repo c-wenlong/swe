@@ -21,18 +21,11 @@
 
 .status-health-block { display: flex; flex-direction: column; gap: 4px; }
 .status-health { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-.health-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--border-strong); }
-.health-operational { background: var(--success); }
-.health-maintenance { background: var(--text-secondary); }
-.health-minor { background: var(--warning); }
-.health-major, .health-critical { background: var(--danger); }
+.health-arrow { width: 10px; height: 10px; flex: none; }
 
 .status-components { display: flex; flex-direction: column; gap: 4px; }
 .status-component { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
-.component-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
-.component-maintenance { background: var(--text-secondary); }
-.component-degraded { background: var(--warning); }
-.component-partial_outage, .component-major_outage { background: var(--danger); }
+.component-arrow { width: 8px; height: 8px; flex: none; }
 .status-component-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-component-state { color: var(--text-secondary); flex: none; }
 

@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Plugins are managed from SWE.** The Mac and web plugin lists hide marketplace-only entries and missing installs. Import to SWE copies installed plugin files into `~/.swe/plugins` without changing a harness or overwriting SWE files. The Mac table renders rows lazily and precomputes its local inventory and action menus.
+
+- **AGENTS.md page: drafts list and compiled size (macOS app).** A
+  "Drafts (N)" menu beside the Edit/Compile tabs lists every chapter with
+  unsaved changes and jumps to it; it appears only while there are drafts.
+  The View AGENTS.md button and popup now show the generated file's size in
+  KiB as last built, per harness output on the Compile tab. Part of #1894.
+- **The AGENTS.md chapter outline has search, keyboard navigation and drag
+  handles (Mac).** A Filter chapters field above the Edit tab's outline
+  matches file names and paths and keeps matching files' folders open;
+  clearing it restores your folders and selection. With the outline focused,
+  Up/Down move between rows, Left/Right collapse, expand or climb to the
+  parent folder, and Return opens a chapter, while the text editor keeps its
+  arrow keys. Rows show a grip on hover, a dragged chapter shows an insertion
+  line, and the folder it will land in is outlined. Part of #1894.
+
+- **AGENTS.md: resizable chapter pane and editor focus mode.** On the macOS
+  app's Edit tab, drag the divider between the chapter outline and the editor
+  (double-click resets; the width persists, with minimums that grow with text
+  zoom). Focus mode (⇧⌘E or the button in the page row) folds away the outline
+  and the harness strip; the file name, Unsaved dot, Save and View AGENTS.md
+  stay visible. Part of #1894.
+- **Devin is a verified MCP sync target.** `swe mcp sync` writes
+  `~/.config/devin/mcp_config.json` (Devin CLI v3000.3+ /
+  [MCP configuration docs](https://docs.devin.ai/cli/extensibility/mcp/configuration)),
+  not the unverified `~/.devin/mcp.json` guess. `swe mcp list` shows a
+  Devin column once the harness is registered.
+- **Harness targets beside the chapter editor (Mac).** The AGENTS.md
+  page's Edit tab shows a Targets strip above the open chapter: a logo
+  and name chip per harness, bright when it gets the chapter, a line
+  saying why (no rule, an `only` or `except` rule in targets.json, or
+  off in index.txt), and a folder line when every chapter in its folder
+  shares the same targets. Clicking a chip or the In AGENTS.md checkbox
+  writes the same index.txt and targets.json edits as the Compile tab,
+  through the same save queue, so both tabs always agree. Compilation
+  rules are unchanged.
+
+### Changed
+
+- **Mac Accounts now groups accounts into horizontally scrolling provider columns.**
+  Narrow cards keep the plan visible, with usage rings and settings beneath. Click a
+  card to smoothly expand its readings; drag provider columns horizontally to save their order.
+  Expanded cards put settings beside the launch buttons and wrap their status text.
+
+- **Mac Codex account cards show monthly credits used and the credit limit** beneath the usage bars when the workspace returns those amounts.
+
+
 ### Security
 
 - **A task link can no longer point the hub's `gh` at any repo.**
@@ -53,6 +102,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Codex education monthly usage reads the workspace billing allowance** when the standard usage response omits it, showing both the percentage and credit amounts.
+- **Installed plugins can be switched and removed before import.** Claude Code and Codex on/off and uninstall controls work for harness-owned plugins. The Mac row and per-harness action menus use themed popovers, with confirmed removal from one or all harnesses; import remains separate for SWE file ownership.
+
+- **AGENTS.md editor header no longer wraps at narrow widths (Mac).** In a
+  900 pt window the Edit tab's Revert, Save and Close buttons wrapped
+  mid-word ("Rever t"). A narrow editor now shows them as icons (named in
+  the tooltip and to VoiceOver) and the Unsaved marker as a dot, and the
+  Chapters heading stays whole; wider windows keep the words.
 - **The Mac app no longer offers to trash a skill's SKILL.md by
   itself.** A skill's Contents card put a trash button on its main
   SKILL.md (and on each skill folder's SKILL.md in a plugin), though a

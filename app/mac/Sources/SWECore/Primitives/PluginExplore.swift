@@ -9,6 +9,8 @@ public struct ExploreRow: Sendable, Equatable, Identifiable {
     /// From a marketplace in `~/.swe/plugins`.
     public let isHub: Bool
     public let skills: [PluginSkill]
+    /// Computed with the index, never rebuilt while a row scrolls or hovers.
+    public let actions: [String: [PluginAction]]
     /// Lowercased name, ref, marketplace, description and skill names, for search.
     let haystack: String
 }
@@ -126,6 +128,9 @@ public struct PluginExploreIndex: Sendable, Equatable {
     public let placement: SkillPlacement
     /// Every plugin once, in the catalog's order.
     public let rows: [ExploreRow]
+    /// Local working inventory, excluding marketplace previews and missing installs.
+    public let localRefs: Set<String>
+    private let localTable: [ExplorePlugin]
     /// Every source, marketplace and plugin row, unfiltered.
     public let sources: [ExploreSource]
     /// The marketplaces the user may rename: those whose folder is in
@@ -152,20 +157,47 @@ public struct PluginExploreIndex: Sendable, Equatable {
             Set(catalog.marketplaces.filter { PrimitiveOwnership.isEditable($0, home: home, resolve: resolve) }.map(\.name))
         } ?? []
         var rows: [ExploreRow] = []
+        var localRefs = Set<String>()
         var seen: Set<String> = []
         for market in catalog.marketplaces {
             // One row per ref: rows are looked up by it.
             for plugin in market.plugins where seen.insert(plugin.ref).inserted {
+                let managed = market.hub && plugin.sourcePath.map { source in
+                    market.path.map { root in resolve(source).hasPrefix(resolve(root) + "/") } ?? false
+                } == true
+                let ownedFiles = managed && plugin.sourcePath.map { FileManager.default.fileExists(atPath: $0) } == true
+                let installedFiles = plugin.harnesses.values.contains { state in
+                    state.installed != false && ([state.path].compactMap { $0 } + state.copies)
+                        .contains { FileManager.default.fileExists(atPath: $0) }
+                }
+                if ownedFiles || installedFiles { localRefs.insert(plugin.ref) }
                 let skills = placement.skills(of: plugin)
                 let haystack = ([plugin.name, plugin.ref, plugin.marketplace,
                                  plugin.displayName ?? "", plugin.description ?? ""]
                     + skills.map(\.name)).joined(separator: "\n").lowercased()
-                rows.append(ExploreRow(plugin: plugin, isHub: market.hub, skills: skills, haystack: haystack))
+                let actions = Dictionary(uniqueKeysWithValues: plugin.harnesses.keys.map { harness in
+                    let registration = market.harnesses[harness]
+                    let usesHub = registration?.sourceType == "directory"
+                        && registration?.location.map { location in
+                            market.path.map { resolve(location) == resolve($0) } ?? false
+                        } == true
+                    let offered = catalog.actions(for: plugin, in: harness)
+                    // Existing installs remain controllable before adoption;
+                    // only installing from a source requires SWE ownership.
+                    return (harness, managed && usesHub ? offered : offered.filter { $0.verb != .install })
+                })
+                rows.append(ExploreRow(plugin: plugin, isHub: managed, skills: skills,
+                                       actions: actions, haystack: haystack))
             }
         }
+        self.localRefs = localRefs
         self.rows = rows
         sources = Self.sources(catalog, rows: Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
                                missing: Set(problems.missing))
+        var localSeen = Set<String>()
+        localTable = sources.flatMap(\.marketplaces).flatMap(\.plugins).filter {
+            localRefs.contains($0.row.id) && localSeen.insert($0.row.id).inserted
+        }
     }
 
     /// The quiet line above the list about marketplaces missing on this
@@ -329,6 +361,17 @@ public struct PluginExploreIndex: Sendable, Equatable {
         return sources(harness: harness, query: query)
             .flatMap(\.marketplaces).flatMap(\.plugins)
             .filter { seen.insert($0.row.id).inserted }
+    }
+
+    /// The management page uses only actual local files. Raw sources stay
+    /// available to catalog consumers and skill ownership matching.
+    public func localEntries(harness: String? = nil, query: String = "") -> [ExplorePlugin] {
+        let needle = Self.needle(query)
+        return localTable.filter { entry in
+            if let harness, entry.row.plugin.harnesses[harness]?.status == .absent { return false }
+            if let harness, entry.row.plugin.harnesses[harness] == nil { return false }
+            return needle.isEmpty || entry.row.haystack.contains(needle)
+        }
     }
 
     /// Every harness worth a column in the table: swe's own list, then

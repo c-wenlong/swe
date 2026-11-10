@@ -77,7 +77,21 @@ struct StatusDot: View {
     /// A follow-up nobody answered for days: grey, not amber.
     var stale = false
     var body: some View {
-        Circle().fill(stale ? Theme.borderStrong : Theme.status(status)).frame(width: Theme.statusDot, height: Theme.statusDot)
+        Image(stale ? "state-grey" : arrowName)
+            .resizable().interpolation(.high).scaledToFit()
+            .frame(width: Theme.statusDot + 2, height: Theme.statusDot + 2)
+            .accessibilityHidden(true)
+    }
+    /// The quiver arrow for the status: active is operational, a
+    /// follow-up or approval waits on someone, an error is a failure and
+    /// anything else is interrupted or unknown.
+    private var arrowName: String {
+        switch status {
+        case .active: "state-green"
+        case .followup, .approval: "state-yellow"
+        case .error: "state-red"
+        default: "state-grey"
+        }
     }
 }
 

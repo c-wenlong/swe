@@ -508,6 +508,7 @@ to use their own login state and environment."""
   {c('cyan', 'swe plugins')}                       Every marketplace claude, codex or cursor has registered
   {c('cyan', 'swe plugins catalog <marketplace>')}   One marketplace's plugins and their state per harness
   {c('cyan', 'swe plugins catalog --json')}          The whole catalog as JSON (the app's Plugins page)
+  {c('cyan', 'swe plugins import <ref>')}            Copy installed files into ~/.swe/plugins
   {c('cyan', 'swe plugins info <ref>')}              One plugin's servers, env keys, skills and calls
   {c('cyan', 'swe plugins install <ref> --harness=claude|codex')}
   {c('cyan', 'swe plugins uninstall <ref> --harness=claude|codex')}
@@ -519,6 +520,10 @@ to use their own login state and environment."""
   lists installed and uninstalled plugins alike, plus anything installed
   whose marketplace has no readable manifest. It reads files only, never
   the network: a marketplace shows what its last fetch left on disk.
+
+  Import copies an installed/cached plugin into SWE without changing a harness.
+  Existing SWE files are never overwritten. The app lists local plugins only;
+  marketplace-only entries remain available through swe plugins catalog.
 
 {c('bold', 'Actions')}  Each one checks first and does nothing if the plugin is
   already in that state, then runs the harness's own CLI:

@@ -416,10 +416,11 @@ public struct PluginDriftState: Codable, Sendable, Equatable {
 /// One install, uninstall, enable or disable of one plugin in one harness.
 public struct PluginAction: Sendable, Hashable, Identifiable {
     public enum Verb: String, Sendable, CaseIterable {
-        case install, uninstall, enable, disable
+        case install, uninstall, enable, disable, adopt = "import"
 
         public var title: String {
             switch self {
+            case .adopt: "Import to SWE"
             case .install: "Install"
             case .uninstall: "Uninstall"
             case .enable: "Enable"
@@ -429,6 +430,7 @@ public struct PluginAction: Sendable, Hashable, Identifiable {
 
         var past: String {
             switch self {
+            case .adopt: "Imported"
             case .install: "Installed"
             case .uninstall: "Uninstalled"
             case .enable: "Enabled"
@@ -456,6 +458,7 @@ public struct PluginAction: Sendable, Hashable, Identifiable {
     /// (src/swe/plugins/actions.py).
     public var command: String {
         switch (harness, verb) {
+        case (_, .adopt): "swe plugins import \(ref)"
         case ("codex", .install): "codex plugin add \(ref)"
         case ("codex", .uninstall): "codex plugin remove \(ref)"
         case ("codex", .enable), ("codex", .disable):
@@ -466,17 +469,22 @@ public struct PluginAction: Sendable, Hashable, Identifiable {
 
     /// "Install in Claude Code", for a menu.
     public var menuTitle: String {
+        if verb == .adopt { return "Import to SWE" }
         let name = HarnessMark(harness).name
         return verb == .uninstall ? "Uninstall from \(name)" : "\(verb.title) in \(name)"
     }
 
     /// "Install tool@kit in Claude Code?", for the confirmation.
     public var question: String {
+        if verb == .adopt { return "Import \(ref) into SWE?" }
         let name = HarnessMark(harness).name
         return "\(verb.title) \(ref) \(verb == .uninstall ? "from" : "in") \(name)?"
     }
 
-    var arguments: [String] { ["plugins", verb.rawValue, ref, "--harness=" + harness, "--json"] }
+    var arguments: [String] {
+        verb == .adopt ? ["plugins", "import", ref, "--json"]
+            : ["plugins", verb.rawValue, ref, "--harness=" + harness, "--json"]
+    }
 }
 
 /// `swe plugins <action> --json`: what happened.
@@ -505,6 +513,7 @@ public struct PluginActionResult: Decodable, Sendable, Equatable {
         guard changed, let verb = PluginAction.Verb(rawValue: action) else {
             return "\(ref) in \(name): \(detail ?? "nothing changed")"
         }
+        if verb == .adopt { return "Imported \(ref) into SWE" }
         return "\(verb.past) \(ref) \(verb == .uninstall ? "from" : "in") \(name)"
     }
 }
@@ -971,6 +980,7 @@ public final class PluginCatalogModel {
     /// Always reads. `source` is the swe asked, as set in Settings; nil keeps the last one.
     public func load(swe: SweClient, for source: String? = nil) async {
         await loader.load(from: source) { try await swe.pluginCatalog() }
+        indexedFrom = nil
         reindex()
         await indexed()
     }
@@ -984,7 +994,10 @@ public final class PluginCatalogModel {
     public func run(_ action: PluginAction, swe: SweClient, for source: String? = nil) async {
         guard running == nil, let catalog = index?.catalog,
               let plugin = catalog.plugins.first(where: { $0.ref == action.ref }),
-              catalog.actions(for: plugin, in: action.harness).contains(action),
+              action.verb == .adopt
+                ? (action.harness == "swe" && index?.localRefs.contains(action.ref) == true
+                   && index?.rows.first(where: { $0.id == action.ref })?.isHub == false)
+                : catalog.actions(for: plugin, in: action.harness).contains(action),
               work.begin()
         else { return }
         running = action
@@ -1007,6 +1020,7 @@ public final class PluginCatalogModel {
         } else {
             await loader.load(from: nil) { try await swe.pluginCatalog() }
         }
+        indexedFrom = nil
         reindex()
         // The chip's spinner stays until the rows show the change.
         await indexed()

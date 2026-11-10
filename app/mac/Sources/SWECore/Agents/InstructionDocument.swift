@@ -44,6 +44,10 @@ public final class InstructionDocument: Identifiable {
 
     public var isDirty: Bool { text != savedText }
 
+    /// The file's size in bytes when last read or written; nil when
+    /// there was no file. Not the size of unsaved edits.
+    public var diskByteCount: Int? { baseline?.count }
+
     /// Where a save writes: the end of the symlink chain at `url`, as the
     /// last read or write found it (`url` itself before the first read).
     public private(set) var writeURL: URL

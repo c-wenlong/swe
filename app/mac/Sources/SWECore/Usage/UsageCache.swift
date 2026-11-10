@@ -7,6 +7,7 @@ struct StoredReading: Codable, Equatable {
     var windows: [UsageWindow]
     /// When the provider answered, kept as is when the reading is reused.
     var fetchedAt: Date
+    var monthlyCredits: MonthlyCredits? = nil
 }
 
 /// The last failed fetch, kept so a launch can show "couldn't refresh" and
@@ -29,6 +30,8 @@ struct StoredAccount: Codable, Equatable {
     /// The last failed fetch; cleared by the next success. Missing in files
     /// written before this field existed.
     var lastFailure: StoredFailure?
+    /// Billing-only throttle survives even when there is no good reading.
+    var monthlyRetryAt: Date? = nil
 }
 
 /// The usage state file. Belongs under ~/.swe/cache/ (gitignored there), for
@@ -74,6 +77,13 @@ struct UsageCacheStore {
             // Keep the later of the two: a copy that saved an older (or no)
             // cooldown must not shorten one another copy just recorded.
             next.cooldownUntil = until
+            entry = next
+        }
+        if var next = entry,
+           let current = accounts[Self.id(key)], current.fingerprint == next.fingerprint,
+           let until = current.monthlyRetryAt, until > now(),
+           until > (next.monthlyRetryAt ?? .distantPast) {
+            next.monthlyRetryAt = until
             entry = next
         }
         accounts[Self.id(key)] = entry

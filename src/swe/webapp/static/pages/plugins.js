@@ -108,7 +108,7 @@ function header() {
   }
   const off = page.tab === "health" && fixing;
   return pageHeader("Plugins",
-    "Every plugin in every marketplace, and where Claude Code and Codex no longer match ~/.swe/plugins.",
+    "Switch installed plugins on or off in each harness. Import into SWE to own and edit their files.",
     `${updated}${fixAll}<button class="icon-button${busy ? " spinning" : ""}" id="page-refresh" aria-label="Refresh" title="${help}"${
       off ? " disabled" : ""}>${icon("rescan")}</button>`);
 }
@@ -729,6 +729,7 @@ function pluginInfoHtml(info) {
 /* ------------------------------------------------- install, enable… */
 
 const VERB = {
+  import: ["Import to SWE", "Imported", "Importing…"],
   install: ["Install", "Installed", "Installing…"], uninstall: ["Uninstall", "Uninstalled", "Uninstalling…"],
   enable: ["Enable", "Enabled", "Enabling…"], disable: ["Disable", "Disabled", "Disabling…"],
 };
@@ -736,13 +737,14 @@ const sameAct = (a, b) => !!a && !!b && a.verb === b.verb && a.ref === b.ref && 
 
 /* PluginAction.command: what swe will run, or the edit it will make. */
 function actionCommand(a) {
+  if (a.verb === "import") return `swe plugins import ${a.ref}`;
   if (a.harness === "codex" && a.verb === "install") return `codex plugin add ${a.ref}`;
   if (a.harness === "codex" && a.verb === "uninstall") return `codex plugin remove ${a.ref}`;
   if (a.harness === "codex") return `set [plugins."${a.ref}"] enabled = ${a.verb === "enable"} in ~/.codex/config.toml`;
   return `${a.harness} plugin ${a.verb} ${a.ref}`;
 }
 
-const actionWhere = (a) => `${a.verb === "uninstall" ? "from" : "in"} ${Fmt.harnessName(a.harness)}`;
+const actionWhere = (a) => a.verb === "import" ? "into SWE" : `${a.verb === "uninstall" ? "from" : "in"} ${Fmt.harnessName(a.harness)}`;
 
 /* One row per harness that has the plugin or could: its state, and the
  * buttons PluginCatalog.actions(for:in:) offers there. */
