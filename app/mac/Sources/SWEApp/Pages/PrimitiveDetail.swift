@@ -1305,6 +1305,11 @@ struct SkillDetailView: View {
                     HStack(spacing: 8) {
                         Text(skill.name).font(Theme.font(size: 16, weight: .semibold))
                         Badge(skill.source.title)
+                        // A skill adoption carried into the shared library
+                        // names its donor (#1882).
+                        if let donor = skill.adoptedFrom {
+                            Badge("Added from \(HarnessMark(donor).name)")
+                        }
                         Spacer()
                         Button { NSWorkspace.shared.activateFileViewerSelecting([root]) } label: {
                             Label("Show in Finder", systemImage: "folder")
