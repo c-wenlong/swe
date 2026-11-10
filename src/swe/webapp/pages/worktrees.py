@@ -223,15 +223,34 @@ def _paths(body: dict, what: str) -> list[str]:
     return paths
 
 
-def _free_bytes(path: str) -> int | None:
-    """Free space on the volume holding ``path`` (its nearest folder that exists)."""
+def _probe(path: str) -> Path:
+    """``path`` or its nearest folder that exists."""
     probe = Path(path)
     while not probe.exists() and probe != probe.parent:
         probe = probe.parent
-    try:
-        return shutil.disk_usage(probe).free
-    except OSError:
-        return None
+    return probe
+
+
+def _volumes(paths: list[str]) -> dict[int, Path]:
+    """One existing folder per volume the paths live on, keyed by device."""
+    found: dict[int, Path] = {}
+    for path in paths:
+        probe = _probe(path)
+        try:
+            found.setdefault(probe.stat().st_dev, probe)
+        except OSError:
+            continue
+    return found
+
+
+def _free(volumes: dict[int, Path]) -> dict[int, int]:
+    free: dict[int, int] = {}
+    for dev, probe in volumes.items():
+        try:
+            free[dev] = shutil.disk_usage(probe).free
+        except OSError:
+            pass
+    return free
 
 
 def _prune(ctx, body: dict) -> dict:
@@ -241,32 +260,30 @@ def _prune(ctx, body: dict) -> dict:
     args = dict(_scope(body), include=include, branch=_text(body, "branch"))
     if not _flag(body, "yes"):
         return _call(ctx, "prune", yes=False, **args)
+    if include is not None:
+        # Bulk clean up never forces: a forced remove skips swe's lock and
+        # hold checks, so a worktree locked after the preview could lose its
+        # changes. Merged worktrees with changes are deleted one at a time.
+        raise PageError(400, "bad_request", "Clean up never deletes uncommitted changes. "
+                        "Delete those worktrees one at a time from their own row.")
     # Confirming never calls prune(yes=True): its ``confirm`` hook gates only
     # merged-dirty worktrees, so a merged-clean one that appeared after the
-    # preview would go too. Each previewed path is removed on its own
-    # instead, without force, so swe itself refuses any that is no longer
+    # preview would go too. Each previewed path is removed on its own,
+    # without force, so swe itself refuses any that is no longer
     # merged-clean (changed, locked, held, or in use).
-    paths = _paths(body, "the worktrees")
-    before = _free_bytes(paths[0])
+    paths = list(dict.fromkeys(_paths(body, "the worktrees")))
+    volumes = _volumes(paths)
+    before = _free(volumes)
     removed: list[str] = []
     skipped: list[dict] = []
-    for path in dict.fromkeys(paths):
+    for path in paths:
         try:
-            force = False
-            if include == "merged-dirty":
-                # Force only a worktree that is still merged-dirty, was ticked,
-                # and is neither locked nor held: force would skip both checks.
-                row = _call(ctx, "show", path)["worktree"]
-                if row.get("state") == "merged-dirty":
-                    if row.get("locked") or row.get("hold"):
-                        raise PageError(409, "not_safe", row.get("hold") or "it is locked")
-                    force = True
-            _call(ctx, "remove", path, force=force)
+            _call(ctx, "remove", path, force=False)
             removed.append(path)
         except PageError as exc:
             skipped.append({"path": path, "reason": exc.message})
-    after = _free_bytes(paths[0])
-    freed = max(0, after - before) if before is not None and after is not None else 0
+    after = _free(volumes)
+    freed = sum(max(0, after[d] - before[d]) for d in before if d in after)
     return {"dry_run": False, "candidates": [], "removed": removed,
             "skipped": skipped, "freed_bytes": freed}
 

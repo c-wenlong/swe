@@ -869,7 +869,6 @@ async function wtPrunePreview(h, includeDirty, notice) {
   }
   const cands = data.candidates || [], skipped = data.skipped || [];
   const hasDirty = wtList().some((w) => w.state === "merged-dirty") || cands.some((c) => c.state === "merged-dirty");
-  const dirtyCount = cands.filter((c) => c.state === "merged-dirty" || c.dirty).length;
   const total = wtSum(cands, "size_bytes");
   frame(`<form id="wt-p-form">
     <div class="sheet-title">Clean up merged worktrees</div>
@@ -880,9 +879,7 @@ async function wtPrunePreview(h, includeDirty, notice) {
            ${c.state === "merged-dirty" ? '<span class="badge">Uncommitted changes</span>' : ""}
            <code class="wt-path">${esc(wtTilde(c.path))}</code></span><span class="num caption">${esc(wtBytes(c.size_bytes))}</span></li>`).join("")}</ul>`
       : `<p class="empty">Nothing to clean up. No worktree is merged and safe to delete.</p>`}
-    ${hasDirty ? `<label class="wt-check"><input type="checkbox" id="wt-p-dirty"${includeDirty ? " checked" : ""}>
-      <span>Also include merged worktrees that have uncommitted changes</span></label>` : ""}
-    ${includeDirty && dirtyCount ? `<p class="note">${esc(wtCount(dirtyCount, "worktree"))} here ${dirtyCount === 1 ? "has" : "have"} uncommitted changes. Those changes are lost for good.</p>` : ""}
+    ${hasDirty ? `<p class="note">Merged worktrees with uncommitted changes are left out. Delete each one from its own row if you are sure.</p>` : ""}
     ${skipped.length ? `<details class="wt-skipped"><summary>${esc(wtCount(skipped.length, "worktree"))} skipped</summary>
       <ul class="wt-list">${skipped.map((s) => `<li><code class="wt-path">${esc(wtTilde(s.path))}</code><span class="caption">${esc(s.reason || "")}</span></li>`).join("")}</ul></details>` : ""}
     <p class="error" id="wt-sheet-error" role="alert" hidden></p>

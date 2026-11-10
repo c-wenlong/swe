@@ -219,24 +219,24 @@ class TestWrites(_Stubbed, unittest.TestCase):
         self.assertEqual((d["removed"], d["skipped"]),
                          ([], [{"path": "/r/wt/a", "reason": "feat/a is open-pr; pass --force"}]))
 
-    def test_prune_forces_only_a_ticked_merged_dirty_one_that_is_still_dirty_and_free(self):
-        rows = {"/r/wt/dirty": _w("/r/wt/dirty", "d", "merged-dirty"),
-                "/r/wt/locked": _w("/r/wt/locked", "l", "merged-dirty", locked=True),
-                "/r/wt/held": _w("/r/wt/held", "h", "merged-dirty", hold="in use"),
-                "/r/wt/open": _w("/r/wt/open", "o", "open-pr"),
-                "/r/wt/clean": _w("/r/wt/clean", "c", "merged-clean")}
-        shown = []
-        self.wt.show = lambda path, **k: (shown.append(path), {"worktree": rows[path]})[1]
-        body = {"all": True, "yes": True, "include": "merged-dirty", "paths": list(rows)}
-        d = self.post("prune", body)
-        forced = {c[1][0]: c[2]["force"] for c in self.wt.calls if c[0] == "remove"}
-        self.assertEqual(forced, {"/r/wt/dirty": True, "/r/wt/open": False, "/r/wt/clean": False})
-        self.assertEqual([x["path"] for x in d["skipped"]], ["/r/wt/locked", "/r/wt/held"])
-        # Without the include box nothing is forced and show is never asked.
-        self.wt.calls.clear()
-        shown.clear()
-        self.post("prune", {"all": True, "yes": True, "paths": ["/r/wt/dirty"]})
-        self.assertEqual((shown, self.wt.calls[0][2]["force"]), ([], False))
+    def test_prune_yes_never_forces_and_refuses_include(self):
+        # A forced remove skips swe's lock and hold checks, so bulk clean up
+        # never forces; merged-dirty ones are deleted one at a time instead.
+        with self.assertRaises(PageError) as ctx:
+            self.post("prune", {"all": True, "yes": True, "include": "merged-dirty", "paths": ["/r/wt/d"]})
+        self.assertEqual(ctx.exception.status, 400)
+        self.assertEqual(self.wt.calls, [])
+        self.post("prune", {"all": True, "yes": True, "paths": ["/r/wt/d"]})
+        self.assertEqual(self.names(), ["remove"])
+        self.assertIs(self.wt.calls[0][2]["force"], False)
+
+    def test_prune_sums_freed_space_per_volume(self):
+        vols = {1: Path("/a"), 2: Path("/b")}
+        frees = iter([{1: 100, 2: 50}, {1: 160, 2: 90}])
+        with patch.object(page, "_volumes", return_value=vols), \
+                patch.object(page, "_free", side_effect=lambda v: next(frees)):
+            d = self.post("prune", {"all": True, "yes": True, "paths": ["/a/wt", "/b/wt"]})
+        self.assertEqual(d["freed_bytes"], 100)
 
     def test_slim_one_or_a_scope_never_both(self):
         self.post("slim", {"path": "/r/wt/a"})
