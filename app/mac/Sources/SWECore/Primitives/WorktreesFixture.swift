@@ -39,10 +39,14 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
 
     private func handle(_ args: [String]) -> CommandResult {
         log.append(args)
-        guard args.count >= 2, args[0] == "wt" else { return fail("unknown_command", "Unknown command") }
+        guard args.count >= 2, args[0] == "wt" else { return fail("bad_args", "Unknown command") }
         let rest = Array(args.dropFirst(2)).filter { $0 != "--json" }
+        // `--name=value`, the repo's own form, or the spaced one.
         func flag(_ name: String) -> String? {
-            rest.firstIndex(of: name).flatMap { rest.indices.contains($0 + 1) ? rest[$0 + 1] : nil }
+            if let joined = rest.first(where: { $0.hasPrefix(name + "=") }) {
+                return String(joined.dropFirst(name.count + 1))
+            }
+            return rest.firstIndex(of: name).flatMap { rest.indices.contains($0 + 1) ? rest[$0 + 1] : nil }
         }
         let positional = positionals(rest)
         switch args[1] {
@@ -54,15 +58,18 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
         case "remove": return remove(positional.first, force: rest.contains("--force"),
                                      deleteBranch: rest.contains("--delete-branch"))
         case "lock":
-            return update(positional.first) { $0.locked(true, reason: flag("--reason")) }
+            if tree(at: positional.first ?? "")?.state == .main {
+                return fail("not_safe", "The main checkout can't be locked.")
+            }
+            return update(positional.first) { var t = $0; t.locked = true; t.lockReason = flag("--reason"); return t }
         case "unlock":
-            return update(positional.first) { $0.locked(false, reason: nil) }
+            return update(positional.first) { var t = $0; t.locked = false; t.lockReason = nil; return t }
         case "move":
-            guard positional.count >= 2 else { return fail("usage", "move needs a path and a new path") }
+            guard positional.count >= 2 else { return fail("bad_args", "move needs a path and a new path") }
             return move(positional[0], to: positional[1])
         case "prune": return prune(rest)
         case "slim": return slim(positional.first, confirmed: rest.contains("--yes"))
-        default: return fail("unknown_command", "Unknown command: wt \(args[1])")
+        default: return fail("bad_args", "Unknown command: wt \(args[1])")
         }
     }
 
@@ -84,7 +91,7 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
 
     private func list(_ rest: [String], repo: String?) -> CommandResult {
         if scenario == .error {
-            return fail("git_missing", "git isn't on this Mac's PATH, so swe can't list worktrees.")
+            return fail("git_failed", "git isn't on this Mac's PATH, so swe can't list worktrees.")
         }
         let all = rest.contains("--all")
         let shown = repo.map { path in trees.filter { $0.mainCheckout == path } } ?? trees
@@ -98,7 +105,7 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
         let pr = flag("--pr").flatMap(Int.init)
         let branch = flag("--branch") ?? "pr-\(pr ?? 0)"
         if trees.contains(where: { $0.mainCheckout == repo && $0.branch == branch }) {
-            return fail("branch_in_use", "\(branch) is already checked out in another worktree.")
+            return fail("exists", "\(branch) is already checked out in another worktree.")
         }
         let slug = branch.replacingOccurrences(of: "/", with: "-")
         let path = flag("--path") ?? "\(repo)/.claude/worktrees/\(slug)"
@@ -114,14 +121,17 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
     private func remove(_ path: String?, force: Bool, deleteBranch: Bool) -> CommandResult {
         guard let path, let tree = tree(at: path) else { return missing(path) }
         if !tree.state.isRemovable {
-            return fail("protected", "\(tree.title) is \(tree.state.rawValue) and is never removed.")
+            return fail("not_safe", "\(tree.title) is \(tree.state.rawValue) and is never removed.")
         }
         if tree.state.removalNeedsForce, !force {
             return fail(WorktreeFailure.notSafe,
                         "\(tree.title) is \(tree.state.rawValue). Pass --force to remove it anyway.")
         }
+        if tree.locked, !force {
+            return fail(WorktreeFailure.notSafe, "\(tree.title) is locked. Pass --force to remove it anyway.")
+        }
         trees.removeAll { $0.path == path }
-        return reply(["removed": path, "freed_bytes": tree.sizeBytes])
+        return reply(["removed": path, "freed_bytes": tree.sizeBytes ?? 0])
     }
 
     private func update(_ path: String?, _ change: (Worktree) -> Worktree) -> CommandResult {
@@ -132,16 +142,17 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
 
     private func move(_ path: String, to newPath: String) -> CommandResult {
         guard let index = trees.firstIndex(where: { $0.path == path }) else { return missing(path) }
-        if trees[index].state == .main { return fail("protected", "The main checkout can't be moved.") }
-        trees[index] = trees[index].moved(to: newPath)
+        if trees[index].state == .main { return fail("not_safe", "The main checkout can't be moved.") }
+        trees[index].path = newPath
         return reply(["worktree": trees[index]])
     }
 
     private func prune(_ rest: [String]) -> CommandResult {
-        let includeDirty = rest.firstIndex(of: "--include").map { rest.indices.contains($0 + 1) && rest[$0 + 1] == "merged-dirty" } ?? false
+        let includeDirty = rest.contains("--include=merged-dirty")
+            || (rest.firstIndex(of: "--include").map { rest.indices.contains($0 + 1) && rest[$0 + 1] == "merged-dirty" } ?? false)
         let confirmed = rest.contains("--yes")
         let candidates = trees.filter { ($0.state == .mergedClean || (includeDirty && $0.state == .mergedDirty)) && !$0.locked }
-        let freed = candidates.reduce(0) { $0 + $1.sizeBytes }
+        let freed = candidates.reduce(0) { $0 + ($1.sizeBytes ?? 0) }
         if confirmed { trees.removeAll { tree in candidates.contains { $0.path == tree.path } } }
         return reply(["dry_run": !confirmed, "candidates": candidates,
                       "removed": confirmed ? candidates.map(\.path) : [],
@@ -155,11 +166,12 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
         guard let path, let index = trees.firstIndex(where: { $0.path == path }) else { return missing(path) }
         let tree = trees[index]
         let weights: [(String, Double)] = [("node_modules", 0.6), (".venv", 0.25), ("build", 0.15)]
-        let dirs = tree.rebuildableBytes == 0 ? [] : weights.map {
-            ["path": "\(path)/\($0.0)", "bytes": Int(Double(tree.rebuildableBytes) * $0.1)] as [String: Any]
+        let rebuildable = tree.rebuildableBytes ?? 0
+        let dirs = rebuildable == 0 ? [] : weights.map {
+            ["path": "\(path)/\($0.0)", "bytes": Int(Double(rebuildable) * $0.1)] as [String: Any]
         }
-        if confirmed { trees[index] = tree.slimmed() }
-        return reply(["dry_run": !confirmed, "dirs": dirs, "freed_bytes": tree.rebuildableBytes])
+        if confirmed { trees[index].sizeBytes = tree.sizeBytes.map { max(0, $0 - rebuildable) }; trees[index].rebuildableBytes = 0 }
+        return reply(["dry_run": !confirmed, "dirs": dirs, "freed_bytes": rebuildable])
     }
 
     // MARK: Replies
@@ -174,8 +186,9 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
     }
 
     private func fail(_ code: String, _ message: String) -> CommandResult {
-        let body = (try? JSONSerialization.data(withJSONObject: ["error": ["code": code, "message": message]])) ?? Data()
-        return CommandResult(status: 1, stdout: Data(), stderr: String(decoding: body, as: UTF8.self))
+        // The contract: a failure prints the envelope with `error` to stdout.
+        let body = (try? JSONSerialization.data(withJSONObject: ["schema": 1, "error": ["code": code, "message": message]])) ?? Data()
+        return CommandResult(status: 1, stdout: body, stderr: "")
     }
 
     private func missing(_ path: String?) -> CommandResult {
@@ -218,7 +231,8 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
             Worktree(path: swe + "/.claude/worktrees/mac-worktrees-page", repo: "c-wenlong/swe", mainCheckout: swe,
                      branch: "mac/worktrees-page", head: "9f3e1c0a77d2", state: .openPr,
                      pr: pr("c-wenlong/swe", 1912, "OPEN"), lastCommitAt: ago(0.04), sizeBytes: mb(640),
-                     rebuildableBytes: mb(520), dirty: true, untracked: 2, harness: "claude"),
+                     rebuildableBytes: mb(520), dirty: true, untracked: 2, harness: "claude",
+                     reason: "Pull request #1912 is open", hold: "You are inside it"),
             Worktree(path: swe + "/.claude/worktrees/cli-wt-commands", repo: "c-wenlong/swe", mainCheckout: swe,
                      branch: "cli/wt-commands", head: "41c0de99ab10", state: .openPr,
                      pr: pr("c-wenlong/swe", 1911, "OPEN"), lastCommitAt: ago(0.3), sizeBytes: mb(580),
@@ -226,7 +240,8 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
             Worktree(path: swe + "/.claude/worktrees/fix-hooks-race", repo: "c-wenlong/swe", mainCheckout: swe,
                      branch: "fix/hooks-race", head: "c5d6e7f80912", state: .mergedClean,
                      pr: pr("c-wenlong/swe", 1890, "MERGED"), lastCommitAt: ago(3), sizeBytes: mb(810),
-                     rebuildableBytes: mb(700), harness: "claude"),
+                     rebuildableBytes: mb(700), harness: "claude",
+                     reason: "Pull request #1890 merged and the folder is clean"),
             Worktree(path: swe + "/.claude/worktrees/docs-roadmap-refresh", repo: "c-wenlong/swe", mainCheckout: swe,
                      branch: "docs/roadmap-refresh", head: "0a1b2c3d4e5f", state: .mergedClean,
                      pr: pr("c-wenlong/swe", 1884, "MERGED"), lastCommitAt: ago(9), sizeBytes: mb(450),
@@ -240,11 +255,13 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
                      sizeBytes: mb(520), rebuildableBytes: mb(410), harness: "codex"),
             Worktree(path: swe + "/.claude/worktrees/old-experiment", repo: "c-wenlong/swe", mainCheckout: swe,
                      branch: nil, head: "123456789abc", state: .orphaned, lastCommitAt: ago(41),
-                     sizeBytes: mb(300), rebuildableBytes: mb(0), harness: "other"),
+                     sizeBytes: nil, rebuildableBytes: nil, harness: "other",
+                     reason: "git no longer lists this folder as a worktree", detached: true),
             Worktree(path: "/Users/demo/Projects/release-1.4", repo: "c-wenlong/swe", mainCheckout: swe,
                      branch: "release/1.4", head: "feedface0001", state: .protected, lastCommitAt: ago(20),
                      sizeBytes: mb(900), rebuildableBytes: mb(750), locked: true,
-                     lockReason: "Release branch, do not touch", harness: "other"),
+                     lockReason: "Release branch, do not touch", harness: "other",
+                     reason: "Release checkout swe never removes", hold: "Locked"),
             Worktree(path: dots, repo: "kaichen/dotfiles", mainCheckout: dots, branch: "main", head: "b00b1e500000",
                      state: .main, lastCommitAt: ago(1), sizeBytes: mb(180), rebuildableBytes: 0, harness: "other"),
             Worktree(path: dots + "/.claude/worktrees/nix-bump-inputs", repo: "kaichen/dotfiles", mainCheckout: dots,
@@ -261,28 +278,8 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
                      branch: "redesign/hero", head: "5566778899aa", state: .openPr,
                      pr: pr("kai/agent-site", 58, "OPEN"), lastCommitAt: ago(1.5), sizeBytes: mb(1_100),
                      rebuildableBytes: mb(950), locked: true, lockReason: "Waiting on design review",
-                     harness: "claude"),
+                     harness: "claude", reason: "Pull request #58 is open", hold: "Locked"),
         ]
     }
 }
 
-private extension Worktree {
-    func locked(_ on: Bool, reason: String?) -> Worktree {
-        Worktree(path: path, repo: repo, mainCheckout: mainCheckout, branch: branch, head: head, state: state,
-                 pr: pr, lastCommitAt: lastCommitAt, sizeBytes: sizeBytes, rebuildableBytes: rebuildableBytes,
-                 dirty: dirty, untracked: untracked, locked: on, lockReason: on ? reason : nil, harness: harness)
-    }
-
-    func moved(to newPath: String) -> Worktree {
-        Worktree(path: newPath, repo: repo, mainCheckout: mainCheckout, branch: branch, head: head, state: state,
-                 pr: pr, lastCommitAt: lastCommitAt, sizeBytes: sizeBytes, rebuildableBytes: rebuildableBytes,
-                 dirty: dirty, untracked: untracked, locked: locked, lockReason: lockReason, harness: harness)
-    }
-
-    func slimmed() -> Worktree {
-        Worktree(path: path, repo: repo, mainCheckout: mainCheckout, branch: branch, head: head, state: state,
-                 pr: pr, lastCommitAt: lastCommitAt, sizeBytes: max(0, sizeBytes - rebuildableBytes),
-                 rebuildableBytes: 0, dirty: dirty, untracked: untracked, locked: locked,
-                 lockReason: lockReason, harness: harness)
-    }
-}

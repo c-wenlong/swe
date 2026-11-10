@@ -79,27 +79,27 @@ import Testing
 
     @Test func listArguments() {
         #expect(WorktreeCommand.list(.all) == ["wt", "list", "--all", "--json"])
-        #expect(WorktreeCommand.list(.repo("/r/swe")) == ["wt", "list", "--repo", "/r/swe", "--json"])
+        #expect(WorktreeCommand.list(.repo("/r/swe")) == ["wt", "list", "--repo=/r/swe", "--json"])
     }
 
     @Test func addArguments() {
         let existing = NewWorktreeDraft(repoPath: "/r/swe", mode: .existingBranch, branch: " fix/a ")
-        #expect(WorktreeCommand.add(existing) == ["wt", "add", "/r/swe", "--branch", "fix/a", "--json"])
+        #expect(WorktreeCommand.add(existing) == ["wt", "add", "/r/swe", "--branch=fix/a", "--json"])
         let fresh = NewWorktreeDraft(repoPath: "/r/swe", mode: .newBranch, branch: "feat/b",
                                      base: "origin/main", path: "~/wt/b")
         #expect(WorktreeCommand.add(fresh) ==
-                ["wt", "add", "/r/swe", "--branch", "feat/b", "--new", "--base", "origin/main", "--path", "~/wt/b", "--json"])
+                ["wt", "add", "/r/swe", "--branch=feat/b", "--new", "--base=origin/main", "--path=~/wt/b", "--json"])
         let noBase = NewWorktreeDraft(repoPath: "/r/swe", mode: .newBranch, branch: "feat/b")
-        #expect(WorktreeCommand.add(noBase) == ["wt", "add", "/r/swe", "--branch", "feat/b", "--new", "--json"])
+        #expect(WorktreeCommand.add(noBase) == ["wt", "add", "/r/swe", "--branch=feat/b", "--new", "--json"])
         let pr = NewWorktreeDraft(repoPath: "/r/swe", mode: .pullRequest, branch: "ignored", pullRequest: "#1912")
-        #expect(WorktreeCommand.add(pr) == ["wt", "add", "/r/swe", "--pr", "1912", "--json"])
+        #expect(WorktreeCommand.add(pr) == ["wt", "add", "/r/swe", "--pr=1912", "--json"])
     }
 
     @Test func removeLockUnlockMoveArguments() {
         #expect(WorktreeCommand.remove("/p", force: false, deleteBranch: false) == ["wt", "remove", "/p", "--json"])
         #expect(WorktreeCommand.remove("/p", force: true, deleteBranch: true) ==
                 ["wt", "remove", "/p", "--force", "--delete-branch", "--json"])
-        #expect(WorktreeCommand.lock("/p", reason: "  waiting  ") == ["wt", "lock", "/p", "--reason", "waiting", "--json"])
+        #expect(WorktreeCommand.lock("/p", reason: "  waiting  ") == ["wt", "lock", "/p", "--reason=waiting", "--json"])
         #expect(WorktreeCommand.lock("/p", reason: "  ") == ["wt", "lock", "/p", "--json"])
         #expect(WorktreeCommand.unlock("/p") == ["wt", "unlock", "/p", "--json"])
         #expect(WorktreeCommand.move("/p", to: "/q") == ["wt", "move", "/p", "/q", "--json"])
@@ -108,7 +108,7 @@ import Testing
     @Test func pruneAndSlimArguments() {
         #expect(WorktreeCommand.prune(scope: .all, includeDirty: false, confirmed: false) == ["wt", "prune", "--all", "--json"])
         #expect(WorktreeCommand.prune(scope: .all, includeDirty: true, confirmed: true) ==
-                ["wt", "prune", "--all", "--include", "merged-dirty", "--yes", "--json"])
+                ["wt", "prune", "--all", "--include=merged-dirty", "--yes", "--json"])
         #expect(WorktreeCommand.prune(scope: .repo("/r"), includeDirty: false, confirmed: true) == ["wt", "prune", "--yes", "--json"])
         #expect(WorktreeCommand.slim("/p", confirmed: false) == ["wt", "slim", "/p", "--json"])
         #expect(WorktreeCommand.slim("/p", confirmed: true) == ["wt", "slim", "/p", "--yes", "--json"])
@@ -248,6 +248,45 @@ import Testing
         let error = SweError.commandFailed(status: 1, message: text)
         #expect(WorktreeFailure.describe(error).code == WorktreeFailure.notSafe)
         #expect(WorktreeFailure.describe(SweError.commandFailed(status: 1, message: "boom")).message == "boom")
+        for code in ["bad_args", "not_a_repo", "not_found", "not_safe", "exists", "git_failed", "gh_unavailable", "busy"] {
+            let friendly = WorktreeFailure.friendly(code: code, message: "detail")
+            #expect(friendly != "detail" && friendly.hasSuffix(" detail"), "\(code)")
+        }
+        #expect(WorktreeFailure.friendly(code: "busy", message: "").contains("Another swe"))
+        #expect(WorktreeFailure.friendly(code: "novel", message: "as is") == "as is")
+    }
+
+    @Test func anErrorOnStdoutWithTheEnvelopeIsRead() async {
+        let body = #"{"schema": 1, "error": {"code": "busy", "message": "lock held by pid 9"}}"#
+        let runner = ScriptedRunner([(["wt", "list"], CommandResult(status: 1, stdout: Data(body.utf8), stderr: ""))])
+        let model = WorktreesModel()
+        await model.load(swe: SweClient(runner: runner))
+        guard case .failed(let message) = model.state else { Issue.record("\(model.state)"); return }
+        #expect(message.hasPrefix("Another swe worktree command is running."))
+        #expect(message.hasSuffix("lock held by pid 9"))
+    }
+
+    @Test func nullSizesAndTheExtraFieldsDecode() async throws {
+        let json = #"""
+        {"scope": "all", "worktrees": [
+          {"path": "/r/a", "main_checkout": "/r", "branch": "a", "head": "abc", "state": "no-pr",
+           "size_bytes": null, "rebuildable_bytes": null, "harness": "swe-pr",
+           "reason": "no PR yet", "hold": "locked", "changes": 2, "detached": false,
+           "rebuildable": [{"path": "/r/a/node_modules", "bytes": 10}]},
+          {"path": "/r/b", "main_checkout": "/r", "branch": "b", "head": "abd", "state": "merged-clean"}
+        ]}
+        """#
+        let list = try await SweClient(runner: ScriptedRunner([(["wt", "list"], ok(json))])).worktrees(.all)
+        let a = list.worktrees[0]
+        #expect(a.sizeBytes == nil && a.rebuildableBytes == nil)
+        #expect(WorktreeFormat.bytes(a.sizeBytes) == "Not measured")
+        #expect(a.reason == "no PR yet" && a.hold == "locked" && a.changes == 2 && a.detached == false)
+        #expect(a.rebuildable == [.init(path: "/r/a/node_modules", bytes: 10)])
+        #expect(WorktreeFormat.harness(a.harness) == "swe PR checkout")
+        #expect(WorktreeFormat.harness("other") == "Other")
+        let b = list.worktrees[1]
+        #expect(b.reason == nil && b.hold == nil && b.rebuildable == nil)
+        #expect(WorktreeFilter.summary(list.worktrees).totalBytes == 0)
     }
 
     @Test func aFailedListShowsTheMessageNotTheJSON() async {
@@ -284,7 +323,7 @@ import Testing
         await model.load(swe: swe)
         model.scope = .repo("/Users/demo/Projects/dotfiles")
         await model.load(swe: swe)
-        #expect(fixture.calls.last == ["wt", "list", "--repo", "/Users/demo/Projects/dotfiles", "--json"])
+        #expect(fixture.calls.last == ["wt", "list", "--repo=/Users/demo/Projects/dotfiles", "--json"])
         #expect(model.worktrees.allSatisfy { $0.mainCheckout == "/Users/demo/Projects/dotfiles" })
         #expect(model.repos.count == 3)
     }
@@ -326,7 +365,7 @@ import Testing
         let draft = NewWorktreeDraft(repoPath: "/Users/demo/Projects/swe", mode: .newBranch, branch: "feat/new")
         let added = try await model.add(draft, swe: swe)
         #expect(model.worktree(at: added.path)?.branch == "feat/new")
-        #expect(fixture.calls.contains(["wt", "lock", target.path, "--reason", "hold", "--json"]))
+        #expect(fixture.calls.contains(["wt", "lock", target.path, "--reason=hold", "--json"]))
         #expect(fixture.calls.contains(["wt", "move", target.path, "/elsewhere/spike", "--json"]))
     }
 

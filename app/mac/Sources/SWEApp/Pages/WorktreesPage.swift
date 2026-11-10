@@ -493,7 +493,10 @@ private struct WorktreeRow: View {
                         .help("Uncommitted or untracked files")
                 }
             }
-            if compact, let pr = tree.pr {
+            if let hold = tree.hold {
+                Label("Clean up keeps it: \(hold.prefix(1).lowercased() + hold.dropFirst())", systemImage: "hand.raised")
+                    .font(Theme.caption).foregroundStyle(Theme.warningText).lineLimit(1)
+            } else if compact, let pr = tree.pr {
                 Text(verbatim: "#\(pr.number) · \(WorktreeFormat.lastCommit(tree.lastCommitAt))")
                     .font(Theme.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
             } else {
@@ -507,8 +510,8 @@ private struct WorktreeRow: View {
     private var size: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(WorktreeFormat.bytes(tree.sizeBytes)).font(Theme.bodySmall).foregroundStyle(Theme.textPrimary)
-            if tree.rebuildableBytes > 0 {
-                Text("\(WorktreeFormat.bytes(tree.rebuildableBytes)) rebuildable")
+            if let rebuildable = tree.rebuildableBytes, rebuildable > 0 {
+                Text("\(WorktreeFormat.bytes(rebuildable)) rebuildable")
                     .font(Theme.caption).foregroundStyle(Theme.textMuted)
                     .lineLimit(1).minimumScaleFactor(0.85)
             }
@@ -518,7 +521,7 @@ private struct WorktreeRow: View {
     private var harness: some View {
         HStack(spacing: 6) {
             if HarnessIcon.exists(for: tree.harness) { HarnessIcon(harness: tree.harness, size: 14) }
-            Text(HarnessMark(tree.harness).name).font(Theme.caption).foregroundStyle(Theme.textSecondary)
+            Text(WorktreeFormat.harness(tree.harness)).font(Theme.caption).foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
         }
     }
@@ -563,7 +566,7 @@ private struct WorktreeMenuItems: View {
         }
         if tree.state != .main {
             Button("Move…") { act(.move) }.disabled(!tree.canMove)
-            Button("Slim…") { act(.slim) }.disabled(tree.rebuildableBytes == 0)
+            Button("Slim…") { act(.slim) }.disabled(!tree.canSlim)
         }
         if tree.state.isRemovable {
             Divider()
@@ -627,6 +630,8 @@ private struct WorktreeDetail: View {
             field("Last commit", tree.lastCommitAt.map {
                 "\(UsageFormat.ago($0, now: Date())) · \($0.formatted(date: .abbreviated, time: .shortened))"
             } ?? "No date")
+            if let reason = tree.reason { field("Why", reason) }
+            if let hold = tree.hold { field("Clean up", "Keeps it: \(hold.prefix(1).lowercased() + hold.dropFirst())") }
             field("Size", WorktreeFormat.bytes(tree.sizeBytes))
             field("Rebuildable", WorktreeFormat.bytes(tree.rebuildableBytes))
             field("Working tree", workingTree)
@@ -634,7 +639,7 @@ private struct WorktreeDetail: View {
             row("Harness") {
                 HStack(spacing: 6) {
                     if HarnessIcon.exists(for: tree.harness) { HarnessIcon(harness: tree.harness, size: 14) }
-                    Text(HarnessMark(tree.harness).name)
+                    Text(WorktreeFormat.harness(tree.harness))
                 }
             }
         }
@@ -687,8 +692,8 @@ private struct WorktreeDetail: View {
                         .hoverTip(tree.locked ? "Unlock it before moving." : "Move the folder somewhere else.",
                                   replacesLabel: false)
                     Button("Slim…", systemImage: "scissors") { act(.slim) }
-                        .secondaryButton().disabled(tree.rebuildableBytes == 0)
-                        .hoverTip(tree.rebuildableBytes == 0 ? "Nothing rebuildable to remove."
+                        .secondaryButton().disabled(!tree.canSlim)
+                        .hoverTip(!tree.canSlim ? "Nothing rebuildable to remove."
                                   : "Delete node_modules, virtual environments and build output. They rebuild.",
                                   replacesLabel: false)
                 }
@@ -833,7 +838,8 @@ private struct RemoveSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Remove \(tree.title)?").font(Theme.sectionTitle).tracking(-0.5)
             VStack(alignment: .leading, spacing: 6) {
-                Text("This deletes the worktree's folder, \(WorktreeFormat.bytes(tree.sizeBytes)) on disk:")
+                Text(tree.sizeBytes.map { "This deletes the worktree's folder, \(WorktreeFormat.bytes($0)) on disk:" }
+                     ?? "This deletes the worktree's folder from disk:")
                     .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
                 Text(displayPath(tree.path))
                     .font(Theme.font(size: 12, design: .monospaced)).foregroundStyle(Theme.textPrimary)

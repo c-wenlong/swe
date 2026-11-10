@@ -90,7 +90,8 @@ public struct SweClient: Sendable {
             let stderr = Self.plain(result.stderr)
             throw SweError.commandFailed(
                 status: result.status,
-                message: stderr.isEmpty && !isJSON ? Self.plain(stdoutText) : stderr)
+                message: stderr.isEmpty && (!isJSON || WorktreeFailure.parse(stdoutText) != nil)
+                    ? Self.plain(stdoutText) : stderr)
         }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase

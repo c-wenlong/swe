@@ -97,7 +97,7 @@ public struct WorktreePR: Codable, Equatable, Hashable, Sendable {
 public struct Worktree: Codable, Equatable, Sendable, Identifiable, Hashable {
     public var id: String { path }
 
-    public let path: String
+    public internal(set) var path: String
     /// `owner/name`, nil for a repository with no GitHub remote.
     public let repo: String?
     public let mainCheckout: String
@@ -108,20 +108,42 @@ public struct Worktree: Codable, Equatable, Sendable, Identifiable, Hashable {
     public let pr: WorktreePR?
     public let lastCommitAt: Date?
     /// `du` estimates.
-    public let sizeBytes: Int
-    public let rebuildableBytes: Int
+    /// nil when sizes were skipped or the folder is gone.
+    public internal(set) var sizeBytes: Int?
+    public internal(set) var rebuildableBytes: Int?
     public let dirty: Bool
     public let untracked: Int
-    public let locked: Bool
-    public let lockReason: String?
+    public internal(set) var locked: Bool
+    public internal(set) var lockReason: String?
     /// `claude`, `codex`, `devin`, `swe-pr` or `other`.
     public let harness: String
+    /// Why it has its state, when swe says.
+    public let reason: String?
+    /// Why clean up keeps it whatever its state: locked, you are inside
+    /// it, a detached HEAD used in the last day. nil when nothing does.
+    public let hold: String?
+    /// Tracked files with changes.
+    public let changes: Int?
+    public let detached: Bool?
+    /// The folders `slim` would remove, when swe lists them.
+    public let rebuildable: [RebuildableDir]?
+
+    public struct RebuildableDir: Codable, Equatable, Hashable, Sendable {
+        public let path: String
+        public let bytes: Int?
+        public init(path: String, bytes: Int?) {
+            self.path = path
+            self.bytes = bytes
+        }
+    }
 
     public init(path: String, repo: String? = nil, mainCheckout: String, branch: String?,
                 head: String = "", state: WorktreeState, pr: WorktreePR? = nil,
-                lastCommitAt: Date? = nil, sizeBytes: Int = 0, rebuildableBytes: Int = 0,
+                lastCommitAt: Date? = nil, sizeBytes: Int? = 0, rebuildableBytes: Int? = 0,
                 dirty: Bool = false, untracked: Int = 0, locked: Bool = false,
-                lockReason: String? = nil, harness: String = "other") {
+                lockReason: String? = nil, harness: String = "other",
+                reason: String? = nil, hold: String? = nil, changes: Int? = nil,
+                detached: Bool? = nil, rebuildable: [RebuildableDir]? = nil) {
         self.path = path
         self.repo = repo
         self.mainCheckout = mainCheckout
@@ -137,11 +159,17 @@ public struct Worktree: Codable, Equatable, Sendable, Identifiable, Hashable {
         self.locked = locked
         self.lockReason = lockReason
         self.harness = harness
+        self.reason = reason
+        self.hold = hold
+        self.changes = changes
+        self.detached = detached
+        self.rebuildable = rebuildable
     }
 
     enum CodingKeys: String, CodingKey {
         case path, repo, mainCheckout, branch, head, state, pr, lastCommitAt
         case sizeBytes, rebuildableBytes, dirty, untracked, locked, lockReason, harness
+        case reason, hold, changes, detached, rebuildable
     }
 
     public init(from decoder: any Decoder) throws {
@@ -156,13 +184,18 @@ public struct Worktree: Codable, Equatable, Sendable, Identifiable, Hashable {
         // ISO 8601 text; an unreadable stamp is "no date", not a failed list.
         lastCommitAt = (try? c.decodeIfPresent(String.self, forKey: .lastCommitAt))
             .flatMap { $0 }.flatMap(Timestamp.parse)
-        sizeBytes = try c.decodeIfPresent(Int.self, forKey: .sizeBytes) ?? 0
-        rebuildableBytes = try c.decodeIfPresent(Int.self, forKey: .rebuildableBytes) ?? 0
+        sizeBytes = try c.decodeIfPresent(Int.self, forKey: .sizeBytes)
+        rebuildableBytes = try c.decodeIfPresent(Int.self, forKey: .rebuildableBytes)
         dirty = try c.decodeIfPresent(Bool.self, forKey: .dirty) ?? false
         untracked = try c.decodeIfPresent(Int.self, forKey: .untracked) ?? 0
         locked = try c.decodeIfPresent(Bool.self, forKey: .locked) ?? false
         lockReason = try c.decodeIfPresent(String.self, forKey: .lockReason)
         harness = try c.decodeIfPresent(String.self, forKey: .harness) ?? "other"
+        reason = try? c.decodeIfPresent(String.self, forKey: .reason)
+        hold = try? c.decodeIfPresent(String.self, forKey: .hold)
+        changes = try? c.decodeIfPresent(Int.self, forKey: .changes)
+        detached = try? c.decodeIfPresent(Bool.self, forKey: .detached)
+        rebuildable = try? c.decodeIfPresent([RebuildableDir].self, forKey: .rebuildable)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -182,6 +215,11 @@ public struct Worktree: Codable, Equatable, Sendable, Identifiable, Hashable {
         try c.encode(locked, forKey: .locked)
         try c.encode(lockReason, forKey: .lockReason)
         try c.encode(harness, forKey: .harness)
+        try c.encode(reason, forKey: .reason)
+        try c.encode(hold, forKey: .hold)
+        try c.encode(changes, forKey: .changes)
+        try c.encode(detached, forKey: .detached)
+        try c.encode(rebuildable, forKey: .rebuildable)
     }
 
     // MARK: Derived
@@ -211,6 +249,9 @@ public struct Worktree: Codable, Equatable, Sendable, Identifiable, Hashable {
     }
 
     public var canRemove: Bool { removalBlock == nil }
+
+    /// Slim has something to remove: unmeasured counts as "maybe".
+    public var canSlim: Bool { state != .main && state != .protected && (rebuildableBytes ?? 1) > 0 }
 
     /// Remove needs `--force` and a second explicit confirmation.
     public var removalNeedsForce: Bool { state.removalNeedsForce }
@@ -371,13 +412,35 @@ public struct WorktreeFailure: Equatable, Sendable {
         return WorktreeFailure(code: object["code"] as? String, message: message)
     }
 
-    /// What the page shows for `error`.
+    /// What the page shows for `error`: swe's own words under a plain
+    /// sentence for its code.
     public static func describe(_ error: any Error) -> WorktreeFailure {
+        let raw: WorktreeFailure
         if case SweError.commandFailed(_, let message) = error {
-            return parse(message) ?? WorktreeFailure(code: nil, message: message)
+            raw = parse(message) ?? WorktreeFailure(code: nil, message: message)
+        } else {
+            let text = error.localizedDescription
+            raw = parse(text) ?? WorktreeFailure(code: nil, message: text)
         }
-        let text = error.localizedDescription
-        return parse(text) ?? WorktreeFailure(code: nil, message: text)
+        return WorktreeFailure(code: raw.code, message: friendly(code: raw.code, message: raw.message))
+    }
+
+    /// One sentence per documented code, then swe's detail. An unknown
+    /// code, or none, shows swe's message alone.
+    public static func friendly(code: String?, message: String) -> String {
+        let lead: String? = switch code {
+        case "bad_args": "swe didn't understand that request."
+        case "not_a_repo": "That folder isn't a git repository."
+        case "not_found": "swe couldn't find that worktree. It may already be gone."
+        case "not_safe": "swe won't remove this without force, because it could lose work."
+        case "exists": "Something already exists there."
+        case "git_failed": "git reported an error."
+        case "gh_unavailable": "The GitHub CLI isn't available or isn't signed in, so swe couldn't check pull requests."
+        case "busy": "Another swe worktree command is running. Try again in a moment."
+        default: nil
+        }
+        guard let lead else { return message }
+        return message.isEmpty ? lead : "\(lead) \(message)"
     }
 }
 
@@ -396,7 +459,7 @@ public enum WorktreeCommand {
     public static func list(_ scope: WorktreeScope) -> [String] {
         switch scope {
         case .all: ["wt", "list", "--all", "--json"]
-        case .repo(let path): ["wt", "list", "--repo", path, "--json"]
+        case .repo(let path): ["wt", "list", "--repo=\(path)", "--json"]
         }
     }
 
@@ -406,14 +469,14 @@ public enum WorktreeCommand {
         var args = ["wt", "add", draft.repoPath]
         switch draft.mode {
         case .existingBranch:
-            args += ["--branch", draft.trimmedBranch]
+            args += ["--branch=\(draft.trimmedBranch)"]
         case .newBranch:
-            args += ["--branch", draft.trimmedBranch, "--new"]
-            if !draft.trimmedBase.isEmpty { args += ["--base", draft.trimmedBase] }
+            args += ["--branch=\(draft.trimmedBranch)", "--new"]
+            if !draft.trimmedBase.isEmpty { args.append("--base=\(draft.trimmedBase)") }
         case .pullRequest:
-            args += ["--pr", draft.trimmedPR]
+            args.append("--pr=\(draft.trimmedPR)")
         }
-        if !draft.trimmedPath.isEmpty { args += ["--path", draft.trimmedPath] }
+        if !draft.trimmedPath.isEmpty { args.append("--path=\(draft.trimmedPath)") }
         return args + ["--json"]
     }
 
@@ -426,7 +489,7 @@ public enum WorktreeCommand {
 
     public static func lock(_ path: String, reason: String) -> [String] {
         let reason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
-        return ["wt", "lock", path] + (reason.isEmpty ? [] : ["--reason", reason]) + ["--json"]
+        return ["wt", "lock", path] + (reason.isEmpty ? [] : ["--reason=\(reason)"]) + ["--json"]
     }
 
     public static func unlock(_ path: String) -> [String] { ["wt", "unlock", path, "--json"] }
@@ -440,7 +503,7 @@ public enum WorktreeCommand {
     public static func prune(scope: WorktreeScope, includeDirty: Bool, confirmed: Bool) -> [String] {
         var args = ["wt", "prune"]
         if case .all = scope { args.append("--all") }
-        if includeDirty { args += ["--include", "merged-dirty"] }
+        if includeDirty { args.append("--include=merged-dirty") }
         if confirmed { args.append("--yes") }
         return args + ["--json"]
     }
@@ -579,7 +642,8 @@ extension SweClient {
 
 public enum WorktreeFormat {
     /// "1.2 GB", "340 MB": Finder's decimal sizes, since `du` estimates.
-    public static func bytes(_ count: Int) -> String {
+    public static func bytes(_ count: Int?) -> String {
+        guard let count else { return "Not measured" }
         if count <= 0 { return "0 KB" }
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
@@ -590,6 +654,15 @@ public enum WorktreeFormat {
     public static func lastCommit(_ date: Date?, now: Date = Date()) -> String {
         guard let date else { return "No date" }
         return UsageFormat.ago(date, now: now)
+    }
+
+    /// The harness as the page names it.
+    public static func harness(_ id: String) -> String {
+        switch id {
+        case "swe-pr": "swe PR checkout"
+        case "other": "Other"
+        default: HarnessMark(id).name
+        }
     }
 
     /// "1 worktree", "12 worktrees".
@@ -604,7 +677,7 @@ public struct WorktreeGroup: Identifiable, Equatable, Sendable {
     public let id: String
     public let title: String
     public let worktrees: [Worktree]
-    public var totalBytes: Int { worktrees.reduce(0) { $0 + $1.sizeBytes } }
+    public var totalBytes: Int { worktrees.reduce(0) { $0 + ($1.sizeBytes ?? 0) } }
 }
 
 /// The page's headline numbers, over the whole loaded list.
@@ -656,9 +729,9 @@ public enum WorktreeFilter {
         let reclaim = worktrees.filter { $0.state == .mergedClean && !$0.locked }
         return WorktreeSummary(
             count: worktrees.count,
-            totalBytes: worktrees.reduce(0) { $0 + $1.sizeBytes },
-            rebuildableBytes: worktrees.reduce(0) { $0 + $1.rebuildableBytes },
-            reclaimableBytes: reclaim.reduce(0) { $0 + $1.sizeBytes },
+            totalBytes: worktrees.reduce(0) { $0 + ($1.sizeBytes ?? 0) },
+            rebuildableBytes: worktrees.reduce(0) { $0 + ($1.rebuildableBytes ?? 0) },
+            reclaimableBytes: reclaim.reduce(0) { $0 + ($1.sizeBytes ?? 0) },
             reclaimableCount: reclaim.count)
     }
 
