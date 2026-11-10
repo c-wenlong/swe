@@ -785,6 +785,51 @@ to use their own login state and environment."""
   stores tokens. The few writes (merge, rerun, inbox read, issue comment)
   are explicit commands, never side effects of a read."""
     ),
+    "worktree": (
+        "Find, add, remove, prune and slim git worktrees",
+        f"""\
+  {c('cyan', 'swe wt list [--all] [--repo=PATH] [--no-size]')}
+                             Every worktree with its repo, branch, state, PR,
+                             last commit and size (du estimates). Default
+                             scope is the repo you are in; --all adds every
+                             repo swe knows (worktree.roots in config, swe gh
+                             mirrors, harness worktree folders).
+  {c('cyan', 'swe wt show <path>')}         One worktree in full.
+  {c('cyan', 'swe wt add <repo> --branch=B [--new] [--base=REF] [--path=P]')}
+  {c('cyan', 'swe wt add <repo> --pr=N [--path=P]')}
+                             A worktree for a branch (--new creates it) or a
+                             PR's head, by default in ../<repo>-worktrees/.
+  {c('cyan', 'swe wt remove <path> [--force] [--delete-branch]')}
+                             git worktree remove. Anything but merged-clean
+                             needs --force; main and protected never go.
+  {c('cyan', 'swe wt lock <path> [--reason=R]')} / {c('cyan', 'unlock <path>')}
+  {c('cyan', 'swe wt move <path> <new-path>')}
+  {c('cyan', 'swe wt prune')}               Dry run: what would go and how much it frees.
+  {c('cyan', 'swe wt prune --yes')}         Remove merged-clean worktrees (git worktree
+                             remove --force, then git worktree prune).
+      {c('cyan', '--include=merged-dirty')}   Also offer merged worktrees with changes,
+                             one yes per worktree.
+      {c('cyan', '--branch=<name>')}          Only that branch's worktree: for post-merge
+                             hooks and the PR loop's cleanup step.
+      {c('cyan', '--auto')}                   Act (like --yes) only in repos whose config
+                             sets worktree.repos.<repo>.auto_prune to true.
+      {c('cyan', '--delete-branches')}        Also delete local branches that are merged,
+                             or whose tip is a merged PR's head. Never remote.
+  {c('cyan', 'swe wt slim [<path> | --all] [--days=N] [--yes]')}
+                             Delete git-ignored rebuildable folders (.venv,
+                             node_modules, .next, build, dist, target,
+                             DerivedData, .build). For a scope: unmerged
+                             worktrees, folders untouched for N days (14).
+
+  States: {c('green', 'merged-clean')}, {c('yellow', 'merged-dirty')}, {c('cyan', 'open-pr')}, no-pr, {c('red', 'orphaned')}, unknown,
+  protected, main. Merged comes from the PR on GitHub (squash merges defeat
+  git ancestry); a detached HEAD counts as merged when it is on origin/main.
+  When gh cannot answer the state is unknown, and unknown is never removed.
+  The main checkout, ~/.swe/cache/install/src and worktree.protect paths are
+  never touched; prune also skips locked worktrees and the one you are in.
+  Applied prune and slim runs log to ~/.swe/logs/worktree/. Every command
+  takes --json; a failure prints {{"error": {{"code", "message"}}}}."""
+    ),
     "remote": (
         "Watch and steer sessions from a phone",
         f"""\
@@ -945,6 +990,7 @@ COMMAND_CATEGORIES = [
     ]),
     ("GitHub", [
         ("gh",      None),
+        ("worktree", "wt"),
     ]),
     ("Shell", [
         ("autocomplete", None),

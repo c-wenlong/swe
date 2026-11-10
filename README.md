@@ -296,6 +296,7 @@ swe mcp sync opencode cursor # copy MCP servers between tools
 | `swe remote <subcommand> …` | | Watch and steer sessions from a phone: `serve` (hub), `agent` (satellite), `setup`, `pair`, `status`, `devices`, `attach`, `notify`, `ssh` |
 | `swe sync [status]` | | Commit, merge and push the `~/.swe` hub repo; `status` shows the branch mode, ahead/behind and uncommitted changes |
 | `swe gh <subcommand> …` | | GitHub surfaces over `gh`: `pr`, `issue`, `run`, `inbox`, `repo`, `board`, `sync`, … |
+| `swe worktree [list\|show\|add\|remove\|lock\|unlock\|move\|prune\|slim] …` | `wt` | Find agent worktrees across repos and harness folders, classify them by PR state, add and remove single worktrees, remove merged ones in bulk (`prune`, dry run unless `--yes`) and delete rebuildable folders (`slim`) |
 | `swe bug` | | Open a bug report on GitHub with your versions filled in |
 | `swe version` | `-v`, `--version` | Print the swe version |
 | `swe help [command]` | `-h` | Full or per-command help |

@@ -64,6 +64,7 @@ cmd_harness = _lazy("swe.setup.commands", "cmd_harness")
 cmd_setup = _lazy("swe.setup.commands", "cmd_setup")
 cmd_skills = _lazy("swe.skills.commands", "cmd_skills")
 cmd_sync = _lazy("swe.sync", "cmd_sync")
+cmd_worktree = _lazy("swe.worktrees.commands", "cmd_worktree")
 # swe.remote pulls sessions, reports and the hub in (#517).
 cmd_remote = _lazy("swe.remote", "cmd_remote")
 
@@ -204,6 +205,8 @@ COMMANDS = {
     "config": cmd_config,
     "remote": cmd_remote,
     "sync": cmd_sync,
+    "worktree": cmd_worktree,
+    "wt": cmd_worktree,
     "report": cmd_report,
     "discover": lambda args: cmd_harness(["discover", *args]),
     "autocomplete": cmd_autocomplete,

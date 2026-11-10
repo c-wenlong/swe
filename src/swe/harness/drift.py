@@ -71,7 +71,7 @@ class Finding:
 # shell-completion entry point. Keep this in sync by hand if COMMANDS grows a
 # new alias-only entry.
 NO_TOPIC_WHITELIST = frozenset({
-    "__complete", "ls", "rm", "run", "sk", "hs", "pv", "-h", "--help", "help",
+    "__complete", "ls", "rm", "run", "sk", "hs", "pv", "wt", "-h", "--help", "help",
     "-v", "-V", "--version",
 })
 
