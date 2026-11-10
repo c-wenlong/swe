@@ -102,6 +102,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Codex education monthly usage reads the workspace billing allowance** when the standard usage response omits it, showing both the percentage and credit amounts.
+
 - **AGENTS.md editor header no longer wraps at narrow widths (Mac).** In a
   900 pt window the Edit tab's Revert, Save and Close buttons wrapped
   mid-word ("Rever t"). A narrow editor now shows them as icons (named in

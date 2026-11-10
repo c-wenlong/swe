@@ -167,11 +167,21 @@ public actor UsageService {
 
         switch http.statusCode {
         case 200..<300:
-            guard let parsed = parse(data, key: key, credential: credential, now: answered) else {
+            guard var parsed = parse(data, key: key, credential: credential, now: answered) else {
                 let status = UsageStatus.error("unexpected response from the usage API")
                 store.save(failed(status, entry: entry, reading: reading,
                                   credential: credential, at: answered), for: key)
                 return result(status, reading: reading, credential: credential)
+            }
+            // A missing monthly allowance must not discard valid short-window
+            // readings when billing is unavailable or not granted to this seat.
+            if key.provider == .codex, !parsed.windows.contains(where: { $0.label == "30d" }),
+               let request = CodexUsageAPI.monthlyRequest(credential, plan: parsed.plan),
+               let (monthlyData, monthlyHTTP) = try? await transport.send(request),
+               (200..<300).contains(monthlyHTTP.statusCode),
+               let monthly = CodexUsageAPI.parseMonthly(monthlyData) {
+                parsed.windows.append(monthly.window)
+                parsed.monthlyCredits = monthly.credits
             }
             let fresh = StoredReading(plan: parsed.plan, email: parsed.email, windows: parsed.windows, fetchedAt: answered, monthlyCredits: parsed.monthlyCredits)
             store.save(StoredAccount(fingerprint: credential.fingerprint, reading: fresh,

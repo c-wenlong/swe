@@ -99,6 +99,59 @@ import Testing
         #expect(parsed.monthlyCredits == nil)
     }
 
+    @Test func educationMonthlyAllowanceComesFromWorkspaceBilling() async throws {
+        let h = UsageHarness()
+        h.files.set("\(codexHome)/auth.json", codexAuthJSON())
+        h.transport.reply(200, body: Data(#"{"plan_type":"education","rate_limit":{"primary_window":{"used_percent":53}},"spend_control":{"reached":false,"individual_limit":null}}"#.utf8))
+        h.transport.reply(200, body: Data(#"{"balance_unit":"credit","effective_monthly_limit":{"limit":700,"enforcement_mode":"HARD_CAP","limit_mode":"amount_credits"},"current_month_usage":502.99}"#.utf8))
+        let service = h.makeService()
+        let usage = await service.usage(for: codexKey, force: true)
+        #expect(usage.windows.map(\.label) == ["5h", "30d"])
+        #expect(abs((usage.windows.last?.usedPercent ?? 0) - 71.8557) < 0.001)
+        #expect(usage.monthlyCredits == MonthlyCredits(used: 502.99, limit: 700))
+        let request = try #require(h.transport.requests.last)
+        #expect(request.url?.path == "/backend-api/accounts/acct-123/spend-controls/current-user/monthly-usage")
+        #expect(request.value(forHTTPHeaderField: "ChatGPT-Account-Id") == "acct-123")
+        let cached = await service.cachedUsage(for: codexKey)
+        #expect(cached?.windows == usage.windows)
+        #expect(cached?.monthlyCredits == usage.monthlyCredits)
+    }
+
+    @Test func typedDollarLimitsDoNotBecomeCredits() throws {
+        let body = #"{"balance_unit":"usd","effective_monthly_limit":{"limit_amount":{"unit":"usd","amount":"28"}},"current_month_usage":7}"#
+        let monthly = try #require(CodexUsageAPI.parseMonthly(Data(body.utf8)))
+        #expect(monthly.window.usedPercent == 25)
+        #expect(monthly.credits == nil)
+    }
+
+    @Test(arguments: [(0.0, 0.0), (700.0, 701.0)])
+    func zeroAndExceededLimitsAreClamped(cap: Double, used: Double) throws {
+        let body = "{\"effective_monthly_limit\":{\"limit\":\(cap)},\"current_month_usage\":\(used)}"
+        let monthly = try #require(CodexUsageAPI.parseMonthly(Data(body.utf8)))
+        #expect(monthly.window.usedPercent == 100)
+        #expect(monthly.credits == MonthlyCredits(used: used, limit: cap))
+    }
+
+    @Test func unavailableMonthlyBillingKeepsTheOtherWindows() async {
+        let h = UsageHarness()
+        h.files.set("\(codexHome)/auth.json", codexAuthJSON())
+        h.transport.reply(200, body: Data(#"{"plan_type":"education","rate_limit":{"primary_window":{"used_percent":53}}}"#.utf8))
+        h.transport.reply(403)
+        let usage = await h.makeService().usage(for: codexKey, force: true)
+        #expect(usage.status == .ok)
+        #expect(usage.windows.map(\.label) == ["5h"])
+    }
+
+    @Test(arguments: [
+        #"{"effective_monthly_limit":{"limit":700,"limit_mode":"unlimited_platform_max"},"current_month_usage":5}"#,
+        #"{"effective_monthly_limit":{"limit":-1},"current_month_usage":5}"#,
+        #"{"balance_unit":"usd","effective_monthly_limit":{"limit":700},"current_month_usage":5}"#,
+        #"{"effective_monthly_limit":{"limit":700},"current_month_usage":true}"#,
+    ])
+    func invalidMonthlyBillingIsHidden(body: String) {
+        #expect(CodexUsageAPI.parseMonthly(Data(body.utf8)) == nil)
+    }
+
     @Test(arguments: [
         ("education", "Education"), ("edu", "Edu"), ("edu_plus", "Edu Plus"), ("edu_pro", "Edu Pro"),
         ("pro", "Pro 20x"), ("self_serve_business_prolite", "Business 5x"),
