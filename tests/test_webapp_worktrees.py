@@ -192,36 +192,76 @@ class TestWrites(_Stubbed, unittest.TestCase):
             with self.subTest(body=body), self.assertRaises(PageError):
                 self.post("prune", body)
 
-    def test_prune_yes_needs_the_previewed_paths_and_gates_dirty_ones(self):
+    def names(self):
+        return [c[0] for c in self.wt.calls]
+
+    def test_prune_yes_needs_the_previewed_paths(self):
         for body in ({"all": True, "yes": True}, {"all": True, "yes": True, "paths": []},
                      {"all": True, "yes": True, "paths": ["rel"]}):
             with self.subTest(body=body), self.assertRaises(PageError):
                 self.post("prune", body)
         self.assertEqual(self.wt.calls, [])
-        d = self.post("prune", {"all": True, "yes": True, "include": "merged-dirty", "paths": ["/r/wt/a"]})
-        self.assertFalse(d["dry_run"])
-        # A dry run first, then the real one with a confirm that knows the preview.
-        self.assertEqual([c[2]["yes"] for c in self.wt.calls], [False, True])
-        confirm = self.last()[2]["confirm"]
-        self.assertTrue(confirm(SimpleNamespace(path="/r/wt/a")))
-        self.assertFalse(confirm(SimpleNamespace(path="/r/wt/other")))
 
-    def test_prune_refuses_when_more_would_go_than_the_preview_showed(self):
-        with self.assertRaises(PageError) as cm:
-            self.post("prune", {"all": True, "yes": True, "paths": ["/r/wt/else"]})
-        self.assertEqual((cm.exception.status, cm.exception.code), (409, "changed"))
-        self.assertEqual([c[2]["yes"] for c in self.wt.calls], [False])
+    def test_prune_yes_removes_exactly_the_previewed_paths_without_force(self):
+        d = self.post("prune", {"all": True, "yes": True, "paths": ["/r/wt/a", "/r/wt/b", "/r/wt/a"]})
+        # Never prune(yes=True): its confirm hook gates only merged-dirty ones.
+        self.assertEqual(self.names(), ["remove", "remove"])
+        self.assertEqual([c[1] for c in self.wt.calls], [("/r/wt/a",), ("/r/wt/b",)])
+        self.assertEqual([c[2] for c in self.wt.calls],
+                         [{"force": False, "home": HOME}] * 2)
+        self.assertEqual((d["dry_run"], d["removed"], d["skipped"]), (False, ["/r/wt/a", "/r/wt/b"], []))
+        self.assertIsInstance(d["freed_bytes"], int)
+
+    def test_prune_yes_reports_what_swe_refused(self):
+        self.wt = _fake_module({"remove": ("not_safe", "feat/a is open-pr; pass --force")})
+        sys.modules["swe.worktrees"] = self.wt
+        d = self.post("prune", {"all": True, "yes": True, "paths": ["/r/wt/a"]})
+        self.assertEqual((d["removed"], d["skipped"]),
+                         ([], [{"path": "/r/wt/a", "reason": "feat/a is open-pr; pass --force"}]))
+
+    def test_prune_forces_only_a_ticked_merged_dirty_one_that_is_still_dirty_and_free(self):
+        rows = {"/r/wt/dirty": _w("/r/wt/dirty", "d", "merged-dirty"),
+                "/r/wt/locked": _w("/r/wt/locked", "l", "merged-dirty", locked=True),
+                "/r/wt/held": _w("/r/wt/held", "h", "merged-dirty", hold="in use"),
+                "/r/wt/open": _w("/r/wt/open", "o", "open-pr"),
+                "/r/wt/clean": _w("/r/wt/clean", "c", "merged-clean")}
+        shown = []
+        self.wt.show = lambda path, **k: (shown.append(path), {"worktree": rows[path]})[1]
+        body = {"all": True, "yes": True, "include": "merged-dirty", "paths": list(rows)}
+        d = self.post("prune", body)
+        forced = {c[1][0]: c[2]["force"] for c in self.wt.calls if c[0] == "remove"}
+        self.assertEqual(forced, {"/r/wt/dirty": True, "/r/wt/open": False, "/r/wt/clean": False})
+        self.assertEqual([x["path"] for x in d["skipped"]], ["/r/wt/locked", "/r/wt/held"])
+        # Without the include box nothing is forced and show is never asked.
+        self.wt.calls.clear()
+        shown.clear()
+        self.post("prune", {"all": True, "yes": True, "paths": ["/r/wt/dirty"]})
+        self.assertEqual((shown, self.wt.calls[0][2]["force"]), ([], False))
 
     def test_slim_one_or_a_scope_never_both(self):
         self.post("slim", {"path": "/r/wt/a"})
         self.assertEqual(self.last(), ("slim", ("/r/wt/a",), {"yes": False, "home": HOME}))
-        self.post("slim", {"all": True, "yes": True, "days": 7})
-        self.assertEqual(self.last(), ("slim", (), {"yes": True, "all": True, "days": 7, "home": HOME}))
+        self.post("slim", {"all": True, "days": 7})
+        self.assertEqual(self.last(), ("slim", (), {"yes": False, "all": True, "days": 7, "home": HOME}))
         self.post("slim", {"repo": "/r/main"})
         self.assertEqual(self.last()[2]["repo"], "/r/main")
         for body in ({}, {"path": "/r/wt/a", "all": True}, {"all": True, "days": -1}, {"all": True, "days": "3"}):
             with self.subTest(body=body), self.assertRaises(PageError):
                 self.post("slim", body)
+
+    def test_slim_yes_needs_the_previewed_folders_and_refuses_others(self):
+        folder = "/r/wt/a/node_modules"
+        with self.assertRaises(PageError):
+            self.post("slim", {"all": True, "yes": True})
+        self.assertEqual(self.wt.calls, [])
+        d = self.post("slim", {"all": True, "yes": True, "paths": [folder]})
+        self.assertEqual([c[2]["yes"] for c in self.wt.calls], [False, True])
+        self.assertFalse(d["dry_run"])
+        self.wt.calls.clear()
+        with self.assertRaises(PageError) as cm:
+            self.post("slim", {"path": "/r/wt/a", "yes": True, "paths": ["/r/wt/a/.venv"]})
+        self.assertEqual((cm.exception.status, cm.exception.code), (409, "changed"))
+        self.assertEqual([c[2]["yes"] for c in self.wt.calls], [False])
 
     def test_unknown_action_and_bad_body(self):
         with self.assertRaises(PageError) as cm:
@@ -350,7 +390,7 @@ const globals = {
 };
 const names = Object.keys(globals);
 const run = new Function(...names, src + `
-;return { wtBytes, wtGroups, wtMatches, wtOpenDelete, wtCanDelete, wtPage, wtShow: (f) => { wtShow = f; }, wtDone: (f) => { wtDone = f; }, wtRows: wtRowHtml };`);
+;return { wtBytes, wtGroups, wtMatches, wtOpenDelete, wtCanDelete, wtAllows, wtPage, wtShow: (f) => { wtShow = f; }, wtDone: (f) => { wtDone = f; }, wtRows: wtRowHtml };`);
 const api = run(...names.map((n) => globals[n]));
 module.exports = { api, posts, els, el, setReply: (r) => { reply = r; } };
 """
@@ -491,6 +531,31 @@ console.log(JSON.stringify(rows));
         self.assertIn('<img alt="claude">', claude)
         self.assertNotIn(">CLI<", claude)
         self.assertIn('data-wt="delete" data-path="/r/l" disabled title="Unlock first"', locked)
+
+    def test_actions_mirror_what_the_cli_accepts(self):
+        out = self.node("""
+const { api } = h;
+const actions = ['lock', 'unlock', 'move', 'slim', 'delete'];
+const table = {};
+for (const [state, locked] of [['main', false], ['protected', false], ['orphaned', false], ['merged-clean', false],
+    ['no-pr', true]]) {
+  table[state + (locked ? '-locked' : '')] = actions.filter((a) => api.wtAllows({ state, locked }, a));
+}
+console.log(JSON.stringify(table));
+""")
+        self.assertEqual(out, {
+            "main": [], "protected": [], "orphaned": [],
+            "merged-clean": ["lock", "move", "slim", "delete"],
+            "no-pr-locked": ["unlock", "move", "slim", "delete"],
+        })
+        rows = self.node(f"""
+const {{ api }} = h;
+console.log(JSON.stringify([{json.dumps(_w("/r/main", "main", "main", rebuildable_bytes=5))},
+  {json.dumps(_w("/r/p", "p", "protected", rebuildable_bytes=5))}].map(api.wtRows)));
+""")
+        for html in rows:
+            self.assertNotIn('data-wt="slim"', html)
+            self.assertNotIn('data-wt="delete"', html)
 
     def test_a_locked_worktree_cannot_be_deleted_from_the_sheet(self):
         self._force, self._branch = False, False

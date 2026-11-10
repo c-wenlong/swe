@@ -81,7 +81,17 @@ const wtBase = (path) => String(path || "").replace(/\/+$/, "").split("/").pop()
 const wtCount = (n, one, many) => `${n} ${n === 1 ? one : many || one + "s"}`;
 const wtBranchName = (w) => w.branch || `detached at ${wtShort(w.head)}`;
 /* swe never deletes a folder git no longer lists, so an orphan has no Delete. */
-const wtCanDelete = (w) => !["main", "protected", "orphaned"].includes(w.state);
+/* Which actions swe.worktrees accepts for a worktree, one rule for the row
+ * and the detail page. api._refuse_special turns main and protected down for
+ * remove, lock, move and slim; an orphan has nothing swe may touch; unlock
+ * is for a locked one. */
+function wtAllows(w, action) {
+  if (action === "unlock") return !!w.locked;
+  if (["main", "protected", "orphaned"].includes(w.state)) return false;
+  if (action === "lock") return !w.locked;
+  return true; // delete, move, slim
+}
+const wtCanDelete = (w) => wtAllows(w, "delete");
 const wtPruneCommand = (w) => `git -C ${Fmt.shellWord(w.main_checkout || ".")} worktree prune`;
 
 function wtStateBadge(state) {
@@ -122,8 +132,14 @@ function wtSizeText(w) {
 /* ----------------------------------------------------------------- model */
 
 const wtList = () => (wtPage.data && wtPage.data.worktrees) || [];
-const wtFind = (path) => wtList().find((w) => w.path === path)
-  || (wtPage.detail && wtPage.detail.path === path ? wtPage.detail : null);
+/* The freshest row for a path: on that worktree's own page, the detail the
+ * page just read beats the list it came from (an unlock changes only the
+ * detail's copy until the list reloads). */
+function wtFind(path) {
+  const d = wtPage.detail;
+  if (d && d.path === path && wtQuery().get("path") === path) return d;
+  return wtList().find((w) => w.path === path) || (d && d.path === path ? d : null);
+}
 const wtRepoKey = (w) => w.main_checkout || w.repo || w.path;
 const wtRepoTitle = (w) => w.repo || wtBase(w.main_checkout || w.path);
 
@@ -271,7 +287,7 @@ function wtOrphanNote(w) {
 function wtRowHtml(w) {
   const actions = [];
   actions.push(`<button type="button" class="icon-button wt-copy" data-wt-copy="${esc(w.path)}" aria-label="Copy path" title="Copy path">${Fmt.copyIcon()}</button>`);
-  if (w.rebuildable_bytes) actions.push(`<button type="button" class="btn hairline secondary" data-wt="slim" data-path="${esc(w.path)}" title="Delete what a build can recreate">Slim</button>`);
+  if (w.rebuildable_bytes && wtAllows(w, "slim")) actions.push(`<button type="button" class="btn hairline secondary" data-wt="slim" data-path="${esc(w.path)}" title="Delete what a build can recreate">Slim</button>`);
   if (wtCanDelete(w)) actions.push(`<button type="button" class="btn hairline secondary danger-text" data-wt="delete" data-path="${esc(w.path)}"${w.locked ? ' disabled title="Unlock first"' : ""}>Delete…</button>`);
   const notes = [];
   if (w.state === "orphaned") notes.push(wtOrphanNote(w));
@@ -399,6 +415,11 @@ async function renderWtDetail(path) {
     return;
   }
   p.detail = data.worktree;
+  // Keep the list's copy in step, so Back doesn't show an older state.
+  if (p.data && p.data.worktrees) {
+    const i = p.data.worktrees.findIndex((x) => x.path === data.worktree.path);
+    if (i >= 0) p.data.worktrees[i] = data.worktree;
+  }
   // The list behind it, if it has not loaded yet, supplies the repo choices.
   paintWtDetail(data.worktree);
 }
@@ -411,12 +432,11 @@ function paintWtDetail(w) {
   const back = `<a class="wt-back" href="#/worktrees">‹ Worktrees</a>`;
   const canDelete = wtCanDelete(w);
   const orphan = w.state === "orphaned";
-  const buttons = orphan ? `<button class="btn hairline wt-button" type="button" data-wt-copy="${esc(w.path)}">${Fmt.copyIcon()}Copy path</button>` : [
-    w.locked
-      ? `<button class="btn hairline wt-button" type="button" data-wt="unlock" data-path="${esc(w.path)}">Unlock</button>`
-      : `<button class="btn hairline wt-button" type="button" data-wt="lock" data-path="${esc(w.path)}">Lock…</button>`,
-    w.state !== "main" ? `<button class="btn hairline wt-button" type="button" data-wt="move" data-path="${esc(w.path)}"${w.locked ? ' disabled title="Unlock first"' : ""}>Move…</button>` : "",
-    `<button class="btn hairline wt-button" type="button" data-wt="slim" data-path="${esc(w.path)}"${w.rebuildable_bytes ? "" : " disabled"}>Slim…</button>`,
+  const buttons = [
+    wtAllows(w, "unlock") ? `<button class="btn hairline wt-button" type="button" data-wt="unlock" data-path="${esc(w.path)}">Unlock</button>` : "",
+    wtAllows(w, "lock") ? `<button class="btn hairline wt-button" type="button" data-wt="lock" data-path="${esc(w.path)}">Lock…</button>` : "",
+    wtAllows(w, "move") ? `<button class="btn hairline wt-button" type="button" data-wt="move" data-path="${esc(w.path)}"${w.locked ? ' disabled title="Unlock first"' : ""}>Move…</button>` : "",
+    wtAllows(w, "slim") ? `<button class="btn hairline wt-button" type="button" data-wt="slim" data-path="${esc(w.path)}"${w.rebuildable_bytes ? "" : " disabled"}>Slim…</button>` : "",
     `<button class="btn hairline wt-button" type="button" data-wt-copy="${esc(w.path)}">${Fmt.copyIcon()}Copy path</button>`,
     canDelete ? `<button class="btn hairline wt-button danger-text" type="button" data-wt="delete" data-path="${esc(w.path)}"${w.locked ? ' disabled title="Unlock first"' : ""}>Delete…</button>` : "",
   ].join("");
@@ -492,6 +512,9 @@ const wtHereLink = (w) => (wtQuery().get("path") ? wtDetailLink(w.path) : null);
 function wtShow(inner, cls = "") {
   const sheet = bodySheet("wt-sheet", "sheet wt-sheet", "Worktrees");
   sheet.dataset.token = String(++wtPage.token);
+  // A new sheet starts idle: a write still out for the last one must not
+  // leave this one's Create or Delete disabled (its reply is dropped by the token).
+  sheet.dataset.working = "";
   sheet.className = `sheet wt-sheet${cls ? ` ${cls}` : ""}`;
   sheet.innerHTML = `<div class="sheet-body">${inner}</div>`;
   if (!sheet.open) sheet.showModal();
@@ -765,7 +788,7 @@ const wtScope = () => (wtPage.repo ? { repo: wtPage.repo } : { all: true });
 
 /* ---- Slim: preview what a build can recreate, then confirm. */
 
-async function wtOpenSlim(w) {
+async function wtOpenSlim(w, notice) {
   const title = w ? `Slim ${wtBranchName(w)}` : wtPage.repo ? "Slim this repo's worktrees" : "Slim every worktree";
   const body = w ? { path: w.path } : wtScope();
   const h = wtShow(`<div class="sheet-title">${esc(title)}</div>
@@ -788,6 +811,7 @@ async function wtOpenSlim(w) {
   const total = data.freed_bytes != null ? data.freed_bytes : wtSum(dirs, "bytes");
   h.sheet.querySelector(".sheet-body").innerHTML = `<form id="wt-s-form">
     <div class="sheet-title">${esc(title)}</div>
+    ${notice ? `<p class="note" role="status">${esc(notice)}</p>` : ""}
     <p class="caption">These ${wtCount(dirs.length, "folder")} can be rebuilt by installing or building again. Deleting them frees ${esc(wtBytes(total))}. Your source files stay.${data.days ? ` Folders changed in the last ${esc(wtCount(data.days, "day"))} are kept.` : ""}</p>
     <ul class="wt-list">${dirs.map((d) => `<li><code class="wt-path">${esc(wtTilde(d.path))}</code><span class="num caption">${esc(wtBytes(d.bytes))}</span></li>`).join("")}</ul>
     <p class="error" id="wt-sheet-error" role="alert" hidden></p>
@@ -803,13 +827,17 @@ async function wtOpenSlim(w) {
     const go = wtById("wt-s-go");
     go.disabled = true;
     go.textContent = "Deleting…";
-    const reply = await wtPost("slim", { ...body, yes: true });
+    // `yes` goes with the folders the preview listed: the hub refuses when others would go.
+    const reply = await wtPost("slim", { ...body, yes: true, paths: dirs.map((d) => d.path) });
     if (!wtLive(h)) return;
     h.sheet.dataset.working = "";
     if (reply.status === 200 && reply.data) {
       h.sheet.close();
       wtDone(`Slimmed ${w ? wtBranchName(w) : "every worktree"}, freed ${wtBytes(reply.data.freed_bytes)}.`, w ? wtHereLink(w) : null);
       return;
+    }
+    if (reply.status === 409 && reply.data && reply.data.error && reply.data.error.code === "changed") {
+      return wtOpenSlim(w, reply.data.error.message);
     }
     go.disabled = false;
     go.textContent = `Delete ${wtCount(dirs.length, "folder")}`;

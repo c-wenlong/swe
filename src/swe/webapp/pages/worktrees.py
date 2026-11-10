@@ -24,7 +24,9 @@ Nothing destructive runs unless the body says so: ``force``, ``yes`` and
 ``delete_branch`` count only when they are the JSON value ``true``, so a
 string like ``"false"`` or a stray ``1`` never turns one on. ``prune`` and
 ``slim`` are dry runs until ``yes`` is true, and a ``prune`` with ``yes`` must
-name the previewed ``paths``: it refuses (409 ``changed``) when more would go. A ``WorktreeError`` becomes a
+name the previewed ``paths`` and removes exactly those, one ``remove`` each and
+never forced except a ticked merged-dirty one; a ``slim`` with ``yes`` must name
+the previewed folder ``paths`` and refuses (409 ``changed``) when more would go. A ``WorktreeError`` becomes a
 ``PageError`` with the same code and message.
 
 ``swe.worktrees`` is imported when a request needs it, so the page loads
@@ -34,6 +36,7 @@ name the previewed ``paths``: it refuses (409 ``changed``) when more would go. A
 from __future__ import annotations
 
 import importlib
+import shutil
 import threading
 from pathlib import Path
 from typing import Any
@@ -211,6 +214,26 @@ def _scope(body: dict) -> dict:
     return {"repo": repo} if repo else {"all": True}
 
 
+def _paths(body: dict, what: str) -> list[str]:
+    """The absolute paths a confirm names (what the preview listed)."""
+    paths = body.get("paths")
+    if (not isinstance(paths, list) or not paths
+            or not all(isinstance(p, str) and Path(p).is_absolute() for p in paths)):
+        raise PageError(400, "bad_request", f"yes needs paths: {what} the preview listed.")
+    return paths
+
+
+def _free_bytes(path: str) -> int | None:
+    """Free space on the volume holding ``path`` (its nearest folder that exists)."""
+    probe = Path(path)
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    try:
+        return shutil.disk_usage(probe).free
+    except OSError:
+        return None
+
+
 def _prune(ctx, body: dict) -> dict:
     include = body.get("include")
     if include is not None and include != "merged-dirty":
@@ -218,20 +241,34 @@ def _prune(ctx, body: dict) -> dict:
     args = dict(_scope(body), include=include, branch=_text(body, "branch"))
     if not _flag(body, "yes"):
         return _call(ctx, "prune", yes=False, **args)
-    # Deleting takes the paths the person saw in the preview, and only
-    # those can go. merged-clean worktrees have no per-item gate in the
-    # API, so a changed list is refused here and previewed again.
-    paths = body.get("paths")
-    if (not isinstance(paths, list) or not paths
-            or not all(isinstance(p, str) and Path(p).is_absolute() for p in paths)):
-        raise PageError(400, "bad_request", "yes needs paths: the worktrees the preview listed.")
-    previewed = set(paths)
-    dry = _call(ctx, "prune", yes=False, **args)
-    extra = [c.get("path") for c in dry.get("candidates", []) if c.get("path") not in previewed]
-    if extra:
-        raise PageError(409, "changed", "The list changed since the preview "
-                        f"({len(extra)} more would be deleted). Preview again.")
-    return _call(ctx, "prune", yes=True, confirm=lambda wt: wt.path in previewed, **args)
+    # Confirming never calls prune(yes=True): its ``confirm`` hook gates only
+    # merged-dirty worktrees, so a merged-clean one that appeared after the
+    # preview would go too. Each previewed path is removed on its own
+    # instead, without force, so swe itself refuses any that is no longer
+    # merged-clean (changed, locked, held, or in use).
+    paths = _paths(body, "the worktrees")
+    before = _free_bytes(paths[0])
+    removed: list[str] = []
+    skipped: list[dict] = []
+    for path in dict.fromkeys(paths):
+        try:
+            force = False
+            if include == "merged-dirty":
+                # Force only a worktree that is still merged-dirty, was ticked,
+                # and is neither locked nor held: force would skip both checks.
+                row = _call(ctx, "show", path)["worktree"]
+                if row.get("state") == "merged-dirty":
+                    if row.get("locked") or row.get("hold"):
+                        raise PageError(409, "not_safe", row.get("hold") or "it is locked")
+                    force = True
+            _call(ctx, "remove", path, force=force)
+            removed.append(path)
+        except PageError as exc:
+            skipped.append({"path": path, "reason": exc.message})
+    after = _free_bytes(paths[0])
+    freed = max(0, after - before) if before is not None and after is not None else 0
+    return {"dry_run": False, "candidates": [], "removed": removed,
+            "skipped": skipped, "freed_bytes": freed}
 
 
 def _slim(ctx, body: dict) -> dict:
@@ -243,8 +280,22 @@ def _slim(ctx, body: dict) -> dict:
     if path is not None:
         if _flag(body, "all") or body.get("repo"):
             raise PageError(400, "bad_request", "Give one worktree path, or a scope, not both.")
-        return _call(ctx, "slim", path, yes=_flag(body, "yes"), **extra)
-    return _call(ctx, "slim", yes=_flag(body, "yes"), **_scope(body), **extra)
+        call = lambda yes: _call(ctx, "slim", path, yes=yes, **extra)  # noqa: E731
+    else:
+        scope = _scope(body)
+        call = lambda yes: _call(ctx, "slim", yes=yes, **scope, **extra)  # noqa: E731
+    if not _flag(body, "yes"):
+        return call(False)
+    # Delete only the folders the preview listed: run the dry run again and
+    # refuse when it names others. slim works per worktree and has no
+    # per-folder gate, so a tiny window remains between this check and the run.
+    previewed = set(_paths(body, "the folders"))
+    dry = call(False)
+    extra_dirs = [d.get("path") for d in dry.get("dirs", []) if d.get("path") not in previewed]
+    if extra_dirs:
+        raise PageError(409, "changed", "The folders changed since the preview "
+                        f"({len(extra_dirs)} more would be deleted). Preview again.")
+    return call(True)
 
 
 _ACTIONS: dict[str, Any] = {
