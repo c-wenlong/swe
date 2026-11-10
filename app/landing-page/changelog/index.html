@@ -465,6 +465,18 @@ injected-context first line. <code>swe session</code> and the session counts on
 <code>swe list</code> also pick up <code>~/.codex/archived_sessions/</code> now: archiving a
 thread moves its rollout there, and an archived session still ran.</p>
 </li>
+<li><p><strong><code>swe init</code> no longer re-asks about a harness it already
+registered.</strong> A skills root discovered under an aliased label
+(<code>~/.vibe/skills</code> is &quot;vibe&quot;, the binary behind <code>mistral-vibe</code>) was
+filed in <code>harness.json</code> under that label, while every &quot;is this root
+known?&quot; check translates the label to the canonical registry key —
+so the entry never matched and the &quot;New skills folders found&quot; picker
+came back on every run, most visibly inside <code>darwin-rebuild</code>
+activations. Registration now writes the canonical key and absorbs a
+stale label-keyed entry, and the known, archived and disabled-name
+checks all count a key's canonical name too, so an entry an older
+init filed as <code>vibe</code> still reads as registered.</p>
+</li>
 </ul>
 <h3 id="added-1"><a class="anchor" href="#added-1"></a>Added</h3>
 <ul>
