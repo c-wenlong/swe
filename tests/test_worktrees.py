@@ -488,6 +488,19 @@ class WorktreeCases(unittest.TestCase):
         rc, doc = self.cli("show", w["path"])
         self.assertEqual(doc["data"]["worktree"]["pr"]["number"], 10)
         self.assertEqual(doc["data"]["worktree"]["state"], OPEN_PR)
+        # Once PR 10 merges, more commits on pr-10 keep the checkout.
+        self.fx.gh_data.pop("pr-10")
+        self.fx.gh_data["#10"] = {**pr(10, "MERGED", sha), "headRefName": "main"}
+        rc, doc = self.cli("show", w["path"])
+        self.assertEqual(doc["data"]["worktree"]["state"], MERGED_CLEAN)
+        Path(w["path"], "more.txt").write_text("x")
+        run("add", ".", cwd=w["path"])
+        run("commit", "-qm", "more", cwd=w["path"])
+        rc, doc = self.cli("show", w["path"])
+        self.assertEqual(doc["data"]["worktree"]["state"], NO_PR)
+        self.fx.gh_data["pr-10"] = [pr(11, "OPEN")]
+        rc, doc = self.cli("show", w["path"])
+        self.assertEqual(doc["data"]["worktree"]["state"], OPEN_PR)
 
     def test_slim_explicit_path(self):
         mods = Path(self.squash, "node_modules")
