@@ -166,6 +166,34 @@ class InteractivePickerTest(unittest.TestCase):
             self.assertFalse((home / ".bar" / "skills").is_symlink())
             self.assertRegex(out, r"ignored\s+~/\.bar/skills\s+archived in harness\.json")
 
+    def test_aliased_label_registers_under_canonical_name(self):
+        # ~/.vibe/skills discovers as "vibe" but files as "mistral-vibe",
+        # the key registry_name() translates to; keying by the raw label
+        # made the next run offer the same root again.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            (home / ".vibe" / "skills").mkdir(parents=True)
+            _init(home, ["--full"], supported=True, chosen=["vibe"], lines=[""])
+            registry = _registry(home)
+            self.assertNotIn("vibe", registry)
+            entry = registry["mistral-vibe"]
+            self.assertEqual(
+                entry["capabilities"]["skills"]["root"], "~/.vibe/skills"
+            )
+            _, picker = _init(home, ["--full"], supported=True, chosen=[])
+            self.assertFalse(picker.called)
+
+    def test_aliased_label_declined_archives_canonical_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            (home / ".vibe" / "skills").mkdir(parents=True)
+            _init(home, ["--full"], supported=True, chosen=[], lines=[])
+            registry = _registry(home)
+            self.assertNotIn("vibe", registry)
+            self.assertEqual(registry["mistral-vibe"]["state"], "archived")
+            _, picker = _init(home, ["--full"], supported=True, chosen=[])
+            self.assertFalse(picker.called)
+
     def test_skip_leaves_no_instruction_capability(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = _home(tmp)
@@ -389,6 +417,17 @@ class AlreadyKnownTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             home = _home(tmp, {"foobar": {"aliases": ["foo"]}})
             (home / ".config" / "foo" / "skills").mkdir(parents=True)
+            _, picker = _init(home, ["--full"], supported=True, chosen=[])
+            self.assertFalse(picker.called)
+
+    def test_label_shaped_key_is_not_offered(self):
+        # A registry entry an older init filed under the discovered label
+        # ("vibe") rather than the canonical key ("mistral-vibe") is still
+        # known: without this the same root re-prompted on every run.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp, {"vibe": {"capabilities": {
+                "skills": {"root": "~/.vibe/skills"}}}})
+            (home / ".vibe" / "skills").mkdir(parents=True)
             _, picker = _init(home, ["--full"], supported=True, chosen=[])
             self.assertFalse(picker.called)
 

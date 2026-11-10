@@ -318,6 +318,8 @@ def _skills_disabled(registry: dict) -> set[str]:
         if isinstance(skills, dict) and skills.get("supported") is False:
             disabled.add(key)
             disabled.update(aliases_of(entry))
+    # A non-canonical key disables its canonical name too.
+    disabled |= {registry_name(name) for name in list(disabled)}
     return disabled
 
 
@@ -851,6 +853,9 @@ def archived_names(registry: dict) -> set[str]:
         if isinstance(entry, dict) and entry.get("state") == "archived":
             names.add(key)
             names.update(aliases_of(entry))
+    # An entry filed under a non-canonical key archives its canonical name
+    # too: registry_name("vibe") -> "mistral-vibe".
+    names |= {registry_name(name) for name in list(names)}
     return names
 
 SEED_LINKIGNORE = """# Paths swe init leaves alone, one per line, relative to your home.
