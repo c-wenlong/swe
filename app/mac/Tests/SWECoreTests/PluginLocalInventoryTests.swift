@@ -14,7 +14,7 @@ import Testing
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         let listed = PluginHarnessState(available: true, installed: false)
-        let catalog = PluginCatalog(harnesses: ["claude"], actions: ["claude"], marketplaces: [
+        let catalog = PluginCatalog(harnesses: ["claude", "codex"], actions: ["claude", "codex"], marketplaces: [
             PluginMarketplace(name: "kit", hub: true, path: root.path,
                               harnesses: ["claude": .init(sourceType: "directory", location: root.path)], plugins: [
                 CatalogPlugin(name: "owned", marketplace: "kit", sourcePath: owned.path,
@@ -23,7 +23,8 @@ import Testing
                 CatalogPlugin(name: "preview", marketplace: "official", sourcePath: preview.path,
                               harnesses: ["claude": listed]),
                 CatalogPlugin(name: "installed", marketplace: "official",
-                              harnesses: ["claude": .init(available: true, installed: true, enabled: true, path: cache.path)]),
+                              harnesses: ["claude": .init(available: true, installed: true, enabled: true, path: cache.path),
+                                          "codex": .init(available: true, installed: true, enabled: false, path: cache.path)]),
                 CatalogPlugin(name: "missing", marketplace: "official",
                               harnesses: ["claude": .init(available: true, installed: true, path: "/missing-plugin")])])
         ])
@@ -33,7 +34,8 @@ import Testing
         let ownedRow = try #require(index.localEntries().first { $0.row.isHub })
         #expect(ownedRow.row.actions["claude"]?.map(\.verb) == [.install])
         let external = try #require(index.localEntries().first { !$0.row.isHub })
-        #expect(external.row.actions["claude"]?.isEmpty == true)
+        #expect(external.row.actions["claude"]?.map(\.verb) == [.disable, .uninstall])
+        #expect(external.row.actions["codex"]?.map(\.verb) == [.enable, .uninstall])
         // A new index rechecks disk; cached derived rows never outlive a reload.
         try FileManager.default.removeItem(at: cache)
         let refreshed = PluginExploreIndex(catalog: catalog, skills: [], home: temp.url)

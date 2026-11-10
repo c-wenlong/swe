@@ -108,7 +108,7 @@ function header() {
   }
   const off = page.tab === "health" && fixing;
   return pageHeader("Plugins",
-    "Local plugins managed by SWE. Import harness copies into SWE before managing them.",
+    "Switch installed plugins on or off in each harness. Import into SWE to own and edit their files.",
     `${updated}${fixAll}<button class="icon-button${busy ? " spinning" : ""}" id="page-refresh" aria-label="Refresh" title="${help}"${
       off ? " disabled" : ""}>${icon("rescan")}</button>`);
 }
