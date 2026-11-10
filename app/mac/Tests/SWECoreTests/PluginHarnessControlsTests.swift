@@ -38,6 +38,12 @@ import Testing
         #expect(parked.localRefs == [plugin.ref])
     }
 
+    @Test func successSummaryIncludesRestartNotice() throws {
+        let raw = #"{"action":"disable","harness":"opencode","ref":"review@local","changed":true,"detail":"Restart existing OpenCode sessions"}"#
+        let result = try JSONDecoder().decode(PluginActionResult.self, from: Data(raw.utf8))
+        #expect(result.summary.contains("Restart existing OpenCode sessions"))
+    }
+
     @Test func controlCommandsUseSweAndExplainScope() {
         let devin = PluginAction(verb: .uninstall, ref: "review@devin-local", harness: "devin")
         #expect(devin.command == "swe plugins uninstall review@devin-local --harness=devin")

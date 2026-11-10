@@ -827,7 +827,7 @@ async function runAction(a) {
     const r = data.result;
     let text;
     if (data.error) text = data.error;
-    else if (r.changed) text = `${VERB[a.verb][1]} ${a.ref} ${actionWhere(a)}`;
+    else if (r.changed) text = `${VERB[a.verb][1]} ${a.ref} ${actionWhere(a)}${r.detail ? ` — ${r.detail}` : ""}`;
     else text = `${a.ref} in ${Fmt.harnessName(a.harness)}: ${r.detail || "nothing changed"}`;
     page.actOutcome = { ref: a.ref, text, error: !!data.error };
   } else {

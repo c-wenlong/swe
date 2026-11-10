@@ -337,9 +337,6 @@ def status(state: dict | None) -> str:
     cached or absent."""
     if not state:
         return "absent"
-    if "allowed_actions" in state:
-        allowed = state["allowed_actions"]
-        return [v for v in ("enable", "disable", "uninstall") if v in allowed] if isinstance(allowed, list) else []
     installed, enabled = state.get("installed"), state.get("enabled")
     if installed is True:
         return "enabled" if enabled is True else "disabled" if enabled is False else "installed"

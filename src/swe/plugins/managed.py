@@ -45,6 +45,10 @@ def import_plugin(home: Path, ref: str) -> dict:
             raise ActionError("No installed plugin files to import; install/download it first")
         if managed_plugin(market, plugin):
             return _reply(ref, False, "already managed by SWE", plugin["source_path"])
+        if "opencode" in plugin.get("harnesses", {}):
+            from swe.plugins.local import local_plugins
+            if sum(p.ref == ref for p in local_plugins(home)) > 1:
+                raise ActionError("Conflicting active and suspended OpenCode copies; resolve them before importing")
         # Prefer the actual installed bytes over a marketplace's preview.
         candidates = [s.get("path") for s in plugin["harnesses"].values()
                       if s.get("installed") is not False]

@@ -493,7 +493,7 @@ public struct PluginAction: Sendable, Hashable, Identifiable {
             return "Remove \(ref) from Devin, including your personal cloud plugins?"
         }
         if harness == "opencode" {
-            return "\(verb.title) global OpenCode file plugin \(ref)?"
+            return "\(verb.title) global OpenCode file plugin \(ref)? Restart existing OpenCode sessions to apply the change."
         }
         let name = HarnessMark(harness).name
         return "\(verb.title) \(ref) \(verb == .uninstall ? "from" : "in") \(name)?"
@@ -533,6 +533,7 @@ public struct PluginActionResult: Decodable, Sendable, Equatable {
         }
         if verb == .adopt { return "Imported \(ref) into SWE" }
         return "\(verb.past) \(ref) \(verb == .uninstall ? "from" : "in") \(name)"
+            + (detail.map { " — \($0)" } ?? "")
     }
 }
 

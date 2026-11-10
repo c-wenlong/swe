@@ -73,6 +73,9 @@ class LocalControls(unittest.TestCase):
         with self.assertRaises(ActionError):
             plugin_action(self.home, 'enable', ref, 'opencode')
         self.assertEqual(self.file.read_text(), 'new copy')
+        with self.assertRaisesRegex(ActionError, "Conflicting"):
+            import_plugin(self.home, ref)
+        self.assertEqual(self.file.read_text(), "new copy")
 
     def test_directory_and_symlink_removal_does_not_follow_target(self):
         target = self.home / 'source'
@@ -159,6 +162,16 @@ class LocalControls(unittest.TestCase):
         deps.mkdir()
         (deps / 'dependency.js').write_text('x')
         self.assertEqual([p.name for p in local_plugins(self.home)], ['review.ts'])
+
+    def test_plain_cli_preserves_success_detail(self):
+        import contextlib
+        import io
+        from swe.plugins.commands import cmd_plugins
+        out = io.StringIO()
+        result = {"changed": True, "ref": "review@local", "detail": "Restart existing OpenCode sessions"}
+        with patch("swe.plugins.commands.plugin_action", return_value=result), contextlib.redirect_stdout(out):
+            self.assertEqual(cmd_plugins(["disable", "review@local", "--harness=opencode"]), 0)
+        self.assertIn(result["detail"], out.getvalue())
 
     def test_malformed_mask_fails_closed(self):
         self.assertEqual(harness_actions({'installed': True, 'enabled': True,
