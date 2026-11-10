@@ -865,6 +865,9 @@ public final class WorktreesModel {
     private var loadedAt: Date?
     private var loadedScope: WorktreeScope?
     private var loading = 0
+    private struct LoadKey: Equatable { var scope: WorktreeScope; var source: String }
+    private var loadingKey: LoadKey?
+    private var inflight: Task<Void, Never>?
     /// A list is being read, so a watcher event never queues a second one.
     public var isLoading: Bool { loading > 0 }
     /// The swe that produced the list on show, as Settings names it.
@@ -911,7 +914,9 @@ public final class WorktreesModel {
     /// Lists unless this scope's list, from this `source` (the swe path as
     /// Settings has it), is under `maxAge` old.
     public func loadIfStale(swe: SweClient, source: String = "") async {
-        if isLoading { return }
+        // A load already running for this same scope and swe is joined by
+        // doing nothing; a different scope or swe always starts its own.
+        if isLoading, loadingKey == LoadKey(scope: scope, source: source) { return }
         if case .loaded = state, loadedScope == scope, loadedSource == source, let loadedAt,
            now().timeIntervalSince(loadedAt) < maxAge { return }
         await load(swe: swe, source: source)
@@ -926,38 +931,63 @@ public final class WorktreesModel {
         await load(swe: swe, source: source)
     }
 
-    /// Always lists, for the scope on show.
+    /// Always lists, for the scope on show. It cancels any load still
+    /// running and bumps `generation`, so only the newest load for the
+    /// current scope ever publishes.
     public func load(swe: SweClient, source: String? = nil) async {
         if let source { requestedSource = source }
         let source = requestedSource
         generation += 1
-        loading += 1
-        defer { loading -= 1 }
         let mine = generation
         let asked = scope
-        if case .loaded = state {} else { state = .loading }
-        do {
-            let list = try await client(swe).worktrees(asked)
-            guard mine == generation else { return }
-            state = .loaded(list)
-            failure = nil
-            loadedAt = now()
-            loadedScope = asked
-            loadedSource = source
-            if case .all = asked {
-                repos = WorktreeFilter.repos(in: list.worktrees)
-            } else {
-                let merged = Set(repos).union(WorktreeFilter.repos(in: list.worktrees))
-                repos = merged.sorted { $0.name.lowercased() < $1.name.lowercased() }
+        loadingKey = LoadKey(scope: asked, source: source)
+        inflight?.cancel()
+        // Another scope's rows never stand in for this one's.
+        if case .loaded = state, loadedScope == asked {} else { state = .loading }
+        let client = client(swe)
+        let task = Task { [weak self] in
+            do {
+                let list = try await client.worktrees(asked)
+                self?.publish(list, scope: asked, source: source, generation: mine)
+            } catch is CancellationError {
+                return
+            } catch {
+                self?.publish(failure: error, scope: asked, generation: mine)
             }
-        } catch is CancellationError {
-            return
-        } catch {
-            guard mine == generation else { return }
-            let described = WorktreeFailure.describe(error)
-            failure = described
-            state = .failed(described.message)
         }
+        inflight = task
+        loading += 1
+        defer { loading -= 1 }
+        await task.value
+        if mine == generation { inflight = nil }
+    }
+
+    /// Whether a result still belongs on screen: the newest load, for the
+    /// scope now selected.
+    private func current(_ scope: WorktreeScope, _ generation: Int) -> Bool {
+        generation == self.generation && scope == self.scope
+    }
+
+    private func publish(_ list: WorktreeList, scope asked: WorktreeScope, source: String, generation mine: Int) {
+        guard current(asked, mine) else { return }
+        state = .loaded(list)
+        failure = nil
+        loadedAt = now()
+        loadedScope = asked
+        loadedSource = source
+        if case .all = asked {
+            repos = WorktreeFilter.repos(in: list.worktrees)
+        } else {
+            let merged = Set(repos).union(WorktreeFilter.repos(in: list.worktrees))
+            repos = merged.sorted { $0.name.lowercased() < $1.name.lowercased() }
+        }
+    }
+
+    private func publish(failure error: any Error, scope asked: WorktreeScope, generation mine: Int) {
+        guard current(asked, mine) else { return }
+        let described = WorktreeFailure.describe(error)
+        failure = described
+        state = .failed(described.message)
     }
 
     // MARK: Changing

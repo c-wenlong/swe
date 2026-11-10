@@ -555,6 +555,27 @@ import Testing
         #expect(lists() == 3)
     }
 
+    @Test func switchingScopeMidLoadShowsTheNewScopeAndNeverTheOld() async throws {
+        let runner = ScopedSlowRunner()
+        let model = WorktreesModel()
+        let swe = SweClient(runner: runner)
+        model.scope = .repo("/a")
+        let first = Task { await model.loadIfStale(swe: swe, source: "/s") }
+        // Let A's slow command start.
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(model.isLoading)
+        // The page switches scope while A is still running: B must load anyway.
+        model.scope = .repo("/b")
+        await model.loadIfStale(swe: swe, source: "/s")
+        #expect(model.worktrees.map(\.path) == ["/b/one"])
+        await first.value
+        // A finishes later and must not publish.
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(model.worktrees.map(\.path) == ["/b/one"])
+        #expect(runner.calls.contains(["wt", "list", "--repo=/a", "--json"]))
+        #expect(runner.calls.contains(["wt", "list", "--repo=/b", "--json"]))
+    }
+
     @Test func aListFromAnotherSweIsNotFresh() async throws {
         let fixture = WorktreesFixture()
         let model = WorktreesModel()
@@ -606,5 +627,20 @@ final class ClockBox: @unchecked Sendable {
     var now: Date {
         get { lock.withLock { value } }
         set { lock.withLock { value = newValue } }
+    }
+}
+
+/// Answers `--repo=/a` slowly and `--repo=/b` at once, each with one row.
+final class ScopedSlowRunner: CommandRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var log: [[String]] = []
+    var calls: [[String]] { lock.withLock { log } }
+
+    func run(_ arguments: [String]) async throws -> CommandResult {
+        lock.withLock { log.append(arguments) }
+        let repo = arguments.first { $0.hasPrefix("--repo=") }.map { String($0.dropFirst(7)) } ?? "/x"
+        if repo == "/a" { try await Task.sleep(for: .milliseconds(300)) }
+        let json = #"{"scope": "repo", "worktrees": [{"path": "\#(repo)/one", "main_checkout": "\#(repo)", "branch": "one", "head": "abc", "state": "no-pr"}]}"#
+        return ok(json)
     }
 }
