@@ -55,7 +55,15 @@ enum CodexUsageAPI {
         return ParsedUsage(
             plan: PlanNames.name(.codex, UsageJSON.string(body["plan_type"])) ?? credential.plan,
             email: credential.email,
-            windows: windows)
+            windows: windows, monthlyCredits: credits(body["spend_control"]))
+    }
+
+    private static func credits(_ value: Any?) -> MonthlyCredits? {
+        guard let control = value as? [String: Any],
+              let limit = control["individual_limit"] as? [String: Any],
+              let used = UsageJSON.number(limit["used"]), used >= 0,
+              let cap = UsageJSON.number(limit["limit"]), cap >= 0 else { return nil }
+        return MonthlyCredits(used: used, limit: cap)
     }
 
     /// One window, labelled by its length rather than its slot: Codex can move

@@ -87,7 +87,7 @@ public actor UsageService {
                 status: entry.lastFailure?.status ?? .ok,
                 plan: reading.plan, email: reading.email,
                 windows: reading.windows, fetchedAt: reading.fetchedAt,
-                isStale: true)
+                isStale: true, monthlyCredits: reading.monthlyCredits)
         }
         // No reading worth showing, but the last failure is still what
         // the card should wear.
@@ -173,7 +173,7 @@ public actor UsageService {
                                   credential: credential, at: answered), for: key)
                 return result(status, reading: reading, credential: credential)
             }
-            let fresh = StoredReading(plan: parsed.plan, email: parsed.email, windows: parsed.windows, fetchedAt: answered)
+            let fresh = StoredReading(plan: parsed.plan, email: parsed.email, windows: parsed.windows, fetchedAt: answered, monthlyCredits: parsed.monthlyCredits)
             store.save(StoredAccount(fingerprint: credential.fingerprint, reading: fresh,
                                      cooldownUntil: nil, lastFailure: nil), for: key)
             return result(.ok, reading: fresh, credential: credential, isStale: false)
@@ -210,7 +210,7 @@ public actor UsageService {
         return AccountUsage(
             status: status, plan: reading.plan ?? credential.plan, email: reading.email ?? credential.email,
             windows: reading.windows, fetchedAt: reading.fetchedAt, isStale: isStale,
-            signInExpiresAt: credential.expiresAt)
+            signInExpiresAt: credential.expiresAt, monthlyCredits: reading.monthlyCredits)
     }
 
     private func lookUpCredential(_ key: AccountKey) async -> CredentialLookup {

@@ -7,6 +7,7 @@ struct StoredReading: Codable, Equatable {
     var windows: [UsageWindow]
     /// When the provider answered, kept as is when the reading is reused.
     var fetchedAt: Date
+    var monthlyCredits: MonthlyCredits? = nil
 }
 
 /// The last failed fetch, kept so a launch can show "couldn't refresh" and

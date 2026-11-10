@@ -51,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   card to smoothly expand its readings; drag provider columns horizontally to save their order.
   Expanded cards put settings beside the launch buttons and wrap their status text.
 
+- **Mac Codex account cards show monthly credits used and the credit limit** beneath the usage bars when the workspace returns those amounts.
+
 
 ### Security
 

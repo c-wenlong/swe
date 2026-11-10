@@ -64,12 +64,39 @@ import Testing
 
         let usage = await h.makeService().usage(for: codexKey, force: false)
 
+        #expect(usage.monthlyCredits == MonthlyCredits(used: 2504, limit: 2500))
         #expect(usage.plan == "Edu")
         #expect(usage.windows == [
             UsageWindow(label: "5h", usedPercent: 0, resetsAt: Date(timeIntervalSince1970: 1_791_727_200)),
             UsageWindow(label: "7d", usedPercent: 86, resetsAt: Date(timeIntervalSince1970: 1_792_051_200)),
             UsageWindow(label: "30d", usedPercent: 100, resetsAt: Date(timeIntervalSince1970: 1_792_300_000)),
         ])
+    }
+
+    @Test func monthlyCreditsSurviveCachedAndFailedReads() async throws {
+        let h = UsageHarness()
+        h.files.set("\(codexHome)/auth.json", codexAuthJSON())
+        h.transport.reply(200, body: Data(#"{"spend_control":{"individual_limit":{"used_percent":0,"used":"0","limit":"700"}}}"#.utf8))
+        let service = h.makeService()
+        let fresh = await service.usage(for: codexKey, force: true)
+        #expect(fresh.monthlyCredits == MonthlyCredits(used: 0, limit: 700))
+        let cached = await service.cachedUsage(for: codexKey)
+        #expect(cached?.monthlyCredits == fresh.monthlyCredits)
+        h.transport.reply(500, body: Data())
+        let stale = await service.usage(for: codexKey, force: true)
+        #expect(stale.isStale)
+        #expect(stale.monthlyCredits == fresh.monthlyCredits)
+        let decoded = try JSONDecoder().decode(AccountUsage.self, from: JSONEncoder().encode(fresh))
+        #expect(decoded.monthlyCredits == fresh.monthlyCredits)
+    }
+
+    @Test(arguments: ["null", "{}", #"{"used":true,"limit":700}"#,
+                      #"{"used":0,"limit":-1}"#, #"{"used":"NaN","limit":700}"#])
+    func missingOrInvalidCreditFiguresStayHidden(limit: String) throws {
+        let body = "{\"rate_limit\":{},\"spend_control\":{\"individual_limit\":\(limit)}}"
+        let parsed = try #require(CodexUsageAPI.parse(Data(body.utf8), credential: UsageCredential(
+            token: "t", accountID: nil, expiresAt: nil, plan: nil, email: nil), now: usageEpoch))
+        #expect(parsed.monthlyCredits == nil)
     }
 
     @Test(arguments: [
