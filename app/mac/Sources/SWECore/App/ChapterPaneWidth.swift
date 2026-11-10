@@ -29,3 +29,19 @@ public enum ChapterPaneWidth {
         return max(low, min(width, high))
     }
 }
+
+/// When an instruction editor's header drops its button words for icons.
+/// At 100% zoom the full header (Raw and Rich, the Unsaved dot, Revert,
+/// Save, Close) needs about 420 pt beside a readable title, so a card
+/// narrower than `compactBelow` (scaled by the text zoom) goes compact.
+/// A 900 pt window with the sidebar and chapter pane open leaves the
+/// editor less than that.
+public enum EditorHeader {
+    public static let compactBelow = 640.0
+
+    /// Whether a card `width` points wide shows icon-only buttons. An
+    /// unmeasured card (0) keeps its words.
+    public static func isCompact(width: Double, zoom: Double = 1) -> Bool {
+        width > 0 && width < compactBelow * TextZoom.clamped(zoom)
+    }
+}
