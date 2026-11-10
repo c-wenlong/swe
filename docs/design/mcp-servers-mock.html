@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MCP servers — table mock</title>
+<style>
+  :root {
+    --bg: #f5f5f4; --card: #ffffff; --border: #e7e5e4; --rule: #f0efee;
+    --col-rule: #ececea; --ink: #1c1917; --body: #44403c; --muted: #78716c;
+    --faint: #a8a29e; --hover: #f0f6ff; --accent: #2563eb; --accent-soft: #eff6ff;
+    --ok: #16a34a; --warn: #b45309; --warn-bg: #fef3c7; --warn-line: #d97706;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 12.5px -apple-system, system-ui, sans-serif; padding: 24px; }
+  .card { max-width: 1180px; margin: 0 auto; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+
+  /* ---------- toolbar ---------- */
+  .bar { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .bar h1 { font-size: 13.5px; font-weight: 600; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+  .seg button { border: 0; background: #fff; padding: 5px 12px; font: 11.5px -apple-system, system-ui, sans-serif; color: var(--body); cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--border); border-radius: 99px; background: #fff; padding: 4px 11px; font: 11px -apple-system, system-ui, sans-serif; color: var(--body); cursor: pointer; }
+  .chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .lbl { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .4px; text-transform: uppercase; }
+  .count { margin-left: auto; font-size: 11.5px; color: var(--faint); }
+  .btn { border: 1px solid var(--border); border-radius: 7px; background: #fff; padding: 5px 12px; font: 11.5px -apple-system, system-ui, sans-serif; color: var(--body); cursor: pointer; }
+
+  /* ---------- the table ---------- */
+  .wrap { overflow: auto; max-height: 640px; }
+  table { border-collapse: collapse; table-layout: fixed; width: 100%; min-width: 960px; }
+  col.c-name { width: 240px; } col.c-type { width: 96px; } col.c-h { width: 92px; }
+  thead th { position: sticky; top: 0; z-index: 2; background: #fafaf9; border-bottom: 1px solid #d6d3d1;
+             font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: .5px; padding: 10px 12px; text-align: left; }
+  thead th.h { text-align: center; border-left: 1px solid var(--col-rule); cursor: grab; }
+  thead th.h:hover { background: #f0efee; }
+  thead th.h.dragging { opacity: .35; }
+  thead th.h.dropmark { box-shadow: inset 3px 0 0 var(--accent); }
+  thead th.h .mark { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 500; color: var(--body); }
+  thead th.h .mark i { width: 14px; height: 14px; border-radius: 50%; color: #fff; font: 600 8px/14px -apple-system; text-align: center; font-style: normal; }
+  thead th.h .mark em { font-style: normal; font-size: 9px; color: var(--faint); }
+  tbody td { padding: 9px 12px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  tbody td.h { text-align: center; border-left: 1px solid var(--col-rule); padding: 0; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--hover); }
+  tbody tr.off { background: var(--hover); }
+  .cell { display: flex; align-items: center; justify-content: center; height: 42px; cursor: pointer; }
+  .cell .on { font-size: 13px; font-weight: 600; color: var(--ink); }
+  .cell .offmark { color: var(--faint); font-size: 14px; }
+  .cell .absent { color: #d6d3d1; font-size: 13px; cursor: default; }
+  .cell .var { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+               border-radius: 5px; background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn); font-size: 11px; font-weight: 600; }
+  .name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; margin-top: 1px; }
+  .nm { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub { font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .warnpill { font-size: 9.5px; color: var(--warn); background: var(--warn-bg); border-radius: 4px; padding: 1px 5px; flex: none; }
+  .type { font-size: 10px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase; color: var(--muted);
+          background: #f5f5f4; border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; }
+  .type.dev { color: #1d4ed8; background: #eff6ff; border-color: #dbeafe; }
+  .type.productivity { color: #0f766e; background: #f0fdfa; border-color: #ccfbf1; }
+  .type.research { color: #7c3aed; background: #f5f3ff; border-color: #ede9fe; }
+  .type.social { color: #be185d; background: #fdf2f8; border-color: #fce7f3; }
+  .type.search { color: #b45309; background: #fffbeb; border-color: #fef3c7; }
+  .empty { padding: 40px; text-align: center; color: var(--faint); }
+  /* master switch */
+  .sw { position: relative; width: 30px; height: 18px; border-radius: 99px; background: #d6d3d1; cursor: pointer; transition: background .12s; flex: none; }
+  .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .12s; }
+  .sw.on::after { left: 14px; }
+  /* the highlight colour carries the server state */
+  .sw.ok      { background: var(--ok); }
+  .sw.error   { background: #dc2626; }
+  .sw.issue   { background: #d97706; }
+  .sw.unknown { background: #a8a29e; }
+
+  /* ---------- detail sheet ---------- */
+  .sheet { position: fixed; top: 0; right: -380px; width: 360px; height: 100%; background: #fff; z-index: 3;
+           border-left: 1px solid var(--border); transition: right .18s ease; padding: 20px; overflow: auto; }
+  .sheet.open { right: 0; }
+  .sheet h2 { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .sheet .x { margin-left: auto; cursor: pointer; color: var(--faint); border: 0; background: none; font-size: 15px; }
+  .kv { display: flex; gap: 10px; margin-top: 10px; font-size: 12px; }
+  .kv b { width: 76px; flex: none; color: var(--muted); font-weight: 600; }
+  .kv span { color: var(--body); font-family: var(--mono); font-size: 11px; word-break: break-all; }
+  .sect { margin-top: 18px; font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: .4px; text-transform: uppercase; }
+  .file { display: flex; gap: 8px; font-size: 11px; font-family: var(--mono); color: var(--body); margin-top: 7px; }
+  .file i { font-style: normal; color: var(--accent); width: 62px; flex: none; }
+  .file em { font-style: normal; color: var(--faint); }
+  .tools li { font-size: 11px; font-family: var(--mono); color: var(--body); margin-top: 5px; margin-left: 14px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="bar">
+    <h1>MCP servers</h1>
+    <span class="lbl">Host</span>
+    <span class="seg" id="hostSeg">
+      <button class="on" data-v="all">All</button><button data-v="local">Local</button><button data-v="remote">Remote</button>
+    </span>
+    <span class="lbl">Type</span>
+    <span class="chips" id="typeChips"></span>
+    <span class="count" id="count"></span>
+    <button class="btn">+ Add</button><button class="btn">Sync</button>
+  </div>
+  <div class="wrap">
+    <table id="tbl">
+      <colgroup><col class="c-name"><col class="c-type"><col class="c-h"><col class="c-h"><col class="c-h"><col class="c-h"><col class="c-h"><col class="c-h"></colgroup>
+      <thead><tr id="headRow">
+        <th>Server</th><th>Type</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>No servers match these filters.</div>
+  </div>
+</div>
+
+<aside class="sheet" id="sheet">
+  <h2><span class="dot" id="shDot"></span><span id="shName"></span><button class="x" id="shX">✕</button></h2>
+  <div class="sect">Server</div>
+  <div id="shKv"></div>
+  <div class="sect">Files</div>
+  <div id="shFiles"></div>
+  <div class="sect">Tools <span id="shToolCount" style="text-transform:none;color:var(--faint)"></span></div>
+  <ul class="tools" id="shTools"></ul>
+</aside>
+
+<script>
+const HARN = {
+  claude:    { label: "Claude",    bg: "#1c1917", ch: "C"  },
+  codex:     { label: "Codex",     bg: "#374151", ch: "x"  },
+  cursor:    { label: "Cursor",    bg: "#0f766e", ch: "cu" },
+  kilo:      { label: "Kilo",      bg: "#7c2d12", ch: "k"  },
+  opencode:  { label: "Opencode",  bg: "#164e63", ch: "o"  },
+  gemini:    { label: "Gemini",    bg: "#1e3a8a", ch: "g"  },
+};
+// Canonical harness index (cells[] is aligned to this); ORDER is the
+// visible column order — drag a header to rearrange it.
+const H = Object.keys(HARN);
+let ORDER = H.slice();
+// state: on | off | - | A (variant)
+const R = [
+ ["dv__github","remote","http · shared","dev",["on","on","on","on","on","-"]],
+ ["dv__linear","remote","http · shared","dev",["-","on","on","-","on","-"]],
+ ["dv__playwright","local","stdio","dev",["on","on","-","-","-","-"]],
+ ["dv__sentry","remote","http · shared","dev",["on","on","on","off","on","-"]],
+ ["dv__supabase","remote","http · shared","dev",["-","A","on","-","-","on"]],
+ ["dv__vercel","remote","http · shared","dev",["-","on","-","-","on","-"]],
+ ["pd__fathom","remote","http · shared","productivity",["on","on","on","on","on","-"]],
+ ["pd__gcalendar","remote","http · shared","productivity",["on","on","on","-","on","-"]],
+ ["pd__gdocs","remote","http · shared","productivity",["on","on","on","-","on","-"]],
+ ["pd__notion","remote","http · shared","productivity",["on","on","on","on","on","on"]],
+ ["rf__lazyweb","remote","http · shared","research",["on","on","-","-","-","-"]],
+ ["rf__phunt","remote","http · shared","research",["on","on","on","-","-","-"]],
+ ["rf__youtube","remote","http · shared","research",["on","on","off","-","on","-"]],
+ ["so__hn","remote","http · shared","social",["on","on","on","-","on","-"]],
+ ["so__reddit","remote","http · shared","social",["on","off","on","-","on","-"]],
+ ["so__rss","remote","http · shared","social",["on","off","on","off","on","-"]],
+ ["so__x","remote","http · shared","social",["on","on","off","-","-","-"]],
+ ["sr__brave","remote","http · shared","search",["on","on","off","off","on","off"]],
+ ["sr__context7","remote","http · shared","search",["on","on","on","on","on","-"]],
+ ["sr__exa","remote","http · shared","search",["on","on","-","on","-","-"]],
+ ["computer-use","local","stdio","other",["on","-","-","-","-","-"]],
+ ["lazyweb","local","stdio","other",["on","on","-","-","-","-"]],
+ ["node_repl","local","stdio","other",["on","on","on","on","on","-"]],
+ ["sources","remote","http","other",["on","on","-","-","-","-"]],
+ ["trigger","local","stdio","other",["on","-","on","-","on","-"]],
+];
+const TYPES = ["dev","productivity","research","social","search","other"];
+const WARN = new Set(["sr__brave"]);
+const SHARED = n => R.find(r=>r[0]===n)?.[2].includes("shared");
+// probe_server_health: ok / error / unknown; a missing ${NAME} value is an issue
+const HEALTH = { dv__sentry: "error", sr__brave: "issue", node_repl: "unknown",
+                 trigger: "unknown" };
+const healthOf = n => HEALTH[n] || "ok";
+const HEALTH_COLOR = { ok: "var(--ok)", error: "#dc2626", issue: "#d97706", unknown: "#a8a29e" };
+
+let host = "all", type = "all";
+const rowsEl = document.getElementById("rows"), emptyEl = document.getElementById("empty");
+
+// type chips
+const chips = document.getElementById("typeChips");
+["all",...TYPES].forEach(t => {
+  const b = document.createElement("button");
+  b.className = "chip" + (t==="all" ? " on" : ""); b.textContent = t === "all" ? "All" : t;
+  b.onclick = () => { type = t; chips.querySelectorAll(".chip").forEach(c=>c.classList.toggle("on", c===b)); render(); };
+  chips.appendChild(b);
+});
+document.getElementById("hostSeg").addEventListener("click", e => {
+  if (e.target.tagName !== "BUTTON") return;
+  host = e.target.dataset.v;
+  document.querySelectorAll("#hostSeg button").forEach(b=>b.classList.toggle("on", b===e.target));
+  render();
+});
+
+function cellHtml(s) {
+  if (s === "on")  return `<div class="cell" title="On — click to turn off"><span class="on">✓</span></div>`;
+  if (s === "off") return `<div class="cell" title="Off — click to turn on"><span class="offmark">⏻</span></div>`;
+  if (s === "A")   return `<div class="cell" title="On — variant A of 2"><span class="var">A</span></div>`;
+  return `<div class="cell" title="Not configured"><span class="absent">—</span></div>`;
+}
+
+// Master semantics: OFF marks every harness currently on (saving the
+// layout); ON restores exactly that saved layout — a harness that was
+// manually off before the master flip stays off.
+function masterOff(row) { row[5] = row[4].slice(); row[4] = row[4].map(c => (c==="on"||c==="A") ? "off" : c); }
+function masterOn(row)  {
+  if (row[5]) { row[4] = row[5]; row[5] = null; }
+  else row[4] = row[4].map(c => c === "off" ? "on" : c);   // nothing saved: enable every configured cell
+}
+const masterState = row => row[4].some(c => c === "on" || c === "A");
+
+// ---- draggable column headers ----
+const headRow = document.getElementById("headRow");
+function renderHead() {
+  headRow.querySelectorAll("th.h").forEach(el => el.remove());
+  ORDER.forEach((h, i) => {
+    const m = HARN[h], th = document.createElement("th");
+    th.className = "h"; th.draggable = true;
+    th.title = `${m.label} — drag to rearrange · click for the column menu`;
+    th.dataset.h = h;
+    th.innerHTML = `<span class="mark"><i style="background:${m.bg}">${m.ch}</i>${m.label}<em>▾</em></span>`;
+    th.addEventListener("dragstart", e => {
+      e.dataTransfer.setData("text/harness", h);
+      e.dataTransfer.effectAllowed = "move";
+      th.classList.add("dragging");
+    });
+    th.addEventListener("dragend", () => {
+      th.classList.remove("dragging");
+      headRow.querySelectorAll("th.h").forEach(x => x.classList.remove("dropmark"));
+    });
+    th.addEventListener("dragover", e => {
+      if (![...e.dataTransfer.types].includes("text/harness")) return;
+      e.preventDefault();
+      headRow.querySelectorAll("th.h").forEach(x => x.classList.toggle("dropmark", x === th));
+    });
+    th.addEventListener("drop", e => {
+      e.preventDefault();
+      const from = ORDER.indexOf(e.dataTransfer.getData("text/harness"));
+      const to = ORDER.indexOf(h);
+      if (from < 0 || from === to) return;
+      ORDER.splice(to, 0, ORDER.splice(from, 1)[0]);
+      renderHead(); render();
+    });
+    headRow.appendChild(th);
+  });
+}
+
+function render() {
+  let n = 0;
+  rowsEl.innerHTML = "";
+  for (const row of R) {
+    const [name, h, sub, t, cells] = row;
+    if (host !== "all" && h !== host) continue;
+    if (type !== "all" && t !== type) continue;
+    n++;
+    const tr = document.createElement("tr");
+    const health = healthOf(name);
+    tr.innerHTML = `<td><div class="name"><span class="sw ${masterState(row) ? "on " + health : ""}" title="Every harness — ${health === "ok" ? "healthy" : health === "error" ? "probe failed" : health === "issue" ? "missing a secret value" : "state unknown"}"></span>
+      <span><span class="nm">${name}</span>${WARN.has(name) ? ` <span class="warnpill">⚠ BRAVE_API_KEY</span>` : ""}
+      <div class="sub">${sub}</div></span></div></td>
+      <td><span class="type ${t}">${t}</span></td>
+      ${ORDER.map(h2 => `<td class="h">${cellHtml(cells[H.indexOf(h2)])}</td>`).join("")}`;
+    tr.querySelector(".sw").onclick = e => {
+      e.stopPropagation();
+      masterState(row) ? masterOff(row) : masterOn(row);
+      render();
+    };
+    // granular per-harness toggles stay clickable (cells[] stays in
+    // canonical order; only the columns' display order changes)
+    tr.querySelectorAll("td.h .cell").forEach((el, i) => {
+      const ci = H.indexOf(ORDER[i]);
+      el.onclick = e => {
+        e.stopPropagation();
+        if (cells[ci] === "on" || cells[ci] === "A") cells[ci] = "off";
+        else if (cells[ci] === "off") cells[ci] = "on";
+        render();
+      };
+    });
+    tr.onclick = () => openSheet(name, h, sub, t);
+    rowsEl.appendChild(tr);
+  }
+  emptyEl.hidden = n > 0;
+  document.getElementById("count").textContent = `${n} of ${R.length}`;
+}
+
+const sheet = document.getElementById("sheet");
+document.getElementById("shX").onclick = () => sheet.classList.remove("open");
+function openSheet(name, host, sub, type) {
+  document.getElementById("shName").textContent = name;
+  const shared = sub.includes("shared");
+  const row = R.find(r=>r[0]===name);
+  const health = healthOf(name);
+  document.getElementById("shDot").style.background = HEALTH_COLOR[health];
+  document.getElementById("shKv").innerHTML = `
+    <div class="kv"><b>Enabled</b><span style="display:flex;align-items:center;gap:8px;font-family:-apple-system,system-ui,sans-serif">
+      <span class="sw ${masterState(row) ? "on " + health : ""}" id="shSw"></span>
+      <em style="font-style:normal;color:var(--faint);font-size:10px">${masterState(row) ? "on — click to mark off everywhere" : "off — click to restore the harnesses it was on"}</em></span></div>
+    <div class="kv"><b>Transport</b><span>${sub.split(" ")[0]}</span></div>
+    <div class="kv"><b>Type</b><span style="font-family:-apple-system,system-ui,sans-serif"><select id="shType" style="font-size:11.5px;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:#fff">
+      ${TYPES.map(o=>`<option${o===type?" selected":""}>${o}</option>`).join("")}</select>
+      <em style="font-style:normal;color:var(--faint);font-size:10px">stored in mcp.json</em></span></div>
+    <div class="kv"><b>Hub</b><span>yes${shared ? " · shared through the gateway" : ""}</span></div>
+    ${shared ? `<div class="kv"><b>Gateway</b><span>running · pid 60318 · up 4h · 41 calls (1 errors) · last call 3m ago</span></div>` : ""}
+    <div class="kv"><b>Health</b><span>${{ok:"ok — binary found, url answers",error:"error — probe failed",issue:"issue — BRAVE_API_KEY missing",unknown:"unknown — not probed yet"}[health]}</span></div>
+    <div class="kv"><b>Env</b><span>${WARN.has(name) ? "BRAVE_API_KEY (missing value)" : "—"}</span></div>`;
+  document.getElementById("shFiles").innerHTML = R.find(r=>r[0]===name)[4].map((s,i)=> {
+    const place = ["claude","codex","cursor","kilo","opencode","gemini","swe"][i] || "swe";
+    return `<div class="file"><i>${place}</i>${s==="-"?"—":s==="off"?"off":"on"}<em>~/.config/${place}/mcp.json · 2d ago</em></div>`;
+  }).join("") + `<div class="file"><i>swe</i>hub<em>~/.swe/mcp.json · 2d ago</em></div>`;
+  document.getElementById("shToolCount").textContent = "· live handshake";
+  document.getElementById("shTools").innerHTML =
+    ["search","read_file","list_issues","create_issue","get_page","list_pages","query_database"]
+      .slice(0, 5).map(t=>`<li>${t}</li>`).join("");
+  document.getElementById("shType").onchange = e => {
+    R.find(r=>r[0]===name)[3] = e.target.value;   // mock: writes the `type` field
+    render();
+  };
+  document.getElementById("shSw").onclick = () => {
+    masterState(row) ? masterOff(row) : masterOn(row);
+    render(); openSheet(name, host, sub, row[3]);   // re-render sheet state with the row's current type
+  };
+  sheet.classList.add("open");
+}
+renderHead();
+render();
+</script>
+</body>
+</html>

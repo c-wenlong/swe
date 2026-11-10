@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="660" viewBox="0 0 1180 660">
+  <defs>
+    <style>
+      .t { font: 600 15px -apple-system, "SF Pro", sans-serif; fill: #1c1917; }
+      .h { font: 600 12.5px -apple-system, "SF Pro", sans-serif; fill: #1c1917; }
+      .b { font: 12px -apple-system, "SF Pro", sans-serif; fill: #44403c; }
+      .s { font: 11px -apple-system, "SF Pro", sans-serif; fill: #78716c; }
+      .m { font: 10.5px ui-monospace, "SF Mono", Menlo, monospace; fill: #44403c; }
+      .mg { font: 10.5px ui-monospace, "SF Mono", Menlo, monospace; fill: #16a34a; }
+      .mr { font: 10.5px ui-monospace, "SF Mono", Menlo, monospace; fill: #dc2626; }
+      .lbl { font: 10px -apple-system, "SF Pro", sans-serif; fill: #a8a29e; letter-spacing: .06em; }
+      .card { fill: #ffffff; stroke: #d6d3d1; rx: 8; }
+      .hub { fill: #eff6ff; stroke: #2563eb; }
+      .orphan { fill: #fffbeb; stroke: #d97706; stroke-dasharray: 5 3; }
+      .arrow { stroke: #a8a29e; stroke-width: 1.5; fill: none; }
+      .arrowA { stroke: #2563eb; stroke-width: 2; fill: none; }
+      .strike { stroke: #dc2626; stroke-width: 1.5; }
+      .sw-off { fill: #e7e5e4; stroke: #d6d3d1; }
+      .sw-on { fill: #2563eb; }
+    </style>
+    <marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#a8a29e"/>
+    </marker>
+    <marker id="ahA" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#2563eb"/>
+    </marker>
+  </defs>
+
+  <rect width="1180" height="660" fill="#fafaf9"/>
+  <text x="40" y="46" class="t">Harness-only servers: today vs proposed</text>
+  <text x="40" y="68" class="s">What happens when one harness has a server the hub never heard of</text>
+
+  <!-- ============ LEFT: TODAY ============ -->
+  <rect x="40" y="92" width="540" height="530" class="card"/>
+  <text x="60" y="124" class="h">Today — the Sync section copies harness → harness</text>
+
+  <!-- hub (passive) -->
+  <rect x="80" y="150" width="200" height="86" class="card" rx="8" stroke="#d6d3d1"/>
+  <text x="94" y="172" class="s">the hub · mcp.json</text>
+  <text x="94" y="192" class="m">dv__github  pd__notion …</text>
+  <text x="94" y="212" class="mr">paper-design  ✗ not here</text>
+
+  <!-- harness boxes -->
+  <g>
+    <rect x="80" y="300" width="200" height="88" class="card"/>
+    <text x="94" y="324" class="h">Claude Code</text>
+    <rect x="94" y="338" width="172" height="36" class="orphan" rx="6"/>
+    <text x="104" y="353" class="m">paper-design</text>
+    <text x="104" y="367" class="s">exists only here</text>
+  </g>
+  <g>
+    <rect x="340" y="300" width="200" height="64" class="card"/>
+    <text x="354" y="324" class="h">Cursor</text>
+    <text x="354" y="346" class="s">doesn't have it</text>
+  </g>
+  <g>
+    <rect x="80" y="430" width="200" height="64" class="card"/>
+    <text x="94" y="454" class="h">Codex</text>
+    <text x="94" y="476" class="s">doesn't have it</text>
+  </g>
+  <g>
+    <rect x="340" y="430" width="200" height="64" class="card"/>
+    <text x="354" y="454" class="h">Kilo Code</text>
+    <text x="354" y="476" class="s">doesn't have it</text>
+  </g>
+
+  <!-- messy copy arrows -->
+  <path d="M 280 360 C 310 355, 315 340, 338 334" class="arrow" marker-end="url(#ah)"/>
+  <path d="M 180 390 L 178 428" class="arrow" marker-end="url(#ah)"/>
+  <path d="M 278 378 C 330 400, 350 415, 375 428" class="arrow" marker-end="url(#ah)"/>
+  <text x="296" y="316" class="s">copy</text>
+  <text x="186" y="412" class="s">copy</text>
+  <text x="340" y="408" class="s">copy</text>
+
+  <!-- the Sync section -->
+  <rect x="80" y="524" width="460" height="76" fill="#f5f5f4" stroke="#e7e5e4" rx="8"/>
+  <text x="94" y="546" class="h">Sync — “Copy from Claude Code”</text>
+  <text x="94" y="566" class="s">pick a source, tick destinations, press Sync:</text>
+  <text x="94" y="584" class="s">every destination pair is its own relationship to track</text>
+
+  <!-- ============ RIGHT: PROPOSED ============ -->
+  <rect x="620" y="92" width="540" height="530" class="card"/>
+  <text x="640" y="124" class="h">Proposed — adopt into the hub, scope with toggles</text>
+
+  <!-- orphan -->
+  <rect x="650" y="150" width="200" height="64" class="orphan" rx="8"/>
+  <text x="664" y="172" class="m">paper-design</text>
+  <text x="664" y="190" class="s">found only in Claude Code</text>
+
+  <!-- adopt arrow -->
+  <path d="M 850 182 L 940 182" class="arrowA" marker-end="url(#ahA)"/>
+  <text x="852" y="166" class="b" fill="#2563eb">auto-adopt</text>
+  <text x="852" y="206" class="s">at sync time</text>
+
+  <!-- hub -->
+  <rect x="950" y="140" width="190" height="116" class="hub" rx="8"/>
+  <text x="964" y="162" class="s">the hub · mcp.json</text>
+  <text x="964" y="182" class="m">paper-design {</text>
+  <text x="964" y="198" class="m">  command … verbatim</text>
+  <text x="964" y="214" class="m">  disabled_in: [cursor,</text>
+  <text x="964" y="230" class="m">    codex, kilo]</text>
+  <text x="964" y="248" class="mg">  ✓ adopted, scoped to where found</text>
+
+  <!-- sync fan-out -->
+  <path d="M 1045 258 L 1045 300" class="arrowA" marker-end="url(#ahA)"/>
+  <text x="1054" y="284" class="s">swe mcp sync</text>
+
+  <!-- harness rows with toggles -->
+  <g>
+    <rect x="950" y="306" width="190" height="34" class="card"/>
+    <text x="962" y="328" class="b">Claude Code</text>
+    <rect x="1098" y="313" width="28" height="16" rx="8" class="sw-on"/>
+    <circle cx="1118" cy="321" r="6" fill="#fff"/>
+  </g>
+  <g>
+    <rect x="950" y="348" width="190" height="34" class="card"/>
+    <text x="962" y="370" class="b">Cursor</text>
+    <rect x="1098" y="355" width="28" height="16" rx="8" class="sw-off"/>
+    <circle cx="1106" cy="363" r="6" fill="#fff"/>
+  </g>
+  <g>
+    <rect x="950" y="390" width="190" height="34" class="card"/>
+    <text x="962" y="412" class="b">Codex</text>
+    <rect x="1098" y="397" width="28" height="16" rx="8" class="sw-off"/>
+    <circle cx="1106" cy="405" r="6" fill="#fff"/>
+  </g>
+  <g>
+    <rect x="950" y="432" width="190" height="34" class="card"/>
+    <text x="962" y="454" class="b">Kilo Code</text>
+    <rect x="1098" y="439" width="28" height="16" rx="8" class="sw-off"/>
+    <circle cx="1106" cy="447" r="6" fill="#fff"/>
+  </g>
+  <text x="950" y="486" class="s">adoption writes disabled_in = every harness it wasn't</text>
+  <text x="950" y="504" class="s">found in, so sync never pushes it anywhere new</text>
+  <text x="950" y="532" class="mr">edge: removing from the hub must also delete it</text>
+  <text x="950" y="550" class="mr">from harness files — or sync re-adopts it forever</text>
+
+  <!-- card sections -->
+  <rect x="650" y="270" width="270" height="320" fill="#f5f5f4" stroke="#e7e5e4" rx="8"/>
+  <text x="666" y="294" class="lbl">SERVER CARD SECTIONS</text>
+  <text x="666" y="320" class="b">✓ Definition (hub entry, env keys)</text>
+  <text x="666" y="346" class="b">✓ Harnesses — one switch each</text>
+  <text x="666" y="372" class="b">✓ Stats — calls, tools, errors</text>
+  <text x="666" y="398" class="b">✓ Tools — live handshake</text>
+  <text x="666" y="424" class="b">✓ Files — paths + mtimes</text>
+  <text x="666" y="450" class="b">✓ Provenance — “added from Claude Code”</text>
+  <g>
+    <text x="666" y="478" class="b" fill="#dc2626">✗ Sync — “Copy from” section</text>
+    <line x1="664" y1="473" x2="900" y2="473" class="strike"/>
+  </g>
+  <text x="666" y="508" class="s">distribution stays one direction:</text>
+  <text x="666" y="526" class="s">hub → harness, never harness → harness</text>
+  <text x="666" y="556" class="s">CLI keeps --from/--to as an escape hatch;</text>
+  <text x="666" y="574" class="s">the card just stops presenting it</text>
+</svg>

@@ -39,6 +39,9 @@ completions/
 # .archive/ — parked, not part of the build
 .archive/
 
+# Worktree checkouts parked inside the repo, never part of the build
+/quiver-worktrees/
+
 # Nix build output
 result
 result-*

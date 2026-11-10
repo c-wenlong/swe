@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="800" viewBox="0 0 1140 800" font-family="-apple-system, system-ui, sans-serif">
+  <defs>
+    <clipPath id="card"><rect x="40" y="96" width="784" height="560" rx="12"/></clipPath>
+  </defs>
+  <rect width="1140" height="800" fill="#f5f5f4"/>
+
+  <text x="40" y="44" font-size="20" font-weight="600" fill="#1c1917">MCP servers — regularized table</text>
+  <text x="40" y="66" font-size="12.5" fill="#78716c">same data and actions as today; the structure becomes a real grid</text>
+
+  <!-- card -->
+  <rect x="40" y="96" width="784" height="560" rx="12" fill="#ffffff" stroke="#e7e5e4" stroke-width="1.2"/>
+  <text x="64" y="126" font-size="13.5" font-weight="600" fill="#1c1917">MCP servers</text>
+  <rect x="632" y="108" width="84" height="24" rx="6" fill="#fafaf9" stroke="#e7e5e4"/>
+  <text x="674" y="124" text-anchor="middle" font-size="11.5" fill="#57534e">+ Add</text>
+  <rect x="724" y="108" width="84" height="24" rx="6" fill="#fafaf9" stroke="#e7e5e4"/>
+  <text x="766" y="124" text-anchor="middle" font-size="11.5" fill="#57534e">Sync</text>
+
+  <g clip-path="url(#card)">
+    <!-- ============ HEADER ROW ============ -->
+    <rect x="40" y="144" width="784" height="40" fill="#fafaf9"/>
+    <text x="72" y="169" font-size="11" font-weight="600" letter-spacing="1" fill="#78716c">SERVER</text>
+    <!-- header cells: logo + name centered per 92pt column -->
+    <g font-size="11.5" font-weight="500" fill="#44403c">
+      <g><circle cx="292" cy="160" r="7" fill="#1c1917"/><text x="292" y="163.5" font-size="7" fill="#fff" text-anchor="middle">C</text><text x="304" y="168">Claude</text></g>
+      <g><circle cx="384" cy="160" r="7" fill="#374151"/><text x="384" y="163.5" font-size="7" fill="#fff" text-anchor="middle">x</text><text x="396" y="168">Codex</text></g>
+      <g><circle cx="476" cy="160" r="7" fill="#0f766e"/><text x="476" y="163.5" font-size="7" fill="#fff" text-anchor="middle">cu</text><text x="488" y="168">Cursor</text></g>
+      <g><circle cx="568" cy="160" r="7" fill="#7c2d12"/><text x="568" y="163.5" font-size="7" fill="#fff" text-anchor="middle">k</text><text x="580" y="168">Kilo</text></g>
+      <g><circle cx="660" cy="160" r="7" fill="#164e63"/><text x="660" y="163.5" font-size="7" fill="#fff" text-anchor="middle">o</text><text x="672" y="168">Opencode</text></g>
+      <g><circle cx="752" cy="160" r="7" fill="#1e3a8a"/><text x="752" y="163.5" font-size="7" fill="#fff" text-anchor="middle">g</text><text x="764" y="168">Gemini</text></g>
+    </g>
+    <line x1="40" y1="184" x2="824" y2="184" stroke="#d6d3d1" stroke-width="1"/>
+
+    <!-- ============ GROUP ROW: Local ============ -->
+    <rect x="40" y="184" width="784" height="30" fill="#f5f5f4"/>
+    <text x="72" y="204" font-size="11.5" font-weight="600" fill="#78716c">Local · 6</text>
+    <text x="800" y="204" text-anchor="end" font-size="10.5" fill="#a8a29e">runs on this Mac</text>
+
+    <!-- ================= ROWS ================= -->
+    <g>
+      <!-- row 1 -->
+      <g transform="translate(0,214)">
+        <circle cx="76" cy="21" r="3.5" fill="#16a34a"/>
+        <text x="90" y="19" font-size="12.5" font-weight="500" fill="#1c1917">dv__github</text>
+        <text x="90" y="35" font-size="10.5" fill="#a8a29e">stdio · checkout · github-mcp ↓3</text>
+        <g font-size="13" fill="#1c1917" text-anchor="middle">
+          <text x="318" y="26">✓</text><text x="410" y="26">✓</text><text x="502" y="26">✓</text><text x="594" y="26">✓</text><text x="686" y="26">✓</text><text x="778" y="26" fill="#d6d3d1">—</text>
+        </g>
+      </g>
+      <!-- row 2 -->
+      <g transform="translate(0,258)">
+        <circle cx="76" cy="21" r="3.5" fill="#16a34a"/>
+        <text x="90" y="19" font-size="12.5" font-weight="500" fill="#1c1917">dv__linear</text>
+        <text x="90" y="35" font-size="10.5" fill="#a8a29e">stdio</text>
+        <g font-size="13" text-anchor="middle">
+          <text x="318" y="26" fill="#d6d3d1">—</text><text x="410" y="26" fill="#1c1917">✓</text><text x="502" y="26" fill="#1c1917">✓</text><text x="594" y="26" fill="#d6d3d1">—</text><text x="686" y="26" fill="#1c1917">✓</text><text x="778" y="26" fill="#d6d3d1">—</text>
+        </g>
+      </g>
+      <!-- row 3: variant badge A -->
+      <g transform="translate(0,302)">
+        <circle cx="76" cy="21" r="3.5" fill="#16a34a"/>
+        <text x="90" y="19" font-size="12.5" font-weight="500" fill="#1c1917">dv__supabase</text>
+        <text x="90" y="35" font-size="10.5" fill="#a8a29e">stdio · 2 variants</text>
+        <g text-anchor="middle">
+          <text x="318" y="26" font-size="13" fill="#d6d3d1">—</text>
+          <rect x="399" y="9" width="22" height="22" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1"/>
+          <text x="410" y="24.5" font-size="11" font-weight="600" fill="#b45309">A</text>
+          <text x="502" y="26" font-size="13" fill="#1c1917">✓</text><text x="594" y="26" font-size="13" fill="#d6d3d1">—</text><text x="686" y="26" font-size="13" fill="#d6d3d1">—</text><text x="778" y="26" font-size="13" fill="#1c1917">✓</text>
+        </g>
+      </g>
+      <!-- row 4 -->
+      <g transform="translate(0,346)">
+        <circle cx="76" cy="21" r="3.5" fill="#16a34a"/>
+        <text x="90" y="19" font-size="12.5" font-weight="500" fill="#1c1917">pd__notion</text>
+        <text x="90" y="35" font-size="10.5" fill="#a8a29e">stdio · shared</text>
+        <g font-size="13" fill="#1c1917" text-anchor="middle">
+          <text x="318" y="26">✓</text><text x="410" y="26">✓</text><text x="502" y="26">✓</text><text x="594" y="26">✓</text><text x="686" y="26">✓</text><text x="778" y="26">✓</text>
+        </g>
+      </g>
+      <!-- row 5: off states -->
+      <g transform="translate(0,390)">
+        <circle cx="76" cy="21" r="3.5" fill="#16a34a"/>
+        <text x="90" y="19" font-size="12.5" font-weight="500" fill="#1c1917">so__rss</text>
+        <text x="90" y="35" font-size="10.5" fill="#a8a29e">stdio · shared</text>
+        <g text-anchor="middle">
+          <text x="318" y="26" font-size="13" fill="#1c1917">✓</text>
+          <g transform="translate(410,20)" stroke="#a8a29e" stroke-width="1.4" fill="none"><circle r="6" cy="1"/><line y1="-8" y2="-3" stroke-linecap="round"/></g>
+          <text x="502" y="26" font-size="13" fill="#1c1917">✓</text>
+          <g transform="translate(594,20)" stroke="#a8a29e" stroke-width="1.4" fill="none"><circle r="6" cy="1"/><line y1="-8" y2="-3" stroke-linecap="round"/></g>
+          <text x="686" y="26" font-size="13" fill="#1c1917">✓</text><text x="778" y="26" font-size="13" fill="#d6d3d1">—</text>
+        </g>
+      </g>
+      <!-- row 6 -->
+      <g transform="translate(0,434)">
+        <circle cx="76" cy="21" r="3.5" fill="#d97706"/>
+        <text x="90" y="19" font-size="12.5" font-weight="500" fill="#1c1917">sr__brave</text>
+        <text x="168" y="19" font-size="10.5" fill="#b45309">⚠ BRAVE_API_KEY</text>
+        <text x="90" y="35" font-size="10.5" fill="#a8a29e">stdio · shared</text>
+        <g text-anchor="middle">
+          <text x="318" y="26" font-size="13" fill="#1c1917">✓</text><text x="410" y="26" font-size="13" fill="#1c1917">✓</text>
+          <g transform="translate(502,20)" stroke="#a8a29e" stroke-width="1.4" fill="none"><circle r="6" cy="1"/><line y1="-8" y2="-3" stroke-linecap="round"/></g>
+          <g transform="translate(594,20)" stroke="#a8a29e" stroke-width="1.4" fill="none"><circle r="6" cy="1"/><line y1="-8" y2="-3" stroke-linecap="round"/></g>
+          <text x="686" y="26" font-size="13" fill="#1c1917">✓</text>
+          <g transform="translate(778,20)" stroke="#a8a29e" stroke-width="1.4" fill="none"><circle r="6" cy="1"/><line y1="-8" y2="-3" stroke-linecap="round"/></g>
+        </g>
+      </g>
+      <!-- row separators -->
+      <g stroke="#f0efee" stroke-width="1">
+        <line x1="40" y1="258" x2="824" y2="258"/><line x1="40" y1="302" x2="824" y2="302"/>
+        <line x1="40" y1="346" x2="824" y2="346"/><line x1="40" y1="390" x2="824" y2="390"/>
+        <line x1="40" y1="434" x2="824" y2="434"/><line x1="40" y1="478" x2="824" y2="478"/>
+      </g>
+
+      <!-- GROUP ROW: Remote -->
+      <rect x="40" y="478" width="784" height="30" fill="#f5f5f4"/>
+      <text x="72" y="498" font-size="11.5" font-weight="600" fill="#78716c">Remote · 2</text>
+      <text x="800" y="498" text-anchor="end" font-size="10.5" fill="#a8a29e">reached at a URL</text>
+
+      <!-- row 7 -->
+      <g transform="translate(0,508)">
+        <circle cx="76" cy="21" r="3.5" fill="#16a34a"/>
+        <text x="90" y="19" font-size="12.5" font-weight="500" fill="#1c1917">pd__fathom</text>
+        <text x="90" y="35" font-size="10.5" fill="#a8a29e">https · mcp.fathom.dev</text>
+        <g font-size="13" text-anchor="middle">
+          <text x="318" y="26" fill="#d6d3d1">—</text><text x="410" y="26" fill="#1c1917">✓</text><text x="502" y="26" fill="#d6d3d1">—</text><text x="594" y="26" fill="#d6d3d1">—</text><text x="686" y="26" fill="#d6d3d1">—</text><text x="778" y="26" fill="#d6d3d1">—</text>
+        </g>
+      </g>
+      <!-- row 8 -->
+      <g transform="translate(0,552)">
+        <circle cx="76" cy="21" r="3.5" fill="#16a34a"/>
+        <text x="90" y="19" font-size="12.5" font-weight="500" fill="#1c1917">gh__copilot</text>
+        <text x="90" y="35" font-size="10.5" fill="#a8a29e">https · api.githubcopilot.com</text>
+        <g font-size="13" text-anchor="middle">
+          <text x="318" y="26" fill="#1c1917">✓</text><text x="410" y="26" fill="#1c1917">✓</text><text x="502" y="26" fill="#d6d3d1">—</text><text x="594" y="26" fill="#d6d3d1">—</text><text x="686" y="26" fill="#d6d3d1">—</text><text x="778" y="26" fill="#d6d3d1">—</text>
+        </g>
+      </g>
+      <line x1="40" y1="552" x2="824" y2="552" stroke="#f0efee"/>
+      <line x1="40" y1="596" x2="824" y2="596" stroke="#f0efee"/>
+
+      <!-- hover row demo -->
+      <rect x="40" y="596" width="784" height="44" fill="#f0f6ff"/>
+      <g transform="translate(0,596)">
+        <circle cx="76" cy="21" r="3.5" fill="#d6d3d1"/>
+        <text x="90" y="19" font-size="12.5" font-weight="500" fill="#1c1917">gh__gitlab</text>
+        <text x="90" y="35" font-size="10.5" fill="#a8a29e">https · gitlab.com/mcp</text>
+        <text x="262" y="26" text-anchor="end" font-size="10" fill="#2563eb">hover = whole row</text>
+        <g font-size="13" text-anchor="middle">
+          <text x="318" y="26" fill="#d6d3d1">—</text><text x="410" y="26" fill="#d6d3d1">—</text><text x="502" y="26" fill="#d6d3d1">—</text><text x="594" y="26" fill="#d6d3d1">—</text><text x="686" y="26" fill="#d6d3d1">—</text><text x="778" y="26" fill="#d6d3d1">—</text>
+        </g>
+      </g>
+
+      <!-- VERTICAL COLUMN SEPARATORS -->
+      <g stroke="#ececea" stroke-width="1">
+        <line x1="272" y1="144" x2="272" y2="640"/><line x1="364" y1="144" x2="364" y2="640"/>
+        <line x1="456" y1="144" x2="456" y2="640"/><line x1="548" y1="144" x2="548" y2="640"/>
+        <line x1="640" y1="144" x2="640" y2="640"/><line x1="732" y1="144" x2="732" y2="640"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- ================= ANNOTATIONS ================= -->
+  <g transform="translate(850,110)">
+    <text font-size="13" font-weight="600" fill="#1c1917">What regularizes it</text>
+    <g font-size="11.5" fill="#44403c">
+      <g transform="translate(0,18)"><circle cx="8" cy="6" r="7" fill="#2563eb"/><text x="8" y="10" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">1</text><text x="24" y="10">Every harness column one width</text><text x="24" y="26" font-size="10.5" fill="#a8a29e">set by the widest label, not per column</text></g>
+      <g transform="translate(0,58)"><circle cx="8" cy="6" r="7" fill="#2563eb"/><text x="8" y="10" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">2</text><text x="24" y="10">Vertical separators at each column edge</text><text x="24" y="26" font-size="10.5" fill="#a8a29e">header and cells read as one column</text></g>
+      <g transform="translate(0,98)"><circle cx="8" cy="6" r="7" fill="#2563eb"/><text x="8" y="10" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">3</text><text x="24" y="10">Three cell states, one container</text><text x="24" y="26" font-size="10.5" fill="#a8a29e">✓ on · power off · — absent; the whole</text><text x="24" y="40" font-size="10.5" fill="#a8a29e">cell is the click target (variant letter</text><text x="24" y="54" font-size="10.5" fill="#a8a29e">keeps the same hit area, shown amber)</text></g>
+      <g transform="translate(0,152)"><circle cx="8" cy="6" r="7" fill="#2563eb"/><text x="8" y="10" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">4</text><text x="24" y="10">Sections are full-width group rows</text><text x="24" y="26" font-size="10.5" fill="#a8a29e">"Local · 6" spans the grid instead of</text><text x="24" y="40" font-size="10.5" fill="#a8a29e">floating text between rows</text></g>
+      <g transform="translate(0,192)"><circle cx="8" cy="6" r="7" fill="#2563eb"/><text x="8" y="10" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">5</text><text x="24" y="10">Header cells match cell alignment</text><text x="24" y="26" font-size="10.5" fill="#a8a29e">logo + name centered; clicking a header</text><text x="24" y="40" font-size="10.5" fill="#a8a29e">opens the on/off-all column menu</text></g>
+      <g transform="translate(0,232)"><circle cx="8" cy="6" r="7" fill="#2563eb"/><text x="8" y="10" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">6</text><text x="24" y="10">Hover covers the whole row</text><text x="24" y="26" font-size="10.5" fill="#a8a29e">one highlight across all columns</text></g>
+      <g transform="translate(0,272)"><circle cx="8" cy="6" r="7" fill="#2563eb"/><text x="8" y="10" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">7</text><text x="24" y="10">Folder actions get a fixed slot</text><text x="24" y="26" font-size="10.5" fill="#a8a29e">right-aligned inside the name cell so</text><text x="24" y="40" font-size="10.5" fill="#a8a29e">columns never shift when they appear</text></g>
+    </g>
+    <g transform="translate(0,340)">
+      <text font-size="11.5" font-weight="600" fill="#1c1917">Not changed</text>
+      <text y="18" font-size="10.5" fill="#78716c">same cells (toggle, absent, variants), same</text>
+      <text y="34" font-size="10.5" fill="#78716c">menus, same sections, same horizontal scroll</text>
+      <text y="50" font-size="10.5" fill="#78716c">when columns overflow the card.</text>
+    </g>
+  </g>
+</svg>
