@@ -903,6 +903,7 @@ private struct HarnessAccountCard: View {
     /// The usage bars as an account card shows them: one per window the
     /// harness reports, then on-demand spend and an extra-usage balance.
     @ViewBuilder private func usageSection(_ limit: RateLimit) -> some View {
+        if row.name == "devin" { FreeModelLimitRow(limit: limit) }
         ForEach(limit.allWindows, id: \.window) { window in
             UsageBar(window: UsageWindow(label: window.window.isEmpty ? "Usage" : UsageFormat.window(row.name, window.window),
                                          usedPercent: Double(min(max(window.usedPercent, 0), 100)),

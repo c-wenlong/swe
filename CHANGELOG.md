@@ -342,6 +342,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Devin free-model limit status.** Accounts and the Mac menu bar show
+  a reached free-model limit and its reset time from Devin's CLI logs,
+  separately from daily and weekly paid quota. The CLI marks an active
+  block with `free:blocked`; web and iPhone cards show it too. Without an
+  active observed block, the cards say Unknown because Devin does not
+  report a remaining free-model percentage.
+
 - **MCP auto-adoption and remove-everywhere.** `swe mcp sync` now ends a
   successful run by adopting every harness-only server into the hub:
   the first holder's definition in sorted harness order lands in

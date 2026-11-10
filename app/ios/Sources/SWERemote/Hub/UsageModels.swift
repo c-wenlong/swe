@@ -87,6 +87,7 @@ struct RateLimit: Decodable, Hashable {
     let extraUsageUsd: Double?
     let onDemand: OnDemand?
     let fetchedAt: Double?
+    let freeModelResetAt: Double?
 
     var isOK: Bool { (status ?? "ok") == "ok" }
 

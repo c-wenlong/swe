@@ -348,6 +348,37 @@ class TestHeaderActions(unittest.TestCase):
     """manage.js's Harnesses header: Detect and Add harness only where
     paintHarnesses binds them, never in the loading or error header."""
 
+    def test_free_model_block_is_separate_and_expires(self):
+        manage_js = Path(__file__).resolve().parents[1] / "src/swe/webapp/static/manage.js"
+        prelude = """
+const esc = String, icon = () => '', harnessTitle = h => h.name;
+const STALE_S = 360, LIMIT_HARNESSES = new Set(['devin']);
+const Fmt = {planTitle: () => '', logo: () => '', ago: () => '', resetIn: () => '2h'};
+Date.now = () => 1800000000000;
+"""
+        body = """
+const h = {name:'devin', rate_limit:{status:'ok', windows:[], fetched_at:1800000000,
+    free_model_reset_at:1800007200}};
+const active = accountCard(h, {hub:true});
+h.rate_limit.free_model_reset_at = 1800000000;
+const expired = accountCard(h, {hub:true});
+delete h.rate_limit.free_model_reset_at;
+const unknown = accountCard(h, {hub:true});
+h.name = 'cursor';
+const other = accountCard(h, {hub:true});
+process.stdout.write(JSON.stringify([active, expired, unknown, other]));
+"""
+        # Isolate the account card from unrelated window rendering.
+        script = prelude + "function readingWindows() { return []; }\n" + app_js_function("accountCard", manage_js) + body
+        done = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        active, expired, unknown, other = json.loads(done.stdout)
+        self.assertIn("Limit reached · resets 2h", active)
+        self.assertIn("Unknown", expired)
+        self.assertNotIn("Limit reached", expired)
+        self.assertIn("Unknown", unknown)
+        self.assertNotIn("Free models", other)
+
     def test_actions_only_when_painted(self):
         manage_js = Path(__file__).resolve().parents[1] / "src/swe/webapp/static/manage.js"
         prelude = ("const esc = (s) => String(s); const icon = () => '';\n"

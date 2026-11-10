@@ -221,6 +221,19 @@ final class UsageDecodingTests: XCTestCase {
 }
 
 final class UsageFormatTests: XCTestCase {
+    func testFreeModelLimitExpiresToUnknown() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let data = Data(#"{"status":"ok","used_percent":4,"free_model_reset_at":1800007200}"#.utf8)
+        let limit = try decoder.decode(RateLimit.self, from: data)
+        XCTAssertEqual(limit.usedPercent, 4)
+        XCTAssertEqual(UsageFormat.freeModelStatus(limit.freeModelResetAt, now: 1800000000),
+                       "Free models: Limit reached · resets in 2 h")
+        XCTAssertEqual(UsageFormat.freeModelStatus(limit.freeModelResetAt, now: 1800007200),
+                       "Free models: Unknown")
+        XCTAssertEqual(UsageFormat.freeModelStatus(nil, now: 1800000000), "Free models: Unknown")
+    }
+
     func testPercentClampsAndRounds() {
         XCTAssertEqual(UsageFormat.percent(42.4), "42%")
         XCTAssertEqual(UsageFormat.percent(130), "100%")

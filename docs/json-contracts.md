@@ -232,7 +232,12 @@ The CLI side of remote also speaks `--json`:
 - `RateLimit`: `status`, `used_percent`, `remaining_percent`,
   `limit_reached`, `reset_at`, `window`, `window_seconds`, `plan_type`,
   `remaining_units`, `total_units`, `fetched_at`, `windows`,
-  `extra_usage_usd` (`extraUsageUsd`), `on_demand`. Providers differ:
+  `extra_usage_usd` (`extraUsageUsd`), `on_demand`, `free_model_reset_at`.
+  `free_model_reset_at` is an optional epoch-second UTC deadline observed
+  in Devin's CLI error logs. It indicates a separate free-model block only
+  while in the future; null, absent or expired means unknown allowance,
+  never unlimited or 0% used. It does not alter the plan's quota windows
+  or `limit_reached`. Providers differ:
   Claude reports one `7d` window, Cursor several windows plus `on_demand`,
   Devin `1d`/`7d` plus `extra_usage_usd`. A `windows` entry can carry
   `unavailable: true` when the provider left that meter unread — the

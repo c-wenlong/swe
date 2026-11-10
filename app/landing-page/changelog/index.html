@@ -453,6 +453,13 @@ thread moves its rollout there, and an archived session still ran.</p>
 </ul>
 <h3 id="added-1"><a class="anchor" href="#added-1"></a>Added</h3>
 <ul>
+<li><p><strong>Devin free-model limit status.</strong> Accounts and the Mac menu bar show
+a reached free-model limit and its reset time from Devin's CLI logs,
+separately from daily and weekly paid quota. The CLI marks an active
+block with <code>free:blocked</code>; web and iPhone cards show it too. Without an
+active observed block, the cards say Unknown because Devin does not
+report a remaining free-model percentage.</p>
+</li>
 <li><p><strong>MCP auto-adoption and remove-everywhere.</strong> <code>swe mcp sync</code> now ends a
 successful run by adopting every harness-only server into the hub:
 the first holder's definition in sorted harness order lands in

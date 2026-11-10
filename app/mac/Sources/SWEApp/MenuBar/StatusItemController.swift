@@ -709,6 +709,7 @@ private struct PanelOtherRow: View {
                               unavailable: window.unavailable, asOf: window.asOf)
             }
             .opacity(old ? 0.55 : 1)
+            if row.name == "devin" { FreeModelLimitRow(limit: row.limit) }
             if let onDemand = row.limit.onDemand {
                 Text("On-demand \(onDemand.value) · \(onDemand.detail)")
                     .font(Theme.caption).foregroundStyle(Theme.textSecondary)

@@ -306,6 +306,9 @@ class RateLimitInfo:
                                # Lets a fetcher hand back a saved reading
                                # (Claude's refresh-pending path) without
                                # the aggregator stamping it fresh.
+    # An observed Devin free-model block, independent of paid quota.
+    # Zero means unknown, including after the reported reset has passed.
+    free_model_reset_at: float = 0.0
 
     def to_json(self) -> dict:
         """The ``swe list --usage --json`` shape.
@@ -351,6 +354,8 @@ class RateLimitInfo:
             # names the account it is about.
             "email": self.email,
             "fetched_at": self.fetched_at or None,
+            "free_model_reset_at": (self.free_model_reset_at
+                                    if self.free_model_reset_at > time.time() else None),
         }
 
     @property
@@ -414,7 +419,11 @@ class RateLimitInfo:
         # Blocked trumps the percentage when a provider derives the two
         # independently (Droid averages budgets, Copilot derives it
         # separately): a reached limit renders the empty red pie.
-        return f"{_pie(0 if self.limit_reached else remaining)} {c('dim', tail)}"
+        result = f"{_pie(0 if self.limit_reached else remaining)} {c('dim', tail)}"
+        if self.free_model_reset_at > time.time():
+            countdown = RateLimitInfo("", 0, False, self.free_model_reset_at, "", 0).reset_in_human
+            result += c("red", f" free:blocked {countdown}")
+        return result
 
 
 @dataclass(frozen=True)

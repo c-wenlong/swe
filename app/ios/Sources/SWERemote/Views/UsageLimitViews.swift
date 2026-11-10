@@ -91,6 +91,10 @@ struct LimitCard: View {
                     }
                     .opacity(stale ? 0.55 : 1)
                     extras(limit)
+                    if harness.name == "devin" {
+                        Text(UsageFormat.freeModelStatus(limit.freeModelResetAt, now: now.timeIntervalSince1970))
+                            .font(Theme.caption.monospacedDigit()).foregroundStyle(Theme.textSecondary)
+                    }
                 } else {
                     Text(UsageFormat.limitStatus(limit?.status, machine: machine.machine?.displayName ?? "that machine"))
                         .font(Theme.caption).foregroundStyle(Theme.textSecondary)

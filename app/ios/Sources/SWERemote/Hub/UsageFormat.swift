@@ -12,6 +12,11 @@ enum UsageFormat {
 
     // MARK: Limits
 
+    static func freeModelStatus(_ resetAt: Double?, now: Double) -> String {
+        guard let resetAt, resetAt > now else { return "Free models: Unknown" }
+        return "Free models: Limit reached · \(resetCountdown(resetAt, now: now))"
+    }
+
     enum Tone: Equatable { case normal, warning, danger }
 
     /// Amber past 80%, red at 100% or once the provider says the limit is hit.

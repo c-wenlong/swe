@@ -3234,7 +3234,16 @@ def _fetch_devin(credentials_path: str | None = None) -> RateLimitInfo | None:
         },
     )
     data = _fetch_json(request, on_401=_warn_devin_401)
-    return _parse_devin_status(data) if isinstance(data, dict) else None
+    info = _parse_devin_status(data) if isinstance(data, dict) else None
+    if info is not None:
+        from swe.harness.devin_limits import free_model_reset
+
+        cutoff = getattr(_fetch_cutoff, "at", None)
+        info.free_model_reset_at = free_model_reset(
+            credentials_path or _DEVIN_CREDENTIALS_PATH,
+            deadline=cutoff - _EXTRAS_CUTOFF_MARGIN if cutoff is not None else None,
+        )
+    return info
 
 
 def _register_devin() -> None:
