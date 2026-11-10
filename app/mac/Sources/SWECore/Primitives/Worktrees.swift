@@ -746,6 +746,42 @@ public struct WorktreeRepo: Identifiable, Equatable, Hashable, Sendable {
     public let name: String
 }
 
+/// A repository card's fold: the first `limit` rows, plus the open row
+/// when it sits beyond them, so it never hides behind the toggle.
+public enum WorktreeFold {
+    public static func visible(_ rows: [Worktree], limit: Int, expanded: Bool,
+                               pinned: String?) -> (shown: [Worktree], hidden: Int) {
+        let head = RowFold.visible(rows, limit: limit, expanded: expanded)
+        let extra = rows.dropFirst(head.count).filter { $0.path == pinned }
+        let shown = head + extra
+        return (shown, rows.count - shown.count)
+    }
+
+    /// Folders whose contents change with every build or install; nothing
+    /// in them says a worktree came or went.
+    static let rebuildable: Set<String> = [
+        "node_modules", ".venv", "venv", ".next", "build", "dist", "target",
+        "DerivedData", "__pycache__", ".gradle", "Pods",
+    ]
+
+    /// Whether a path under `~/.swe` (relative to it) is a worktree being
+    /// registered or removed: `.git/worktrees/<name>` or a worktree folder
+    /// added or dropped directly under a `worktrees` folder. Edits inside a
+    /// worktree, build output, caches and `.git/index` are not.
+    public static func affectsList(_ relative: String) -> Bool {
+        let parts = relative.split(separator: "/").map(String.init)
+        if parts.contains(where: { rebuildable.contains($0) }) { return false }
+        if let first = parts.first, ["cache", "data", "logs"].contains(first) { return false }
+        if relative == "config.json" { return true }
+        for (index, part) in parts.enumerated() where part == "worktrees" {
+            let after = parts.count - index - 1
+            let inGit = index > 0 && parts[index - 1] == ".git"
+            if after <= 1 { return !(parts.last?.hasSuffix(".lock") ?? false) || inGit }
+        }
+        return false
+    }
+}
+
 public enum WorktreeFilter {
     /// Rows matching a state chip and the search text. `query` matches the
     /// branch, repository, path, harness and PR number, ignoring case.
@@ -828,6 +864,9 @@ public final class WorktreesModel {
     private var generation = 0
     private var loadedAt: Date?
     private var loadedScope: WorktreeScope?
+    private var loading = 0
+    /// A list is being read, so a watcher event never queues a second one.
+    public var isLoading: Bool { loading > 0 }
     /// The swe that produced the list on show, as Settings names it.
     private var loadedSource: String?
     private var requestedSource = ""
@@ -872,8 +911,18 @@ public final class WorktreesModel {
     /// Lists unless this scope's list, from this `source` (the swe path as
     /// Settings has it), is under `maxAge` old.
     public func loadIfStale(swe: SweClient, source: String = "") async {
+        if isLoading { return }
         if case .loaded = state, loadedScope == scope, loadedSource == source, let loadedAt,
            now().timeIntervalSince(loadedAt) < maxAge { return }
+        await load(swe: swe, source: source)
+    }
+
+    /// A reload a folder change asked for: only once the freshness window
+    /// has passed and no list is already being read. Events inside the
+    /// window are dropped; the page's own re-check picks the change up
+    /// when the window ends. A manual Refresh calls `load` and always runs.
+    public func reloadFromWatcher(swe: SweClient, source: String) async {
+        guard !isLoading, let loadedAt, now().timeIntervalSince(loadedAt) >= maxAge else { return }
         await load(swe: swe, source: source)
     }
 
@@ -882,6 +931,8 @@ public final class WorktreesModel {
         if let source { requestedSource = source }
         let source = requestedSource
         generation += 1
+        loading += 1
+        defer { loading -= 1 }
         let mine = generation
         let asked = scope
         if case .loaded = state {} else { state = .loading }
@@ -976,15 +1027,15 @@ public final class WorktreesModel {
 
     /// The dry run: what `prune` would remove. Changes nothing, so it
     /// skips the gate and the reload.
-    public func prunePreview(includeDirty: Bool, swe: SweClient) async throws -> PruneReport {
-        try await client(swe).pruneWorktrees(scope: scope, includeDirty: includeDirty, confirmed: false)
+    public func prunePreview(swe: SweClient) async throws -> PruneReport {
+        try await client(swe).pruneWorktrees(scope: scope, includeDirty: false, confirmed: false)
     }
 
-    /// Removes the worktrees the preview showed, one `swe wt remove` each,
-    /// so swe itself refuses any that stopped being merged and clean since.
-    /// `prune --yes` would rescan and could take worktrees the person
-    /// never saw. A previewed `merged-dirty` row is shown again first and
-    /// only force-removed if it is still `merged-dirty`.
+    /// Removes the worktrees the preview showed, one unforced
+    /// `swe wt remove` each, so swe itself refuses any that stopped being
+    /// merged and clean, or got locked, since. `prune --yes` would rescan
+    /// and could take worktrees the person never saw, and `--force` would
+    /// skip swe's lock and hold checks, so bulk clean up never uses either.
     @discardableResult
     public func cleanUp(_ candidates: [Worktree], swe: SweClient) async throws -> CleanupResult {
         let result = try await perform(candidates.map(\.path), swe: swe) { client in
@@ -994,17 +1045,7 @@ public final class WorktreesModel {
             for tree in candidates {
                 try Task.checkCancellation()
                 do {
-                    var force = false
-                    if tree.state == .mergedDirty {
-                        let current = try await client.worktree(at: tree.path)
-                        guard current.state == .mergedDirty else {
-                            skipped.append(.init(path: tree.path,
-                                                 reason: "No longer merged with changes left (\(current.state.title))"))
-                            continue
-                        }
-                        force = true
-                    }
-                    let done = try await client.removeWorktree(tree.path, force: force, deleteBranch: false)
+                    let done = try await client.removeWorktree(tree.path, force: false, deleteBranch: false)
                     removed.append(tree.path)
                     if let bytes = done.freedBytes { freed = (freed ?? 0) + bytes }
                 } catch is CancellationError {

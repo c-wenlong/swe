@@ -61,8 +61,8 @@ struct WorktreesPage: View {
         // cache or .git/index, which the app's own reads write.
         .task {
             let swe = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".swe")
-            for await _ in FolderChanges.stream(root: swe, matches: Self.affectsList) {
-                await model.load(swe: app.swe, source: app.swePath)
+            for await _ in FolderChanges.stream(root: swe, matches: WorktreeFold.affectsList) {
+                await model.reloadFromWatcher(swe: app.swe, source: app.swePath)
             }
         }
         .task(id: app.pendingWorktree) { applyPending() }
@@ -271,13 +271,6 @@ struct WorktreesPage: View {
         }
     }
 
-    /// A path under `~/.swe` (relative to it) that can change the list.
-    nonisolated static func affectsList(_ relative: String) -> Bool {
-        if relative.hasPrefix("cache/") || relative.hasPrefix("data/") || relative.hasPrefix("logs/") { return false }
-        if relative.hasSuffix("/index") || relative.contains(".git/index") || relative.hasSuffix(".lock") { return false }
-        return relative.hasPrefix("worktrees") || relative.contains("/worktrees/") || relative == "config.json"
-    }
-
     /// A saved repository that has moved or gone: back to All repositories,
     /// or the page would restore the same failing scope on every launch.
     private func leaveMissingScope() {
@@ -462,16 +455,16 @@ private struct RepoCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 header
                 // The open row never folds away behind the toggle.
-                let rows = RowFold.visible(group.worktrees, limit: Self.foldLimit, expanded: expanded)
-                let shown = rows + group.worktrees.dropFirst(rows.count).filter { $0.path == opened }
-                ForEach(shown) { tree in
+                let fold = WorktreeFold.visible(group.worktrees, limit: Self.foldLimit,
+                                                expanded: expanded, pinned: opened)
+                ForEach(fold.shown) { tree in
                     WorktreeRow(tree: tree, compact: compact, isOpen: opened == tree.path,
                                 busy: busy.contains(tree.path),
                                 open: { open(tree) }, act: { act($0, tree) })
                 }
-                if group.worktrees.count > Self.foldLimit {
+                if group.worktrees.count > Self.foldLimit, expanded || fold.hidden > 0 {
                     ExpandRow(isExpanded: expanded,
-                              hidden: RowFold.hiddenCount(total: group.worktrees.count, limit: Self.foldLimit),
+                              hidden: fold.hidden,
                               help: (expand: "Show every worktree in this repository",
                                      collapse: "Show fewer worktrees"),
                               edge: .inset) {
@@ -1191,9 +1184,11 @@ private struct PruneSheet: View {
     @Environment(\.dismissSheet) private var dismiss
     @State private var preview: Loadable<PruneReport> = .loading
     @State private var done: CleanupResult?
-    @State private var includeDirty = false
     @State private var working = false
     @State private var error: String?
+
+    /// Merged worktrees still holding files: bulk clean up never forces.
+    private var leftOut: Int { app.worktrees.worktrees.filter { $0.state == .mergedDirty }.count }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1212,7 +1207,7 @@ private struct PruneSheet: View {
         }
         .sheetScaffold(width: 540)
         .onSheetDismissRequest { if !working { dismiss() } }
-        .task(id: includeDirty) { await loadPreview() }
+        .task { await loadPreview() }
     }
 
     @ViewBuilder private var previewBody: some View {
@@ -1273,12 +1268,11 @@ private struct PruneSheet: View {
                 }
             }
         }
-        Toggle("Also include merged worktrees that still have uncommitted files", isOn: $includeDirty)
-            .toggleStyle(.checkbox).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-            .disabled(working)
-        if includeDirty {
-            Label("Those files are deleted with the folder and can't be recovered.", systemImage: "exclamationmark.triangle")
-                .font(Theme.caption).foregroundStyle(Theme.dangerText)
+        if leftOut > 0 {
+            Label("Merged worktrees with uncommitted changes are left out. Delete each one from its own row if you are sure.",
+                  systemImage: "info.circle")
+                .font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1299,7 +1293,7 @@ private struct PruneSheet: View {
     private func loadPreview() async {
         preview = .loading
         do {
-            let report = try await app.worktrees.prunePreview(includeDirty: includeDirty, swe: app.swe)
+            let report = try await app.worktrees.prunePreview(swe: app.swe)
             // A newer preview (the toggle changed) owns the result.
             if !Task.isCancelled { preview = .loaded(report) }
         } catch is CancellationError {

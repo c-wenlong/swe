@@ -388,7 +388,7 @@ import Testing
         let swe = SweClient(runner: fixture)
         await model.load(swe: swe)
         let before = model.worktrees.count
-        let preview = try await model.prunePreview(includeDirty: false, swe: swe)
+        let preview = try await model.prunePreview(swe: swe)
         #expect(preview.dryRun)
         #expect(preview.candidates.count == 3)
         #expect(preview.candidates.allSatisfy { $0.state == .mergedClean })
@@ -402,10 +402,6 @@ import Testing
         #expect(removes.count == 3 && removes.allSatisfy { !$0.contains("--force") })
         #expect(model.worktrees.count == before - 3)
         #expect(model.notice?.hasPrefix("Removed 3 worktrees.") == true)
-        // Including merged-dirty offers the extra one.
-        let withDirty = try await model.prunePreview(includeDirty: true, swe: swe)
-        #expect(withDirty.candidates.map(\.state) == [.mergedDirty])
-        #expect(fixture.calls.last == ["wt", "prune", "--all", "--include=merged-dirty", "--json"])
     }
 
     @Test func aWorktreeThatStoppedBeingSafeIsSkippedNotForced() async throws {
@@ -413,7 +409,7 @@ import Testing
         let model = WorktreesModel()
         let swe = SweClient(runner: fixture)
         await model.load(swe: swe)
-        let preview = try await model.prunePreview(includeDirty: false, swe: swe)
+        let preview = try await model.prunePreview(swe: swe)
         // Between the preview and the confirm, one candidate gets locked.
         let locked = preview.candidates[0]
         try await model.lock(locked, reason: "someone's using it", swe: swe)
@@ -424,32 +420,21 @@ import Testing
         #expect(model.worktree(at: locked.path) != nil)
     }
 
-    @Test func mergedDirtyRowsAreCheckedAgainBeforeAForcedRemove() async throws {
+    @Test func bulkCleanUpNeverForcesOrTouchesDirtyRows() async throws {
         let fixture = WorktreesFixture()
         let model = WorktreesModel()
         let swe = SweClient(runner: fixture)
         await model.load(swe: swe)
-        let all = try await model.prunePreview(includeDirty: true, swe: swe).candidates
-        #expect(all.count == 4)
-        let dirty = all.filter { $0.state == .mergedDirty }
-        #expect(dirty.count == 1)
-        let result = try await model.cleanUp(dirty, swe: swe)
-        #expect(result.removed == [dirty[0].path])
-        let calls = fixture.calls.filter { $0.starts(with: ["wt", "show"]) || $0.starts(with: ["wt", "remove"]) }
-        #expect(calls == [["wt", "show", dirty[0].path, "--json"],
-                          ["wt", "remove", dirty[0].path, "--force", "--json"]])
-    }
-
-    @Test func aDirtyRowThatChangedStateIsNotForced() async throws {
-        let fixture = WorktreesFixture()
-        let model = WorktreesModel()
-        let swe = SweClient(runner: fixture)
-        await model.load(swe: swe)
-        let stale = tree("/Users/demo/Projects/swe/.claude/worktrees/spike-vector-index", .mergedDirty)
-        // The fixture knows this path as no-pr, so `show` says it is no longer merged-dirty.
-        let result = try await model.cleanUp([stale], swe: swe)
-        #expect(result.removed.isEmpty && result.skipped.count == 1)
-        #expect(!fixture.calls.contains { $0.contains("--force") })
+        let preview = try await model.prunePreview(swe: swe)
+        #expect(preview.candidates.allSatisfy { $0.state == .mergedClean })
+        #expect(!fixture.calls.contains { $0.contains { $0.hasPrefix("--include") } })
+        // Even if a merged-dirty row is handed over, swe refuses it unforced.
+        let dirty = try #require(model.worktrees.first { $0.state == .mergedDirty })
+        let result = try await model.cleanUp(preview.candidates + [dirty], swe: swe)
+        #expect(result.removed.count == 3)
+        #expect(result.skipped.map(\.path) == [dirty.path])
+        #expect(!fixture.calls.contains { $0.contains("--force") || $0.starts(with: ["wt", "show"]) })
+        #expect(model.worktree(at: dirty.path) != nil)
     }
 
     @Test func aRepoScopedCleanUpStaysInThatRepo() async throws {
@@ -458,7 +443,7 @@ import Testing
         let swe = SweClient(runner: fixture)
         await model.load(swe: swe)
         model.scope = .repo("/Users/demo/Projects/dotfiles")
-        let preview = try await model.prunePreview(includeDirty: false, swe: swe)
+        let preview = try await model.prunePreview(swe: swe)
         #expect(fixture.calls.last == ["wt", "prune", "--repo=/Users/demo/Projects/dotfiles", "--json"])
         #expect(preview.candidates.map(\.repoName) == ["kaichen/dotfiles"])
         // Nothing outside the repo is in the candidates, so nothing outside is removed.
@@ -521,6 +506,55 @@ import Testing
         #expect(summary.reclaimableBytes == 100 && summary.reclaimableCount == 1)
     }
 
+    @Test func theFoldCountsOnlyRowsActuallyHidden() {
+        let rows = (1...13).map { tree("/r/w\($0)", .noPr, days: Double($0)) }
+        let folded = WorktreeFold.visible(rows, limit: 12, expanded: false, pinned: nil)
+        #expect(folded.shown.count == 12 && folded.hidden == 1)
+        // The last row is open: it shows beyond the limit, so nothing is hidden.
+        let pinned = WorktreeFold.visible(rows, limit: 12, expanded: false, pinned: "/r/w13")
+        #expect(pinned.shown.count == 13 && pinned.hidden == 0)
+        #expect(pinned.shown.last?.path == "/r/w13")
+        let open = WorktreeFold.visible(rows, limit: 12, expanded: false, pinned: "/r/w12")
+        #expect(open.shown.count == 12 && open.hidden == 1)
+        let all = WorktreeFold.visible(rows, limit: 12, expanded: true, pinned: "/r/w13")
+        #expect(all.shown.count == 13 && all.hidden == 0)
+    }
+
+    @Test func theWatcherReactsToRegistrationsNotBuildOutput() {
+        for path in ["worktrees", "worktrees/feat-a", "config.json",
+                     "accounts/codex/a/home/worktrees/plan/quiver",
+                     "accounts/codex/a/home/worktrees/plan"] {
+            #expect(WorktreeFold.affectsList(path) == (path != "accounts/codex/a/home/worktrees/plan/quiver"), "\(path)")
+        }
+        #expect(WorktreeFold.affectsList("repo/.git/worktrees/feat-a"))
+        for path in ["worktrees/feat-a/node_modules/x/y.js", "worktrees/feat-a/src/main.swift",
+                     "worktrees/feat-a/.venv/lib", "worktrees/feat-a/build", "worktrees/a/DerivedData/x",
+                     "worktrees/a/Pods/y", "worktrees/a/.next/z", "worktrees/a/dist/q", "worktrees/a/target/r",
+                     "worktrees/a/__pycache__/m.pyc", "worktrees/a/.gradle/g", "worktrees/a/venv/v",
+                     "cache/hooks.json", "data/ledger/db", "logs/x", "repo/.git/index",
+                     "worktrees/feat-a/.git/index"] {
+            #expect(!WorktreeFold.affectsList(path), "\(path)")
+        }
+    }
+
+    @Test func aWatcherReloadWaitsOutTheWindowAndNeverQueues() async throws {
+        let fixture = WorktreesFixture()
+        let clock = ClockBox()
+        let model = WorktreesModel(maxAge: 120, now: { clock.now })
+        let swe = SweClient(runner: fixture)
+        await model.load(swe: swe, source: "/a")
+        let lists = { fixture.calls.filter { $0.starts(with: ["wt", "list"]) }.count }
+        #expect(lists() == 1)
+        await model.reloadFromWatcher(swe: swe, source: "/a")
+        #expect(lists() == 1)
+        clock.now = clock.now.addingTimeInterval(121)
+        await model.reloadFromWatcher(swe: swe, source: "/a")
+        #expect(lists() == 2)
+        // A manual refresh always runs.
+        await model.load(swe: swe)
+        #expect(lists() == 3)
+    }
+
     @Test func aListFromAnotherSweIsNotFresh() async throws {
         let fixture = WorktreesFixture()
         let model = WorktreesModel()
@@ -562,5 +596,15 @@ import Testing
         #expect(WorktreeFormat.lastCommit(nil, now: now) == "No date")
         #expect(WorktreeFormat.count(1) == "1 worktree")
         #expect(WorktreeFormat.count(2) == "2 worktrees")
+    }
+}
+
+/// A clock the test moves by hand.
+final class ClockBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = Date(timeIntervalSince1970: 1_800_000_000)
+    var now: Date {
+        get { lock.withLock { value } }
+        set { lock.withLock { value = newValue } }
     }
 }
