@@ -63,8 +63,16 @@ public enum WorktreeState: String, Codable, Sendable, CaseIterable {
         }
     }
 
-    /// `main` and `protected` rows have no delete at all.
-    public var isRemovable: Bool { self != .main && self != .protected }
+    /// `main` and `protected` rows have no delete at all, and swe refuses
+    /// `orphaned` ones even with `--force`: git has to forget them first.
+    public var isRemovable: Bool { self != .main && self != .protected && self != .orphaned }
+
+    /// Move and slim apply to ordinary worktrees only.
+    public var supportsMoveAndSlim: Bool { self != .main && self != .protected && self != .orphaned }
+
+    /// Lock is for anything git still lists: not the main checkout, not an
+    /// orphan.
+    public var supportsLock: Bool { self != .main && self != .orphaned }
 
     /// Anything but `merged-clean` needs `--force` to remove.
     public var removalNeedsForce: Bool { self != .mergedClean }
@@ -244,6 +252,7 @@ public struct Worktree: Codable, Equatable, Sendable, Identifiable, Hashable {
         switch state {
         case .main: "The main checkout can't be removed."
         case .protected: "swe never removes a protected worktree."
+        case .orphaned: "swe can't remove an orphaned worktree. Run git worktree prune in the main checkout."
         default: locked ? "Unlock it before removing." : nil
         }
     }
@@ -251,14 +260,23 @@ public struct Worktree: Codable, Equatable, Sendable, Identifiable, Hashable {
     public var canRemove: Bool { removalBlock == nil }
 
     /// Slim has something to remove: unmeasured counts as "maybe".
-    public var canSlim: Bool { state != .main && state != .protected && (rebuildableBytes ?? 1) > 0 }
+    public var canSlim: Bool { state.supportsMoveAndSlim && (rebuildableBytes ?? 1) > 0 }
 
     /// Remove needs `--force` and a second explicit confirmation.
     public var removalNeedsForce: Bool { state.removalNeedsForce }
 
     /// The main checkout has no lock or move; everything else does.
-    public var canLock: Bool { state != .main }
-    public var canMove: Bool { state != .main && !locked }
+    public var canLock: Bool { state.supportsLock }
+    public var canMove: Bool { state.supportsMoveAndSlim && !locked }
+
+    /// What clears an orphan: git forgets the folder it no longer lists.
+    public var pruneCommand: String {
+        "git -C \(Self.shellQuote(mainCheckout)) worktree prune"
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
+    }
 
     /// What deleting it would throw away beyond the folder itself.
     public var removalLosses: [String] {
@@ -430,6 +448,8 @@ public struct WorktreeFailure: Equatable, Sendable {
     public static func friendly(code: String?, message: String) -> String {
         let lead: String? = switch code {
         case "bad_args": "swe didn't understand that request."
+        case "bad_config": "swe's worktree settings are invalid."
+        case "io_error": "swe couldn't read or write a file."
         case "not_a_repo": "That folder isn't a git repository."
         case "not_found": "swe couldn't find that worktree. It may already be gone."
         case "not_safe": "swe won't remove this without force, because it could lose work."
@@ -502,7 +522,10 @@ public enum WorktreeCommand {
     /// them, so it is never on unless the person asked for it.
     public static func prune(scope: WorktreeScope, includeDirty: Bool, confirmed: Bool) -> [String] {
         var args = ["wt", "prune"]
-        if case .all = scope { args.append("--all") }
+        switch scope {
+        case .all: args.append("--all")
+        case .repo(let path): args.append("--repo=\(path)")
+        }
         if includeDirty { args.append("--include=merged-dirty") }
         if confirmed { args.append("--yes") }
         return args + ["--json"]

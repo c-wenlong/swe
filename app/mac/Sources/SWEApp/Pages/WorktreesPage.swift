@@ -168,12 +168,12 @@ struct WorktreesPage: View {
         Binding(get: { scopeStored }, set: { scopeStored = $0 })
     }
 
-    private var canPrune: Bool { model.scope == .all && !model.worktrees.isEmpty }
+    private var canPrune: Bool { !model.worktrees.isEmpty }
 
     private var pruneHelp: String {
         model.scope == .all
             ? "Remove every merged worktree that is clean. You see the list first."
-            : "swe can only clean up across all repositories. Switch the scope to All repositories."
+            : "Remove this repository's merged, clean worktrees. You see the list first."
     }
 
     // MARK: Actions
@@ -204,6 +204,7 @@ struct WorktreesPage: View {
         case .move: sheet = .move(tree)
         case .slim: sheet = .slim(tree)
         case .remove: sheet = .remove(tree)
+        case .copyPruneCommand: copyToPasteboard(tree.pruneCommand)
         }
     }
 
@@ -221,7 +222,8 @@ struct WorktreesPage: View {
         func tree(_ branch: String) -> Worktree? { model.worktrees.first { $0.branch == branch } }
         switch state {
         case "filtered": model.stateFilter = .mergedClean
-        case "detail": opened = tree("mac/worktrees-page")?.path
+        case "detail": opened = (tree("mac/worktrees-page") ?? model.worktrees.first { $0.state == .openPr } ?? model.worktrees.first { $0.state != .main })?.path
+        case "orphan": opened = model.worktrees.first { $0.state == .orphaned }?.path
         case "new": sheet = .new
         case "remove": sheet = tree("mac/worktrees-page").map { .remove($0) }
         case "removeclean": sheet = tree("fix/hooks-race").map { .remove($0) }
@@ -247,7 +249,7 @@ private extension WorktreesModel {
 
 // MARK: - Actions and sheets
 
-enum WorktreeAction { case reveal, copyPath, terminal, lock, unlock, move, slim, remove }
+enum WorktreeAction { case reveal, copyPath, terminal, lock, unlock, move, slim, remove, copyPruneCommand }
 
 enum WorktreeSheet: Identifiable {
     case new, prune
@@ -560,17 +562,20 @@ private struct WorktreeMenuItems: View {
         Button("Open in Terminal") { act(.terminal) }
         Button("Reveal in Finder") { act(.reveal) }
         Button("Copy path") { act(.copyPath) }
-        if tree.canLock || tree.state.isRemovable { Divider() }
+        if tree.canLock || tree.state.isRemovable || tree.state == .orphaned { Divider() }
         if tree.canLock {
             if tree.locked { Button("Unlock") { act(.unlock) } } else { Button("Lock…") { act(.lock) } }
         }
-        if tree.state != .main {
+        if tree.state.supportsMoveAndSlim {
             Button("Move…") { act(.move) }.disabled(!tree.canMove)
             Button("Slim…") { act(.slim) }.disabled(!tree.canSlim)
         }
         if tree.state.isRemovable {
             Divider()
             Button("Remove…", role: .destructive) { act(.remove) }.disabled(!tree.canRemove)
+        } else if tree.state == .orphaned {
+            Divider()
+            Button("Copy git worktree prune command") { act(.copyPruneCommand) }
         }
     }
 }
@@ -686,7 +691,7 @@ private struct WorktreeDetail: View {
                         Button("Lock…", systemImage: "lock") { act(.lock) }.secondaryButton()
                     }
                 }
-                if tree.state != .main {
+                if tree.state.supportsMoveAndSlim {
                     Button("Move…", systemImage: "arrow.right.circle") { act(.move) }
                         .secondaryButton().disabled(!tree.canMove)
                         .hoverTip(tree.locked ? "Unlock it before moving." : "Move the folder somewhere else.",
@@ -701,6 +706,20 @@ private struct WorktreeDetail: View {
                     Button("Remove…", systemImage: "trash", role: .destructive) { act(.remove) }
                         .secondaryButton().disabled(!tree.canRemove)
                         .hoverTip(tree.removalBlock ?? "Delete this worktree's folder.", replacesLabel: false)
+                }
+            }
+            if tree.state == .orphaned {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("swe can't remove an orphaned worktree. Run git worktree prune in the main checkout.")
+                        .font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(tree.pruneCommand)
+                        .font(Theme.font(size: 12, design: .monospaced)).foregroundStyle(Theme.textPrimary)
+                        .textSelection(.enabled)
+                        .padding(.vertical, 6).padding(.horizontal, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.code, in: .rect(cornerRadius: Theme.smallRadius))
+                    Button("Copy command", systemImage: "doc.on.doc") { act(.copyPruneCommand) }.secondaryButton()
                 }
             }
             if busy {
@@ -1133,9 +1152,26 @@ private struct PruneSheet: View {
                 .background(Theme.code, in: .rect(cornerRadius: Theme.smallRadius))
             }
             if !report.skipped.isEmpty {
-                Text("Skipped: " + report.skipped.map { "\(displayPath($0.path)) (\($0.reason))" }.joined(separator: ", "))
-                    .font(Theme.caption).foregroundStyle(Theme.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("\(WorktreeFormat.count(report.skipped.count)) clean up leaves alone").font(Theme.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(report.skipped) { skipped in
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(displayPath(skipped.path))
+                                        .font(Theme.font(size: 11, design: .monospaced))
+                                        .foregroundStyle(Theme.textSecondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                    Text(skipped.reason).font(Theme.caption).foregroundStyle(Theme.textMuted)
+                                        .lineLimit(2)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 110)
+                }
             }
         }
         Toggle("Also include merged worktrees that still have uncommitted files", isOn: $includeDirty)

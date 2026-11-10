@@ -109,7 +109,7 @@ import Testing
         #expect(WorktreeCommand.prune(scope: .all, includeDirty: false, confirmed: false) == ["wt", "prune", "--all", "--json"])
         #expect(WorktreeCommand.prune(scope: .all, includeDirty: true, confirmed: true) ==
                 ["wt", "prune", "--all", "--include=merged-dirty", "--yes", "--json"])
-        #expect(WorktreeCommand.prune(scope: .repo("/r"), includeDirty: false, confirmed: true) == ["wt", "prune", "--yes", "--json"])
+        #expect(WorktreeCommand.prune(scope: .repo("/r"), includeDirty: false, confirmed: true) == ["wt", "prune", "--repo=/r", "--yes", "--json"])
         #expect(WorktreeCommand.slim("/p", confirmed: false) == ["wt", "slim", "/p", "--json"])
         #expect(WorktreeCommand.slim("/p", confirmed: true) == ["wt", "slim", "/p", "--yes", "--json"])
     }
@@ -198,7 +198,13 @@ import Testing
         #expect(!tree("/r/l", .mergedClean, locked: true).canRemove)
         #expect(tree("/r/m", .mergedClean).canRemove)
         #expect(!tree("/r/m", .mergedClean).removalNeedsForce)
-        for state in [WorktreeState.mergedDirty, .openPr, .noPr, .orphaned, .unknown] {
+        // swe refuses an orphan even with force: git has to forget it first.
+        let orphan = tree("/r/o", .orphaned)
+        #expect(!orphan.canRemove && !orphan.canLock && !orphan.canMove && !orphan.canSlim)
+        #expect(orphan.pruneCommand == "git -C '/r' worktree prune")
+        #expect(!tree("/r/p", .protected).canMove && !tree("/r/p", .protected).canSlim)
+        #expect(tree("/r/p", .protected).canLock)
+        for state in [WorktreeState.mergedDirty, .openPr, .noPr, .unknown] {
             #expect(tree("/r/x", state).canRemove)
             #expect(tree("/r/x", state).removalNeedsForce)
         }
@@ -248,7 +254,7 @@ import Testing
         let error = SweError.commandFailed(status: 1, message: text)
         #expect(WorktreeFailure.describe(error).code == WorktreeFailure.notSafe)
         #expect(WorktreeFailure.describe(SweError.commandFailed(status: 1, message: "boom")).message == "boom")
-        for code in ["bad_args", "not_a_repo", "not_found", "not_safe", "exists", "git_failed", "gh_unavailable", "busy"] {
+        for code in ["bad_args", "bad_config", "io_error", "not_a_repo", "not_found", "not_safe", "exists", "git_failed", "gh_unavailable", "busy"] {
             let friendly = WorktreeFailure.friendly(code: code, message: "detail")
             #expect(friendly != "detail" && friendly.hasSuffix(" detail"), "\(code)")
         }
