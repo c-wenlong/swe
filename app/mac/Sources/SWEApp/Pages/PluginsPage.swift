@@ -14,8 +14,6 @@ struct PluginsPage: View {
     private static let foldLimit = 8
     /// Harnesses whose drift cards are unfolded.
     @State private var opened: Set<String> = []
-    /// The Add marketplace sheet's visibility.
-    @State private var addingMarketplace = false
     /// A plugin's detail is on screen (`DetailOpenKey`).
     @State private var detailOpen = false
 
@@ -27,13 +25,11 @@ struct PluginsPage: View {
     var body: some View {
         @Bindable var app = app
         Page(title: "Plugins",
-             subtitle: "Every plugin in every marketplace, and where Claude Code and Codex no longer match ~/.swe/plugins.",
+             subtitle: "Switch installed plugins on or off in each harness. Import into SWE to own and edit their files.",
              back: app.pluginsTab == .explore && detailOpen
                 ? ("Back to all plugins", { app.navReselects += 1 }) : nil) {
             switch app.pluginsTab {
             case .explore:
-                Button("Add marketplace", systemImage: "plus") { addingMarketplace = true }
-                    .primaryButton()
                 Button("Refresh", systemImage: "arrow.clockwise") { Task { await refreshExplore() } }
                     .iconButton()
                     .disabled(catalog.running != nil)
@@ -54,7 +50,7 @@ struct PluginsPage: View {
                     .help("Check again (⌘R)")
             }
         } content: {
-            Tabs(options: [(PluginsTab.explore, "Explore"), (PluginsTab.health, "Health")],
+            Tabs(options: [(PluginsTab.explore, "Plugins"), (PluginsTab.health, "Health")],
                  selection: $app.pluginsTab, style: .underline,
                  // Reselecting Explore while a plugin detail is open goes
                  // back to the list, through the detail's unsaved ask.
@@ -64,7 +60,6 @@ struct PluginsPage: View {
             switch app.pluginsTab {
             case .explore:
                 PluginExplorer(model: catalog, openHealth: { app.pluginsTab = .health },
-                               addMarketplace: { addingMarketplace = true },
                                confirm: { confirmingAction = $0 },
                                confirmBatch: { confirmingBatch = $0 })
                     .onPreferenceChange(DetailOpenKey.self) { detailOpen = $0 }
@@ -74,9 +69,6 @@ struct PluginsPage: View {
         .task(id: app.swePath) {
             // Health's report stays warm behind Explore, the tab on show.
             await model.loadIfStale(swe: app.swe, for: app.swePath)
-        }
-        .cardSheet(isPresented: $addingMarketplace) {
-            AddMarketplaceSheet()
         }
         .task(id: ExploreLoad(swePath: app.swePath, open: app.pluginsTab == .explore)) {
             if app.pluginsTab == .explore { await openExplore() }
@@ -103,14 +95,17 @@ struct PluginsPage: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { action in
-            Text(action.isEdit
+            Text(action.verb == .adopt
+                 ? "Copy the installed plugin into ~/.swe/plugins. Existing SWE files are never overwritten. Harness installations stay as they are.\n\n\(action.command)"
+                 : action.isEdit
                  ? "swe checks the current state, then makes this edit, and writes it only once it is proven safe:\n\n\(action.command)"
                  : "swe checks the current state, then runs:\n\n\(action.command)")
         }
         .confirmationDialog(batchQuestion,
                             isPresented: .init(get: { confirmingBatch != nil }, set: { if !$0 { confirmingBatch = nil } }),
                             presenting: confirmingBatch) { actions in
-            Button("Run all") { Task { await runBatch(actions) } }
+            Button(actions.first?.verb == .uninstall ? "Remove all" : "Run all",
+                   role: actions.first?.verb == .uninstall ? .destructive : nil) { Task { await runBatch(actions) } }
             Button("Cancel", role: .cancel) {}
         } message: { actions in
             Text("One at a time, stopping at the first that fails:\n\n"

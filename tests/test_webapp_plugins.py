@@ -140,6 +140,30 @@ class TestBuilt(_CatalogHome, unittest.TestCase):
         official = [m for s in body["sources"] for m in s["marketplaces"] if m["name"] == "official"]
         self.assertEqual([m["tag"] for m in official], ["github", "git"])
 
+    def test_local_inventory_and_import_to_swe(self):
+        body = page.explore(self.home)
+        self.assertNotIn("remote-one@official", body["plugins"])
+        lsp = body["plugins"]["lsp@official"]
+        self.assertFalse(lsp["managed"])
+        self.assertEqual(lsp["harnesses"]["claude"]["actions"], ["enable", "uninstall"])
+        self.assertEqual(lsp["harnesses"]["swe"]["actions"], ["import"])
+        ctx = PageContext(home=self.home, state=type("S", (), {"machine": {"name": "box"}})())
+        reply = page.post(ctx, "plugin", {"verb": "import", "ref": "lsp@official", "harness": "swe"})
+        self.assertTrue(reply["result"]["changed"])
+        adopted = reply["explore"]["plugins"]["lsp@official"]
+        self.assertTrue(adopted["managed"])
+        self.assertEqual(adopted["harnesses"]["claude"]["actions"], ["enable", "uninstall"])
+        self.assertNotIn("swe", adopted["harnesses"])
+
+    def test_unimported_plugin_can_be_switched_and_removed(self):
+        ctx = PageContext(home=self.home, state=type("S", (), {"machine": {"name": "box"}})())
+        for verb in ("enable", "uninstall"):
+            with patch("swe.plugins.actions.plugin_action", return_value={"changed": True}) as run:
+                reply = page.post(ctx, "plugin", {"verb": verb, "ref": "lsp@official", "harness": "claude"})
+            self.assertIsNone(reply["error"])
+            run.assert_called_once_with(self.home, verb, "lsp@official", "claude", run=page._run)
+        self.assertFalse((self.home / ".swe/plugins/official").exists())
+
     def test_a_missing_folder_is_written_from_home(self):
         inside = {"harness": "claude", "marketplace": "nus", "detail": "x",
                   "path": str(self.home / ".swe" / "plugins" / "nus")}

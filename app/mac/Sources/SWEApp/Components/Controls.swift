@@ -149,6 +149,8 @@ struct SelectOptionList<Value: Hashable>: View {
     /// The popover's floor; the select passes its face's width where that
     /// tops it.
     var minWidth: CGFloat = 200
+    /// Action lists use the same rows with destructive text for removal.
+    var destructiveValues: Set<Value> = []
     /// A filter field's prompt, or nil for a list short enough to scan.
     var searchPrompt: String? = nil
     /// The row the arrow keys are on; Return picks it.
@@ -211,7 +213,7 @@ struct SelectOptionList<Value: Hashable>: View {
             .onAppear {
                 // A stale filter must not hide the selection on reopen.
                 query = ""
-                highlighted = selection
+                highlighted = options.contains { $0.value == selection } ? selection : shown.first?.value
                 if searchPrompt == nil { listFocused = true } else { searchFocused = true }
                 proxy.scrollTo(selection, anchor: .center)
             }
@@ -253,7 +255,8 @@ struct SelectOptionList<Value: Hashable>: View {
                     selectOptionIcon(id: icons[option.value], symbol: symbols[option.value])
                         .frame(width: 16, height: 16)
                 }
-                Text(option.title).font(Theme.bodySmall).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                Text(option.title).font(Theme.bodySmall)
+                    .foregroundStyle(destructiveValues.contains(option.value) ? Theme.danger : Theme.textPrimary).lineLimit(1)
                 Spacer(minLength: 12)
                 Image(systemName: "checkmark").font(Theme.font(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.interactive)

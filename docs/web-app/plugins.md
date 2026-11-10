@@ -154,3 +154,7 @@ Also different:
   next time it opens.
 - The app's last-result and error banners for Explore's actions do not
   exist, since Explore has no actions here.
+
+## Local inventory and SWE ownership
+
+Explore filters out marketplace-only previews and installs without files. Installed plugins can be enabled, disabled and uninstalled in their existing harness before import. Import to SWE is required for source ownership/editing and new source installs, and remains a separate detail action. This uses the existing `plugin` POST with `{verb: "import", ref, harness: "swe"}` and returns the same action result and refreshed view. The row gains `managed`; an unmanaged row has a synthetic `swe` action cell. The full catalog is still available from the CLI. Import does not register, compile or install the SWE source into a harness.

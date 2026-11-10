@@ -65,7 +65,7 @@ under those names.
 | `cache/web-service-status.json` | swe (hub) | JSON, epoch seconds | the web app's status-page readings, with a tombstone (`removed_at`) per untracked page; written by `status/poller.py` (atomic, under an `flock`) | a page is asked at most every 5 minutes; a reading older than an hour is not shown |
 | `cache/rate_limits_cache.json` | swe | JSON per provider | last limit reading per provider | 300s, `SWE_RATE_LIMITS_TTL`; stale fallback up to 24h; per-provider `updated_at` |
 | `cache/claude_usage_cache.json` | swe | JSON `{info, retry_at, credential_fingerprint, fetched_at}` | Claude usage endpoint's last reading + 429 cooldown | reading kept up to 24h; cooldown from `Retry-After` |
-| `cache/app-usage.json` (+ `.lock`) | app | JSON `{version: 1, accounts}` | Claude/Codex usage readings, cooldowns, credential fingerprints, last failure per account (`lastFailure: {at, status}`) (no secrets) | 60s poll; flock-shared read-modify-write |
+| `cache/app-usage.json` (+ `.lock`) | app | JSON `{version: 1, accounts}` | Claude/Codex usage readings (optional `monthlyCredits: {used, limit}` in provider credit units), cooldowns (including optional account-level `monthlyRetryAt` for Codex billing-only throttling), credential fingerprints, last failure per account (`lastFailure: {at, status}`) (no secrets) | 60s poll; flock-shared read-modify-write |
 | `cache/app-other-limits.json` | app | JSON `{savedAt, rows, cards, starred, cliInstalled}` | the last `swe list --usage` cards OtherLimitsModel showed | written after each successful load; hydrate at init; corrupt or missing files are ignored |
 | `cache/app-limit-alerts.json` | app | JSON | `LimitAlerter` dedupe state (alerted ids, reset timestamps) | pruned per evaluation |
 | `cache/api-key-checks.json` (+ `.lock`) | app | JSON `{version: 2, files}` | per-key validity results salted by `apiKeyCheckSalt` | no expiry: kept until the next check, shown only while the key's salted fingerprint still matches; flock-shared |
@@ -109,6 +109,7 @@ every key below is live.
 | `apiKeyCheckSalt` | salt for cached key-check results (not a secret itself) |
 | `widgetHarnesses.summary`, `widgetHarnesses.heatmap`, `widgetHarnesses.models` | per-widget harness picks |
 | `widgetLimitsHiddenSources`, `widgetLimitsHiddenSourceWindows` | per-widget limit filters |
+| `accountsProviderOrder` | Mac Accounts provider columns, comma-separated harness ids; hidden providers keep their position |
 | `widgetLimitsSourceOrder`, `widgetSummaryShowsTotal` | limits source order; summary widget's total line |
 | `migratedCursorAutoToIncluded` | one-time marker: Cursor `auto` rewritten to `included` |
 
@@ -252,3 +253,7 @@ resumes) and left in place.
 | GPU + process samplers | `sampledAt` reuse | half the trend interval, plus 3s on-page refresh | shared sampler |
 | login shell environment | `LoginShell.cachedEnvironment` | once per launch | single shared task |
 | pricing catalog | `data/catalog/catalog.sqlite` + bundled fallback | daily, from the last good fetch's time | n/a |
+
+### Imported plugins
+
+`swe plugins import <ref>` writes a local marketplace at `plugins/<marketplace>/.claude-plugin/marketplace.json` and an independent plugin copy at `plugins/<marketplace>/plugins/<name>` (or appends to an existing hub marketplace). It never overwrites a declared plugin. These are ordinary hub sources, with no new database or persistent rendering cache. Mac local inventory and action arrays are derived off the main actor per catalog/skills revision.

@@ -2,26 +2,31 @@ import AppKit
 import SWECore
 import SwiftUI
 
-/// Rows that drag straight up or down to reorder: the dragged row follows
+/// Rows or columns that drag along their axis to reorder: the dragged row follows
 /// the pointer, clamped to the list, while the others spring out of its
 /// way; on drop it glides into its new slot. `onMove` gets the row's id
 /// and the row it should land before — nil for the end. Plain `.gesture`,
 /// so a switch, chip or button inside a row keeps its own click and drag.
 struct ReorderableRows<Item: Identifiable, Row: View>: View where Item.ID == String {
     let items: [Item]
+    let axis: Axis
+    let spacing: CGFloat
     let showsDividers: Bool
     let onMove: (_ id: String, _ before: String?) -> Void
     @ViewBuilder let row: (Item) -> Row
 
-    init(_ items: [Item], showsDividers: Bool = false,
+    init(_ items: [Item], axis: Axis = .vertical, spacing: CGFloat = 0, showsDividers: Bool = false,
          onMove: @escaping (_ id: String, _ before: String?) -> Void,
          @ViewBuilder row: @escaping (Item) -> Row) {
+        self.axis = axis
+        self.spacing = spacing
         self.items = items
         self.showsDividers = showsDividers
         self.onMove = onMove
         self.row = row
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var heights: [String: CGFloat] = [:]
     @State private var draggingID: String?
     @State private var translation: CGFloat = 0
@@ -30,7 +35,7 @@ struct ReorderableRows<Item: Identifiable, Row: View>: View where Item.ID == Str
     @GestureState private var down = false
 
     private var ids: [String] { items.map(\.id) }
-    private var rowHeights: [CGFloat] { items.map { heights[$0.id] ?? 44 } }
+    private var rowHeights: [CGFloat] { items.map { (heights[$0.id] ?? 44) + spacing } }
     private var dragged: Int? { draggingID.flatMap { ids.firstIndex(of: $0) } }
     /// Where the dragged row would land, as an index among the other rows.
     private var target: Int? {
@@ -38,7 +43,10 @@ struct ReorderableRows<Item: Identifiable, Row: View>: View where Item.ID == Str
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        let layout = axis == .horizontal
+            ? AnyLayout(HStackLayout(alignment: .top, spacing: spacing))
+            : AnyLayout(VStackLayout(spacing: spacing))
+        layout {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 rowView(item, index: index)
             }
@@ -53,11 +61,12 @@ struct ReorderableRows<Item: Identifiable, Row: View>: View where Item.ID == Str
 
     private func rowView(_ item: Item, index: Int) -> some View {
         let isDragged = draggingID == item.id
+        let horizontal = axis == .horizontal
         return VStack(spacing: 0) {
             row(item)
             if showsDividers, index < items.count - 1 { SettingsDivider() }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[item.id] = $0 }
+        .onGeometryChange(for: CGFloat.self) { horizontal ? $0.size.width : $0.size.height } action: { heights[item.id] = $0 }
         .contentShape(.rect)
         .background {
             if isDragged {
@@ -66,9 +75,10 @@ struct ReorderableRows<Item: Identifiable, Row: View>: View where Item.ID == Str
                     .shadow(color: .black.opacity(0.25), radius: 8, y: 2)
             }
         }
-        .offset(y: yOffset(for: index, isDragged: isDragged))
+        .offset(x: axis == .horizontal ? yOffset(for: index, isDragged: isDragged) : 0,
+                y: axis == .vertical ? yOffset(for: index, isDragged: isDragged) : 0)
         .zIndex(isDragged ? 1 : 0)
-        .animation(isDragged ? nil : .spring(response: 0.28, dampingFraction: 0.86), value: target)
+        .animation(isDragged || reduceMotion ? nil : .easeOut(duration: 0.2), value: target)
         // A drag that starts on a row's text must reorder, not select.
         .textSelection(.disabled)
         .gesture(
@@ -77,15 +87,15 @@ struct ReorderableRows<Item: Identifiable, Row: View>: View where Item.ID == Str
                 .onChanged { value in
                     if draggingID == nil { NSCursor.closedHand.push() }
                     draggingID = item.id
-                    translation = value.translation.height
+                    translation = axis == .horizontal ? value.translation.width : value.translation.height
                 }
                 .onEnded { _ in finish(move: true) }
         )
-        .accessibilityAction(named: "Move up") {
+        .accessibilityAction(named: axis == .horizontal ? "Move left" : "Move up") {
             guard index > 0 else { return }
             onMove(item.id, ids[index - 1])
         }
-        .accessibilityAction(named: "Move down") {
+        .accessibilityAction(named: axis == .horizontal ? "Move right" : "Move down") {
             guard index < items.count - 1 else { return }
             onMove(item.id, index + 2 < items.count ? ids[index + 2] : nil)
         }
@@ -103,7 +113,7 @@ struct ReorderableRows<Item: Identifiable, Row: View>: View where Item.ID == Str
 
     private func finish(move: Bool) {
         guard let id = draggingID else { return }
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
             if move, let dragged {
                 let target = RowReorder.targetIndex(
                     heights: rowHeights, dragged: dragged, translation: translation)

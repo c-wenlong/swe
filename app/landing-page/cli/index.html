@@ -734,6 +734,7 @@ States
 <pre><code class="language-text">  swe plugins                       Every marketplace claude, codex or cursor has registered
   swe plugins catalog &lt;marketplace&gt;   One marketplace's plugins and their state per harness
   swe plugins catalog --json          The whole catalog as JSON (the app's Plugins page)
+  swe plugins import &lt;ref&gt;            Copy installed files into ~/.swe/plugins
   swe plugins info &lt;ref&gt;              One plugin's servers, env keys, skills and calls
   swe plugins install &lt;ref&gt; --harness=claude|codex
   swe plugins uninstall &lt;ref&gt; --harness=claude|codex
@@ -745,6 +746,10 @@ States
   lists installed and uninstalled plugins alike, plus anything installed
   whose marketplace has no readable manifest. It reads files only, never
   the network: a marketplace shows what its last fetch left on disk.
+
+  Import copies an installed/cached plugin into SWE without changing a harness.
+  Existing SWE files are never overwritten. The app lists local plugins only;
+  marketplace-only entries remain available through swe plugins catalog.
 
 Actions  Each one checks first and does nothing if the plugin is
   already in that state, then runs the harness's own CLI:

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Plugins are managed from SWE.** The Mac and web plugin lists hide marketplace-only entries and missing installs. Import to SWE copies installed plugin files into `~/.swe/plugins` without changing a harness or overwriting SWE files. The Mac table renders rows lazily and precomputes its local inventory and action menus.
 - **Harness-only skills adopt into the shared tree.** `swe init` (skip
   with `--no-adopt`) and `swe skills adopt [<name>|--all]` move a skill
   that only lives in a harness's real skills folder into `~/.swe/skills`
@@ -58,6 +59,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the same save queue, so both tabs always agree. Compilation
   rules are unchanged.
 
+### Changed
+
+- **Mac Accounts now groups accounts into horizontally scrolling provider columns.**
+  Narrow cards keep the plan visible, with usage rings and settings beneath. Click a
+  card to smoothly expand its readings; drag provider columns horizontally to save their order.
+  Expanded cards put settings beside the launch buttons and wrap their status text.
+
+- **Mac Codex account cards show monthly credits used and the credit limit** beneath the usage bars when the workspace returns those amounts.
+
 
 ### Security
 
@@ -104,6 +114,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comments in `--json` gain `association`.
 
 ### Fixed
+
+- **Codex education monthly usage reads the workspace billing allowance** when the standard usage response omits it, showing both the percentage and credit amounts.
+- **Installed plugins can be switched and removed before import.** Claude Code and Codex on/off and uninstall controls work for harness-owned plugins. The Mac row and per-harness action menus use themed popovers, with confirmed removal from one or all harnesses; import remains separate for SWE file ownership.
 
 - **AGENTS.md editor header no longer wraps at narrow widths (Mac).** In a
   900 pt window the Edit tab's Revert, Save and Close buttons wrapped

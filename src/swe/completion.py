@@ -272,6 +272,7 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
     "plugins catalog": [
         ("--json", "Every marketplace and plugin as JSON"),
     ],
+    "plugins import": [("--json", "Import installed plugin files into SWE as JSON")],
     "plugins info": [
         ("--json", "Print the detail sheet as JSON"),
     ],
@@ -617,7 +618,7 @@ _NESTED_FLAGS: dict[str, dict[str, str]] = {
     },
     "plugins": {
         "catalog": "plugins catalog", "marketplace": "plugins marketplace add",
-        "info": "plugins info",
+        "info": "plugins info", "import": "plugins import",
         # every action takes the same flags
         "install": "plugins install", "uninstall": "plugins install",
         "enable": "plugins install", "disable": "plugins install",
@@ -835,6 +836,7 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("catalog", "Every plugin in every registered marketplace"),
         ("marketplace", "Add a marketplace source to a harness"),
         ("info", "One plugin's servers, env keys, skills and calls"),
+        ("import", "Copy installed plugin files into SWE"),
         ("install", "Install a plugin in one harness"),
         ("uninstall", "Uninstall a plugin from one harness"),
         ("enable", "Enable an installed plugin"),

@@ -10,6 +10,9 @@ import SwiftUI
 struct StateArrow: View {
     var kind: StateArrows.Kind
     var size: CGFloat = Theme.statusDot
+    /// Set when the arrow stands alone; with a visible label beside it it
+    /// stays hidden and the label speaks for it.
+    var label: String? = nil
 
     var body: some View {
         Group {
@@ -20,7 +23,8 @@ struct StateArrow: View {
             }
         }
         .frame(width: size, height: size)
-        .accessibilityHidden(true)
+        .accessibilityHidden(label == nil)
+        .accessibilityLabel(label ?? "")
     }
 
     @MainActor private static var cache: [StateArrows.Kind: NSImage] = [:]

@@ -4,6 +4,7 @@ import SwiftUI
 
 struct AccountsPage: View {
     @Environment(AppModel.self) private var app
+    @AppStorage("accountsProviderOrder") private var providerOrder = ""
     @State private var adding = false
     @State private var actionError: String?
     /// Every card's usage history, off by default so the cards stay
@@ -44,23 +45,46 @@ struct AccountsPage: View {
             if model.cards.contains(where: { !$0.profile.isDefault && $0.profile.vendor.hasDefaultProfile }) {
                 SharedContentCard(sync: app.accountSync)
             }
-            // One grid for every account: SWE's own profiles first, vendors
-            // in a fixed order, then the starred harnesses in swe's order.
-            // Each card carries its logo, so there are no per-vendor headings.
-            // SWE's own account cards are Claude and Codex only; extra
-            // Devin/Cursor accounts appear as harness cards from `others`.
             let cards = Vendor.allCases.filter(\.hasDefaultProfile).flatMap { vendor in
                 app.starredAccountCards.filter { $0.profile.vendor == vendor } }
             let harnesses = app.others.cards
             if !cards.isEmpty || !harnesses.isEmpty {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: Theme.gutter, alignment: .top)], spacing: Theme.gutter) {
-                    ForEach(cards) { card in
-                        AccountCard(card: card, history: history, perform: perform,
-                                    reloadAll: { await reloadAll(force: $0) })
+                let providers = (cards.map { $0.profile.vendor.rawValue } + harnesses.map(\.name))
+                    .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+                let savedOrder = providerOrder.split(separator: ",").map(String.init)
+                let ordered = savedOrder.filter { providers.contains($0) }
+                    + providers.filter { !savedOrder.contains($0) }
+                ScrollView(.horizontal) {
+                    ReorderableRows(ordered.map { ProviderColumn(id: $0) }, axis: .horizontal, spacing: 12,
+                                    onMove: { id, before in
+                        var order = savedOrder.filter { $0 != id }
+                        for provider in providers where provider != id && !order.contains(provider) { order.append(provider) }
+                        order.insert(id, at: before.flatMap { order.firstIndex(of: $0) } ?? order.count)
+                        providerOrder = order.joined(separator: ",")
+                    }) { column in
+                        let provider = column.id
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 8) {
+                                    HarnessIcon(harness: provider, size: 16)
+                                    Text(HarnessMark.accountName(provider)).font(Theme.rowTitle)
+                                    Spacer()
+                                    Text("\(cards.filter { $0.profile.vendor.rawValue == provider }.count + harnesses.filter { $0.name == provider }.count)")
+                                        .font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                                }
+                                .padding(.horizontal, 10)
+                                .help("Drag left or right to reorder providers")
+                                .accessibilityHint("Drag left or right to reorder providers")
+                                ForEach(cards.filter { $0.profile.vendor.rawValue == provider }) { card in
+                                    AccountCard(card: card, history: history, perform: perform,
+                                                reloadAll: { await reloadAll(force: $0) })
+                                }
+                                ForEach(harnesses.filter { $0.name == provider }) { row in
+                                    HarnessAccountCard(row: row, history: history, perform: perform)
+                                }
+                            }
+                            .frame(width: 240)
                     }
-                    ForEach(harnesses) { row in
-                        HarnessAccountCard(row: row, history: history, perform: perform)
-                    }
+                    .padding(.bottom, 12)
                 }
                 .task(id: showHistory ? historyKeys(cards: cards, harnesses: harnesses) : []) {
                     if showHistory {
@@ -155,12 +179,90 @@ struct HistoryDisplay {
     var profiles: [Profile]
 }
 
+private struct ProviderColumn: Identifiable { let id: String }
+
+private struct CompactAccountCard<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Binding var expanded: Bool
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) { content }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .clipped()
+            .background(Theme.card, in: .rect(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, lineWidth: 1))
+            .contentShape(.rect(cornerRadius: Theme.cardRadius))
+            .onTapGesture { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { expanded.toggle() } }
+            .accessibilityAction(named: expanded ? "Collapse account" : "Expand account") { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { expanded.toggle() } }
+    }
+}
+
+private struct AccountDisclosure: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Binding var expanded: Bool
+    var body: some View {
+        Button { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { expanded.toggle() } } label: {
+            Image(systemName: "chevron.right")
+                .font(Theme.caption)
+                .rotationEffect(.degrees(expanded ? 90 : 0))
+                .frame(width: 20, height: 28)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(expanded ? "Collapse account" : "Expand account")
+        .help(expanded ? "Collapse account" : "Show account details")
+    }
+}
+
+/// Compact counterpart of UsageBar; the same window and explanation remain available.
+private struct AccountUsageRing: View {
+    var window: UsageWindow
+    var info: String? = nil
+    var stale = false
+    var failed = false
+    var asOf: Date? = nil
+
+    private var detail: String {
+        var lines = ["\(Int(window.usedPercent.rounded()))% used"]
+        if stale || failed {
+            lines.append(failed ? "Couldn’t refresh · last reading" : "Older reading")
+            if let asOf { lines.append("As of \(asOf.formatted())") }
+        } else if let reset = window.resetsAt {
+            lines.append("Resets \(reset.formatted(.relative(presentation: .named)))")
+            lines.append(reset.formatted())
+        }
+        if let info { lines.append(info) }
+        return lines.joined(separator: "\n")
+    }
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Theme.usageTrack, lineWidth: 3)
+            Circle().trim(from: 0, to: min(max(window.usedPercent / 100, 0), 1))
+                .stroke(failed ? Theme.textMuted : Theme.usage(Int(window.usedPercent)),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Text(failed && asOf == nil ? "—" : "\(Int(window.usedPercent.rounded()))")
+                .font(Theme.font(size: 9, weight: .medium).monospacedDigit())
+                .foregroundStyle(Theme.textPrimary)
+        }
+        .frame(width: 30, height: 30)
+        .opacity(stale || failed ? 0.55 : 1)
+        .help("\(window.label)\n\(detail)")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(window.label)
+        .accessibilityValue(detail)
+    }
+}
+
 private struct AccountCard: View {
     @Environment(AppModel.self) private var app
     var card: AccountsModel.Card
     var history: HistoryDisplay?
     var perform: (@escaping () async throws -> Void) -> Void
     var reloadAll: (Bool) async -> Void
+    @State private var expanded = false
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmingRemove = false
@@ -189,52 +291,84 @@ private struct AccountCard: View {
         }
     }
 
+    @ViewBuilder private var accountMenu: some View {
+        let profile = card.profile
+        let model = app.accounts
+        EllipsisMenu {
+            signInItem(harness: profile.vendor.rawValue,
+                       cli: model.signInCLI(for: profile),
+                       installed: app.others.cliInstalled[LaunchPlanner.cliName(for: profile.vendor)]
+                           ?? model.cliOnPath[profile.vendor]) {
+                perform { try await model.signIn(profile) }
+            }
+            Button("Show folder in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([model.folder(of: profile)])
+            }
+            Divider()
+            // Any account can be renamed; a default only can't be removed,
+            // since it is the vendor's own ~/.claude or ~/.codex.
+            Button("Rename…") { newName = profile.name; renaming = true }
+            if !profile.isDefault {
+                Button("Remove…", role: .destructive) { confirmingRemove = true }
+            }
+        }
+    }
+
+    /// Full name, email, plan and default marker, for the name's tooltip.
+    private var nameDetail: String {
+        [card.profile.name, card.usage?.email, card.usage?.plan.map(planTitle),
+         card.profile.isDefault ? "Default account" : nil]
+            .compactMap { $0 }.joined(separator: "\n")
+    }
+
     var body: some View {
         let profile = card.profile
         let model = app.accounts
-        Card {
-            HStack(spacing: 8) {
-                HarnessIcon(harness: profile.vendor.rawValue, size: 16)
-                    .help(profile.vendor.title)
+        CompactAccountCard(expanded: $expanded) {
+            HStack(spacing: 6) {
+                AccountDisclosure(expanded: $expanded)
                 Text(profile.name).font(Theme.rowTitle).foregroundStyle(Theme.textPrimary)
-                    // The logo is hidden from VoiceOver, so the name carries the vendor.
+                    .lineLimit(1)
+                    // The column names the vendor visually; keep it in the spoken account name.
                     .accessibilityLabel("\(profile.name), \(profile.vendor.title)")
+                    .hoverTip(nameDetail, title: profile.name)
+                    .help(nameDetail)
                 // The default account is already named Default; a badge would repeat it.
-                if profile.isDefault && profile.name != "Default" { Badge("Default") }
-                if let plan = card.usage?.plan { Badge(planTitle(plan)) }
-                Spacer()
-                EllipsisMenu {
-                    signInItem(harness: profile.vendor.rawValue,
-                               cli: model.signInCLI(for: profile),
-                               installed: app.others.cliInstalled[LaunchPlanner.cliName(for: profile.vendor)]
-                                   ?? model.cliOnPath[profile.vendor]) {
-                        perform { try await model.signIn(profile) }
+                Spacer(minLength: 2)
+                if let plan = card.usage?.plan { Badge(planTitle(plan)).fixedSize() }
+            }
+            if !expanded {
+                HStack(spacing: 6) {
+                    if let usage = card.usage {
+                        ForEach(usage.windows, id: \.label) { window in
+                            AccountUsageRing(window: window, stale: usage.isStale,
+                                             failed: usage.isStale && usage.status != .ok, asOf: usage.fetchedAt)
+                        }
                     }
-                    Button("Show folder in Finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([model.folder(of: profile)])
-                    }
-                    Divider()
-                    // Any account can be renamed; a default only can't be removed,
-                    // since it is the vendor's own ~/.claude or ~/.codex.
-                    Button("Rename…") { newName = profile.name; renaming = true }
-                    if !profile.isDefault {
-                        Button("Remove…", role: .destructive) { confirmingRemove = true }
-                    }
+                    Spacer(minLength: 0)
+                    accountMenu
                 }
             }
-            if let email = card.usage?.email {
-                Text(email).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-            }
-            UsageBars(usage: card.usage)
-            HStack {
+            if expanded {
+                if let email = card.usage?.email {
+                    Text(email).font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                }
+                UsageBars(usage: card.usage)
+                HStack {
+                    StatusLine(usage: card.usage, card: card)
+                }
+                HStack {
+                    accountMenu
+                    Spacer()
+                    LaunchButtons(
+                        target: LaunchTarget(kind: .account(profile), model: model,
+                            installedApp: { app.apps.installedApp(for: $0) },
+                            // swe's answer when its registry lists the CLI, else a direct PATH check.
+                            cliInstalled: { app.others.cliInstalled[$0] ?? model.cliOnPath[profile.vendor] }),
+                        perform: perform)
+                }
+            } else if card.usage == nil || card.usage?.status != .ok {
                 StatusLine(usage: card.usage, card: card)
-                Spacer()
-                LaunchButtons(
-                    target: LaunchTarget(kind: .account(profile), model: model,
-                        installedApp: { app.apps.installedApp(for: $0) },
-                        // swe's answer when its registry lists the CLI, else a direct PATH check.
-                        cliInstalled: { app.others.cliInstalled[$0] ?? model.cliOnPath[profile.vendor] }),
-                    perform: perform)
             }
             if let history {
                 let key = model.historyKey(harness: profile.vendor.rawValue, profile: profile,
@@ -278,6 +412,17 @@ struct UsageBars: View {
             VStack(spacing: 8) {
                 ForEach(usage.windows, id: \.label) { window in
                     UsageBar(window: window, failed: failed, asOf: usage.fetchedAt)
+                }
+                if let credits = usage.monthlyCredits {
+                    HStack {
+                        Text("Monthly credits").foregroundStyle(Theme.textSecondary)
+                        Spacer()
+                        Text("\(credits.used.formatted(.number.precision(.fractionLength(0...2)))) of \(credits.limit.formatted(.number.precision(.fractionLength(0...2)))) used")
+                            .monospacedDigit()
+                            .foregroundStyle(failed ? Theme.dangerText : Theme.textPrimary)
+                    }
+                    .font(Theme.caption)
+                    .opacity(failed ? 0.55 : 1)
                 }
             }
             .opacity(usage.isStale && !failed ? 0.55 : 1)
@@ -369,9 +514,10 @@ struct StatusLine: View {
             case .rateLimited(let until):
                 Text("Usage API busy until \(until, format: .dateTime.hour().minute())")
             case .error(let message):
-                Text(message).lineLimit(1)
+                Text(message)
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .font(Theme.caption)
         .foregroundStyle(Theme.textSecondary)
     }
@@ -526,6 +672,7 @@ private struct HarnessAccountCard: View {
     var row: OtherLimitsModel.Card
     var history: HistoryDisplay?
     var perform: (@escaping () async throws -> Void) -> Void
+    @State private var expanded = false
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmingRemove = false
@@ -555,105 +702,152 @@ private struct HarnessAccountCard: View {
         }
     }
 
+    @ViewBuilder private var accountMenu: some View {
+        let model = app.accounts
+        let ownName = row.harnessTitle
+        let name = row.title
+        if let profile = row.profile {
+            // An extra account: its name and folder are the profile's,
+            // so a rename writes profiles.json and Remove deletes them.
+            EllipsisMenu {
+                signInItem(harness: profile.vendor.rawValue,
+                           cli: model.signInCLI(for: profile),
+                           installed: app.others.cliInstalled[LaunchPlanner.cliName(for: profile.vendor)]
+                               ?? model.cliOnPath[profile.vendor]) {
+                    perform { try await model.signIn(profile) }
+                }
+                Button("Show folder in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([model.folder(of: profile)])
+                }
+                Divider()
+                Button("Rename…") { newName = profile.name; renaming = true }
+                Button("Remove…", role: .destructive) { confirmingRemove = true }
+            }
+        } else {
+            EllipsisMenu {
+                if let login = HarnessAccess.loginCommand(for: row.name) {
+                    let cli = AccountSignIn.cli(loginCommand: login)
+                    signInItem(harness: row.name, cli: cli,
+                               installed: AccountSignIn.installed(
+                                   harness: row.name, cli: cli,
+                                   cliInstalled: app.others.cliInstalled,
+                                   vendorInstalled: row.cliInstalled)) {
+                        perform { try await model.signIn(harness: row.name) }
+                    }
+                    Divider()
+                }
+                Button("Rename…") { newName = name; renaming = true }
+                if let accountName = row.accountName, !accountName.isEmpty {
+                    Button("Use the name \(ownName)") { rename(to: "") }
+                }
+            }
+        }
+    }
+
+    /// Full name, email and plan, for the name's tooltip.
+    private var nameDetail: String {
+        [row.title, row.limit?.email, row.limit?.planType.map(planTitle)]
+            .compactMap { $0 }.joined(separator: "\n")
+    }
+
     var body: some View {
         let limit = row.limit
         // The harness's own name, never the account name given to it here.
         let ownName = row.harnessTitle
         let name = row.title
         let model = app.accounts
-        Card {
-            HStack(spacing: 8) {
-                HarnessIcon(harness: row.name, size: 16)
-                    .help(ownName)
+        CompactAccountCard(expanded: $expanded) {
+            HStack(spacing: 6) {
+                AccountDisclosure(expanded: $expanded)
                 Text(name).font(Theme.rowTitle).foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
                     .accessibilityLabel(name == ownName ? name : "\(name), \(ownName)")
-                if let plan = limit?.planType { Badge(planTitle(plan)) }
-                if row.issue?.status.needsAction == true {
-                    Text("Action needed")
-                        .font(Theme.font(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.warningText)
-                        .lineLimit(1)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 1)
-                        .background(Theme.warning.opacity(0.15), in: .capsule)
-                        .overlay(Capsule().strokeBorder(Theme.warning.opacity(0.4), lineWidth: 1))
-                }
-                Spacer()
-                if let profile = row.profile {
-                    // An extra account: its name and folder are the profile's,
-                    // so a rename writes profiles.json and Remove deletes them.
-                    EllipsisMenu {
-                        signInItem(harness: profile.vendor.rawValue,
-                                   cli: model.signInCLI(for: profile),
-                                   installed: app.others.cliInstalled[LaunchPlanner.cliName(for: profile.vendor)]
-                                       ?? model.cliOnPath[profile.vendor]) {
-                            perform { try await model.signIn(profile) }
-                        }
-                        Button("Show folder in Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([model.folder(of: profile)])
-                        }
-                        Divider()
-                        Button("Rename…") { newName = profile.name; renaming = true }
-                        Button("Remove…", role: .destructive) { confirmingRemove = true }
+                    .hoverTip(nameDetail, title: name)
+                    .help(nameDetail)
+                Spacer(minLength: 2)
+                if let plan = limit?.planType { Badge(planTitle(plan)).fixedSize() }
+            }
+            if !expanded {
+                HStack(spacing: 6) {
+                    if row.issue?.status.needsAction == true {
+                        Text("Action needed")
+                            .font(Theme.font(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.warningText)
+                            .lineLimit(1)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 1)
+                            .background(Theme.warning.opacity(0.15), in: .capsule)
+                            .overlay(Capsule().strokeBorder(Theme.warning.opacity(0.4), lineWidth: 1))
                     }
-                } else {
-                    EllipsisMenu {
-                        if let login = HarnessAccess.loginCommand(for: row.name) {
-                            let cli = AccountSignIn.cli(loginCommand: login)
-                            signInItem(harness: row.name, cli: cli,
-                                       installed: AccountSignIn.installed(
-                                           harness: row.name, cli: cli,
-                                           cliInstalled: app.others.cliInstalled,
-                                           vendorInstalled: row.cliInstalled)) {
-                                perform { try await model.signIn(harness: row.name) }
-                            }
-                            Divider()
-                        }
-                        Button("Rename…") { newName = name; renaming = true }
-                        if let accountName = row.accountName, !accountName.isEmpty {
-                            Button("Use the name \(ownName)") { rename(to: "") }
+                    if let limit, limit.status == .ok {
+                        ForEach(limit.allWindows, id: \.window) { window in
+                            AccountUsageRing(
+                                window: UsageWindow(label: window.window.isEmpty ? "Usage" : UsageFormat.window(row.name, window.window),
+                                                    usedPercent: Double(min(max(window.usedPercent, 0), 100)),
+                                                    resetsAt: window.resetAt),
+                                info: UsageFormat.windowInfo(row.name, window.window),
+                                failed: window.unavailable, asOf: window.asOf)
                         }
                     }
+                    Spacer(minLength: 0)
+                    accountMenu
                 }
             }
-            if let email = limit?.email {
-                Text(email).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-            }
-            if let limit, limit.status == .ok { usageSection(limit) }
-            HStack {
-                if let line = row.issue?.actionNeededLine {
-                    // The remedy's summary is the explanation, in amber;
-                    // the Fix button beside it opens the full steps.
-                    Text(line)
-                        .font(Theme.caption).foregroundStyle(Theme.warningText)
-                } else {
-                    statusLine(limit: limit, ownName: ownName)
-                        .font(Theme.caption).foregroundStyle(Theme.textSecondary)
+            if expanded {
+                if let email = limit?.email {
+                    Text(email).font(Theme.caption).foregroundStyle(Theme.textSecondary)
                 }
-                Spacer()
-                if row.issue?.status.needsAction == true {
-                    Button("Fix…") { fixing = true }
-                        .secondaryButton()
-                        .hoverTip("Show how to fix this")
+                if let limit, limit.status == .ok { usageSection(limit) }
+                HStack {
+                    if let line = row.issue?.actionNeededLine {
+                        // The remedy's summary is the explanation, in amber;
+                        // the Fix button beside it opens the full steps.
+                        Text(line)
+                            .font(Theme.caption).foregroundStyle(Theme.warningText)
+                    } else {
+                        statusLine(limit: limit, ownName: ownName)
+                            .font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                    }
                 }
-                if let profile = row.profile {
-                    LaunchButtons(
-                        target: LaunchTarget(kind: .account(profile), model: model,
-                            installedApp: { app.apps.installedApp(for: $0) },
-                            cliInstalled: { _ in row.cliInstalled ?? model.cliOnPath[profile.vendor] }),
-                        // cursor-agent keeps one sign-in per Mac; say so
-                        // before the button reads as opening this account.
-                        terminalHelp: profile.vendor == .cursor
-                            ? "Opens cursor-agent on your default Cursor account. The Cursor CLI keeps one sign-in per Mac."
-                            : nil,
-                        perform: perform)
-                } else {
-                    LaunchButtons(
-                        target: LaunchTarget(kind: .harness(name: row.name, command: row.command),
-                            model: model,
-                            installedApp: { app.apps.installedApp(for: $0) },
-                            cliInstalled: { _ in row.cliInstalled }),
-                        perform: perform)
+                HStack {
+                    accountMenu
+                    Spacer()
+                    if row.issue?.status.needsAction == true {
+                        Button("Fix…") { fixing = true }
+                            .secondaryButton()
+                            .hoverTip("Show how to fix this")
+                    }
+                    if let profile = row.profile {
+                        LaunchButtons(
+                            target: LaunchTarget(kind: .account(profile), model: model,
+                                installedApp: { app.apps.installedApp(for: $0) },
+                                cliInstalled: { _ in row.cliInstalled ?? model.cliOnPath[profile.vendor] }),
+                            // cursor-agent keeps one sign-in per Mac; say so
+                            // before the button reads as opening this account.
+                            terminalHelp: profile.vendor == .cursor
+                                ? "Opens cursor-agent on your default Cursor account. The Cursor CLI keeps one sign-in per Mac."
+                                : nil,
+                            perform: perform)
+                    } else {
+                        LaunchButtons(
+                            target: LaunchTarget(kind: .harness(name: row.name, command: row.command),
+                                model: model,
+                                installedApp: { app.apps.installedApp(for: $0) },
+                                cliInstalled: { _ in row.cliInstalled }),
+                            perform: perform)
+                    }
+                }
+            } else if limit == nil || limit?.status != .ok || row.issue?.status.needsAction == true {
+                HStack {
+                    if let line = row.issue?.actionNeededLine {
+                        Text(line).font(Theme.caption).foregroundStyle(Theme.warningText)
+                    } else {
+                        statusLine(limit: limit, ownName: ownName)
+                            .font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                    }
+                    if row.issue?.status.needsAction == true {
+                        Button("Fix…") { fixing = true }.secondaryButton()
+                    }
                 }
             }
             if let history {
@@ -887,42 +1081,59 @@ private struct IssueFixSheet: View {
 /// Turning one off removes only what swe added.
 private struct SharedContentCard: View {
     let sync: AccountSyncModel
+    @State private var expanded = false
+
+    private var needsAttention: Bool {
+        sync.error != nil || !(sync.report?.blocked ?? []).isEmpty
+    }
 
     var body: some View {
-        Card(title: "Shared content",
-             subtitle: "Links the shared AGENTS.md, skills and hooks into every extra Claude and Codex account's folder, and merges in the hub's MCP servers. Turning one off removes only what swe added.") {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(AccountSyncPiece.allCases) { piece in
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(piece.title).font(Theme.rowTitle).foregroundStyle(Theme.textPrimary)
-                            Text(piece.caption).font(Theme.caption).foregroundStyle(Theme.textSecondary)
+        CompactAccountCard(expanded: $expanded) {
+            DisclosureGroup(isExpanded: $expanded) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(AccountSyncPiece.allCases) { piece in
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(piece.title).font(Theme.rowTitle).foregroundStyle(Theme.textPrimary)
+                                Text(piece.caption).font(Theme.caption).foregroundStyle(Theme.textSecondary)
+                            }
+                            Spacer(minLength: 8)
+                            Toggle(piece.title, isOn: Binding(
+                                get: { sync.isOn(piece) },
+                                set: { on in Task { await sync.set(piece, on: on) } }))
+                                .labelsHidden()
+                                .toggleStyle(AccentSwitchStyle())
+                                .disabled(sync.busy || sync.report?.accountSync == nil)
                         }
-                        Spacer(minLength: 8)
-                        Toggle(piece.title, isOn: Binding(
-                            get: { sync.isOn(piece) },
-                            set: { on in Task { await sync.set(piece, on: on) } }))
-                            .labelsHidden()
-                            .toggleStyle(AccentSwitchStyle())
-                            .disabled(sync.busy || sync.report?.accountSync == nil)
+                    }
+                    if let error = sync.error {
+                        ErrorCard(message: error, framed: false)
+                    }
+                    let conflicts = sync.report?.conflicts ?? []
+                    if !conflicts.isEmpty {
+                        Text("Left alone, the account already has its own: "
+                             + conflicts.map { "\($0.account) \($0.target)" }
+                                .joined(separator: ", "))
+                            .font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    }
+                    let blocked = sync.report?.blocked ?? []
+                    if !blocked.isEmpty {
+                        Text("Not changed, could not edit safely: "
+                             + blocked.map { "\($0.account) \(($0.path as NSString).lastPathComponent) (\($0.detail))" }
+                                .joined(separator: ", "))
+                            .font(Theme.caption).foregroundStyle(Theme.textMuted)
                     }
                 }
-                if let error = sync.error {
-                    ErrorCard(message: error, framed: false)
-                }
-                let conflicts = sync.report?.conflicts ?? []
-                if !conflicts.isEmpty {
-                    Text("Left alone, the account already has its own: "
-                         + conflicts.map { "\($0.account) \($0.target)" }
-                            .joined(separator: ", "))
-                        .font(Theme.caption).foregroundStyle(Theme.textMuted)
-                }
-                let blocked = sync.report?.blocked ?? []
-                if !blocked.isEmpty {
-                    Text("Not changed, could not edit safely: "
-                         + blocked.map { "\($0.account) \(($0.path as NSString).lastPathComponent) (\($0.detail))" }
-                            .joined(separator: ", "))
-                        .font(Theme.caption).foregroundStyle(Theme.textMuted)
+            } label: {
+                HStack(spacing: 8) {
+                    Text("Shared content").font(Theme.rowTitle)
+                    // The details start folded, so a failed check or a
+                    // blocked file still has to show on the folded row.
+                    if !expanded, needsAttention {
+                        Label("Needs attention", systemImage: "exclamationmark.triangle.fill")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.dangerText)
+                    }
                 }
             }
         }

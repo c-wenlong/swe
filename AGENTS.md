@@ -18,6 +18,21 @@ The core CLI is stdlib-only with no runtime dependencies. Optional extras: `serv
 | [docs/remote-control.md](docs/remote-control.md), [docs/web-app.md](docs/web-app.md) | `swe remote`, the hub, the web app |
 | [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md) | the PR process and the changelog |
 
+## State arrows (status indicators)
+
+The quiver arrows are the standard status indicator anywhere a state fits the mapping — reach for them instead of a colored dot or badge color alone:
+
+| Arrow | Meaning |
+|---|---|
+| red | critical failure |
+| yellow | partial failure, or waiting on someone |
+| green | fully operational |
+| grey | interrupted, maintenance, or unknown |
+
+The canonical mapping lives in the FEATURES.md ported-logic table (`SWECore/Swe/StateArrows.swift` on Mac, `StatusDot` on iOS, `HEALTH_ARROW`/`COMPONENT_ARROW`/`STATUS_ARROW` in `src/swe/webapp/static/`). Each client ships its own copy of the four `state-<color>.svg` files: `app/mac/Sources/SWECore/Resources/`, `app/ios/Assets.xcassets/States/`, `src/swe/webapp/static/`. Keep every copy in step when an arrow changes.
+
+[assets/swe-arrows/](assets/swe-arrows/) holds the source set: `manifest.json` catalogs the normal and pixel arrows, PNG sizes, preview and the original export script. Pair the arrows with text or an accessible description rather than color alone. The preserved export script needs its original workspace and font paths adapted before running locally.
+
 ## The clients
 
 | Client | Where | Builds with |
