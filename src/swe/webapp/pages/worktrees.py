@@ -235,7 +235,8 @@ def _volumes(paths: list[str]) -> dict[int, Path]:
     """One existing folder per volume the paths live on, keyed by device."""
     found: dict[int, Path] = {}
     for path in paths:
-        probe = _probe(path)
+        # The parent, not the worktree: the worktree is about to be deleted.
+        probe = _probe(str(Path(path).parent))
         try:
             found.setdefault(probe.stat().st_dev, probe)
         except OSError:
@@ -246,7 +247,12 @@ def _volumes(paths: list[str]) -> dict[int, Path]:
 def _free(volumes: dict[int, Path]) -> dict[int, int]:
     free: dict[int, int] = {}
     for dev, probe in volumes.items():
+        # Walk up again in case the folder went away; skip it if that lands
+        # on another disk.
+        probe = _probe(str(probe))
         try:
+            if probe.stat().st_dev != dev:
+                continue
             free[dev] = shutil.disk_usage(probe).free
         except OSError:
             pass

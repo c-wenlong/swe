@@ -230,6 +230,15 @@ class TestWrites(_Stubbed, unittest.TestCase):
         self.assertEqual(self.names(), ["remove"])
         self.assertIs(self.wt.calls[0][2]["force"], False)
 
+    def test_freed_space_is_measured_outside_the_deleted_worktree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wt = Path(tmp) / "wt-a"
+            wt.mkdir()
+            vols = page._volumes([str(wt)])
+            self.assertEqual(list(vols.values()), [Path(tmp)])
+            wt.rmdir()
+            self.assertEqual(set(page._free(vols)), set(vols))
+
     def test_prune_sums_freed_space_per_volume(self):
         vols = {1: Path("/a"), 2: Path("/b")}
         frees = iter([{1: 100, 2: 50}, {1: 160, 2: 90}])
