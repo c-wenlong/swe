@@ -251,6 +251,14 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
     "skills sync": [
         ("--json", "Print what changed as JSON"),
     ],
+    "skills adopt": [
+        ("--all", "Adopt every harness-only skill"),
+        ("--dry-run", "Show what would move without writing"),
+        ("--json", "Print the result as JSON"),
+    ],
+    "skills remove": [
+        ("--json", "Print the result as JSON"),
+    ],
     "skills usage": [
         ("--json", "Print the call stats as JSON"),
     ],
@@ -527,6 +535,7 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
         ("--hub=", "Clone your hub repo as ~/.swe first"),
         ("--yes", "Register every new harness without asking"),
         ("--accounts", "Only sync the extra account homes (accounts.sync.*)"),
+        ("--no-adopt", "Leave harness-only skills where they are"),
     ],
     "setup": [
         ("--quick", "Only missing or actionable stages"),
@@ -651,6 +660,8 @@ _NESTED_FLAGS: dict[str, dict[str, str]] = {
         "hub": "skills hub", "new": "skills new",
         "enable": "skills enable", "disable": "skills disable",
         "sync": "skills sync", "usage": "skills usage",
+        "adopt": "skills adopt", "remove": "skills remove",
+        "rm": "skills remove", "delete": "skills remove",
     },
     "sk": {
         "link": "skills link", "unlink": "skills unlink",
@@ -658,6 +669,8 @@ _NESTED_FLAGS: dict[str, dict[str, str]] = {
         "hub": "skills hub",
         "enable": "skills enable", "disable": "skills disable",
         "sync": "skills sync", "usage": "skills usage",
+        "adopt": "skills adopt", "remove": "skills remove",
+        "rm": "skills remove", "delete": "skills remove",
     },
     "find": {
         "amd": "find", "agents": "find", "agents.md": "find",
@@ -936,6 +949,8 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("enable", "Link one shared skill into a harness"),
         ("disable", "Drop one shared skill's link in a harness"),
         ("sync", "Re-apply each harness's skill selection"),
+        ("adopt", "Pull harness-only skills into the shared tree"),
+        ("remove", "Delete a shared skill and its links"),
         ("usage", "Call counts from the session index"),
         ("new", "Create a SKILL.md in the hub"),
         ("discover", "Find skills not yet cataloged"),
@@ -954,6 +969,8 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("enable", "Link one shared skill into a harness"),
         ("disable", "Drop one shared skill's link in a harness"),
         ("sync", "Re-apply each harness's skill selection"),
+        ("adopt", "Pull harness-only skills into the shared tree"),
+        ("remove", "Delete a shared skill and its links"),
         ("usage", "Call counts from the session index"),
         ("new", "Create a SKILL.md in the hub"),
         ("discover", "Find skills not yet cataloged"),

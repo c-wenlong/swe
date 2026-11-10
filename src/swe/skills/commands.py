@@ -8,10 +8,12 @@ from swe.skills.catalog_commands import cmd_skills_catalog, cmd_skills_discover
 from swe.skills.discovery import discover_skills
 from swe.skills.help_text import cmd_skills_help, print_skills_overview
 from swe.skills.layout_commands import (
+    cmd_skills_adopt,
     cmd_skills_disable,
     cmd_skills_enable,
     cmd_skills_link,
     cmd_skills_move,
+    cmd_skills_remove,
     cmd_skills_sync,
     cmd_skills_unlink,
     cmd_skills_usage,
@@ -119,6 +121,10 @@ def cmd_skills(args):
         return cmd_skills_unlink(args[1:])
     if args[0] == "move":
         return cmd_skills_move(args[1:])
+    if args[0] == "adopt":
+        return cmd_skills_adopt(args[1:])
+    if args[0] in ("remove", "rm", "delete"):
+        return cmd_skills_remove(args[1:])
     if args[0] == "enable":
         return cmd_skills_enable(args[1:])
     if args[0] == "disable":

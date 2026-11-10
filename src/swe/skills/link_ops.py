@@ -29,6 +29,7 @@ from swe.skills.layout import (
 __all__ = [
     "SkillLayoutError", "link_skill_root", "unlink_skill_root", "move_skill",
     "set_skill_enabled", "reconcile_selection_root", "reconcile_all_selections",
+    "remove_skill",
 ]
 
 
@@ -568,6 +569,132 @@ def reconcile_selection_root(root: Path, shared: Path, record: dict) -> dict:
             link.unlink()
             removed.append(n)
     return {"added": added, "removed": removed}
+
+
+def remove_skill(
+    name: str,
+    *,
+    home: Path | None = None,
+    cwd: Path | None = None,
+) -> dict:
+    """Delete a shared skill and every per-skill link into it.
+
+    The shared folder is the unit: links pointing at it are dropped from
+    every discovered root (a donor root's adopt link-back included) so a
+    removal leaves no dangling trail and a later adopt pass cannot
+    resurrect it through a leftover link or record. Real private folders
+    of the same name in harness roots are user content and stay; the
+    caller warns that the next adopt pass will pull them back.
+    """
+    home = home or Path.home()
+    cwd = cwd or Path.cwd()
+    check_link_records_writable()
+    shared = skills_dir_for(home)
+    try:
+        shared_resolved = shared.resolve()
+    except (OSError, RuntimeError):
+        shared_resolved = shared
+
+    try:
+        folder = find_skill_directory(name, SHARED_LABEL, home=home, cwd=cwd)
+    except SkillLayoutError:
+        # discover_skills does not descend into a top-level entry that is
+        # itself a link (shared/foo -> elsewhere), so a vendored-in skill
+        # is looked up directly before giving up.
+        candidate = shared / name
+        if not (
+            os.path.lexists(candidate)
+            and candidate.is_dir()
+            and (candidate / "SKILL.md").is_file()
+        ):
+            raise
+        folder = candidate
+    # The parent is compared resolved: a shared skill vendored in by a
+    # symlink resolves OUT of the tree, yet removing its link is the
+    # point, and the direct lookup above produces the literal spelling.
+    try:
+        parent = folder.parent.resolve()
+    except (OSError, RuntimeError):
+        parent = folder.parent
+    if parent != shared_resolved:
+        raise SkillLayoutError(
+            f"{name} is nested in {folder.parent.name}, not a top-level "
+            "shared skill; remove the skill it belongs to instead"
+        )
+    fname = folder.name
+    # A link can spell the target with either the literal shared path or
+    # its resolved one (/var vs /private/var on macOS); both are swe's.
+    targets = {
+        Path(os.path.normpath(str(base / fname)))
+        for base in (shared, shared_resolved)
+    }
+
+    from swe.init.layout import (
+        _links_into,
+        discover_skill_roots,
+        skill_root_label,
+    )
+
+    # The backup comes first: links are only safe to drop once the skill
+    # is known to survive removal. A failed remove must not strand a
+    # still-installed skill with no harness links.
+    backup = backup_tree(folder, home)
+
+    dropped: list[str] = []
+    dropped_links: list[tuple[Path, str]] = []
+    private_left: list[str] = []
+    for root in discover_skill_roots(home):
+        if root.is_symlink() or not root.is_dir():
+            continue
+        label = skill_root_label(root, home)
+        for link in _links_into(root, shared):
+            try:
+                raw = os.readlink(link)
+            except OSError:
+                continue
+            pointed = Path(raw)
+            if not pointed.is_absolute():
+                pointed = link.parent / pointed
+            if Path(os.path.normpath(str(pointed))) not in targets:
+                continue
+            try:
+                link.unlink()
+                dropped_links.append((link, raw))
+                dropped.append(label)
+            except OSError:
+                pass
+        slot = root / fname
+        if (
+            not slot.is_symlink()
+            and slot.is_dir()
+            and (slot / "SKILL.md").is_file()
+        ):
+            private_left.append(label)
+
+    try:
+        if folder.is_symlink():
+            folder.unlink()
+        else:
+            shutil.rmtree(folder)
+    except OSError:
+        for link, raw in dropped_links:
+            try:
+                link.symlink_to(raw)
+            except OSError:
+                pass
+        raise
+    # Provenance and selection records for the name would otherwise steer
+    # a later adopt or reconcile on a skill that no longer exists.
+    from swe.skills.layout import purge_skill_state
+
+    purge_skill_state(fname)
+    return {
+        "name": fname,
+        "removed": str(folder),
+        "links_dropped": sorted(set(dropped)),
+        "private_left": sorted(set(private_left)),
+        "backup": str(backup),
+    }
 
 
 def reconcile_all_selections(home: Path | None = None) -> list[dict]:

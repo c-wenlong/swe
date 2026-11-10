@@ -243,8 +243,12 @@ def installed_skills(home: Path | None = None, cwd: Path | None = None) -> dict:
     roots = _plan_skill_roots(home)
     archived = archived_names(load_registry(home))
     shared = paths.skills_dir_for(home)
-    from swe.init.layout import shared_skill_dirs, skill_root_links
-    from swe.skills.layout import selection_intent, selection_record_at
+    from swe.init.layout import _same_skill, shared_skill_dirs, skill_root_links
+    from swe.skills.layout import (
+        selection_intent,
+        selection_record_at,
+        skill_adopted_map,
+    )
 
     shared_names = set(shared_skill_dirs(shared))
     harnesses = []
@@ -330,6 +334,22 @@ def installed_skills(home: Path | None = None, cwd: Path | None = None) -> dict:
     for real, (name, description, owners) in live.items():
         rows.append((name, description, real, "claude-plugin", owners))
 
+    # A selection root can hold links into shared below the top level —
+    # an adopt link-back lands at root/cat/name — so visibility resolves
+    # every link under the root once, not just the per-skill slot.
+    from swe.init.layout import _links_into
+
+    shared_dir = paths.skills_dir_for(home)
+    deep_links: dict[Path, set[Path]] = {}
+    for _harness, root in selection_dirs:
+        targets: set[Path] = set()
+        for link in _links_into(root, shared_dir):
+            try:
+                targets.add(link.resolve())
+            except (OSError, RuntimeError):
+                continue
+        deep_links[root] = targets
+
     skills = []
     for name, description, folder, label, owners in rows:
         real = _real_path(folder)
@@ -343,9 +363,7 @@ def installed_skills(home: Path | None = None, cwd: Path | None = None) -> dict:
         # shared row stays off for a root that forked it.
         if real is not None:
             for harness, root in selection_dirs:
-                slot = root / real.name
-                if (harness not in seen_by and slot.is_symlink()
-                        and _real_path(slot) == real):
+                if harness not in seen_by and real in deep_links.get(root, ()):
                     seen_by.append(harness)
         seen_by += [owner for owner in owners if owner not in seen_by]
         skills.append({
@@ -357,6 +375,29 @@ def installed_skills(home: Path | None = None, cwd: Path | None = None) -> dict:
             "harnesses": sorted(seen_by),
         })
     skills.sort(key=lambda s: (s["name"].lower(), s["path"]))
+    # Adoption provenance lives in skill_links.json by folder name; a
+    # conflict is a same-named private copy in a harness root whose bytes
+    # differ from the shared one — the row adoption refused to merge.
+    adopted = skill_adopted_map()
+    # Group by folder name, the link unit adoption groups by — two skills
+    # declaring one frontmatter name are not a conflict, and two folders
+    # sharing a folder name with different frontmatter names are.
+    by_folder: dict[str, list[dict]] = {}
+    for row in skills:
+        by_folder.setdefault(Path(row["path"]).name, []).append(row)
+    for row in skills:
+        if row["source"] != "shared":
+            continue
+        donor = adopted.get(Path(row["path"]).name)
+        if donor is not None:
+            row["adopted_from"] = donor
+        shared_md = Path(row["path"]) / "SKILL.md"
+        for other in by_folder.get(Path(row["path"]).name, []):
+            if other["source"] != "harness":
+                continue
+            if not _same_skill(Path(other["path"]) / "SKILL.md", shared_md):
+                row["conflict"] = True
+                break
     return {
         "shared_dir": str(paths.skills_dir_for(home)),
         "harnesses": harnesses,

@@ -219,7 +219,9 @@ class CmdInitTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             home = _home(tmp)
             _skill(home / ".agents/skills", "only-here")
-            _, out = self._run(home, [])
+            # --no-adopt: a keep root's skills stay private, so the
+            # protected report this test checks is the one that shows.
+            _, out = self._run(home, ["--no-adopt"])
             self.assertIn("exist nowhere else", out)
             self.assertIn(".linkignore", out)
 

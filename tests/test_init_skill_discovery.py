@@ -566,7 +566,9 @@ class SafetyTest(unittest.TestCase):
             _skill(home / ".pane" / "skills", "only-here")
             # --yes: an unreviewed root is held, never planned for linking,
             # so the protect path only shows for one that is managed.
-            _, out = self._run(home, ["--yes"])
+            # --no-adopt: a managed root's unique skills stay private, so
+            # the protected report this test checks is the one that shows.
+            _, out = self._run(home, ["--yes", "--no-adopt"])
             self.assertIn("exist nowhere else", out)
             self.assertIn(".pane/skills", out)
 

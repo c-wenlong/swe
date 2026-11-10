@@ -362,6 +362,10 @@ class InitRun:
     account_rows: list[AccountRow] = field(default_factory=list)
     # Why the account pass did not run (an unreadable file), if it didn't.
     account_notes: list[str] = field(default_factory=list)
+    # The harness-only skills the run adopted into ~/.swe/skills — an
+    # AdoptionResult, dry_run=True on --check; None when adoption was off
+    # (--no-adopt) or its pass could not run.
+    adopt_result: object = None
 
     def rows_json(self) -> list[dict]:
         """Every path with its result, for `swe setup --apply --json`."""
@@ -383,7 +387,7 @@ class InitRun:
 def run_init(home: Path, *, check_only: bool = False, force: bool = False,
              migrate: bool = False, yes: bool = False,
              evidence_only: bool = False, quiet: bool = False,
-             ask: bool = True) -> InitRun:
+             ask: bool = True, adopt: bool = True) -> InitRun:
     """Build the layout and link every harness; the body of `swe init`.
 
     ``evidence_only`` registers only the new skills folders whose owner has
@@ -391,7 +395,10 @@ def run_init(home: Path, *, check_only: bool = False, force: bool = False,
     is what `swe setup --apply` wants with nobody there to ask. ``quiet``
     keeps it from printing, for callers that emit one JSON document.
     ``ask=False`` never opens the picker: new skills folders wait, as on a
-    run without a terminal.
+    run without a terminal. ``adopt`` pulls skills only a harness root holds
+    into the shared tree at the end of the run (``swe init --no-adopt`` and
+    `swe skills adopt` both steer it); a check run plans the same pass as a
+    dry run so the preview says what a real run would move.
     Raises LinkIgnoreError when ~/.swe/.linkignore can't be read.
     """
     patterns = load_linkignore(home)
@@ -500,8 +507,21 @@ def run_init(home: Path, *, check_only: bool = False, force: bool = False,
     account_rows, account_notes = sync_accounts(
         home, patterns, registry, check_only=check_only)
     scaffold.extend(account_notes)
+    adopt_result = None
+    if adopt:
+        # After the link apply so _mark_off sees the roots this run just
+        # linked, on the statuses plan() computed so a held-new root stays
+        # out. Like the MCP sync's adoption, housekeeping never fails the
+        # run it rode on: a store it cannot trust skips with a note.
+        from swe.skills.adopt import adopt_harness_skills
+
+        try:
+            adopt_result = adopt_harness_skills(
+                home, skills_statuses=skills, dry_run=check_only)
+        except Exception as exc:
+            scaffold.append(f"skill adoption skipped: {exc}")
     return InitRun(scaffold, instructions, skills, inst_rows, skill_rows, hook_rows,
-                   account_rows, account_notes)
+                   account_rows, account_notes, adopt_result)
 
 
 def check_document(home: Path, run: InitRun | None = None) -> dict:
@@ -515,10 +535,20 @@ def check_document(home: Path, run: InitRun | None = None) -> dict:
         flags = sync_flags(home)
     except AccountSyncUnavailable:
         flags = None
+    adopt = run.adopt_result
     return {
         "agents_file": str(agents_file(home)),
         "agents_file_exists": agents_file(home).exists(),
         "harnesses": _link_json(run.instructions, run.skills, home),
+        "skills_adoption": (
+            {
+                "adopted": adopt.adopted,
+                "deduped": adopt.deduped,
+                "conflicts": adopt.conflicts,
+            }
+            if adopt is not None
+            else None
+        ),
         "account_sync": flags,
         "accounts": [row.to_json() for row in run.account_rows],
         "account_notes": run.account_notes,
@@ -644,8 +674,10 @@ def cmd_init(args) -> int:
     full = "--full" in args
     yes = "--yes" in args
     accounts_only = "--accounts" in args
+    adopt = "--no-adopt" not in args
 
-    known = ("--check", "-n", "--force", "--migrate", "--full", "--yes", "--accounts")
+    known = ("--check", "-n", "--force", "--migrate", "--full", "--yes",
+             "--accounts", "--no-adopt")
     unknown = [a for a in args if a not in known]
     if unknown:
         if json_view:
@@ -689,7 +721,7 @@ def cmd_init(args) -> int:
     # the very paths the user listed to protect.
     try:
         result = run_init(home, check_only=check_only, force=force,
-                          migrate=migrate, yes=yes)
+                          migrate=migrate, yes=yes, adopt=adopt)
     except LinkIgnoreError as exc:
         if json_view:
             print(str(exc), file=sys.stderr)
@@ -725,12 +757,40 @@ def cmd_init(args) -> int:
             sections.append(("Accounts", acct_rows))
         _print_summary(sections)
 
+    adopt_result = result.adopt_result
+    if adopt_result is not None and (
+        adopt_result.adopted or adopt_result.deduped
+        or adopt_result.conflicts or adopt_result.failed
+    ):
+        # Silent when nothing moved or would move: init's own report of an
+        # unchanged skills root is what it always was.
+        from swe.skills.layout_commands import _print_adopt_result
+
+        _print_adopt_result(adopt_result)
+
     everything = inst_rows + skill_rows + hook_rows
     blocked = [(s_, r) for s_, r in everything if r in ("blocked", "would-conflict")]
     # check mode renders an unchanged state verbatim, so "keep" arrives as-is.
     protected = [
         (s_, r) for s_, r in skill_rows if r in ("protected", "keep", "would-keep")
     ]
+    if protected and adopt_result is not None and not adopt_result.dry_run \
+            and (adopt_result.adopted or adopt_result.deduped):
+        # A keep whose private skills just moved into the shared tree is a
+        # dir of link-backs now; warning about it as still-alone is stale.
+        # One holding what adoption left (a conflict, a skipped copy) is
+        # still alone and still belongs in the warning.
+        from swe.skills.adopt import _candidates, _real_dir_root
+
+        try:
+            _shared_resolved = skills_dir(home).resolve()
+        except (OSError, RuntimeError):
+            _shared_resolved = skills_dir(home)
+        protected = [
+            (s_, r) for s_, r in protected
+            if (root_real := _real_dir_root(s_.path, _shared_resolved)) is not None
+            and _candidates(s_.path, root_real, s_.label)
+        ]
     linked = [r for _, r in everything if r in _LINKED_RESULTS]
     # With chapters, AGENTS.md is generated and the next build replaces
     # an edit made to it, so point at the chapters instead.
@@ -780,6 +840,7 @@ def print_init_help() -> None:
   {c('cyan', 'swe init --force')}    Replace real files too (backed up first)
   {c('cyan', 'swe init --migrate')}  Move a pre-0.2.7 ~/.config/swe into ~/.swe
   {c('cyan', 'swe init --yes')}      Register every new skills folder without asking
+  {c('cyan', 'swe init --no-adopt')} Leave harness-only skills where they are
   {c('cyan', 'swe init --accounts')} Only sync the extra account homes (see Accounts)
 
   {c('bold', 'New harnesses')}

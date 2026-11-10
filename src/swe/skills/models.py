@@ -87,6 +87,65 @@ class ToggleReply:
 
 
 @dataclass(frozen=True)
+class AdoptReply:
+    """The ``swe skills adopt --json`` reply.
+
+    ``adopted`` rows carry ``{name, from}`` (the registry name of the
+    donor root); ``deduped`` ``{name, harness}`` rows were identical
+    private copies folded into links; ``conflicts`` ``{name, harnesses,
+    detail}`` rows were left where they sat; ``held_off`` ``{harness,
+    skills}`` rows are the roots that got an off-mark so the new shared
+    skills stay invisible to them.
+    """
+
+    adopted: list[dict]
+    deduped: list[dict]
+    conflicts: list[dict]
+    failed: list[dict]
+    held_off: list[dict]
+    dry_run: bool = False
+
+    def to_json(self) -> dict:
+        return {
+            "action": "adopt",
+            "dry_run": self.dry_run,
+            "adopted": self.adopted,
+            "deduped": self.deduped,
+            "conflicts": self.conflicts,
+            "failed": self.failed,
+            "held_off": self.held_off,
+        }
+
+
+@dataclass(frozen=True)
+class RemoveReply:
+    """The ``swe skills remove --json`` reply.
+
+    ``links_dropped`` lists the harness roots a link into the deleted
+    folder was dropped from; ``private_left`` lists roots still holding
+    a real folder of the same name (the next adopt pass will pull those
+    back into the shared tree); ``backup`` is where the folder was
+    copied before deletion.
+    """
+
+    name: str
+    removed: str
+    links_dropped: list[str]
+    private_left: list[str]
+    backup: str
+
+    def to_json(self) -> dict:
+        return {
+            "action": "remove",
+            "name": self.name,
+            "removed": self.removed,
+            "links_dropped": self.links_dropped,
+            "private_left": self.private_left,
+            "backup": self.backup,
+        }
+
+
+@dataclass(frozen=True)
 class SyncReply:
     """The ``swe skills sync --json`` reply: roots reconcile changed."""
 

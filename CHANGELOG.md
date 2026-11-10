@@ -32,7 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checkout. Closes #1909.
 
 - **Plugins are managed from SWE.** The Mac and web plugin lists hide marketplace-only entries and missing installs. Import to SWE copies installed plugin files into `~/.swe/plugins` without changing a harness or overwriting SWE files. The Mac table renders rows lazily and precomputes its local inventory and action menus.
-
+- **Harness-only skills adopt into the shared tree.** `swe init` (skip
+  with `--no-adopt`) and `swe skills adopt [<name>|--all]` move a skill
+  that only lives in a harness's real skills folder into `~/.swe/skills`
+  verbatim, leave a per-skill link in the donor root so that harness
+  sees no change, record the donor in `skill_links.json`'s
+  `adopted_from`, and mark the skill off for every other root — a
+  whole-root link converts to an `except` selection — so nothing new
+  appears anywhere. Same-named copies never merge: the first root in
+  registry order donates, identical ones fold into links, divergent ones
+  stay and flag `conflict` on the shared row in `swe skills --json`.
+  `swe skills remove <name>` deletes a shared skill plus every link into
+  it and purges its records so a later adopt cannot resurrect it.
+  `swe init --check` previews the pass and reports it as
+  `skills_adoption`. Closes #1882.
 - **AGENTS.md page: drafts list and compiled size (macOS app).** A
   "Drafts (N)" menu beside the Edit/Compile tabs lists every chapter with
   unsaved changes and jumps to it; it appears only while there are drafts.
