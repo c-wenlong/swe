@@ -67,7 +67,7 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
         case "move":
             guard positional.count >= 2 else { return fail("bad_args", "move needs a path and a new path") }
             return move(positional[0], to: positional[1])
-        case "prune": return prune(rest)
+        case "prune": return prune(rest, repo: flag("--repo"))
         case "slim": return slim(positional.first, confirmed: rest.contains("--yes"))
         default: return fail("bad_args", "Unknown command: wt \(args[1])")
         }
@@ -131,7 +131,8 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
             return fail(WorktreeFailure.notSafe, "\(tree.title) is locked. Pass --force to remove it anyway.")
         }
         trees.removeAll { $0.path == path }
-        return reply(["removed": path, "freed_bytes": tree.sizeBytes ?? 0])
+        return reply(["removed": path, "freed_bytes": tree.sizeBytes ?? 0,
+                      "branch_deleted": deleteBranch ? (tree.state == .mergedClean) as Any : NSNull()])
     }
 
     private func update(_ path: String?, _ change: (Worktree) -> Worktree) -> CommandResult {
@@ -147,11 +148,11 @@ public final class WorktreesFixture: CommandRunning, @unchecked Sendable {
         return reply(["worktree": trees[index]])
     }
 
-    private func prune(_ rest: [String]) -> CommandResult {
+    private func prune(_ rest: [String], repo: String?) -> CommandResult {
         let includeDirty = rest.contains("--include=merged-dirty")
             || (rest.firstIndex(of: "--include").map { rest.indices.contains($0 + 1) && rest[$0 + 1] == "merged-dirty" } ?? false)
         let confirmed = rest.contains("--yes")
-        let candidates = trees.filter { ($0.state == .mergedClean || (includeDirty && $0.state == .mergedDirty)) && !$0.locked }
+        let candidates = trees.filter { ($0.state == .mergedClean || (includeDirty && $0.state == .mergedDirty)) && !$0.locked && (repo == nil || $0.mainCheckout == repo) }
         let freed = candidates.reduce(0) { $0 + ($1.sizeBytes ?? 0) }
         if confirmed { trees.removeAll { tree in candidates.contains { $0.path == tree.path } } }
         return reply(["dry_run": !confirmed, "candidates": candidates,

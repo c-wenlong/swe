@@ -127,8 +127,11 @@ import Testing
         #expect(draft.problem?.contains("dash") == true)
         draft.branch = "feat/ok"
         #expect(draft.isComplete)
-        draft.base = "bad..ref"
-        #expect(draft.problem != nil)
+        // The base is any git revision expression; only the new branch's name is checked.
+        draft.base = "HEAD~1"
+        #expect(draft.isComplete)
+        draft.base = "origin/main^"
+        #expect(draft.isComplete)
         draft.base = ""
         draft.path = "relative/dir"
         #expect(draft.problem?.contains("full path") == true)
@@ -203,7 +206,11 @@ import Testing
         #expect(!orphan.canRemove && !orphan.canLock && !orphan.canMove && !orphan.canSlim)
         #expect(orphan.pruneCommand == "git -C '/r' worktree prune")
         #expect(!tree("/r/p", .protected).canMove && !tree("/r/p", .protected).canSlim)
-        #expect(tree("/r/p", .protected).canLock)
+        // Lock is refused for main, protected and orphans; Unlock stays for a locked row.
+        #expect(!tree("/r/p", .protected).canLock && !main().canLock && !orphan.canLock)
+        #expect(tree("/r/p", .protected, locked: true).canUnlock)
+        #expect(!tree("/r/p", .protected).canUnlock)
+        #expect(!orphan.canUnlock)
         for state in [WorktreeState.mergedDirty, .openPr, .noPr, .unknown] {
             #expect(tree("/r/x", state).canRemove)
             #expect(tree("/r/x", state).removalNeedsForce)
@@ -375,7 +382,7 @@ import Testing
         #expect(fixture.calls.contains(["wt", "move", target.path, "/elsewhere/spike", "--json"]))
     }
 
-    @Test func pruneRunsADryRunFirstAndOnlyThenRemoves() async throws {
+    @Test func cleanUpRemovesOnlyWhatThePreviewShowed() async throws {
         let fixture = WorktreesFixture()
         let model = WorktreesModel()
         let swe = SweClient(runner: fixture)
@@ -387,14 +394,77 @@ import Testing
         #expect(preview.candidates.allSatisfy { $0.state == .mergedClean })
         #expect(model.worktrees.count == before)
         #expect(fixture.calls.last == ["wt", "prune", "--all", "--json"])
-        let report = try await model.prune(includeDirty: false, swe: swe)
-        #expect(!report.dryRun)
-        #expect(report.removed.count == 3)
-        #expect(fixture.calls.contains(["wt", "prune", "--all", "--yes", "--json"]))
+        let result = try await model.cleanUp(preview.candidates, swe: swe)
+        #expect(result.removed.count == 3 && result.skipped.isEmpty)
+        // Never `prune --yes`, which would rescan: one plain remove each, no --force.
+        #expect(!fixture.calls.contains { $0.contains("--yes") })
+        let removes = fixture.calls.filter { $0.starts(with: ["wt", "remove"]) }
+        #expect(removes.count == 3 && removes.allSatisfy { !$0.contains("--force") })
         #expect(model.worktrees.count == before - 3)
+        #expect(model.notice?.hasPrefix("Removed 3 worktrees.") == true)
         // Including merged-dirty offers the extra one.
         let withDirty = try await model.prunePreview(includeDirty: true, swe: swe)
         #expect(withDirty.candidates.map(\.state) == [.mergedDirty])
+        #expect(fixture.calls.last == ["wt", "prune", "--all", "--include=merged-dirty", "--json"])
+    }
+
+    @Test func aWorktreeThatStoppedBeingSafeIsSkippedNotForced() async throws {
+        let fixture = WorktreesFixture()
+        let model = WorktreesModel()
+        let swe = SweClient(runner: fixture)
+        await model.load(swe: swe)
+        let preview = try await model.prunePreview(includeDirty: false, swe: swe)
+        // Between the preview and the confirm, one candidate gets locked.
+        let locked = preview.candidates[0]
+        try await model.lock(locked, reason: "someone's using it", swe: swe)
+        let result = try await model.cleanUp(preview.candidates, swe: swe)
+        #expect(result.removed.count == 2)
+        #expect(result.skipped.map(\.path) == [locked.path])
+        #expect(result.skipped[0].reason.contains("locked"))
+        #expect(model.worktree(at: locked.path) != nil)
+    }
+
+    @Test func mergedDirtyRowsAreCheckedAgainBeforeAForcedRemove() async throws {
+        let fixture = WorktreesFixture()
+        let model = WorktreesModel()
+        let swe = SweClient(runner: fixture)
+        await model.load(swe: swe)
+        let all = try await model.prunePreview(includeDirty: true, swe: swe).candidates
+        #expect(all.count == 4)
+        let dirty = all.filter { $0.state == .mergedDirty }
+        #expect(dirty.count == 1)
+        let result = try await model.cleanUp(dirty, swe: swe)
+        #expect(result.removed == [dirty[0].path])
+        let calls = fixture.calls.filter { $0.starts(with: ["wt", "show"]) || $0.starts(with: ["wt", "remove"]) }
+        #expect(calls == [["wt", "show", dirty[0].path, "--json"],
+                          ["wt", "remove", dirty[0].path, "--force", "--json"]])
+    }
+
+    @Test func aDirtyRowThatChangedStateIsNotForced() async throws {
+        let fixture = WorktreesFixture()
+        let model = WorktreesModel()
+        let swe = SweClient(runner: fixture)
+        await model.load(swe: swe)
+        let stale = tree("/Users/demo/Projects/swe/.claude/worktrees/spike-vector-index", .mergedDirty)
+        // The fixture knows this path as no-pr, so `show` says it is no longer merged-dirty.
+        let result = try await model.cleanUp([stale], swe: swe)
+        #expect(result.removed.isEmpty && result.skipped.count == 1)
+        #expect(!fixture.calls.contains { $0.contains("--force") })
+    }
+
+    @Test func aRepoScopedCleanUpStaysInThatRepo() async throws {
+        let fixture = WorktreesFixture()
+        let model = WorktreesModel()
+        let swe = SweClient(runner: fixture)
+        await model.load(swe: swe)
+        model.scope = .repo("/Users/demo/Projects/dotfiles")
+        let preview = try await model.prunePreview(includeDirty: false, swe: swe)
+        #expect(fixture.calls.last == ["wt", "prune", "--repo=/Users/demo/Projects/dotfiles", "--json"])
+        #expect(preview.candidates.map(\.repoName) == ["kaichen/dotfiles"])
+        // Nothing outside the repo is in the candidates, so nothing outside is removed.
+        let before = fixture.worktrees.filter { $0.mainCheckout != "/Users/demo/Projects/dotfiles" }.count
+        try await model.cleanUp(preview.candidates, swe: swe)
+        #expect(fixture.worktrees.filter { $0.mainCheckout != "/Users/demo/Projects/dotfiles" }.count == before)
     }
 
     @Test func slimPreviewsThenFrees() async throws {
@@ -410,6 +480,65 @@ import Testing
         try await model.slim(target, swe: swe)
         #expect(model.worktree(at: target.path)?.rebuildableBytes == 0)
         #expect(fixture.calls.contains(["wt", "slim", target.path, "--yes", "--json"]))
+    }
+
+    @Test func nullFreedBytesAndBranchKeptAreReadAndSaid() async throws {
+        let removal = ok(#"{"removed": "/r/x", "freed_bytes": null, "branch_deleted": false}"#)
+        let slim = ok(#"{"dry_run": false, "dirs": [], "freed_bytes": null}"#)
+        let list = ok(#"{"scope": "all", "worktrees": []}"#)
+        let runner = ScriptedRunner([(["wt", "remove"], removal), (["wt", "slim"], slim), (["wt", "list"], list)])
+        let swe = SweClient(runner: runner)
+        let model = WorktreesModel()
+        let open = tree("/r/x", .openPr, branch: "feat/x")
+        let result = try await model.remove(open, force: true, deleteBranch: true, swe: swe)
+        #expect(result.freedBytes == nil && result.branchDeleted == false)
+        #expect(model.notice?.contains("Freed space unknown") == true)
+        #expect(model.notice?.contains("kept the branch feat/x") == true)
+        let report = try await model.slim(tree("/r/y", .noPr), swe: swe)
+        #expect(report.freedBytes == nil)
+        #expect(model.notice == "Slimmed y. Freed space unknown")
+        #expect(WorktreeFormat.freed(1_000_000) == "1 MB")
+    }
+
+    @Test func aLongErrorOnStdoutStillParses() async {
+        let path = String(repeating: "/very/long/path", count: 60)
+        let body = #"{"schema": 1, "error": {"code": "git_failed", "message": "bad \#(path)"}}"#
+        #expect(body.utf8.count > 500)
+        let runner = ScriptedRunner([(["wt", "list"], CommandResult(status: 1, stdout: Data(body.utf8), stderr: ""))])
+        let model = WorktreesModel()
+        await model.load(swe: SweClient(runner: runner))
+        guard case .failed(let message) = model.state else { Issue.record("\(model.state)"); return }
+        #expect(message.hasPrefix("git reported an error."))
+        #expect(message.hasSuffix(path))
+        #expect(model.failure?.code == "git_failed")
+    }
+
+    @Test func reclaimableLeavesOutHeldWorktrees() {
+        let held = Worktree(path: "/r/h", mainCheckout: "/r", branch: "h", state: .mergedClean,
+                            sizeBytes: 400, hold: "detached HEAD used in the last 24h")
+        let free = tree("/r/f", .mergedClean, size: 100)
+        let summary = WorktreeFilter.summary([held, free])
+        #expect(summary.reclaimableBytes == 100 && summary.reclaimableCount == 1)
+    }
+
+    @Test func aListFromAnotherSweIsNotFresh() async throws {
+        let fixture = WorktreesFixture()
+        let model = WorktreesModel()
+        let swe = SweClient(runner: fixture)
+        await model.loadIfStale(swe: swe, source: "/a/swe")
+        await model.loadIfStale(swe: swe, source: "/a/swe")
+        #expect(fixture.calls.filter { $0.starts(with: ["wt", "list"]) }.count == 1)
+        await model.loadIfStale(swe: swe, source: "/b/swe")
+        #expect(fixture.calls.filter { $0.starts(with: ["wt", "list"]) }.count == 2)
+    }
+
+    @Test func aMissingSavedRepoFailsWithACodeThePageCanReadBack() async {
+        let runner = ScriptedRunner([(["wt", "list"], CommandResult(
+            status: 1, stdout: Data(#"{"schema": 1, "error": {"code": "not_a_repo", "message": "/gone"}}"#.utf8), stderr: ""))])
+        let model = WorktreesModel()
+        model.scope = .repo("/gone")
+        await model.load(swe: SweClient(runner: runner))
+        #expect(model.failure?.code == "not_a_repo")
     }
 
     @Test func emptyAndErrorScenarios() async {

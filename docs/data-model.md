@@ -94,6 +94,7 @@ every key below is live.
 | `swePath`, `apiKeysPath`, `mcpServersPath`, `codeEditor`, `terminalApp` | user-set paths and app choices |
 | `appearance`, `showsInDock`, `lastSection`, `settingsSection`, `menuBarPageTab`, `desktopWidgetTab`, `agentsMdView` | window and page state |
 | `agentsProjectFolder` | last Agents.md project |
+| `worktreesScope` | the Worktrees page's repository filter: a main checkout's path, or empty for all repositories (the page falls back to empty when that repository is gone) |
 | `limitNotifications` | notification opt-in |
 | `menuBarVisible`, `menuBarPrimary`, `menuBarSecondary`, `menuBarWatchedLimit` | menu bar display |
 | `popupShowIncidents`, `popupShowStats`, `popupHiddenSources`, `popupHiddenSourceWindows`, `popupSourceOrder` | menu bar popup content and order |

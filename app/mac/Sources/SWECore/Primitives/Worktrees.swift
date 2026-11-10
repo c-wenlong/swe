@@ -70,9 +70,9 @@ public enum WorktreeState: String, Codable, Sendable, CaseIterable {
     /// Move and slim apply to ordinary worktrees only.
     public var supportsMoveAndSlim: Bool { self != .main && self != .protected && self != .orphaned }
 
-    /// Lock is for anything git still lists: not the main checkout, not an
-    /// orphan.
-    public var supportsLock: Bool { self != .main && self != .orphaned }
+    /// swe refuses Lock on the main checkout, a protected worktree and an
+    /// orphan, so the page never offers it there.
+    public var supportsLock: Bool { self != .main && self != .orphaned && self != .protected }
 
     /// Anything but `merged-clean` needs `--force` to remove.
     public var removalNeedsForce: Bool { self != .mergedClean }
@@ -267,6 +267,9 @@ public struct Worktree: Codable, Equatable, Sendable, Identifiable, Hashable {
 
     /// The main checkout has no lock or move; everything else does.
     public var canLock: Bool { state.supportsLock }
+    /// Unlock stays on offer for anything git still lists that is locked,
+    /// even a row Lock is never offered on.
+    public var canUnlock: Bool { locked && state != .orphaned }
     public var canMove: Bool { state.supportsMoveAndSlim && !locked }
 
     /// What clears an orphan: git forgets the folder it no longer lists.
@@ -327,11 +330,15 @@ public struct WorktreeReply: Decodable, Equatable, Sendable {
 /// `swe wt remove --json`.
 public struct WorktreeRemoval: Decodable, Equatable, Sendable {
     public let removed: String
-    public let freedBytes: Int
+    /// nil when swe could not measure it (another volume, say).
+    public let freedBytes: Int?
+    /// true or false after `--delete-branch`, nil when it was not asked.
+    public let branchDeleted: Bool?
 
-    public init(removed: String, freedBytes: Int) {
+    public init(removed: String, freedBytes: Int?, branchDeleted: Bool? = nil) {
         self.removed = removed
         self.freedBytes = freedBytes
+        self.branchDeleted = branchDeleted
     }
 }
 
@@ -378,13 +385,27 @@ public struct PruneReport: Decodable, Equatable, Sendable {
 }
 
 /// `swe wt slim --json`: the rebuildable folders a worktree can shed.
+/// What a confirmed clean up did, worktree by worktree.
+public struct CleanupResult: Equatable, Sendable {
+    public let removed: [String]
+    public let skipped: [PruneReport.Skipped]
+    /// nil when no removal reported a figure.
+    public let freedBytes: Int?
+
+    public init(removed: [String], skipped: [PruneReport.Skipped], freedBytes: Int?) {
+        self.removed = removed
+        self.skipped = skipped
+        self.freedBytes = freedBytes
+    }
+}
+
 public struct SlimReport: Decodable, Equatable, Sendable {
     public struct Dir: Decodable, Equatable, Sendable, Identifiable {
         public var id: String { path }
         public let path: String
-        public let bytes: Int
+        public let bytes: Int?
 
-        public init(path: String, bytes: Int) {
+        public init(path: String, bytes: Int?) {
             self.path = path
             self.bytes = bytes
         }
@@ -392,9 +413,10 @@ public struct SlimReport: Decodable, Equatable, Sendable {
 
     public let dryRun: Bool
     public let dirs: [Dir]
-    public let freedBytes: Int
+    /// nil when swe has no figure, such as when nothing was left to delete.
+    public let freedBytes: Int?
 
-    public init(dryRun: Bool, dirs: [Dir], freedBytes: Int) {
+    public init(dryRun: Bool, dirs: [Dir], freedBytes: Int?) {
         self.dryRun = dryRun
         self.dirs = dirs
         self.freedBytes = freedBytes
@@ -581,9 +603,8 @@ public struct NewWorktreeDraft: Equatable, Sendable {
         switch mode {
         case .existingBranch, .newBranch:
             if let reason = Self.refProblem(trimmedBranch, noun: "branch") { return reason }
-            if mode == .newBranch, !trimmedBase.isEmpty, let reason = Self.refProblem(trimmedBase, noun: "base") {
-                return reason
-            }
+            // The base goes to git as a starting point, so any revision
+            // expression (HEAD~1, origin/main^) is fine.
         case .pullRequest:
             guard let number = Int(trimmedPR), number > 0 else { return "Enter the pull request number." }
         }
@@ -673,6 +694,11 @@ public enum WorktreeFormat {
         return formatter.string(fromByteCount: Int64(count))
     }
 
+    /// "Freed space unknown" when swe has no figure.
+    public static func freed(_ count: Int?) -> String {
+        count.map { bytes($0) } ?? "Freed space unknown"
+    }
+
     /// "3d ago", or "no commits" without a date.
     public static func lastCommit(_ date: Date?, now: Date = Date()) -> String {
         guard let date else { return "No date" }
@@ -708,7 +734,7 @@ public struct WorktreeSummary: Equatable, Sendable {
     public let count: Int
     public let totalBytes: Int
     public let rebuildableBytes: Int
-    /// What removing every unlocked `merged-clean` worktree would free.
+    /// What removing every unlocked, unheld `merged-clean` worktree would free.
     public let reclaimableBytes: Int
     public let reclaimableCount: Int
 }
@@ -749,7 +775,7 @@ public enum WorktreeFilter {
     }
 
     public static func summary(_ worktrees: [Worktree]) -> WorktreeSummary {
-        let reclaim = worktrees.filter { $0.state == .mergedClean && !$0.locked }
+        let reclaim = worktrees.filter { $0.state == .mergedClean && !$0.locked && ($0.hold ?? "").isEmpty }
         return WorktreeSummary(
             count: worktrees.count,
             totalBytes: worktrees.reduce(0) { $0 + ($1.sizeBytes ?? 0) },
@@ -790,6 +816,9 @@ public final class WorktreesModel {
     public var actionError: String?
     /// A one-line result ("Removed fix/hooks-race, freed 810 MB").
     public var notice: String?
+    /// The last list failure, so the page can leave a saved scope that no
+    /// longer exists.
+    public private(set) var failure: WorktreeFailure?
 
     /// Replaces the `swe` the page would use, for the debug fixture.
     private let clientOverride: SweClient?
@@ -799,8 +828,14 @@ public final class WorktreesModel {
     private var generation = 0
     private var loadedAt: Date?
     private var loadedScope: WorktreeScope?
+    /// The swe that produced the list on show, as Settings names it.
+    private var loadedSource: String?
+    private var requestedSource = ""
 
-    public init(client: SweClient? = nil, maxAge: TimeInterval = 30,
+    /// How long a list counts as fresh, for the page's own re-check.
+    public var freshness: TimeInterval { maxAge }
+
+    public init(client: SweClient? = nil, maxAge: TimeInterval = 120,
                 now: @escaping @Sendable () -> Date = Date.init) {
         clientOverride = client
         self.maxAge = maxAge
@@ -834,15 +869,18 @@ public final class WorktreesModel {
 
     // MARK: Loading
 
-    /// Lists unless this scope's list is under `maxAge` old.
-    public func loadIfStale(swe: SweClient) async {
-        if case .loaded = state, loadedScope == scope, let loadedAt,
+    /// Lists unless this scope's list, from this `source` (the swe path as
+    /// Settings has it), is under `maxAge` old.
+    public func loadIfStale(swe: SweClient, source: String = "") async {
+        if case .loaded = state, loadedScope == scope, loadedSource == source, let loadedAt,
            now().timeIntervalSince(loadedAt) < maxAge { return }
-        await load(swe: swe)
+        await load(swe: swe, source: source)
     }
 
     /// Always lists, for the scope on show.
-    public func load(swe: SweClient) async {
+    public func load(swe: SweClient, source: String? = nil) async {
+        if let source { requestedSource = source }
+        let source = requestedSource
         generation += 1
         let mine = generation
         let asked = scope
@@ -851,8 +889,10 @@ public final class WorktreesModel {
             let list = try await client(swe).worktrees(asked)
             guard mine == generation else { return }
             state = .loaded(list)
+            failure = nil
             loadedAt = now()
             loadedScope = asked
+            loadedSource = source
             if case .all = asked {
                 repos = WorktreeFilter.repos(in: list.worktrees)
             } else {
@@ -863,7 +903,9 @@ public final class WorktreesModel {
             return
         } catch {
             guard mine == generation else { return }
-            state = .failed(WorktreeFailure.describe(error).message)
+            let described = WorktreeFailure.describe(error)
+            failure = described
+            state = .failed(described.message)
         }
     }
 
@@ -907,7 +949,11 @@ public final class WorktreesModel {
             try await $0.removeWorktree(tree.path, force: force && tree.removalNeedsForce,
                                         deleteBranch: deleteBranch)
         }
-        notice = "Removed \(tree.title), freed \(WorktreeFormat.bytes(result.freedBytes))"
+        var line = "Removed \(tree.title). \(WorktreeFormat.freed(result.freedBytes))"
+        if deleteBranch, result.branchDeleted == false, let branch = tree.branch {
+            line += ". The folder is gone but git kept the branch \(branch), usually because it has commits that aren't merged."
+        }
+        notice = line
         return result
     }
 
@@ -934,14 +980,43 @@ public final class WorktreesModel {
         try await client(swe).pruneWorktrees(scope: scope, includeDirty: includeDirty, confirmed: false)
     }
 
+    /// Removes the worktrees the preview showed, one `swe wt remove` each,
+    /// so swe itself refuses any that stopped being merged and clean since.
+    /// `prune --yes` would rescan and could take worktrees the person
+    /// never saw. A previewed `merged-dirty` row is shown again first and
+    /// only force-removed if it is still `merged-dirty`.
     @discardableResult
-    public func prune(includeDirty: Bool, swe: SweClient) async throws -> PruneReport {
-        let scope = scope
-        let report = try await perform(swe: swe) {
-            try await $0.pruneWorktrees(scope: scope, includeDirty: includeDirty, confirmed: true)
+    public func cleanUp(_ candidates: [Worktree], swe: SweClient) async throws -> CleanupResult {
+        let result = try await perform(candidates.map(\.path), swe: swe) { client in
+            var removed: [String] = []
+            var skipped: [PruneReport.Skipped] = []
+            var freed: Int?
+            for tree in candidates {
+                try Task.checkCancellation()
+                do {
+                    var force = false
+                    if tree.state == .mergedDirty {
+                        let current = try await client.worktree(at: tree.path)
+                        guard current.state == .mergedDirty else {
+                            skipped.append(.init(path: tree.path,
+                                                 reason: "No longer merged with changes left (\(current.state.title))"))
+                            continue
+                        }
+                        force = true
+                    }
+                    let done = try await client.removeWorktree(tree.path, force: force, deleteBranch: false)
+                    removed.append(tree.path)
+                    if let bytes = done.freedBytes { freed = (freed ?? 0) + bytes }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    skipped.append(.init(path: tree.path, reason: WorktreeFailure.describe(error).message))
+                }
+            }
+            return CleanupResult(removed: removed, skipped: skipped, freedBytes: freed)
         }
-        notice = "Removed \(WorktreeFormat.count(report.removed.count)), freed \(WorktreeFormat.bytes(report.freedBytes))"
-        return report
+        notice = "Removed \(WorktreeFormat.count(result.removed.count)). \(WorktreeFormat.freed(result.freedBytes))"
+        return result
     }
 
     public func slimPreview(_ tree: Worktree, swe: SweClient) async throws -> SlimReport {
@@ -953,7 +1028,7 @@ public final class WorktreesModel {
         let report = try await perform([tree.path], swe: swe) {
             try await $0.slimWorktree(tree.path, confirmed: true)
         }
-        notice = "Slimmed \(tree.title), freed \(WorktreeFormat.bytes(report.freedBytes))"
+        notice = "Slimmed \(tree.title). \(WorktreeFormat.freed(report.freedBytes))"
         return report
     }
 }

@@ -35,7 +35,7 @@ struct WorktreesPage: View {
             Button("New worktree", systemImage: "plus") { sheet = .new }
                 .primaryButton()
             Button("Refresh", systemImage: "arrow.clockwise") {
-                Task { await model.load(swe: app.swe) }
+                Task { await model.load(swe: app.swe, source: app.swePath) }
             }
             .iconButton()
             .keyboardShortcut("r", modifiers: .command)
@@ -45,8 +45,25 @@ struct WorktreesPage: View {
         }
         .task(id: "\(app.swePath)|\(scopeStored)") {
             model.scope = scopeStored.isEmpty ? .all : .repo(scopeStored)
-            await model.loadIfStale(swe: app.swe)
+            await model.loadIfStale(swe: app.swe, source: app.swePath)
+            leaveMissingScope()
             applyDebugState()
+        }
+        // Lists go stale while the page is open: look again when they do.
+        .task(id: app.swePath) {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(model.freshness))
+                if Task.isCancelled { break }
+                await model.loadIfStale(swe: app.swe, source: app.swePath)
+            }
+        }
+        // Worktrees under ~/.swe come and go from a terminal. Never the
+        // cache or .git/index, which the app's own reads write.
+        .task {
+            let swe = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".swe")
+            for await _ in FolderChanges.stream(root: swe, matches: Self.affectsList) {
+                await model.load(swe: app.swe, source: app.swePath)
+            }
         }
         .task(id: app.pendingWorktree) { applyPending() }
         .onChange(of: model.worktrees) { _, _ in applyPending() }
@@ -73,18 +90,31 @@ struct WorktreesPage: View {
         case .idle, .loading:
             LoadingCard(text: "Reading worktrees…")
         case .failed(let message):
+            scopeBar
             ErrorCard(message: Self.loadMessage(message), actionTitle: "Refresh",
                       actionShortcut: .init("r", modifiers: .command)) {
-                Task { await model.load(swe: app.swe) }
+                Task { await model.load(swe: app.swe, source: app.swePath) }
             }
         case .loaded(let list):
             if list.worktrees.isEmpty {
+                scopeBar
                 EmptyCard(text: model.scope == .all
                           ? "No worktrees yet. A worktree is a second checkout of a repository, one per branch."
                           : "This repository has no worktrees.",
                           icon: "arrow.triangle.branch", actionTitle: "New worktree") { sheet = .new }
             } else {
                 loaded
+            }
+        }
+    }
+
+    /// The scope picker alone, for the states that have no filters, so a
+    /// repository that fails or is empty never traps the page.
+    @ViewBuilder private var scopeBar: some View {
+        if !model.repos.isEmpty || !scopeStored.isEmpty {
+            HStack {
+                SelectMenu(options: scopeOptions, selection: scopeBinding, width: 260)
+                Spacer(minLength: 0)
             }
         }
     }
@@ -161,7 +191,13 @@ struct WorktreesPage: View {
     // MARK: Scope
 
     private var scopeOptions: [(value: String, title: String)] {
-        [("", "All repositories")] + model.repos.map { ($0.path, $0.name) }
+        var options: [(value: String, title: String)] = [("", "All repositories")]
+            + model.repos.map { ($0.path, $0.name) }
+        // A saved repository the list doesn't know still needs its own entry.
+        if !scopeStored.isEmpty, !options.contains(where: { $0.value == scopeStored }) {
+            options.append((scopeStored, (scopeStored as NSString).lastPathComponent))
+        }
+        return options
     }
 
     private var scopeBinding: Binding<String> {
@@ -233,6 +269,21 @@ struct WorktreesPage: View {
         case "move": sheet = tree("cli/wt-commands").map { .move($0) }
         default: break
         }
+    }
+
+    /// A path under `~/.swe` (relative to it) that can change the list.
+    nonisolated static func affectsList(_ relative: String) -> Bool {
+        if relative.hasPrefix("cache/") || relative.hasPrefix("data/") || relative.hasPrefix("logs/") { return false }
+        if relative.hasSuffix("/index") || relative.contains(".git/index") || relative.hasSuffix(".lock") { return false }
+        return relative.hasPrefix("worktrees") || relative.contains("/worktrees/") || relative == "config.json"
+    }
+
+    /// A saved repository that has moved or gone: back to All repositories,
+    /// or the page would restore the same failing scope on every launch.
+    private func leaveMissingScope() {
+        guard !scopeStored.isEmpty, case .failed = model.state,
+              let code = model.failure?.code, ["not_a_repo", "not_found"].contains(code) else { return }
+        scopeStored = ""
     }
 
     private static func loadMessage(_ message: String) -> String {
@@ -393,6 +444,9 @@ private enum Col {
 }
 
 private struct RepoCard: View {
+    private static let foldLimit = 12
+    @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var group: WorktreeGroup
     var compact: Bool
     var opened: String?
@@ -407,10 +461,22 @@ private struct RepoCard: View {
         } content: {
             VStack(alignment: .leading, spacing: 0) {
                 header
-                ForEach(group.worktrees) { tree in
+                // The open row never folds away behind the toggle.
+                let rows = RowFold.visible(group.worktrees, limit: Self.foldLimit, expanded: expanded)
+                let shown = rows + group.worktrees.dropFirst(rows.count).filter { $0.path == opened }
+                ForEach(shown) { tree in
                     WorktreeRow(tree: tree, compact: compact, isOpen: opened == tree.path,
                                 busy: busy.contains(tree.path),
                                 open: { open(tree) }, act: { act($0, tree) })
+                }
+                if group.worktrees.count > Self.foldLimit {
+                    ExpandRow(isExpanded: expanded,
+                              hidden: RowFold.hiddenCount(total: group.worktrees.count, limit: Self.foldLimit),
+                              help: (expand: "Show every worktree in this repository",
+                                     collapse: "Show fewer worktrees"),
+                              edge: .inset) {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: Theme.fadeDuration)) { expanded.toggle() }
+                    }
                 }
             }
             .padding(.horizontal, -8)
@@ -562,10 +628,9 @@ private struct WorktreeMenuItems: View {
         Button("Open in Terminal") { act(.terminal) }
         Button("Reveal in Finder") { act(.reveal) }
         Button("Copy path") { act(.copyPath) }
-        if tree.canLock || tree.state.isRemovable || tree.state == .orphaned { Divider() }
-        if tree.canLock {
-            if tree.locked { Button("Unlock") { act(.unlock) } } else { Button("Lock…") { act(.lock) } }
-        }
+        if tree.canLock || tree.canUnlock || tree.state.isRemovable || tree.state == .orphaned { Divider() }
+        if tree.locked { if tree.canUnlock { Button("Unlock") { act(.unlock) } } }
+        else if tree.canLock { Button("Lock…") { act(.lock) } }
         if tree.state.supportsMoveAndSlim {
             Button("Move…") { act(.move) }.disabled(!tree.canMove)
             Button("Slim…") { act(.slim) }.disabled(!tree.canSlim)
@@ -684,12 +749,12 @@ private struct WorktreeDetail: View {
                 Button("Copy path", systemImage: "doc.on.doc") { act(.copyPath) }.secondaryButton()
             }
             FlowLayout(spacing: 8, lineSpacing: 8) {
-                if tree.canLock {
-                    if tree.locked {
+                if tree.locked {
+                    if tree.canUnlock {
                         Button("Unlock", systemImage: "lock.open") { act(.unlock) }.secondaryButton()
-                    } else {
-                        Button("Lock…", systemImage: "lock") { act(.lock) }.secondaryButton()
                     }
+                } else if tree.canLock {
+                    Button("Lock…", systemImage: "lock") { act(.lock) }.secondaryButton()
                 }
                 if tree.state.supportsMoveAndSlim {
                     Button("Move…", systemImage: "arrow.right.circle") { act(.move) }
@@ -772,18 +837,37 @@ private struct NewWorktreeSheet: View {
     @State private var working = false
     @State private var error: String?
     @State private var touched = false
+    /// A repository swe hasn't listed yet: typed as a path.
+    @State private var otherRepo = false
 
     private var model: WorktreesModel { app.worktrees }
+    private static let otherTag = "\u{0}other"
+
+    private var repoChoice: Binding<String> {
+        Binding(get: { otherRepo ? Self.otherTag : draft.repoPath },
+                set: { value in
+                    if value == Self.otherTag {
+                        otherRepo = true
+                        draft.repoPath = ""
+                    } else {
+                        otherRepo = false
+                        draft.repoPath = value
+                    }
+                })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("New worktree").font(Theme.sectionTitle).tracking(-0.5)
             FormField("Repository") {
-                if model.repos.isEmpty {
-                    TextField("/path/to/repository", text: $draft.repoPath).sweField(monospaced: true)
-                } else {
-                    SelectMenu(options: model.repos.map { ($0.path, $0.name) },
-                               selection: $draft.repoPath, width: nil)
+                VStack(alignment: .leading, spacing: 8) {
+                    if !model.repos.isEmpty {
+                        SelectMenu(options: model.repos.map { ($0.path, $0.name) } + [(Self.otherTag, "Other repository…")],
+                                   selection: repoChoice, width: nil)
+                    }
+                    if otherRepo || model.repos.isEmpty {
+                        TextField("/path/to/repository", text: $draft.repoPath).sweField(monospaced: true)
+                    }
                 }
             }
             Tabs(options: NewWorktreeDraft.Mode.allCases.map { ($0, $0.title) },
@@ -818,15 +902,17 @@ private struct NewWorktreeSheet: View {
             }
         }
         .sheetScaffold(width: 480)
+        .onSheetDismissRequest { if !working { dismiss() } }
         .onAppear {
             if draft.repoPath.isEmpty { draft.repoPath = model.repos.first?.path ?? "" }
+            otherRepo = model.repos.isEmpty
             if case .repo(let path) = model.scope { draft.repoPath = path }
         }
     }
 
     private func create() {
         touched = true
-        guard draft.isComplete else { return }
+        guard draft.isComplete, !working else { return }
         working = true
         error = nil
         Task {
@@ -885,6 +971,7 @@ private struct RemoveSheet: View {
             }
         }
         .sheetScaffold(width: 480)
+        .onSheetDismissRequest { if !working { dismiss() } }
     }
 
     /// Anything but merged-clean can lose work, so Remove stays off until
@@ -938,6 +1025,7 @@ private struct LockSheet: View {
                 .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
             FormField("Reason", hint: "Optional. Shown on the row and in the details.") {
                 TextField("Waiting on design review", text: $reason).sweField()
+                    .disabled(working)
                     .onSubmit(lock)
             }
             if let error { Text(error).font(Theme.caption).foregroundStyle(Theme.dangerText).textSelection(.enabled) }
@@ -946,9 +1034,11 @@ private struct LockSheet: View {
             }
         }
         .sheetScaffold(width: 440)
+        .onSheetDismissRequest { if !working { dismiss() } }
     }
 
     private func lock() {
+        guard !working else { return }
         working = true
         error = nil
         Task {
@@ -1000,6 +1090,7 @@ private struct MoveSheet: View {
             }
         }
         .sheetScaffold(width: 480)
+        .onSheetDismissRequest { if !working { dismiss() } }
     }
 
     private func move() {
@@ -1033,7 +1124,7 @@ private struct SlimSheet: View {
             Text("Deletes folders that rebuild on the next install or build. Your code and git history stay.")
                 .font(Theme.bodySmall).foregroundStyle(Theme.textSecondary)
             if let done {
-                Label("Freed \(WorktreeFormat.bytes(done.freedBytes)).", systemImage: "checkmark.circle")
+                Label("\(WorktreeFormat.freed(done.freedBytes)).", systemImage: "checkmark.circle")
                     .font(Theme.bodySmall).foregroundStyle(Theme.accent)
             } else {
                 switch preview {
@@ -1065,15 +1156,22 @@ private struct SlimSheet: View {
             if let error { Text(error).font(Theme.caption).foregroundStyle(Theme.dangerText).textSelection(.enabled) }
             SheetButtons(cancelTitle: done == nil ? "Cancel" : "Done", working: working) {
                 if done == nil, case .loaded(let report) = preview, !report.dirs.isEmpty {
-                    Button(working ? "Slimming…" : "Free \(WorktreeFormat.bytes(report.freedBytes))") { slim() }
+                    Button(working ? "Slimming…" : report.freedBytes.map { "Free \(WorktreeFormat.bytes($0))" } ?? "Free space") { slim() }
                         .primaryButton().disabled(working)
                 }
             }
         }
         .sheetScaffold(width: 480)
+        .onSheetDismissRequest { if !working { dismiss() } }
         .task {
-            do { preview = .loaded(try await app.worktrees.slimPreview(tree, swe: app.swe)) }
-            catch { preview = .failed(WorktreeFailure.describe(error).message) }
+            do {
+                let report = try await app.worktrees.slimPreview(tree, swe: app.swe)
+                if !Task.isCancelled { preview = .loaded(report) }
+            } catch is CancellationError {
+                return
+            } catch {
+                if !Task.isCancelled { preview = .failed(WorktreeFailure.describe(error).message) }
+            }
         }
     }
 
@@ -1092,7 +1190,7 @@ private struct PruneSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismissSheet) private var dismiss
     @State private var preview: Loadable<PruneReport> = .loading
-    @State private var done: PruneReport?
+    @State private var done: CleanupResult?
     @State private var includeDirty = false
     @State private var working = false
     @State private var error: String?
@@ -1107,12 +1205,13 @@ private struct PruneSheet: View {
             SheetButtons(cancelTitle: done == nil ? "Cancel" : "Done", working: working) {
                 if done == nil, case .loaded(let report) = preview, !report.candidates.isEmpty {
                     Button(working ? "Removing…" : "Remove \(WorktreeFormat.count(report.candidates.count))",
-                           role: .destructive) { run() }
+                           role: .destructive) { run(report.candidates) }
                         .primaryButton().disabled(working)
                 }
             }
         }
         .sheetScaffold(width: 540)
+        .onSheetDismissRequest { if !working { dismiss() } }
         .task(id: includeDirty) { await loadPreview() }
     }
 
@@ -1183,9 +1282,9 @@ private struct PruneSheet: View {
         }
     }
 
-    private func result(_ report: PruneReport) -> some View {
+    private func result(_ report: CleanupResult) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Removed \(WorktreeFormat.count(report.removed.count)), freed \(WorktreeFormat.bytes(report.freedBytes)).",
+            Label("Removed \(WorktreeFormat.count(report.removed.count)). \(WorktreeFormat.freed(report.freedBytes)).",
                   systemImage: "checkmark.circle")
                 .font(Theme.bodySmall).foregroundStyle(Theme.accent)
             if !report.skipped.isEmpty {
@@ -1199,15 +1298,24 @@ private struct PruneSheet: View {
 
     private func loadPreview() async {
         preview = .loading
-        do { preview = .loaded(try await app.worktrees.prunePreview(includeDirty: includeDirty, swe: app.swe)) }
-        catch { preview = .failed(WorktreeFailure.describe(error).message) }
+        do {
+            let report = try await app.worktrees.prunePreview(includeDirty: includeDirty, swe: app.swe)
+            // A newer preview (the toggle changed) owns the result.
+            if !Task.isCancelled { preview = .loaded(report) }
+        } catch is CancellationError {
+            return
+        } catch {
+            if !Task.isCancelled { preview = .failed(WorktreeFailure.describe(error).message) }
+        }
     }
 
-    private func run() {
+    /// Removes exactly what the preview showed.
+    private func run(_ candidates: [Worktree]) {
+        guard !working else { return }
         working = true
         error = nil
         Task {
-            do { done = try await app.worktrees.prune(includeDirty: includeDirty, swe: app.swe) }
+            do { done = try await app.worktrees.cleanUp(candidates, swe: app.swe) }
             catch { self.error = WorktreeFailure.describe(error).message }
             working = false
         }
