@@ -755,7 +755,7 @@ struct PluginCell: View {
         }
     }
 
-    private func help(for state: PluginHarnessState) -> String {
+    func help(for state: PluginHarnessState) -> String {
         var parts = ["\(name): \(state.status.title.lowercased())"]
         if let version = state.version { parts.append("version \(version)") }
         if !state.scopes.isEmpty { parts.append("scope \(state.scopes.joined(separator: ", "))") }

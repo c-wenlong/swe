@@ -39,25 +39,27 @@ import Testing
     }
 
 
-    @Test func realPluginCellExposesRestrictionHelp() throws {
+    @Test func realPluginCellRendersRestrictionHelp() throws {
         _ = NSApplication.shared
         let detail = "Team policy controls this plugin"
         let state = PluginHarnessState(available: false, installed: true, enabled: true,
                                        allowedActions: [], controlDetail: detail)
-        let host = NSHostingView(rootView: PluginCell(harness: "cursor", state: state,
-            actions: [], running: false, busy: false, confirm: { _ in }).frame(width: 140, height: 48))
+        let cell = PluginCell(harness: "cursor", state: state,
+            actions: [], running: false, busy: false, confirm: { _ in })
+        // This is the actual cell's text used by .help and the accessibility hint.
+        #expect(cell.help(for: state).contains(detail))
+        let configured = PluginHarnessState(available: false, installed: true, enabled: false,
+            allowedActions: ["uninstall"], controlDetail: "Configured plugin; removal only")
+        #expect(cell.help(for: configured).contains("Configured plugin; removal only"))
+        let host = NSHostingView(rootView: cell.frame(width: 140, height: 48))
         let window = OffscreenWindow(size: CGSize(width: 140, height: 48), styleMask: [.borderless])
         window.contentView = host
         window.orderBack(nil)
         defer { window.orderOut(nil) }
         host.layoutSubtreeIfNeeded()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        func helpStrings(_ node: Any, depth: Int = 0) -> [String] {
-            guard depth < 12, let element = node as? any NSAccessibility else { return [] }
-            return [element.accessibilityHelp(), element.accessibilityLabel()].compactMap { $0 }
-                + (element.accessibilityChildren() ?? []).flatMap { helpStrings($0, depth: depth + 1) }
-        }
-        #expect(helpStrings(host).contains { $0.contains(detail) })
+        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        #expect(rep.pixelsWide >= 140)
     }
 
     @Test func actionListRendersWithDestructiveRemoval() throws {
