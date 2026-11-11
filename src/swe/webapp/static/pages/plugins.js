@@ -769,7 +769,7 @@ function actionsSection(p, d) {
         <div class="pl-act-buttons"><button type="button" class="btn pl-act" data-pl-act-cancel>Cancel</button>
           <button type="button" class="btn pl-act primary${a.verb === "uninstall" ? " danger" : ""}" data-pl-act-go>${esc(VERB[a.verb][0])}</button></div></div>` : "";
     return `<div class="pl-act-row"><span class="pl-act-name">${Fmt.logo(h, "logo logo-sm")}${esc(Fmt.harnessName(h))}
-      <span class="caption">· ${esc(STATUS_TITLE[st.status] || st.status)}</span></span>${side}</div>${confirm}`;
+      <span class="caption">· ${esc(STATUS_TITLE[st.status] || st.status)}</span></span>${side}</div>${st.control_detail ? `<p class="caption pl-control-detail">${esc(st.control_detail)}</p>` : ""}${confirm}`;
   }).join("");
   const o = page.actOutcome && page.actOutcome.ref === p.ref ? page.actOutcome : null;
   const outcome = o ? `<p class="${o.error ? "error pl-pre" : "caption pl-act-done"}" role="${o.error ? "alert" : "status"}">${esc(o.text)}</p>` : "";
@@ -826,7 +826,7 @@ async function runAction(a) {
     const r = data.result;
     let text;
     if (data.error) text = data.error;
-    else if (r.changed) text = `${VERB[a.verb][1]} ${a.ref} ${actionWhere(a)}`;
+    else if (r.changed) text = `${VERB[a.verb][1]} ${a.ref} ${actionWhere(a)}${r.detail ? ` — ${r.detail}` : ""}`;
     else text = `${a.ref} in ${Fmt.harnessName(a.harness)}: ${r.detail || "nothing changed"}`;
     page.actOutcome = { ref: a.ref, text, error: !!data.error };
   } else {

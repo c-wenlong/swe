@@ -341,7 +341,7 @@ def status(state: dict | None) -> str:
     if installed is True:
         return "enabled" if enabled is True else "disabled" if enabled is False else "installed"
     if installed is False:
-        return "available" if state.get("available") else "absent"
+        return "cached" if state.get("copies") else "available" if state.get("available") else "absent"
     if state.get("path") or state.get("copies"):
         return "cached"
     return "available" if state.get("available") else "absent"

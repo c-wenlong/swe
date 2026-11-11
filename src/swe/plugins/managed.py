@@ -24,8 +24,8 @@ def local_plugin(market: dict, plugin: dict) -> bool:
     """Owned source, or an installed/cached copy; a marketplace clone alone is not usage."""
     if managed_plugin(market, plugin) and Path(plugin["source_path"]).is_dir():
         return True
-    for state in plugin.get("harnesses", {}).values():
-        if state.get("installed") is False:
+    for harness, state in plugin.get("harnesses", {}).items():
+        if state.get("installed") is False and harness != "cursor":
             continue
         if any(Path(p).is_dir() for p in [state.get("path"), *state.get("copies", [])] if p):
             return True
@@ -48,8 +48,8 @@ def import_plugin(home: Path, ref: str) -> dict:
         # Prefer the actual installed bytes over a marketplace's preview.
         candidates = [s.get("path") for s in plugin["harnesses"].values()
                       if s.get("installed") is not False]
-        candidates += [p for s in plugin["harnesses"].values()
-                       if s.get("installed") is not False for p in s.get("copies", [])]
+        candidates += [p for h, s in plugin["harnesses"].items()
+                       if s.get("installed") is not False or h == "cursor" for p in s.get("copies", [])]
         source = next((Path(p) for p in candidates if p and Path(p).is_dir()), None)
         if source is None:
             raise ActionError("The plugin's installed files are missing; refresh and try again")

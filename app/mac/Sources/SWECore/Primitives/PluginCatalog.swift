@@ -348,7 +348,7 @@ public struct PluginHarnessState: Codable, Sendable, Equatable {
             case nil: .installed
             }
         case false?:
-            available ? .available : .absent
+            !copies.isEmpty ? .cached : available ? .available : .absent
         case nil:
             path != nil || !copies.isEmpty ? .cached : available ? .available : .absent
         }

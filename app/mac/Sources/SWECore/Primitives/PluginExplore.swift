@@ -166,8 +166,8 @@ public struct PluginExploreIndex: Sendable, Equatable {
                     market.path.map { root in resolve(source).hasPrefix(resolve(root) + "/") } ?? false
                 } == true
                 let ownedFiles = managed && plugin.sourcePath.map { FileManager.default.fileExists(atPath: $0) } == true
-                let installedFiles = plugin.harnesses.values.contains { state in
-                    state.installed != false && ([state.path].compactMap { $0 } + state.copies)
+                let installedFiles = plugin.harnesses.contains { harness, state in
+                    (harness == "cursor" || state.installed != false) && ([state.path].compactMap { $0 } + state.copies)
                         .contains { FileManager.default.fileExists(atPath: $0) }
                 }
                 if ownedFiles || installedFiles { localRefs.insert(plugin.ref) }

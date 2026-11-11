@@ -6,6 +6,7 @@ Only personal installs are writable here; team policies remain authoritative.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import urllib.error
@@ -90,7 +91,7 @@ class CursorClient:
             raise CursorPluginError(f"Cursor plugin request failed (HTTP {exc.code}).") from None
         except urllib.error.URLError:
             raise CursorPluginError("Cannot reach Cursor's plugin service. Refresh when it is available.") from None
-        except (OSError, ValueError):
+        except (OSError, ValueError, http.client.HTTPException):
             raise CursorPluginError("Cannot read Cursor's plugin response.") from None
         if not isinstance(result, dict) or "error" in result or ("code" in result and "message" in result):
             raise CursorPluginError("Cursor rejected the plugin request.")

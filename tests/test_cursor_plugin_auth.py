@@ -65,6 +65,38 @@ class CursorAuthTests(unittest.TestCase):
         auth.write_text(json.dumps({"accessToken": jwt()}))
         self.assertEqual(cursor_token(self.home), jwt())
 
+    def test_protected_token_is_decrypted_only_for_the_pinned_system_home(self):
+        from types import SimpleNamespace
+        store = self.home / "Library/Application Support/Cursor/User/globalStorage/state.vscdb"
+        store.parent.mkdir(parents=True)
+        store.touch()
+        with patch('pwd.getpwuid', return_value=SimpleNamespace(pw_dir=str(self.home))), \
+             patch('swe.harness.rate_limits._read_cursor_state_token', return_value='opaque'), \
+             patch('swe.harness.rate_limits._cursor_safe_storage_ciphertext', return_value=b'cipher'), \
+             patch('swe.plugins.cursor_auth._keychain_password', return_value='fake-password') as password, \
+             patch('swe.harness.rate_limits._aes_128_cbc_decrypt', return_value=jwt().encode()) as decrypt:
+            self.assertEqual(cursor_token(self.home), jwt())
+            password.assert_called_once_with('Cursor Safe Storage')
+            self.assertEqual(len(decrypt.call_args.args[0]), 16)
+            for invalid in (b'\xff', b'not-a-token', None):
+                decrypt.return_value = invalid
+                self.assertIsNone(cursor_token(self.home))
+            password.return_value = None
+            self.assertIsNone(cursor_token(self.home))
+
+    def test_keychain_loading_and_ui_failures_return_none(self):
+        with patch('swe.plugins.cursor_auth.sys.platform', 'linux'):
+            self.assertIsNone(_keychain_password('fixture'))
+        with patch('swe.plugins.cursor_auth.sys.platform', 'darwin'), \
+             patch('swe.plugins.cursor_auth.ctypes.CDLL', side_effect=OSError('unavailable')):
+            self.assertIsNone(_keychain_password('fixture'))
+        sec = FakeSecurity()
+        sec.SecKeychainGetUserInteractionAllowed = Function(lambda *_: -1)
+        with patch('swe.plugins.cursor_auth.sys.platform', 'darwin'), \
+             patch('swe.plugins.cursor_auth.ctypes.CDLL', return_value=sec):
+            self.assertIsNone(_keychain_password('fixture'))
+        self.assertEqual(sec.states, [])
+
     def test_keychain_ui_is_disabled_and_restored_even_on_refusal(self):
         for status in [0, -25308]:
             security = FakeSecurity(status)

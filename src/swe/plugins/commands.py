@@ -171,7 +171,8 @@ def _action(action: str, rest: list[str], json_view: bool, fail) -> int:
     if json_view:
         return emit(result)
     if result["changed"]:
-        print(f"  {c('green', '✓')} {harness} {result['ref']}: {_DONE[action]}")
+        detail = f" — {result['detail']}" if result.get("detail") else ""
+        print(f"  {c('green', '✓')} {harness} {result['ref']}: {_DONE[action]}{detail}")
     else:
         print(f"  {c('dim', '·')} {harness} {result['ref']}: {result['detail']}")
     return 0

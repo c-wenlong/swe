@@ -42,8 +42,9 @@ Same title and subtitle as the app, and its two tabs.
   category, author, homepage, tags, folders and skills, then "In each
   harness": a row per harness that has it or could, with its state and
   the app's menu items as buttons (Install where its marketplace is
-  listed; Enable or Disable and Uninstall once installed; for Cursor,
-  "swe can't change Cursor plugins"). A button opens a confirm under its
+  listed; Enable or Disable and Uninstall once installed; Cursor personal
+  installs offer supported controls, while team policy and configured/pinned
+  restrictions show a read-only or removal-only explanation). A button opens a confirm under its
   row with the app's question and the command or config edit it makes
   ("Disable tool@mk in Codex on box?", `set [plugins."tool@mk"] enabled =
   false in ~/.codex/config.toml`); Uninstall's button is red. While it

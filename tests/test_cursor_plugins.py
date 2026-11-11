@@ -1,4 +1,5 @@
 """Cursor controls use account RPCs, never SQLite/cache edits as enable state."""
+import http.client
 import io
 import json
 import tempfile
@@ -129,6 +130,72 @@ class CursorPluginTests(unittest.TestCase):
                     self.client.plugins()
             self.assertNotIn("fixture-token", str(raised.exception))
             self.assertNotIn("private-value", str(raised.exception))
+
+    def test_interrupted_response_is_redacted_and_catalog_survives(self):
+        class Broken(io.BytesIO):
+            def read(self, *args):
+                raise http.client.IncompleteRead(b"fixture-token", 50)
+        self.client.opener = lambda *args, **kwargs: Broken()
+        with self.assertRaises(CursorPluginError) as raised:
+            self.client.plugins()
+        self.assertNotIn("fixture-token", str(raised.exception))
+        (self.home / ".cursor/plugins/cache").mkdir(parents=True)
+        with patch("swe.plugins.cursor.CursorClient", return_value=self.client):
+            errors = []
+            view = read_cursor(self.home, errors)
+        self.assertFalse(view.installs_known)
+        self.assertTrue(errors)
+
+    def test_uninstalled_download_remains_visible_and_importable(self):
+        from swe.plugins.managed import import_plugin
+        from swe.webapp.pages.plugins import explore
+        cache = self.home / ".cursor/plugins/cache/cursor-public/downloaded/1"
+        (cache / ".cursor-plugin").mkdir(parents=True)
+        (cache / ".cursor-plugin/plugin.json").write_text('{"name":"downloaded"}')
+        (cache / "readme.md").write_text("downloaded bytes")
+        with patch("swe.plugins.cursor.CursorClient", return_value=self.client):
+            catalog = build_catalog(self.home)
+            plugin = next(p for m in catalog["marketplaces"] for p in m['plugins'] if p['name'] == 'downloaded')
+            self.assertFalse(plugin['harnesses']['cursor']['installed'])
+            self.assertEqual(plugin['harnesses']['cursor']['allowed_actions'], [])
+            page = explore(self.home)
+            self.assertIn('downloaded@cursor-public', page['plugins'])
+            self.assertEqual(page['plugins']['downloaded@cursor-public']['harnesses']['cursor']['status'], 'cached')
+            result = import_plugin(self.home, 'downloaded@cursor-public')
+        self.assertEqual((Path(result['state']['path']) / 'readme.md').read_text(), 'downloaded bytes')
+        self.assertTrue(cache.is_dir())
+
+    def test_transport_and_schema_failures_are_safe(self):
+        for code in (403, 429, 500):
+            error = urllib.error.HTTPError("https://fixture", code, "private", {}, io.BytesIO(b"fixture-token"))
+            with patch.object(self.client, "opener", side_effect=error):
+                with self.assertRaises(CursorPluginError) as raised:
+                    self.client.plugins()
+            self.assertNotIn('fixture-token', str(raised.exception))
+        for raw in (b'not-json', b'[]', b'{"error":"private"}', b'{"code":1,"message":"private"}'):
+            self.client.opener = lambda *args, raw=raw, **kwargs: io.BytesIO(raw)
+            with self.assertRaises(CursorPluginError):
+                self.client.plugins()
+        self.client.opener = lambda *args, **kwargs: io.BytesIO(b'x' * 20)
+        with patch('swe.plugins.cursor._MAX_REPLY', 10):
+            with self.assertRaisesRegex(CursorPluginError, 'oversized'):
+                self.client.plugins()
+
+    def test_invalid_inventory_and_ids_fail_without_writes(self):
+        with patch.object(self.client, 'call', return_value={'plugins': {}}):
+            with self.assertRaises(CursorPluginError):
+                self.client.plugins()
+        for item in [effective(pid=True), effective(pid='0'), effective(name=''),
+                     effective() | {'isEnabled': 'bad'}]:
+            self.api.entries = [item]
+            try:
+                self.assertEqual(self.client.plugins(), {})
+            except CursorPluginError:
+                pass
+        for verb in ['install', 'unknown']:
+            with self.assertRaises(CursorPluginError):
+                self.client.change(verb, 'example@cursor-public')
+        self.assertFalse(any(url.endswith(('UninstallUserPlugin','UpdateUserPluginInstall')) for url, _, _ in self.api.calls))
 
     def test_state_token_is_pinned_to_scratch_home_and_uses_no_keychain(self):
         store = self.home / "Library/Application Support/Cursor/User/globalStorage/state.vscdb"

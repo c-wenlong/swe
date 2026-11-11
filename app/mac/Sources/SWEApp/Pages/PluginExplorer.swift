@@ -677,7 +677,7 @@ private struct PluginGridRow: View {
 /// Unlike the skills cells these open a menu rather than toggle
 /// directly, since a plugin's change is an install or a write to the
 /// harness's config, never a silent flip.
-private struct PluginCell: View {
+struct PluginCell: View {
     var harness: String
     var state: PluginHarnessState?
     var actions: [PluginAction]
@@ -697,6 +697,8 @@ private struct PluginCell: View {
             if actions.isEmpty {
                 mark(state.status)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .help(help(for: state))
+                    .accessibilityHelp(help(for: state))
                     .hoverTip(help(for: state), pinsOnClick: false)
             } else {
                 Button { open.toggle() } label: {
@@ -718,6 +720,8 @@ private struct PluginCell: View {
                     .onExitCommand { open = false }
                 }
                 .disabled(busy)
+                .help(help(for: state) + " Click for actions.")
+                .accessibilityHelp(help(for: state))
                 .hoverTip(help(for: state) + " Click for actions.", pinsOnClick: false)
             }
         } else {
