@@ -115,6 +115,8 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <ul>
 <li><p><strong>Cursor personal plugin controls.</strong> SWE reads account state instead of guessing from downloaded folders, adds on/off for unconfigured, unpinned personal plugins and personal removal, and keeps team-controlled plugins read-only. Protected credentials and failed API reads keep cache state unknown.</p>
 </li>
+<li><p><strong>Devin and OpenCode plugin controls.</strong> Devin resolved installs can be removed through its native CLI. OpenCode global file plugins can be suspended into SWE storage, restored, imported, and removed. Controls are available on Mac, web and CLI; Devin has no per-plugin toggle, and OpenCode package/project controls remain unsupported.</p>
+</li>
 <li><p><strong><code>swe worktree</code> (alias <code>swe wt</code>) manages git worktrees across repos.</strong>
 <code>swe wt list</code> lists every linked worktree in the current repo, or with
 <code>--all</code> in every repo swe knows (<code>worktree.roots</code> in config, <code>swe gh</code>
@@ -466,6 +468,18 @@ that it never ran — and kept spawned threads are titled from
 injected-context first line. <code>swe session</code> and the session counts on
 <code>swe list</code> also pick up <code>~/.codex/archived_sessions/</code> now: archiving a
 thread moves its rollout there, and an archived session still ran.</p>
+</li>
+<li><p><strong><code>swe init</code> no longer re-asks about a harness it already
+registered.</strong> A skills root discovered under an aliased label
+(<code>~/.vibe/skills</code> is &quot;vibe&quot;, the binary behind <code>mistral-vibe</code>) was
+filed in <code>harness.json</code> under that label, while every &quot;is this root
+known?&quot; check translates the label to the canonical registry key —
+so the entry never matched and the &quot;New skills folders found&quot; picker
+came back on every run, most visibly inside <code>darwin-rebuild</code>
+activations. Registration now writes the canonical key and absorbs a
+stale label-keyed entry, and the known, archived and disabled-name
+checks all count a key's canonical name too, so an entry an older
+init filed as <code>vibe</code> still reads as registered.</p>
 </li>
 </ul>
 <h3 id="added-1"><a class="anchor" href="#added-1"></a>Added</h3>

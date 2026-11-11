@@ -335,18 +335,22 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
         ("--harness=claude", "Act in Claude Code"),
         ("--harness=codex", "Act in Codex"),
         ("--harness=cursor", "Act on existing Cursor personal plugins"),
+        ("--harness=opencode", "Act on global file plugins"),
         ("--json", "Print the result as JSON"),
     ],
     "plugins disable": [
         ("--harness=claude", "Act in Claude Code"),
         ("--harness=codex", "Act in Codex"),
         ("--harness=cursor", "Act on existing Cursor personal plugins"),
+        ("--harness=opencode", "Act on global file plugins"),
         ("--json", "Print the result as JSON"),
     ],
     "plugins uninstall": [
         ("--harness=claude", "Act in Claude Code"),
         ("--harness=codex", "Act in Codex"),
         ("--harness=cursor", "Act on existing Cursor personal plugins"),
+        ("--harness=opencode", "Act on global file plugins"),
+        ("--harness=devin", "Remove through Devin"),
         ("--json", "Print the result as JSON"),
     ],
     "plugins marketplace add": [

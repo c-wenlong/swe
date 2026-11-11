@@ -7,12 +7,12 @@ import Observation
 /// has registered or `~/.swe/plugins` holds, installed or not, with each
 /// harness's state.
 public struct PluginCatalog: SnapshotValue {
-    /// 3 invalidates cache-only Cursor state from before account controls.
-    public static let snapshotVersion = 3
+    /// 4 adds Cursor account controls to the version 3 multi-harness catalog.
+    public static let snapshotVersion = 4
 
     /// The harnesses swe read, in its order.
     public let harnesses: [String]
-    /// The harnesses swe can install, uninstall, enable and disable in.
+    /// Harnesses with controls; per-state masks may restrict the available verbs.
     public let actions: [String]
     public let marketplaces: [PluginMarketplace]
     /// What swe could not read, in its words.
@@ -57,6 +57,11 @@ public struct PluginCatalog: SnapshotValue {
     /// state swe does not know.
     public func actions(for plugin: CatalogPlugin, in harness: String) -> [PluginAction] {
         guard actions.contains(harness), let state = plugin.harnesses[harness] else { return [] }
+        if let allowed = state.allowedActions {
+            return allowed.compactMap { PluginAction.Verb(rawValue: $0) }
+                .filter { [.enable, .disable, .uninstall].contains($0) }
+                .map { PluginAction(verb: $0, ref: plugin.ref, harness: harness) }
+        }
         let verbs: [PluginAction.Verb]
         switch state.installed {
         case true?:
@@ -335,7 +340,8 @@ public struct PluginHarnessState: Codable, Sendable, Equatable {
         scopes = (try? c.decodeIfPresent([String].self, forKey: .scopes)) ?? []
         path = try? c.decodeIfPresent(String.self, forKey: .path)
         copies = (try? c.decodeIfPresent([String].self, forKey: .copies)) ?? []
-        allowedActions = try c.decodeIfPresent([String].self, forKey: .allowedActions)
+        allowedActions = c.contains(.allowedActions)
+            ? ((try? c.decode([String].self, forKey: .allowedActions)) ?? []) : nil
         controlDetail = try c.decodeIfPresent(String.self, forKey: .controlDetail)
     }
 
@@ -468,6 +474,8 @@ public struct PluginAction: Sendable, Hashable, Identifiable {
         switch (harness, verb) {
         case (_, .adopt): "swe plugins import \(ref)"
         case ("cursor", _): "swe plugins \(verb.rawValue) \(ref) --harness=cursor"
+        case ("devin", _), ("opencode", _):
+            "swe plugins \(verb.rawValue) \(ref) --harness=\(harness)"
         case ("codex", .install): "codex plugin add \(ref)"
         case ("codex", .uninstall): "codex plugin remove \(ref)"
         case ("codex", .enable), ("codex", .disable):
@@ -486,6 +494,12 @@ public struct PluginAction: Sendable, Hashable, Identifiable {
     /// "Install tool@kit in Claude Code?", for the confirmation.
     public var question: String {
         if verb == .adopt { return "Import \(ref) into SWE?" }
+        if harness == "devin" && verb == .uninstall {
+            return "Remove \(ref) from Devin, including your personal cloud plugins?"
+        }
+        if harness == "opencode" {
+            return "\(verb.title) global OpenCode file plugin \(ref)? Restart existing OpenCode sessions to apply the change."
+        }
         let name = HarnessMark(harness).name
         return "\(verb.title) \(ref) \(verb == .uninstall ? "from" : "in") \(name)?"
     }
@@ -525,6 +539,7 @@ public struct PluginActionResult: Decodable, Sendable, Equatable {
         if verb == .adopt { return "Imported \(ref) into SWE" }
         if harness == "cursor" { return "\(verb.past) \(ref) in Cursor. \(detail ?? "Refocus Cursor or start a new CLI session.")" }
         return "\(verb.past) \(ref) \(verb == .uninstall ? "from" : "in") \(name)"
+            + (detail.map { " — \($0)" } ?? "")
     }
 }
 

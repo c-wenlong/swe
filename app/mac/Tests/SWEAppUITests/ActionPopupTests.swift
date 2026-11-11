@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import SWECore
 import Testing
 @testable import SWEApp
 
@@ -35,6 +36,28 @@ import Testing
         }
         #expect(clicks.primary == 1)
         #expect(clicks.secondary == 2)
+    }
+
+
+    @Test func realPluginCellExposesRestrictionHelp() throws {
+        _ = NSApplication.shared
+        let detail = "Team policy controls this plugin"
+        let state = PluginHarnessState(available: false, installed: true, enabled: true,
+                                       allowedActions: [], controlDetail: detail)
+        let host = NSHostingView(rootView: PluginCell(harness: "cursor", state: state,
+            actions: [], running: false, busy: false, confirm: { _ in }).frame(width: 140, height: 48))
+        let window = OffscreenWindow(size: CGSize(width: 140, height: 48), styleMask: [.borderless])
+        window.contentView = host
+        window.orderBack(nil)
+        defer { window.orderOut(nil) }
+        host.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        func helpStrings(_ node: Any, depth: Int = 0) -> [String] {
+            guard depth < 12, let element = node as? any NSAccessibility else { return [] }
+            return [element.accessibilityHelp(), element.accessibilityLabel()].compactMap { $0 }
+                + (element.accessibilityChildren() ?? []).flatMap { helpStrings($0, depth: depth + 1) }
+        }
+        #expect(helpStrings(host).contains { $0.contains(detail) })
     }
 
     @Test func actionListRendersWithDestructiveRemoval() throws {

@@ -739,6 +739,7 @@ const sameAct = (a, b) => !!a && !!b && a.verb === b.verb && a.ref === b.ref && 
 function actionCommand(a) {
   if (a.harness === "cursor") return `swe plugins ${a.verb} ${a.ref} --harness=cursor`;
   if (a.verb === "import") return `swe plugins import ${a.ref}`;
+  if (["devin", "opencode"].includes(a.harness)) return `swe plugins ${a.verb} ${a.ref} --harness=${a.harness}`;
   if (a.harness === "codex" && a.verb === "install") return `codex plugin add ${a.ref}`;
   if (a.harness === "codex" && a.verb === "uninstall") return `codex plugin remove ${a.ref}`;
   if (a.harness === "codex") return `set [plugins."${a.ref}"] enabled = ${a.verb === "enable"} in ~/.codex/config.toml`;
@@ -765,6 +766,7 @@ function actionsSection(p, d) {
     const a = page.actConfirm;
     const confirm = a && a.ref === p.ref && a.harness === h && !running ? `<div class="pl-act-confirm" role="group" aria-label="${esc(VERB[a.verb][0])} ${esc(a.ref)}?">
         <span>${esc(VERB[a.verb][0])} ${esc(a.ref)} ${esc(actionWhere(a))} on ${esc(where)}?</span>
+        ${a.harness === "devin" ? `<span class="caption">Uses Devin removal, including your personal cloud plugins. Required plugins are never force-removed.</span>` : a.harness === "opencode" ? `<span class="caption">Changes global file discovery. Restart existing OpenCode sessions; project and package configuration may override discovery.</span>` : ""}
         <code class="pl-path">${esc(actionCommand(a))}</code>
         <div class="pl-act-buttons"><button type="button" class="btn pl-act" data-pl-act-cancel>Cancel</button>
           <button type="button" class="btn pl-act primary${a.verb === "uninstall" ? " danger" : ""}" data-pl-act-go>${esc(VERB[a.verb][0])}</button></div></div>` : "";

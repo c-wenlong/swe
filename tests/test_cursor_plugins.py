@@ -121,6 +121,12 @@ class CursorPluginTests(unittest.TestCase):
         self.assertTrue(result["changed"])
         self.assertTrue(result["state"]["installed"])
         self.assertIn("team policy", result["detail"])
+        import contextlib
+        from swe.plugins.commands import cmd_plugins
+        output = io.StringIO()
+        with patch('swe.plugins.commands.plugin_action', return_value=result), contextlib.redirect_stdout(output):
+            self.assertEqual(cmd_plugins(['uninstall', 'example@cursor-public', '--harness=cursor']), 0)
+        self.assertIn(result['detail'], output.getvalue())
 
     def test_http_errors_do_not_echo_credentials_or_server_body(self):
         for error in [urllib.error.HTTPError("https://fixture", 401, "fixture-token", {}, io.BytesIO(b"private-value")),

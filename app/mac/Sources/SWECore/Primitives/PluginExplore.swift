@@ -168,7 +168,8 @@ public struct PluginExploreIndex: Sendable, Equatable {
                 let ownedFiles = managed && plugin.sourcePath.map { FileManager.default.fileExists(atPath: $0) } == true
                 let installedFiles = plugin.harnesses.contains { harness, state in
                     (harness == "cursor" || state.installed != false) && ([state.path].compactMap { $0 } + state.copies)
-                        .contains { FileManager.default.fileExists(atPath: $0) }
+                        .contains { FileManager.default.fileExists(atPath: $0)
+                            || (try? FileManager.default.destinationOfSymbolicLink(atPath: $0)) != nil }
                 }
                 if ownedFiles || installedFiles { localRefs.insert(plugin.ref) }
                 let skills = placement.skills(of: plugin)

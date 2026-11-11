@@ -27,7 +27,7 @@ def local_plugin(market: dict, plugin: dict) -> bool:
     for harness, state in plugin.get("harnesses", {}).items():
         if state.get("installed") is False and harness != "cursor":
             continue
-        if any(Path(p).is_dir() for p in [state.get("path"), *state.get("copies", [])] if p):
+        if any((Path(p).exists() or Path(p).is_symlink()) for p in [state.get("path"), *state.get("copies", [])] if p):
             return True
     return False
 
@@ -45,12 +45,16 @@ def import_plugin(home: Path, ref: str) -> dict:
             raise ActionError("No installed plugin files to import; install/download it first")
         if managed_plugin(market, plugin):
             return _reply(ref, False, "already managed by SWE", plugin["source_path"])
+        if "opencode" in plugin.get("harnesses", {}):
+            from swe.plugins.local import local_plugins
+            if sum(p.ref == ref for p in local_plugins(home)) > 1:
+                raise ActionError("Conflicting active and suspended OpenCode copies; resolve them before importing")
         # Prefer the actual installed bytes over a marketplace's preview.
         candidates = [s.get("path") for s in plugin["harnesses"].values()
                       if s.get("installed") is not False]
         candidates += [p for h, s in plugin["harnesses"].items()
                        if s.get("installed") is not False or h == "cursor" for p in s.get("copies", [])]
-        source = next((Path(p) for p in candidates if p and Path(p).is_dir()), None)
+        source = next((Path(p) for p in candidates if p and Path(p).exists()), None)
         if source is None:
             raise ActionError("The plugin's installed files are missing; refresh and try again")
         root = plugins_dir_for(home)
@@ -78,6 +82,8 @@ def import_plugin(home: Path, ref: str) -> dict:
         # Dereference links to make an independent copy, but never copy a
         # link outside the installed plugin (credentials, sibling caches).
         resolved_source = source.resolve()
+        if source.is_symlink() and source.is_file():
+            raise ActionError("Materialize the plugin file symlink before importing")
         for base, dirs, files in os.walk(source, followlinks=False):
             for part in dirs + files:
                 path = Path(base) / part
@@ -88,7 +94,11 @@ def import_plugin(home: Path, ref: str) -> dict:
         try:
             with tempfile.TemporaryDirectory(prefix=".import-", dir=root) as scratch:
                 stage = Path(scratch)
-                shutil.copytree(source, stage / "plugin", ignore=shutil.ignore_patterns(".git"))
+                if source.is_file():
+                    (stage / "plugin").mkdir()
+                    shutil.copy2(source, stage / "plugin" / source.name)
+                else:
+                    shutil.copytree(source, stage / "plugin", ignore=shutil.ignore_patterns(".git"))
                 data["plugins"].append({"name": name, "source": f"./plugins/{name}"})
                 (stage / "marketplace.json").write_text(json.dumps(data, indent=2) + "\n")
                 if not target_market.exists():

@@ -263,3 +263,13 @@ resumes) and left in place.
 ### Cursor plugin credentials and state
 
 Cursor plugin status is read from its account API. No new persistent plugin state store is written. Existing editor/CLI credentials are read only, and keychain UI is disabled while decrypting macOS credentials. Catalog snapshots store only plugin metadata, enabled state and allowed action names, never credentials or configured values. Cursor's SQLite installedIds cache and downloaded plugin folders are never rewritten as an enable-state mechanism.
+
+### Disabled OpenCode file plugins
+
+`data/plugin-disabled/opencode/<sha256-of-absolute-discovery-root>/<filename>`
+holds files or directories suspended from OpenCode's global discovery folder.
+Re-enabling moves the original entry back; there is no second metadata record.
+Active/disabled name collisions refuse actions. Registry `capabilities.plugins.root`
+wins over the default `~/.config/opencode/plugins`. Both locations must be on
+the same filesystem; a failed rename leaves the source intact. Removal deletes
+only the selected discovery entry (a symlink itself, never its target).

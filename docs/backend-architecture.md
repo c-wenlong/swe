@@ -45,7 +45,7 @@ An example per layer, from the harness domain:
 | `harness/` | `commands.py`, `discover_commands.py` | `registry.py`, `stars.py`, `archive.py`, `catalog.py`, `columns.py`, `tools.py`, `path_health.py`, `doctor.py`, `drift.py`, `rate_limits.py`, `codex_usage.py`, `remedies.py`, `installers.py`, `discover.py` | `models.py`: `HarnessRow`, `RateLimitInfo`, `DoctorFinding`, `DoctorReport`, `StateReply`, `ArchiveReply`, `EditReply`, `DiscoveryRow` |
 | `sessions/` | `commands.py` | `aggregator.py`, `parse_cache.py`, `parsers.py`, `engines/`, `opencode_store.py`, `identity.py`, `status.py`, `query.py`, `picker.py`, `resume.py`, `usage.py`, `models_analytics.py`, `failures.py`, `search_index.py`, `search_writer.py`, `search_decode.py`, `search_containers.py` | `models.py`: `Session`, `SessionRow`, `ResumeCmd` |
 | `mcp/` | `cli.py`, `discover_commands.py`, `gateway_commands.py` | `inventory.py`, `formats.py`, `secrets.py`, `codex_io.py`, `discover.py`, `server.py`, `gateway.py`, `gateway_server.py` | `models.py`: `ServerRow`, `DiscoveryRow` |
-| `plugins/` | `commands.py` | `actions.py`, `catalog.py`, `managed.py` | `models.py`: `ActionResult` |
+| `plugins/` | `commands.py` | `actions.py`, `catalog.py`, `managed.py`, `local.py` | `models.py`: `ActionResult` |
 | `skills/` | `commands.py`, `layout_commands.py`, `catalog_commands.py` | `layout.py`, `link_ops.py`, `inventory.py`, `discovery.py`, `catalog_discover.py`, `catalogs.py`, `symlinks.py`, `help_text.py` | `models.py`: `LinkReply`, `UnlinkReply`, `MoveReply`, `CatalogRow` |
 | `providers/` | `commands.py`, `cli.py` | `keys.py`, `keyfile.py`, `registry.py`, `defaults.py`, `discover.py`, `help_text.py` | (no `--json` yet) |
 | `find/` | `commands.py`, `browser.py` | `roots.py`, `plugins.py`, `mcps.py`, `plugin_drift.py`, `entries.py`, `tree.py`, `summary.py`, `highlight.py` | `models.py`: `DriftRow` |
@@ -278,3 +278,23 @@ Non-obvious decisions and traps in `src/swe`, recorded so they are not re-learne
 Only personal installs in USER mode are writable. Required/default team installations are read-only. `UpdateUserPluginInstall` has no native enable-toggle call site whose configuration preservation could be verified, so SWE permits toggles only without variable keys, team variables, configured values or pinned refs. It sends only ID, enable flag and `mergeWithStored: true`. Configured/pinned plugins still offer native personal uninstall. Neither cache deletion nor SQLite installedIds edits implement plugin state.
 
 `plugins/cursor_auth.py` pins credentials to the first existing editor state store; failed, corrupt or missing-token reads never select another CLI account. Without an editor store it can use the CLI credential file/keychain. On macOS it suppresses legacy keychain UI around the read under a process-wide lock and restores the previous setting. Tests inject the Security framework; scratch homes never read the system keychain. The API is private and may change; failures leave cache-only state unknown. Cursor refreshes account plugins on window focus, or on a new CLI session. See [Cursor plugins](https://cursor.com/docs/plugins).
+
+### Devin and OpenCode plugin controls
+
+`plugins.catalog` joins Devin's resolved lock and OpenCode's global discovered
+files into the management catalog. They are `CONTROLLABLE`, not `ACTIONABLE`
+marketplace installers. Devin uses opaque source hashes in refs and resolves
+back to a unique native name before `devin plugins remove <name> --yes`. The
+command runs from the supplied home with XDG config/data overrides cleared.
+Custom Devin roots and ambiguous names are read-only; no `--force` is used.
+Lock resolution does not prove policy allows loading, so enable state is unknown.
+There is no native per-plugin toggle: do not invent one by editing the lock.
+See [Devin plugins](https://docs.devin.ai/cli/extensibility/plugins/overview).
+
+`plugins/local.py` suspends OpenCode `.js`/`.ts` files and immediate directories
+by moving them out of discovery into SWE; restoring keeps their bytes and options.
+Controls refer to global file discovery, not effective project runtime state.
+No package config, wildcard, policy or project override is changed, and existing
+sessions should restart. No scripts are executed during inventory. Both clients
+honor the `allowed_actions` mask; native catalog snapshots advance to version 3.
+See [OpenCode plugins](https://opencode.ai/docs/plugins/).

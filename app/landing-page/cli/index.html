@@ -737,10 +737,14 @@ States
   swe plugins import &lt;ref&gt;            Copy installed files into ~/.swe/plugins
   swe plugins info &lt;ref&gt;              One plugin's servers, env keys, skills and calls
   swe plugins install &lt;ref&gt; --harness=claude|codex
-  swe plugins uninstall &lt;ref&gt; --harness=claude|codex|cursor
-  swe plugins enable &lt;ref&gt; --harness=claude|codex|cursor
-  swe plugins disable &lt;ref&gt; --harness=claude|codex|cursor
+  swe plugins uninstall &lt;ref&gt; --harness=claude|codex|cursor|devin|opencode
+  swe plugins enable &lt;ref&gt; --harness=claude|codex|cursor|opencode
+  swe plugins disable &lt;ref&gt; --harness=claude|codex|cursor|opencode
   swe plugins marketplace add &lt;source&gt; --harness=claude,codex
+
+  Devin supports native removal only (including personal cloud plugins).
+  OpenCode supports global file/directory on/off and removal; restart existing
+  sessions. Package/project configuration and runtime directives are unchanged.
 
   A ref is &lt;plugin&gt;@&lt;marketplace&gt;, the name both CLIs use. The catalog
   lists installed and uninstalled plugins alike, plus anything installed

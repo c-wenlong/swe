@@ -5,7 +5,7 @@ and droid keep an ``installed_plugins.json`` (droid's lives under its home
 directory, ``~/.factory``, even though the registry calls it "droid" — see
 ``PLUGIN_FALLBACK``), codex declares ``[plugins."name@marketplace"]`` blocks
 in ``config.toml``, grok and cursor keep an unreadable marketplace cache,
-opencode writes no install record this module recognises at all, and devin
+opencode discovers global plugin files and directories, and devin
 keeps a ``lock.json`` under ``~/.local/share/devin/cli/plugins``. So this
 reads per-harness rather than globbing, the same way ``swe mcp`` does.
 
@@ -421,6 +421,7 @@ PLUGIN_FALLBACK: dict[str, Path] = {
     "cursor": Path(".cursor/plugins"),
     "grok": Path(".grok/marketplace-cache"),   # no ~/.grok/plugins on disk
     "devin": Path(".local/share/devin/cli/plugins"),
+    "opencode": Path(".config/opencode/plugins"),
 }
 
 
@@ -518,8 +519,10 @@ def discover_plugins(home: Path | None = None) -> list[Plugin]:
         found += _from_cache_scan("grok", root)
 
     if _plugin_capable(reg, "opencode"):
-        root = _plugin_root(reg, "opencode", home) or (home / ".opencode" / "plugins")
-        found += _from_dir_presence("opencode", root)
+        from swe.plugins.local import local_plugins
+        found += [Plugin(harness="opencode", name=p.name, marketplace="opencode-local",
+                         enabled=p.enabled, path=p.path, components=count_components(p.path))
+                  for p in local_plugins(home)]
 
     if _plugin_capable(reg, "devin"):
         root = _plugin_root(reg, "devin", home) or (home / PLUGIN_FALLBACK["devin"])

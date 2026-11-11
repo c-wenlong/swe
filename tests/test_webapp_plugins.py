@@ -47,6 +47,14 @@ def _tree(sources):
 
 
 class TestStatus(unittest.TestCase):
+    def test_action_masks_never_change_status_type(self):
+        for state, expected in [(_state(installed=True, enabled=True), "enabled"),
+                                (_state(installed=True, enabled=False), "disabled"),
+                                (_state(installed=True), "installed"),
+                                (_state(), "absent")]:
+            for mask in ([], ["uninstall"], ["enable", "uninstall"], "invalid"):
+                self.assertEqual(page.status({**state, "allowed_actions": mask}), expected)
+
     def test_each_state_reads_as_the_app_does(self):
         self.assertEqual(page.status(_state(installed=True, enabled=True)), "enabled")
         self.assertEqual(page.status(_state(installed=True, enabled=False)), "disabled")

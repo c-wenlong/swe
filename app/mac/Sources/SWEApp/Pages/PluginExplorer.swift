@@ -698,7 +698,7 @@ struct PluginCell: View {
                 mark(state.status)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .help(help(for: state))
-                    .accessibilityHelp(help(for: state))
+                    .accessibilityHint(Text(help(for: state)))
                     .hoverTip(help(for: state), pinsOnClick: false)
             } else {
                 Button { open.toggle() } label: {
@@ -721,7 +721,7 @@ struct PluginCell: View {
                 }
                 .disabled(busy)
                 .help(help(for: state) + " Click for actions.")
-                .accessibilityHelp(help(for: state))
+                .accessibilityHint(Text(help(for: state)))
                 .hoverTip(help(for: state) + " Click for actions.", pinsOnClick: false)
             }
         } else {
@@ -759,7 +759,7 @@ struct PluginCell: View {
         var parts = ["\(name): \(state.status.title.lowercased())"]
         if let version = state.version { parts.append("version \(version)") }
         if !state.scopes.isEmpty { parts.append("scope \(state.scopes.joined(separator: ", "))") }
-        if actions.isEmpty && state.installed == nil { parts.append("read only; sign in to Cursor and refresh to check its state") }
+        if harness == "cursor" && actions.isEmpty && state.installed == nil { parts.append("read only; sign in to Cursor and refresh to check its state") }
         if let detail = state.controlDetail { parts.append(detail) }
         return parts.joined(separator: " · ")
     }

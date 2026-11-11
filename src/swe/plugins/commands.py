@@ -195,7 +195,7 @@ def _installed_counts(market: dict, harnesses: list[str]) -> str:
 def _render_marketplaces(data: dict) -> None:
     markets = data["marketplaces"]
     if not markets:
-        print(c("dim", "\n  No plugin marketplaces registered in claude, codex or cursor.\n"))
+        print(c("dim", "\n  No plugin sources or installations found.\n"))
         return
     harnesses = data["harnesses"]
     table = Table()
