@@ -737,6 +737,7 @@ const sameAct = (a, b) => !!a && !!b && a.verb === b.verb && a.ref === b.ref && 
 
 /* PluginAction.command: what swe will run, or the edit it will make. */
 function actionCommand(a) {
+  if (a.harness === "cursor") return `swe plugins ${a.verb} ${a.ref} --harness=cursor`;
   if (a.verb === "import") return `swe plugins import ${a.ref}`;
   if (["devin", "opencode"].includes(a.harness)) return `swe plugins ${a.verb} ${a.ref} --harness=${a.harness}`;
   if (a.harness === "codex" && a.verb === "install") return `codex plugin add ${a.ref}`;
@@ -770,7 +771,7 @@ function actionsSection(p, d) {
         <div class="pl-act-buttons"><button type="button" class="btn pl-act" data-pl-act-cancel>Cancel</button>
           <button type="button" class="btn pl-act primary${a.verb === "uninstall" ? " danger" : ""}" data-pl-act-go>${esc(VERB[a.verb][0])}</button></div></div>` : "";
     return `<div class="pl-act-row"><span class="pl-act-name">${Fmt.logo(h, "logo logo-sm")}${esc(Fmt.harnessName(h))}
-      <span class="caption">· ${esc(STATUS_TITLE[st.status] || st.status)}</span></span>${side}</div>${confirm}`;
+      <span class="caption">· ${esc(STATUS_TITLE[st.status] || st.status)}</span></span>${side}</div>${st.control_detail ? `<p class="caption pl-control-detail">${esc(st.control_detail)}</p>` : ""}${confirm}`;
   }).join("");
   const o = page.actOutcome && page.actOutcome.ref === p.ref ? page.actOutcome : null;
   const outcome = o ? `<p class="${o.error ? "error pl-pre" : "caption pl-act-done"}" role="${o.error ? "alert" : "status"}">${esc(o.text)}</p>` : "";

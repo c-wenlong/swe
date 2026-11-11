@@ -737,9 +737,9 @@ States
   swe plugins import &lt;ref&gt;            Copy installed files into ~/.swe/plugins
   swe plugins info &lt;ref&gt;              One plugin's servers, env keys, skills and calls
   swe plugins install &lt;ref&gt; --harness=claude|codex
-  swe plugins uninstall &lt;ref&gt; --harness=claude|codex|devin|opencode
-  swe plugins enable &lt;ref&gt; --harness=claude|codex|opencode
-  swe plugins disable &lt;ref&gt; --harness=claude|codex|opencode
+  swe plugins uninstall &lt;ref&gt; --harness=claude|codex|cursor|devin|opencode
+  swe plugins enable &lt;ref&gt; --harness=claude|codex|cursor|opencode
+  swe plugins disable &lt;ref&gt; --harness=claude|codex|cursor|opencode
   swe plugins marketplace add &lt;source&gt; --harness=claude,codex
 
   Devin supports native removal only (including personal cloud plugins).
@@ -748,8 +748,8 @@ States
 
   A ref is &lt;plugin&gt;@&lt;marketplace&gt;, the name both CLIs use. The catalog
   lists installed and uninstalled plugins alike, plus anything installed
-  whose marketplace has no readable manifest. It reads files only, never
-  the network: a marketplace shows what its last fetch left on disk.
+  whose marketplace has no readable manifest. Claude Code and Codex listings
+  read local files. Cursor queries its account API when credentials are available.
 
   Import copies an installed/cached plugin into SWE without changing a harness.
   Existing SWE files are never overwritten. The app lists local plugins only;
@@ -763,7 +763,12 @@ Actions  Each one checks first and does nothing if the plugin is
   [plugins.&quot;&lt;ref&gt;&quot;] enabled in ~/.codex/config.toml, an edit swe checks
   parses back to the same file with only that flag changed. When it cannot
   prove that, it writes nothing and says what to edit by hand.
-  Cursor is read-only: it keeps no install record swe can read.
+  Cursor uses its account API for existing personal plugins. Team installations
+  stay read-only. Configured or pinned plugins offer removal only, because
+  on/off preservation is not verified for those settings. A missing login,
+  protected credentials or failed API read leaves cached plugins unknown.
+  Credential reads never open a keychain dialog. Refocus Cursor or start a
+  new Cursor CLI session after a change. Cursor source install is not supported.
 
   Collision: swe find also has a --harness, but it means active|all there.
   swe find plugins shows drift between ~/.swe/plugins and each harness.

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cursor personal plugin controls.** SWE reads account state instead of guessing from downloaded folders, adds on/off for unconfigured, unpinned personal plugins and personal removal, and keeps team-controlled plugins read-only. Protected credentials and failed API reads keep cache state unknown.
+
 - **Devin and OpenCode plugin controls.** Devin resolved installs can be removed through its native CLI. OpenCode global file plugins can be suspended into SWE storage, restored, imported, and removed. Controls are available on Mac, web and CLI; Devin has no per-plugin toggle, and OpenCode package/project controls remain unsupported.
 
 - **`swe worktree` (alias `swe wt`) manages git worktrees across repos.**

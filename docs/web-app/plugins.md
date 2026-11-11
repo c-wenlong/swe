@@ -42,8 +42,9 @@ Same title and subtitle as the app, and its two tabs.
   category, author, homepage, tags, folders and skills, then "In each
   harness": a row per harness that has it or could, with its state and
   the app's menu items as buttons (Install where its marketplace is
-  listed; Enable or Disable and Uninstall once installed; for Cursor,
-  "swe can't change Cursor plugins"). A button opens a confirm under its
+  listed; Enable or Disable and Uninstall once installed; Cursor personal
+  installs offer supported controls, while team policy and configured/pinned
+  restrictions show a read-only or removal-only explanation). A button opens a confirm under its
   row with the app's question and the command or config edit it makes
   ("Disable tool@mk in Codex on box?", `set [plugins."tool@mk"] enabled =
   false in ~/.codex/config.toml`); Uninstall's button is red. While it
@@ -158,6 +159,8 @@ Also different:
 ## Local inventory and SWE ownership
 
 Explore filters out marketplace-only previews and installs without files. Installed plugins can be enabled, disabled and uninstalled in their existing harness before import. Import to SWE is required for source ownership/editing and new source installs, and remains a separate detail action. This uses the existing `plugin` POST with `{verb: "import", ref, harness: "swe"}` and returns the same action result and refreshed view. The row gains `managed`; an unmanaged row has a synthetic `swe` action cell. The full catalog is still available from the CLI. Import does not register, compile or install the SWE source into a harness.
+
+Cursor account state and per-plugin action restrictions match the Mac app. The existing plugin POST routes Cursor actions to the authenticated API; its control details contain no credentials. Team entries stay read-only; configured/pinned personal plugins offer removal only.
 
 Devin resolved installs offer native removal only; OpenCode global file plugins
 offer enable/disable/removal. Both clients obey each state's `allowed_actions`

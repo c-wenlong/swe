@@ -152,6 +152,12 @@ def plugin_action(home: Path, action: str, ref: str, harness: str, run=None,
     if harness == "devin" and action != "uninstall":
         raise ActionError("Devin supports uninstall here; it has no native per-plugin enable/disable command")
     split_ref(ref)
+    if harness == "cursor":
+        from swe.plugins.cursor import CursorClient, CursorPluginError
+        try:
+            return CursorClient(home).change(action, ref)
+        except CursorPluginError as exc:
+            raise ActionError(str(exc)) from None
     run = run or subprocess.run
     before = plugin_state(home, harness, ref)
     reason = _noop_reason(action, before, harness)
@@ -218,9 +224,9 @@ def marketplace_add(home: Path, source: str, harnesses: list[str], run=None) -> 
     # Every harness is checked before any CLI runs, so a typo in the second
     # one can't leave the first registered and the command reporting failure.
     for harness in harnesses:
-        if harness not in ACTIONABLE:
+        if harness not in _VERBS:
             raise ActionError(
-                f"--harness must be one of {', '.join(ACTIONABLE)}, not {harness!r}")
+                f"--harness must be one of {', '.join(_VERBS)}, not {harness!r}")
     results = []
     for harness in harnesses:
         if harness == "claude":

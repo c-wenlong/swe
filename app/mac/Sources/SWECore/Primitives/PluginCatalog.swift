@@ -7,8 +7,8 @@ import Observation
 /// has registered or `~/.swe/plugins` holds, installed or not, with each
 /// harness's state.
 public struct PluginCatalog: SnapshotValue {
-    /// 3: per-plugin action masks and additional harness controls.
-    public static let snapshotVersion = 3
+    /// 4 adds Cursor account controls to the version 3 multi-harness catalog.
+    public static let snapshotVersion = 4
 
     /// The harnesses swe read, in its order.
     public let harnesses: [String]
@@ -53,7 +53,7 @@ public struct PluginCatalog: SnapshotValue {
     public var plugins: [CatalogPlugin] { marketplaces.flatMap(\.plugins) }
 
     /// What can be done to `plugin` in `harness` now, in the order a menu
-    /// lists them. Empty for a harness swe cannot act in (Cursor), and for a
+    /// lists them. Empty for a harness swe cannot act in, and for a
     /// state swe does not know.
     public func actions(for plugin: CatalogPlugin, in harness: String) -> [PluginAction] {
         guard actions.contains(harness), let state = plugin.harnesses[harness] else { return [] }
@@ -77,7 +77,8 @@ public struct PluginCatalog: SnapshotValue {
         case nil:
             verbs = []
         }
-        return verbs.map { PluginAction(verb: $0, ref: plugin.ref, harness: harness) }
+        return verbs.filter { state.allowedActions?.contains($0.rawValue) ?? true }
+            .map { PluginAction(verb: $0, ref: plugin.ref, harness: harness) }
     }
 }
 
@@ -286,7 +287,7 @@ public struct CatalogSkill: Codable, Sendable, Equatable {
 public struct PluginHarnessState: Codable, Sendable, Equatable {
     /// A marketplace this harness has registered lists it.
     public let available: Bool
-    /// Nil when swe cannot tell (Cursor keeps only a cache).
+    /// Nil when swe cannot read authoritative state, including signed-out Cursor.
     public let installed: Bool?
     /// Nil when not installed, or when the harness does not say.
     public let enabled: Bool?
@@ -296,8 +297,9 @@ public struct PluginHarnessState: Codable, Sendable, Equatable {
     public let path: String?
     /// Every cached copy.
     public let copies: [String]
-    /// A harness may offer only a subset of the standard controls. Nil is legacy.
+    /// An explicit action allowlist; absent preserves older catalog behavior.
     public let allowedActions: [String]?
+    public let controlDetail: String?
 
     public enum Status: Sendable, Equatable {
         case enabled, disabled, installed, available, cached, absent
@@ -315,8 +317,7 @@ public struct PluginHarnessState: Codable, Sendable, Equatable {
     }
 
     public init(available: Bool, installed: Bool?, enabled: Bool? = nil, version: String? = nil,
-                scopes: [String] = [], path: String? = nil, copies: [String] = [], allowedActions: [String]? = nil) {
-        self.allowedActions = allowedActions
+                scopes: [String] = [], path: String? = nil, copies: [String] = [], allowedActions: [String]? = nil, controlDetail: String? = nil) {
         self.available = available
         self.installed = installed
         self.enabled = enabled
@@ -324,9 +325,11 @@ public struct PluginHarnessState: Codable, Sendable, Equatable {
         self.scopes = scopes
         self.path = path
         self.copies = copies
+        self.allowedActions = allowedActions
+        self.controlDetail = controlDetail
     }
 
-    enum CodingKeys: String, CodingKey { case available, installed, enabled, version, scopes, path, copies, allowedActions }
+    enum CodingKeys: String, CodingKey { case available, installed, enabled, version, scopes, path, copies, allowedActions, controlDetail }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -339,6 +342,7 @@ public struct PluginHarnessState: Codable, Sendable, Equatable {
         copies = (try? c.decodeIfPresent([String].self, forKey: .copies)) ?? []
         allowedActions = c.contains(.allowedActions)
             ? ((try? c.decode([String].self, forKey: .allowedActions)) ?? []) : nil
+        controlDetail = try c.decodeIfPresent(String.self, forKey: .controlDetail)
     }
 
     public var status: Status {
@@ -350,7 +354,7 @@ public struct PluginHarnessState: Codable, Sendable, Equatable {
             case nil: .installed
             }
         case false?:
-            available ? .available : .absent
+            !copies.isEmpty ? .cached : available ? .available : .absent
         case nil:
             path != nil || !copies.isEmpty ? .cached : available ? .available : .absent
         }
@@ -469,6 +473,7 @@ public struct PluginAction: Sendable, Hashable, Identifiable {
     public var command: String {
         switch (harness, verb) {
         case (_, .adopt): "swe plugins import \(ref)"
+        case ("cursor", _): "swe plugins \(verb.rawValue) \(ref) --harness=cursor"
         case ("devin", _), ("opencode", _):
             "swe plugins \(verb.rawValue) \(ref) --harness=\(harness)"
         case ("codex", .install): "codex plugin add \(ref)"
@@ -532,6 +537,7 @@ public struct PluginActionResult: Decodable, Sendable, Equatable {
             return "\(ref) in \(name): \(detail ?? "nothing changed")"
         }
         if verb == .adopt { return "Imported \(ref) into SWE" }
+        if harness == "cursor" { return "\(verb.past) \(ref) in Cursor. \(detail ?? "Refocus Cursor or start a new CLI session.")" }
         return "\(verb.past) \(ref) \(verb == .uninstall ? "from" : "in") \(name)"
             + (detail.map { " — \($0)" } ?? "")
     }

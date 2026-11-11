@@ -10,6 +10,20 @@ SCRIPT = Path(__file__).resolve().parents[1] / 'src/swe/webapp/static/pages/plug
 
 @unittest.skipUnless(shutil.which('node'), 'node is required')
 class PluginScripts(unittest.TestCase):
+    def test_restriction_detail_is_visible_and_escaped(self):
+        code = r'''
+const registerPage = () => {};
+const Fmt = { harnessName: x => x, logo: () => "" };
+const esc = x => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+''' + SCRIPT.read_text() + r'''
+const plugin = {ref: "review@kit", harnesses: {cursor: {
+ status: "enabled", actions: [], control_detail: "Team policy <script>private</script>"}}};
+console.log(actionsSection(plugin, {actions: ["cursor"]}));
+'''
+        result = subprocess.run(['node', '-e', code], check=True, text=True, capture_output=True)
+        self.assertIn('Team policy &lt;script&gt;private&lt;/script&gt;', result.stdout)
+        self.assertNotIn('<script>private</script>', result.stdout)
+
     def test_changed_action_keeps_service_detail(self):
         code = '''
 const registerPage = () => {};

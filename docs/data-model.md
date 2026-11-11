@@ -74,7 +74,7 @@ under those names.
 | `cache/skills.json` | app | snapshot v1 | last `swe skills --json` result | restored instantly, refreshed via `swe` |
 | `cache/mcp-servers.json` | app | snapshot v1 | last `swe mcp list --json` result | `SnapshotLoader`, 60s stale |
 | `cache/plugins.json` | app | snapshot v1 | installed plugin list from `swe find plugins --json` | restored, refreshed via `swe` |
-| `cache/plugin-catalog.json` | app | snapshot v2 | `swe plugins catalog` output | 24h (`86400`s); v1 was bundled, never released |
+| `cache/plugin-catalog.json` | app | snapshot v4 | `swe plugins catalog` output | 24h (`86400`s); v4 adds Cursor account controls to the v3 multi-harness catalog; v1 was bundled, never released |
 | `cache/sessions.json` | app | snapshot v1 | last session listing shown | `SessionSnapshot` v1; swe asked again when listing is over 60s old |
 | `cache/widgets/snapshot.json` | app | snapshot v2 | widget payload: summaries, heatmap, models, limit readings | rewritten on limit refresh; WidgetKit reads it |
 | `cache/pricing/litellm.json` | app | JSON | superseded: the old LiteLLM download | imported once into `data/catalog/catalog.sqlite` (dated by its mtime) and left in place; nothing writes it |
@@ -259,6 +259,10 @@ resumes) and left in place.
 ### Imported plugins
 
 `swe plugins import <ref>` writes a local marketplace at `plugins/<marketplace>/.claude-plugin/marketplace.json` and an independent plugin copy at `plugins/<marketplace>/plugins/<name>` (or appends to an existing hub marketplace). It never overwrites a declared plugin. These are ordinary hub sources, with no new database or persistent rendering cache. Mac local inventory and action arrays are derived off the main actor per catalog/skills revision.
+
+### Cursor plugin credentials and state
+
+Cursor plugin status is read from its account API. No new persistent plugin state store is written. Existing editor/CLI credentials are read only, and keychain UI is disabled while decrypting macOS credentials. Catalog snapshots store only plugin metadata, enabled state and allowed action names, never credentials or configured values. Cursor's SQLite installedIds cache and downloaded plugin folders are never rewritten as an enable-state mechanism.
 
 ### Disabled OpenCode file plugins
 

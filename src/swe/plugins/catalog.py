@@ -21,9 +21,9 @@ Where each harness keeps things (read from files only, never the network):
           ``.claude-plugin/marketplace.json`` for a Claude-format one.
           ``[plugins."<ref>"]`` is the install record, with its ``enabled``
           flag; the copy codex runs is ``plugins/cache/<market>/<plugin>/<v>``.
-  cursor  keeps only ``~/.cursor/plugins/cache/<market>/<plugin>/<v>``, with
-          no manifest and no readable install record, so it is read-only:
-          ``installed`` and ``enabled`` are null, never guessed.
+  cursor  keeps downloads in ``~/.cursor/plugins/cache/<market>/<plugin>/<v>``.
+          Account state comes from its DashboardService API when credentials
+          can be read without prompting. Cached-only state stays unknown.
 
 A file this module cannot parse costs only what it describes: a malformed
 manifest drops that marketplace's listing for that harness (its installed
@@ -54,9 +54,9 @@ from swe.find.plugins import (
 from swe.paths import plugins_dir_for
 
 HARNESSES = ("claude", "codex", "cursor", "devin", "opencode")
-CONTROLLABLE = ("claude", "codex", "devin", "opencode")
 # Harnesses whose CLI swe can drive for install, uninstall, enable, disable.
 ACTIONABLE = ("claude", "codex")
+CONTROLLABLE = (*ACTIONABLE, "cursor", "devin", "opencode")
 
 # Where a plugin keeps its own manifest, per harness format.
 _PLUGIN_MANIFESTS = (".devin-plugin", ".claude-plugin", ".codex-plugin", ".cursor-plugin", ".plugin")
@@ -91,6 +91,7 @@ class View:
     cache: Path | None        # <cache>/<marketplace>/<plugin>/<version>
     installs_known: bool = True
     scopes: dict = field(default_factory=dict)   # claude: ref -> every scope with a record
+    plugin_notes: dict = field(default_factory=dict)
     allowed_actions: dict = field(default_factory=dict)  # ref -> supported verbs
 
 
@@ -360,7 +361,30 @@ def read_cursor(home: Path, errors: list) -> View | None:
     for market, _plugin, _versions in cache_copies(cache):
         if market not in markets:
             markets[market] = Market(market, "cache", str(cache / market), None)
-    return View("cursor", markets, {}, {}, cache, installs_known=False)
+    view = View("cursor", markets, {}, {}, cache, installs_known=False)
+    from swe.plugins.cursor import CursorClient, CursorPluginError
+    if root.resolve() != (home / ".cursor/plugins").resolve():
+        return view  # custom cache roots carry no proven account mapping
+    try:
+        client = CursorClient(home)
+    except CursorPluginError as exc:
+        _err(errors, "cursor", str(exc))
+        return view  # a downloaded cache alone proves no enable state
+    try:
+        remote = client.plugins()
+    except CursorPluginError as exc:
+        _err(errors, "cursor", str(exc))
+        return view
+    view.installs_known = True
+    cached = {f"{name}@{market}": versions for market, name, versions in cache_copies(cache)}
+    for ref, item in remote.items():
+        copies = cached.get(ref, [])
+        folder = newest(copies)
+        view.installs[ref] = Install(folder.name if folder else None, folder)
+        view.enabled[ref] = item.enabled
+        view.allowed_actions[ref] = list(item.actions)
+        view.plugin_notes[ref] = item.detail
+    return view
 
 
 def read_devin(home: Path, errors: list) -> View | None:
@@ -589,6 +613,7 @@ def _harness_state(view: View, record: _Record, plugin: _Plugin, ref: str) -> di
         elif present:
             path = inst.path
     return {
+        **({"control_detail": view.plugin_notes.get(ref)} if view.harness == "cursor" else {}),
         "available": available,
         "installed": inst is not None,
         "enabled": view.enabled.get(ref) if inst is not None else None,
@@ -597,7 +622,7 @@ def _harness_state(view: View, record: _Record, plugin: _Plugin, ref: str) -> di
         "path": str(path) if path is not None else None,
         "copies": [str(p) for p in copy_paths],
         **({"allowed_actions": view.allowed_actions.get(ref, [])}
-           if view.harness in ("devin", "opencode") else {}),
+           if view.harness in ("cursor", "devin", "opencode") else {}),
     }
 
 
@@ -731,7 +756,7 @@ def build_catalog(home: Path | None = None) -> dict:
         })
     return {
         "harnesses": list(views),
-        "actions": [h for h in CONTROLLABLE if h in views],
+        "actions": [h for h in CONTROLLABLE if h in views and (h != "cursor" or views[h].installs_known)],
         "marketplaces": out,
         "errors": errors,
     }

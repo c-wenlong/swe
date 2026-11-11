@@ -51,9 +51,11 @@ Notes:
 
 - **Devin, plugins:** resolved installs appear in the management table, with native removal (including personal cloud removal). There is no per-plugin toggle. SWE never forces removal of governance-required plugins.
 - **OpenCode, plugins:** global file and directory plugins can be suspended, restored, imported and removed. Package configuration, project plugins, and runtime ID directives are outside these controls.
-- **Cursor, plugins:** `swe plugins` lists Cursor's installed plugins, but
-  install, uninstall, enable and disable only run through the Claude and
-  Codex CLIs.
+- **Cursor, plugins:** personal account installs can be removed through Cursor's API;
+  unconfigured, unpinned personal plugins can also be enabled/disabled. Team
+  installs stay read-only. Cache-only state stays unknown when credentials or
+  the API are unavailable. Source/marketplace installation remains unsupported,
+  so overall setup support is Partial.
 - **Copilot, instructions:** SWE links its shared skills directory but
   has no confirmed instructions file for Copilot, so `AGENTS.md` is not
   linked there.

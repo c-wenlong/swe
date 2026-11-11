@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import SWECore
 import Testing
 @testable import SWEApp
 
@@ -35,6 +36,30 @@ import Testing
         }
         #expect(clicks.primary == 1)
         #expect(clicks.secondary == 2)
+    }
+
+
+    @Test func realPluginCellRendersRestrictionHelp() throws {
+        _ = NSApplication.shared
+        let detail = "Team policy controls this plugin"
+        let state = PluginHarnessState(available: false, installed: true, enabled: true,
+                                       allowedActions: [], controlDetail: detail)
+        let cell = PluginCell(harness: "cursor", state: state,
+            actions: [], running: false, busy: false, confirm: { _ in })
+        // This is the actual cell's text used by .help and the accessibility hint.
+        #expect(cell.help(for: state).contains(detail))
+        let configured = PluginHarnessState(available: false, installed: true, enabled: false,
+            allowedActions: ["uninstall"], controlDetail: "Configured plugin; removal only")
+        #expect(cell.help(for: configured).contains("Configured plugin; removal only"))
+        let host = NSHostingView(rootView: cell.frame(width: 140, height: 48))
+        let window = OffscreenWindow(size: CGSize(width: 140, height: 48), styleMask: [.borderless])
+        window.contentView = host
+        window.orderBack(nil)
+        defer { window.orderOut(nil) }
+        host.layoutSubtreeIfNeeded()
+        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        #expect(rep.pixelsWide >= 140)
     }
 
     @Test func actionListRendersWithDestructiveRemoval() throws {

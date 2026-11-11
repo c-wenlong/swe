@@ -119,3 +119,7 @@ Use the [bug report template](https://github.com/c-wenlong/swe/issues/new?templa
 then open an [issue](https://github.com/c-wenlong/swe/issues). Discussions
 are not enabled on this repo, so issues are the only channel — and we're happy
 to help you find a good first task there.
+
+## Secret scanning
+
+The pre-commit hook in `.githooks` runs Gitleaks on staged changes. Use `git -c core.hooksPath=.githooks commit` for a commit, or configure that hooks path for your checkout. Manage the local Gitleaks installation through dotfiles; the hook reports when it is unavailable. The Secret scan workflow runs the same scanner on the PR or push commit range, with redacted output and a pinned container image.

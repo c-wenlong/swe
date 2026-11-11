@@ -68,6 +68,21 @@ import Testing
         #expect(model.index?.localRefs.isEmpty == true)
     }
 
+    @Test func knownUninstalledCursorCacheStillAppearsForImport() throws {
+        let temp = try TempDir()
+        defer { withExtendedLifetime(temp) {} }
+        let cache = temp.url.appending(path: "downloaded")
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let plugin = CatalogPlugin(name: "example", marketplace: "cursor-public", harnesses: [
+            "cursor": .init(available: false, installed: false, copies: [cache.path], allowedActions: [])])
+        let catalog = PluginCatalog(harnesses: ["cursor"], actions: ["cursor"], marketplaces: [
+            PluginMarketplace(name: "cursor-public", harnesses: [:], plugins: [plugin])])
+        let index = PluginExploreIndex(catalog: catalog, skills: [], home: temp.url)
+        #expect(index.localRefs == [plugin.ref])
+        #expect(plugin.harnesses["cursor"]?.status == .cached)
+        #expect(index.localEntries().first?.row.actions["cursor"]?.isEmpty == true)
+    }
+
     @Test func importUsesSweWithoutAHarnessFlag() {
         let action = PluginAction(verb: .adopt, ref: "tool@kit", harness: "swe")
         #expect(action.arguments == ["plugins", "import", "tool@kit", "--json"])
