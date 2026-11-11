@@ -68,13 +68,20 @@ class CursorClient:
             from swe.harness.rate_limits import _verified_context
             try:
                 # Includes the Windows trust store; Unix bundle files are optional.
-                context = ssl.create_default_context()
+                try:
+                    context = ssl.create_default_context()
+                except (OSError, ssl.SSLError, ValueError):
+                    context = None
                 fallback = _verified_context()
-                if fallback is not None:
+                if context is None:
+                    context = fallback
+                elif fallback is not None:
                     # Add verified bundle roots without dropping native/private trust.
                     roots = fallback.get_ca_certs(binary_form=True)
                     if roots:
                         context.load_verify_locations(cadata="".join(ssl.DER_cert_to_PEM_cert(c) for c in roots))
+                if context is None:
+                    raise CursorPluginError("Cannot initialize verified TLS for Cursor plugin requests.")
             except (OSError, ssl.SSLError, ValueError):
                 raise CursorPluginError("Cannot initialize verified TLS for Cursor plugin requests.") from None
             opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=context)).open

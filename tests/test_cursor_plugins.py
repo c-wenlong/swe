@@ -185,6 +185,23 @@ class CursorPluginTests(unittest.TestCase):
         self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
         self.assertTrue(context.check_hostname)
 
+    def test_verified_bundle_survives_native_context_initialization_failure(self):
+        import ssl
+        from swe.plugins.cursor import _NoRedirect
+        fallback = ssl.create_default_context()
+        with patch('swe.plugins.cursor.ssl.create_default_context', side_effect=ssl.SSLError('fixture')), \
+             patch('swe.harness.rate_limits._verified_context', return_value=fallback), \
+             patch('swe.plugins.cursor.urllib.request.build_opener', return_value=Mock(open=self.api)) as build:
+            self.assertIn('example@cursor-public', CursorClient(self.home, token='fixture-token').plugins())
+        self.assertIs(build.call_args.args[0], _NoRedirect)
+        self.assertEqual(fallback.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(fallback.check_hostname)
+        with patch('swe.plugins.cursor.ssl.create_default_context', side_effect=ssl.SSLError('fixture-token')), \
+             patch('swe.harness.rate_limits._verified_context', return_value=None):
+            with self.assertRaises(CursorPluginError) as raised:
+                CursorClient(self.home, token='fixture-token')
+        self.assertNotIn('fixture-token', str(raised.exception))
+
     def test_verified_bundle_roots_supplement_native_trust_without_retry(self):
         native, fallback = Mock(), Mock()
         fallback.get_ca_certs.return_value = [b'fixture-der']
