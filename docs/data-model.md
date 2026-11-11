@@ -74,7 +74,7 @@ under those names.
 | `cache/skills.json` | app | snapshot v1 | last `swe skills --json` result | restored instantly, refreshed via `swe` |
 | `cache/mcp-servers.json` | app | snapshot v1 | last `swe mcp list --json` result | `SnapshotLoader`, 60s stale |
 | `cache/plugins.json` | app | snapshot v1 | installed plugin list from `swe find plugins --json` | restored, refreshed via `swe` |
-| `cache/plugin-catalog.json` | app | snapshot v3 | `swe plugins catalog` output | 24h (`86400`s); v3 invalidates the old cache-only Cursor inventory; v1 was bundled, never released |
+| `cache/plugin-catalog.json` | app | snapshot v4 | `swe plugins catalog` output | 24h (`86400`s); v4 adds Cursor account controls to the v3 multi-harness catalog; v1 was bundled, never released |
 | `cache/sessions.json` | app | snapshot v1 | last session listing shown | `SessionSnapshot` v1; swe asked again when listing is over 60s old |
 | `cache/widgets/snapshot.json` | app | snapshot v2 | widget payload: summaries, heatmap, models, limit readings | rewritten on limit refresh; WidgetKit reads it |
 | `cache/pricing/litellm.json` | app | JSON | superseded: the old LiteLLM download | imported once into `data/catalog/catalog.sqlite` (dated by its mtime) and left in place; nothing writes it |

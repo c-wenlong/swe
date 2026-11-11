@@ -9,6 +9,7 @@ from __future__ import annotations
 import http.client
 import json
 import re
+import ssl
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -65,9 +66,17 @@ class CursorClient:
         self.token = token
         if opener is None:
             from swe.harness.rate_limits import _verified_context
-            context = _verified_context()
-            if context is None:
-                raise CursorPluginError("No trusted CA bundle is available for Cursor plugin requests.")
+            try:
+                # Includes the Windows trust store; Unix bundle files are optional.
+                context = ssl.create_default_context()
+                fallback = _verified_context()
+                if fallback is not None:
+                    # Add verified bundle roots without dropping native/private trust.
+                    roots = fallback.get_ca_certs(binary_form=True)
+                    if roots:
+                        context.load_verify_locations(cadata="".join(ssl.DER_cert_to_PEM_cert(c) for c in roots))
+            except (OSError, ssl.SSLError, ValueError):
+                raise CursorPluginError("Cannot initialize verified TLS for Cursor plugin requests.") from None
             opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=context)).open
         self.opener = opener
 

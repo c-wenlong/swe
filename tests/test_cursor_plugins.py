@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from swe.plugins.cursor import CursorClient, CursorPluginError
 from swe.plugins.catalog import read_cursor, build_catalog
@@ -170,6 +170,32 @@ class CursorPluginTests(unittest.TestCase):
             result = import_plugin(self.home, 'downloaded@cursor-public')
         self.assertEqual((Path(result['state']['path']) / 'readme.md').read_text(), 'downloaded bytes')
         self.assertTrue(cache.is_dir())
+
+    def test_native_windows_trust_works_without_unix_bundle_or_certifi(self):
+        import ssl
+        context = ssl.create_default_context()
+        opener = Mock(open=self.api)
+        with patch('swe.plugins.cursor.ssl.create_default_context', return_value=context), \
+             patch('swe.harness.rate_limits._verified_context', return_value=None), \
+             patch('swe.plugins.cursor.urllib.request.build_opener', return_value=opener) as build:
+            client = CursorClient(self.home, token='fixture-token')
+            self.assertIn('example@cursor-public', client.plugins())
+        from swe.plugins.cursor import _NoRedirect
+        self.assertIs(build.call_args.args[0], _NoRedirect)
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+
+    def test_verified_bundle_roots_supplement_native_trust_without_retry(self):
+        native, fallback = Mock(), Mock()
+        fallback.get_ca_certs.return_value = [b'fixture-der']
+        with patch('swe.plugins.cursor.ssl.create_default_context', return_value=native), \
+             patch('swe.harness.rate_limits._verified_context', return_value=fallback), \
+             patch('swe.plugins.cursor.ssl.DER_cert_to_PEM_cert', return_value='fixture-pem'), \
+             patch('swe.plugins.cursor.urllib.request.build_opener', return_value=Mock(open=self.api)):
+            client = CursorClient(self.home, token='fixture-token')
+            client.change('disable', 'example@cursor-public')
+        native.load_verify_locations.assert_called_once_with(cadata='fixture-pem')
+        self.assertEqual(sum(url.endswith('UpdateUserPluginInstall') for url, _, _ in self.api.calls), 1)
 
     def test_transport_and_schema_failures_are_safe(self):
         for code in (403, 429, 500):
