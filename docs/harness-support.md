@@ -22,9 +22,9 @@ ZCode, which `swe install` knows but discovery does not.
 | Copilot | Yes | No | Yes | No | Yes |
 | Cline | Yes | Yes | Yes | No | Yes |
 | Kilo | Yes | Yes | Yes | No | Yes |
-| OpenCode | Yes | Yes | Yes | No | Yes |
+| OpenCode | Yes | Yes | Yes | Partial | Yes |
 | Droid | Yes | Yes | Yes | No | Yes |
-| Devin | Yes | Yes | Yes | No | Yes |
+| Devin | Yes | Yes | Yes | Partial | Yes |
 | Crush | Yes | Yes | Yes | No | Partial |
 | Qwen Code | Yes | Yes | Yes | No | Partial |
 | Mistral Vibe | Yes | No | Yes | No | Partial |
@@ -49,6 +49,8 @@ ZCode, which `swe install` knows but discovery does not.
 
 Notes:
 
+- **Devin, plugins:** resolved installs appear in the management table, with native removal (including personal cloud removal). There is no per-plugin toggle. SWE never forces removal of governance-required plugins.
+- **OpenCode, plugins:** global file and directory plugins can be suspended, restored, imported and removed. Package configuration, project plugins, and runtime ID directives are outside these controls.
 - **Cursor, plugins:** `swe plugins` lists Cursor's installed plugins, but
   install, uninstall, enable and disable only run through the Claude and
   Codex CLIs.

@@ -331,6 +331,13 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
         ("--harness=codex", "Act in Codex"),
         ("--json", "Print the result as JSON"),
     ],
+    "plugins enable": [("--harness=claude", "Act in Claude Code"), ("--harness=codex", "Act in Codex"),
+                       ("--harness=opencode", "Restore a global file plugin"), ("--json", "Print JSON")],
+    "plugins disable": [("--harness=claude", "Act in Claude Code"), ("--harness=codex", "Act in Codex"),
+                        ("--harness=opencode", "Suspend a global file plugin"), ("--json", "Print JSON")],
+    "plugins uninstall": [("--harness=claude", "Act in Claude Code"), ("--harness=codex", "Act in Codex"),
+                          ("--harness=devin", "Remove through Devin"), ("--harness=opencode", "Remove a global file plugin"),
+                          ("--json", "Print JSON")],
     "plugins marketplace add": [
         ("--harness=", "Which harnesses register it: claude,codex"),
         ("--json", "Print the result as JSON"),
@@ -682,8 +689,8 @@ _NESTED_FLAGS: dict[str, dict[str, str]] = {
         "catalog": "plugins catalog", "marketplace": "plugins marketplace add",
         "info": "plugins info", "import": "plugins import",
         # every action takes the same flags
-        "install": "plugins install", "uninstall": "plugins install",
-        "enable": "plugins install", "disable": "plugins install",
+        "install": "plugins install", "uninstall": "plugins uninstall",
+        "enable": "plugins enable", "disable": "plugins disable",
     },
     "hooks": {
         "list": "hooks list", "ls": "hooks list",

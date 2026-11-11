@@ -109,6 +109,8 @@ struct PluginsPage: View {
             Button("Cancel", role: .cancel) {}
         } message: { actions in
             Text("One at a time, stopping at the first that fails:\n\n"
+                 + (actions.contains { $0.harness == "devin" && $0.verb == .uninstall }
+                    ? "Devin removal includes your personal cloud plugins.\n\n" : "")
                  + actions.map(\.command).joined(separator: "\n"))
         }
     }
