@@ -443,23 +443,30 @@ the same vendored rule as the rest of `find`.
 Each harness session starts its own copy of every stdio server it is
 configured with. With 17 servers that was 26 processes and about 1.3 GB
 per Claude Code session. A hub entry marked `"shared": true` (`swe mcp
-gateway share`) runs once instead, in `swe mcp gateway serve`, a
-LaunchAgent (`com.cwenlong.swe.mcp-gateway`) that serves it as MCP
-streamable HTTP at `http://127.0.0.1:8478/mcp/<name>`. While mcp.json's
-`gateway.enabled` is set (by `install`), `swe mcp sync swe ...` writes
-that URL for a shared server instead of its command; Claude Desktop takes
-no URL server, so it keeps the command.
+gateway share`) runs once instead, in the standalone `warp-gate` daemon
+(repo `starship-terminal/warp-gate`), which `warp-gate install` puts
+under launchd (`com.starship-terminal.warp-gate`) and which serves it as
+MCP streamable HTTP at `http://127.0.0.1:8478/mcp/<name>`. While
+mcp.json's `gateway.enabled` is set (by `warp-gate install`), `swe mcp
+sync swe ...` writes that URL for a shared server instead of its
+command; Claude Desktop takes no URL server, so it keeps the command.
 
-One stdio process is one MCP session, so the gateway multiplexes
-(`mcp/gateway_server.py`): it runs the handshake once and answers each
-client's `initialize` from it, renumbers request ids, forwards only the
-spec's client requests (Claude Code probes HTTP servers with
-`server/discover`, which crashes older Python SDK servers), refuses the
-server's own requests to a client, and drops notifications. That is only
-right for servers without per-session state, so `share` refuses a
-browser or REPL server without `--force`. `discover` and `list` read a
-synced gateway URL as the hub's own server (`gateway.matches_hub`), so the
-URL never flows back into the hub.
+One stdio process is one MCP session, so the gateway multiplexes: it
+runs the handshake once and answers each client's `initialize` from it,
+renumbers request ids, forwards only the spec's client requests (Claude
+Code probes HTTP servers with `server/discover`, which crashes older
+Python SDK servers), refuses the server's own requests to a client, and
+drops notifications. That is only right for servers without per-session
+state, so `share` refuses a browser or REPL server without `--force`.
+`discover` and `list` read a synced gateway URL as the hub's own server
+(`gateway.matches_hub`), so the URL never flows back into the hub.
+
+swe keeps the manifest side — `share`/`unshare`/`status` in
+`mcp/gateway_commands.py` — and the wire contract with the daemon:
+same port default, same `/mcp/<name>` paths, same `/status` and
+`/health` endpoints. `gateway status` reports a daemon under any of the
+labels it has run as (warp-gate's, plus the retired `swe`/`quiver`
+agents a machine may still carry).
 
 ## Drift
 

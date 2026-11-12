@@ -56,7 +56,7 @@ final class MarkdownStreamTests: XCTestCase {
         1. first
         2) second
 
-        Done: see https://github.com/c-wenlong/swe/pull/1 and `https://in.code/x`.
+        Done: see https://github.com/starship-terminal/swe/pull/1 and `https://in.code/x`.
         """,
         "~~~\nunclosed\n\nfence that never closes\n\nso it all stays code",
         "para\r\n\r\nnext\r\n\r\n```\r\ncode\r\n\r\n```\r\n",
@@ -115,7 +115,7 @@ final class MarkdownStreamTests: XCTestCase {
         let text = Self.samples[0]
         XCTAssertEqual(LinkCards.urls(in: Markdown.Stream().update(text)), LinkCards.urls(in: text))
         XCTAssertEqual(LinkCards.urls(in: text).map(\.absoluteString),
-                       ["https://example.com/a", "https://github.com/c-wenlong/swe/pull/1"])
+                       ["https://example.com/a", "https://github.com/starship-terminal/swe/pull/1"])
     }
 
     func testInlineStylingIsTheSameFromTheCache() {

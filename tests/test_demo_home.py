@@ -160,7 +160,7 @@ class DemoHomeTest(unittest.TestCase):
                 self.assertFalse(root.exists())
                 self.assertEqual(sorted(p.name for p in home.iterdir()), [".swe"])
 
-    def test_home_with_a_dangling_git_link_or_a_quiver_hub_is_refused(self):
+    def test_home_with_a_dangling_git_link_or_a_swe_hub_is_refused(self):
         dangling = self.scratch / "home-link"
         (dangling / ".swe").mkdir(parents=True)
         (dangling / ".swe" / ".git").symlink_to(self.scratch / "gone")

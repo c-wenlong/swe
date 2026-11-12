@@ -157,17 +157,19 @@ if [ -e "$dest" ]; then
 fi
 mv "$staged" "$dest"
 # The remote hub/satellite LaunchAgents (swe remote serve|agent
-# --install) and the MCP gateway all run this bundle's swe. Their labels
+# --install) run this bundle's swe. Their labels
 # were com.cwenlong.quiver.* while the app was Quiver.app: an old plist is
 # moved onto the new label, repointing it at this bundle when it ran an
 # app-bundle swe. The old job keeps running until the new one loads —
 # a refused bootstrap drops the copy and leaves a running service alone —
 # and its plist goes only once launchd has really let it go.
+# (The MCP gateway is not migrated: the daemon moved to the standalone
+# warp-gate package, and an agent repointed at this bundle's swe would
+# find no `mcp gateway serve` to run.)
 uid="gui/$(id -u)"
 for pair in \
   "com.cwenlong.quiver.remote-hub:com.cwenlong.swe.remote-hub" \
-  "com.cwenlong.quiver.remote-agent:com.cwenlong.swe.remote-agent" \
-  "com.cwenlong.quiver.mcp-gateway:com.cwenlong.swe.mcp-gateway"; do
+  "com.cwenlong.quiver.remote-agent:com.cwenlong.swe.remote-agent"; do
   old_label="${pair%%:*}"
   new_label="${pair##*:}"
   old_plist="$HOME/Library/LaunchAgents/$old_label.plist"

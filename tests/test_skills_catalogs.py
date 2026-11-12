@@ -35,13 +35,13 @@ class SkillsCatalogTest(unittest.TestCase):
         )
 
     def test_suggest_label_uses_parent_when_basename_is_skills(self):
-        path = Path("/tmp/ai-engineering/skills")
-        self.assertEqual(suggest_catalog_label(path), "ai-engineering")
+        path = Path("/tmp/starship-terminal/skills")
+        self.assertEqual(suggest_catalog_label(path), "starship-terminal")
 
     def test_discover_finds_skills_dir_under_desktop(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
-            catalog = home / "Desktop" / "Personal" / "Projects" / "ai-engineering" / "skills"
+            catalog = home / "Desktop" / "Personal" / "Projects" / "starship-terminal" / "skills"
             self._write_skill(catalog, "my-skill", name="my-skill")
 
             found = discover_catalog_dirs(home)
@@ -53,18 +53,18 @@ class SkillsCatalogTest(unittest.TestCase):
             home = Path(tmp)
             config_dir = home / ".config" / "swe"
             catalogs_file = config_dir / "skill_catalogs.json"
-            catalog = home / "Desktop" / "ai-engineering" / "skills"
+            catalog = home / "Desktop" / "starship-terminal" / "skills"
             self._write_skill(catalog, "alpha", name="alpha")
 
             p1, p2, p3, p4 = _catalog_patches(config_dir, catalogs_file)
             with p1, p2, p3, p4:
-                add_skill_catalog(catalog, "ai-engineering")
+                add_skill_catalog(catalog, "starship-terminal")
                 roots = skill_roots(home=home, cwd=home)
                 labels = [label for label, _ in roots]
-                self.assertIn("ai-engineering", labels)
+                self.assertIn("starship-terminal", labels)
                 skills = discover_skills(home=home, cwd=home)
                 self.assertEqual({s["name"] for s in skills}, {"alpha"})
-                self.assertEqual(skills[0]["scope"], "ai-engineering")
+                self.assertEqual(skills[0]["scope"], "starship-terminal")
 
     def test_discover_and_apply_registers_new_catalog(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -92,7 +92,7 @@ class SkillsCatalogTest(unittest.TestCase):
             home = Path(tmp)
             config_dir = home / ".config" / "swe"
             catalogs_file = config_dir / "skill_catalogs.json"
-            catalog = home / "work" / "ai-engineering" / "skills"
+            catalog = home / "work" / "starship-terminal" / "skills"
             self._write_skill(catalog, "gamma", name="gamma")
 
             p1, p2, p3, p4 = _catalog_patches(config_dir, catalogs_file)

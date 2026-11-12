@@ -15,8 +15,8 @@ dies at startup ("Operation not permitted" on ``pyvenv.cfg``). The
 bundle lives in Applications, and the app's own folder access covers it.
 
 Logic only: callers print. ``run`` is injectable so tests never touch
-the real launchctl. ``label`` lets the MCP gateway (``swe mcp gateway
-install``) run as its own agent through the same code.
+the real launchctl. ``label`` lets the satellite agent (``AGENT_LABEL``)
+run as its own agent through the same code.
 """
 
 from __future__ import annotations
@@ -99,8 +99,9 @@ def build_plist(program: list[str], log_path: Path, path_env: str,
     when the process is killed.
 
     ``Background`` lets macOS throttle the job's CPU and I/O, which suits
-    the hub. The MCP gateway answers a session's tool calls while someone
-    waits, so it asks for ``Interactive``: under ``Background`` one
+    the hub. An agent answering a session's tool calls while someone
+    waits (the standalone warp-gate daemon, which keeps its own copy of
+    this) asks for ``Interactive`` instead: under ``Background`` one
     server's 6 MB tool list took 6.9 s instead of 1.3 s.
     """
     return {

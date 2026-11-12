@@ -71,7 +71,7 @@ def print_skills_catalog_help():
 
 {c('bold', 'Examples')}
   cd ~/Projects/my-app/skills && swe skills catalog .
-  swe skills catalog add ~/Desktop/Projects/ai-engineering/skills
+  swe skills catalog add ~/Desktop/Projects/starship-terminal/skills
   swe skills catalog add ./skills my-project
 
 {c('bold', 'Config')}  {SKILL_CATALOGS_FILE}
@@ -150,7 +150,7 @@ def print_skills_move_help():
   {c('cyan', 'swe skills move <name> --from=<scope> --to=<scope>')}
 
 {c('bold', 'Examples')}
-  swe skills move query --from=ai-engineering --to=shared
+  swe skills move query --from=starship-terminal --to=shared
   swe skills move my-skill --from=shared --to=codex
 
   Scopes are harness labels (shared, codex, claude, cursor), catalog labels,

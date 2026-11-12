@@ -53,7 +53,7 @@ HUB_PLAIN_TIMEOUT_S = 300
 # The public demo hub people fork (or use as a template) to start their own
 # (#1446). Every surface that asks for a hub URL shows it as a link line, and
 # hides that line when this is empty.
-DEMO_HUB_URL = "https://github.com/c-wenlong/swe-demo-hub"
+DEMO_HUB_URL = "https://github.com/starship-terminal/swe-demo-hub"
 
 # What every surface says beside the hub URL field.
 FORK_NOTE = ("Fork a hub repo first (or use it as a template for a private copy), "

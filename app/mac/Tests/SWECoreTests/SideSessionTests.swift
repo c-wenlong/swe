@@ -3,7 +3,7 @@ import Testing
 @testable import SWECore
 
 private let notes = "/Users/k/Library/Application Support/Claude/side-session-notes/local_parent"
-private let worktree = "/Users/k/ai-engineering/.claude/worktrees/jovial"
+private let worktree = "/Users/k/starship-terminal/.claude/worktrees/jovial"
 
 @Suite struct SessionFoldersTests {
     @Test func theFolderWithMostEventsWinsAndNotesOnlyAsALastResort() {
@@ -81,7 +81,7 @@ private let worktree = "/Users/k/ai-engineering/.claude/worktrees/jovial"
     private func fixture(_ root: URL) throws {
         try write(root, "local_parent", #"""
         {"sessionId":"local_parent","cliSessionId":"cli-parent","title":"design-systems-repo",
-         "cwd":"/Users/k/ai-engineering","promptAppendSnapshot":{"append":"..."},"prs":[]}
+         "cwd":"/Users/k/starship-terminal","promptAppendSnapshot":{"append":"..."},"prs":[]}
         """#)
         try write(root, "local_side", #"""
         {"sessionId":"local_side","cliSessionId":"cli-side","priorCliSessionIds":["cli-side-old"],

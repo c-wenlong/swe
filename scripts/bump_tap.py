@@ -2,7 +2,7 @@
 """Point the Homebrew tap at a new release.
 
 Rewrites ``Casks/swe.rb`` and ``Formula/swe.rb`` in a checkout of
-c-wenlong/homebrew-swe with a release's version and the SHA-256 of its
+starship-terminal/homebrew-swe with a release's version and the SHA-256 of its
 DMG and wheel. release.yml runs it after the assets are on the release.
 
     python3 scripts/bump_tap.py TAP_DIR VERSION DMG_SHA256 WHEEL_SHA256
@@ -35,13 +35,13 @@ cask "swe" do
   version "{version}"
   sha256 "{sha256}"
 
-  url "https://github.com/c-wenlong/swe/releases/download/v#{{version}}/SWE-#{{version}}.dmg"
+  url "https://github.com/starship-terminal/swe/releases/download/v#{{version}}/SWE-#{{version}}.dmg"
   name "SWE"
   desc "Manage AI coding CLIs, their sessions, usage and rate limits"
-  homepage "https://github.com/c-wenlong/swe"
+  homepage "https://github.com/starship-terminal/swe"
 
   livecheck do
-    url "https://github.com/c-wenlong/swe/releases/latest/download/appcast.xml"
+    url "https://github.com/starship-terminal/swe/releases/latest/download/appcast.xml"
     strategy :sparkle, &:short_version
   end
 

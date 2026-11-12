@@ -1,6 +1,6 @@
 name: Homebrew tap token check
 
-# Checks that HOMEBREW_TAP_TOKEN can push to c-wenlong/homebrew-swe
+# Checks that HOMEBREW_TAP_TOKEN can push to starship-terminal/homebrew-swe
 # without a release. `git push --dry-run` asks GitHub for the push
 # endpoint, which answers 403 without write access, and sends nothing.
 # Run it by hand after creating or editing the token:
@@ -26,7 +26,7 @@ jobs:
           fi
           tap="$RUNNER_TEMP/homebrew-swe"
           git clone --depth 1 \
-            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/c-wenlong/homebrew-swe.git" "$tap"
+            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/starship-terminal/homebrew-swe.git" "$tap"
           cd "$tap"
           git push --dry-run origin HEAD:main
-          echo "HOMEBREW_TAP_TOKEN can push to c-wenlong/homebrew-swe."
+          echo "HOMEBREW_TAP_TOKEN can push to starship-terminal/homebrew-swe."

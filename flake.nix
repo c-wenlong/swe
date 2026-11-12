@@ -65,7 +65,7 @@
 
           meta = {
             description = "One command to launch, resume, and analyze many AI coding agents";
-            homepage = "https://github.com/c-wenlong/swe";
+            homepage = "https://github.com/starship-terminal/swe";
             license = lib.licenses.mit;
             mainProgram = "swe";
             platforms = lib.platforms.unix;

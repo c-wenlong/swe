@@ -199,7 +199,7 @@ dialog .close { margin-left: auto; }
         <a href="changelog/">Changelog</a>
       </div>
       <div class="right">
-        <a class="plain star" href="https://github.com/c-wenlong/swe"><svg class="i"><use href="#gh"/></svg>GitHub</a>
+        <a class="plain star" href="https://github.com/starship-terminal/swe"><svg class="i"><use href="#gh"/></svg>GitHub</a>
         <a class="btn light sm" href="install/"><svg class="i"><use href="#dl"/></svg><span>Install</span></a>
       </div>
     </nav>
@@ -214,7 +214,7 @@ dialog .close { margin-left: auto; }
   <p class="lede">Sessions, usage, limits, skills and MCP servers for Claude Code, Codex, Gemini CLI and the rest, in one place. From your terminal, your Mac or your phone.</p>
   <div class="ctas">
     <a class="btn light" href="install/"><svg class="i"><use href="#dl"/></svg><span>Install swe</span></a>
-    <a class="btn" href="https://github.com/c-wenlong/swe"><svg class="i"><use href="#gh"/></svg>View on GitHub</a>
+    <a class="btn" href="https://github.com/starship-terminal/swe"><svg class="i"><use href="#gh"/></svg>View on GitHub</a>
   </div>
   <p class="hint" id="dmg-hint">You install <code>swe</code>. You type <code>swe</code>.</p>
 
@@ -336,9 +336,9 @@ dialog .close { margin-left: auto; }
       <div class="steps">
         <div class="step"><span class="n">1</span><div>
           <p>Install with Homebrew (or <a href="overview/#nix">Nix</a>).</p>
-          <div class="cmd"><code><span class="p">$ </span>brew install c-wenlong/swe/swe</code><button class="copy" type="button" data-copy="brew install c-wenlong/swe/swe">Copy</button></div>
+          <div class="cmd"><code><span class="p">$ </span>brew install starship-terminal/swe/swe</code><button class="copy" type="button" data-copy="brew install starship-terminal/swe/swe">Copy</button></div>
           <p>On Linux:</p>
-          <div class="cmd"><code><span class="p">$ </span>curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh">Copy</button></div>
+          <div class="cmd"><code><span class="p">$ </span>curl -fsSL https://github.com/starship-terminal/swe/releases/latest/download/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://github.com/starship-terminal/swe/releases/latest/download/install.sh | sh">Copy</button></div>
         </div></div>
         <div class="step"><span class="n">2</span><div>
           <p>Run setup. It finds your agents, providers, MCP servers and skills.</p>
@@ -371,11 +371,11 @@ dialog .close { margin-left: auto; }
 
 <div class="final">
   <h2>Get swe.</h2>
-  <div class="cmd"><code><span class="p">$ </span>brew install --cask c-wenlong/swe/swe</code><button class="copy" type="button" data-copy="brew install --cask c-wenlong/swe/swe">Copy</button></div>
+  <div class="cmd"><code><span class="p">$ </span>brew install --cask starship-terminal/swe/swe</code><button class="copy" type="button" data-copy="brew install --cask starship-terminal/swe/swe">Copy</button></div>
   <div class="ctas">
     <a class="btn light" href="install/" data-dmg="Download for Mac" hidden><svg class="i"><use href="#apple"/></svg><span>Download for Mac</span></a>
     <a class="btn" href="overview/">Read the docs</a>
-    <a class="btn" href="https://github.com/c-wenlong/swe"><svg class="i"><use href="#gh"/></svg>View on GitHub</a>
+    <a class="btn" href="https://github.com/starship-terminal/swe"><svg class="i"><use href="#gh"/></svg>View on GitHub</a>
   </div>
 </div>
 
@@ -385,7 +385,7 @@ dialog .close { margin-left: auto; }
     <a href="overview/">Docs</a>
     <a href="changelog/">Changelog</a>
     <a href="contributing/">Contributing</a>
-    <a href="https://github.com/c-wenlong/swe">GitHub</a>
+    <a href="https://github.com/starship-terminal/swe">GitHub</a>
   </div>
 </footer>
 
@@ -486,7 +486,7 @@ dialog .close { margin-left: auto; }
   // Once the latest release carries a DMG, the install buttons download it
   // and wear the Apple mark; until then they keep pointing at the commands.
   if (window.fetch) {
-    fetch("https://api.github.com/repos/c-wenlong/swe/releases/latest")
+    fetch("https://api.github.com/repos/starship-terminal/swe/releases/latest")
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (rel) {
         var dmg = rel && (rel.assets || []).filter(function (a) { return /\.dmg$/i.test(a.name); })[0];

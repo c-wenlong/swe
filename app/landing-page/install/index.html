@@ -134,7 +134,7 @@ footer a:hover { color: var(--text); }
         <a href="../changelog/">Changelog</a>
       </div>
       <div class="right">
-        <a class="plain" href="https://github.com/c-wenlong/swe"><svg class="i"><use href="#gh"/></svg>GitHub</a>
+        <a class="plain" href="https://github.com/starship-terminal/swe"><svg class="i"><use href="#gh"/></svg>GitHub</a>
         <a class="btn light sm" href="./" aria-current="page"><span>Install</span></a>
       </div>
     </nav>
@@ -158,16 +158,16 @@ footer a:hover { color: var(--text); }
     <h2>SWE.app</h2>
     <p class="why">The full home base: sessions, usage, limits, menu bar and widgets, with its own copy of <code>swe</code> bundled.</p>
     <div class="dmg">
-      <a class="btn light" href="https://github.com/c-wenlong/swe/releases/latest" data-dmg="Download for Mac"><svg class="i"><use href="#dl"/></svg><span>Download for Mac</span></a>
+      <a class="btn light" href="https://github.com/starship-terminal/swe/releases/latest" data-dmg="Download for Mac"><svg class="i"><use href="#dl"/></svg><span>Download for Mac</span></a>
       <span class="osreq" id="dmg-note">Needs macOS 26 or later.</span>
     </div>
     <div class="or">or</div>
-    <div class="cmd"><code><span class="p">$ </span>brew install --cask c-wenlong/swe/swe</code><button class="copy" type="button" data-copy="brew install --cask c-wenlong/swe/swe">Copy</button></div>
+    <div class="cmd"><code><span class="p">$ </span>brew install --cask starship-terminal/swe/swe</code><button class="copy" type="button" data-copy="brew install --cask starship-terminal/swe/swe">Copy</button></div>
   </section>
   <section>
     <h2>Just the CLI</h2>
     <p class="why">The <code>swe</code> command on its own, no app.</p>
-    <div class="cmd"><code><span class="p">$ </span>brew install c-wenlong/swe/swe</code><button class="copy" type="button" data-copy="brew install c-wenlong/swe/swe">Copy</button></div>
+    <div class="cmd"><code><span class="p">$ </span>brew install starship-terminal/swe/swe</code><button class="copy" type="button" data-copy="brew install starship-terminal/swe/swe">Copy</button></div>
     <p class="fine">Needs Python 3.11+. <a href="../overview/#nix">Nix</a> and <a href="../overview/">pipx</a> work too.</p>
   </section>
 </div>
@@ -176,9 +176,9 @@ footer a:hover { color: var(--text); }
   <section>
     <h2>Install script</h2>
     <p class="why">Installs the latest released <code>swe</code>: the wheel is verified against the release's <code>SHA256SUMS</code>, then installed through <code>uv</code>, or into a venv under <code>~/.local/share/swe</code> when uv is missing. No sudo, no shell rc edits.</p>
-    <div class="cmd"><code><span class="p">$ </span>curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh">Copy</button></div>
+    <div class="cmd"><code><span class="p">$ </span>curl -fsSL https://github.com/starship-terminal/swe/releases/latest/download/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://github.com/starship-terminal/swe/releases/latest/download/install.sh | sh">Copy</button></div>
     <p class="opt">Also serve the web app and phone remote from the machine (<code>swe remote setup --apply</code>):</p>
-    <div class="cmd"><code><span class="p">$ </span>curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh -s -- --hub</code><button class="copy" type="button" data-copy="curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh -s -- --hub">Copy</button></div>
+    <div class="cmd"><code><span class="p">$ </span>curl -fsSL https://github.com/starship-terminal/swe/releases/latest/download/install.sh | sh -s -- --hub</code><button class="copy" type="button" data-copy="curl -fsSL https://github.com/starship-terminal/swe/releases/latest/download/install.sh | sh -s -- --hub">Copy</button></div>
     <ul>
       <li>No Python 3.11 (Ubuntu 22.04)? The script installs uv first and brings its own interpreter.</li>
       <li>Pin a version with <code>--version=vX.Y.Z</code>, or install a local wheel with <code>--wheel=PATH</code>.</li>
@@ -188,8 +188,8 @@ footer a:hover { color: var(--text); }
   <section>
     <h2>Other ways</h2>
     <p class="why">With pipx already installed:</p>
-    <div class="cmd"><code><span class="p">$ </span>pipx install git+https://github.com/c-wenlong/swe.git</code><button class="copy" type="button" data-copy="pipx install git+https://github.com/c-wenlong/swe.git">Copy</button></div>
-    <p class="fine">One-off with Nix: <code>nix run github:c-wenlong/swe -- --help</code>. The flake goes on your inputs list to keep it; see <a href="../overview/#nix">the docs</a>.</p>
+    <div class="cmd"><code><span class="p">$ </span>pipx install git+https://github.com/starship-terminal/swe.git</code><button class="copy" type="button" data-copy="pipx install git+https://github.com/starship-terminal/swe.git">Copy</button></div>
+    <p class="fine">One-off with Nix: <code>nix run github:starship-terminal/swe -- --help</code>. The flake goes on your inputs list to keep it; see <a href="../overview/#nix">the docs</a>.</p>
   </section>
 </div>
 
@@ -206,7 +206,7 @@ footer a:hover { color: var(--text); }
     <a href="../overview/">Docs</a>
     <a href="../changelog/">Changelog</a>
     <a href="../contributing/">Contributing</a>
-    <a href="https://github.com/c-wenlong/swe">GitHub</a>
+    <a href="https://github.com/starship-terminal/swe">GitHub</a>
   </div>
 </footer>
 
@@ -251,7 +251,7 @@ footer a:hover { color: var(--text); }
   // The download button points at the latest release's DMG once one is
   // published; until then it links the release page.
   if (window.fetch) {
-    fetch("https://api.github.com/repos/c-wenlong/swe/releases/latest")
+    fetch("https://api.github.com/repos/starship-terminal/swe/releases/latest")
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (rel) {
         var dmg = rel && (rel.assets || []).filter(function (a) { return /\.dmg$/i.test(a.name); })[0];

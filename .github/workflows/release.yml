@@ -6,7 +6,7 @@
 # job builds SWE.app on a macOS 26 runner, signs and notarizes it when
 # the secrets below are configured, and attaches the DMG plus a Sparkle
 # `appcast.xml` the same way.  `bump-homebrew-tap` then points the
-# c-wenlong/homebrew-swe cask and formula at the new DMG and wheel.
+# starship-terminal/homebrew-swe cask and formula at the new DMG and wheel.
 #
 # It does NOT create the release and it does NOT merge or tag anything: the
 # maintainer publishes the release by hand, and this workflow only attaches
@@ -528,7 +528,7 @@ jobs:
           fi
 
   homebrew-tap-gate:
-    # Decides whether this run may move c-wenlong/homebrew-swe. Kept
+    # Decides whether this run may move starship-terminal/homebrew-swe. Kept
     # out of the bump job's concurrency group on purpose: a re-run for an
     # older tag stops here instead of queueing, where it would replace
     # (and so cancel) the newest release's pending bump.
@@ -537,7 +537,7 @@ jobs:
     # `attached` output), and only the latest release.
     #
     # Required secret: HOMEBREW_TAP_TOKEN, a fine-grained token with
-    # Contents read/write on c-wenlong/homebrew-swe only. Without it
+    # Contents read/write on starship-terminal/homebrew-swe only. Without it
     # this leaves a notice and the tap stays as it is.
     name: Check whether the Homebrew tap should follow
     needs: attach-to-release
@@ -621,7 +621,7 @@ jobs:
         run: |
           tap="$RUNNER_TEMP/homebrew-swe"
           git clone --depth 1 \
-            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/c-wenlong/homebrew-swe.git" "$tap"
+            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/starship-terminal/homebrew-swe.git" "$tap"
           python3 scripts/bump_tap.py "$tap" "$RELEASE_TAG" "$DMG_SHA" "$WHEEL_SHA"
           cd "$tap"
           if git diff --quiet; then

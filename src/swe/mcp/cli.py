@@ -18,7 +18,7 @@ Commands:
   info <name>                    One server's full detail
   tools <name>                   List a server's tools by handshake
   doctor                         Deep diagnostics
-  gateway                        Run shared servers once for every session
+  gateway                        Shared-server flags + the daemon's status
   secret set NAME                Store a ${NAME} value in the secrets file
 
 Run 'swe mcp <command> help' for detailed help on each command.
@@ -3061,31 +3061,31 @@ MCP_HELP = {
   {c('cyan', 'swe mcp gateway')}                     Show the gateway and its shared servers
   {c('cyan', 'swe mcp gateway share <server...>')}    Run these hub servers once for every session
   {c('cyan', 'swe mcp gateway unshare <server...>')}  Give each session its own copy again
-  {c('cyan', 'swe mcp gateway install')}             Run the gateway at login (macOS LaunchAgent)
-  {c('cyan', 'swe mcp gateway uninstall')}           Stop it; sync writes commands again
-  {c('cyan', 'swe mcp gateway serve')}               Run it in the foreground (what the agent runs)
 
   Every harness session starts its own copy of each stdio server it is
-  configured with. The gateway starts each shared server once and serves
-  it at http://127.0.0.1:{gateway_defaults.DEFAULT_PORT}/mcp/<server>; once it is installed,
-  `swe mcp sync swe ...` writes that URL for shared servers instead of
-  the command. Claude Desktop takes local servers only, so it keeps the
-  command.
+  configured with. The gateway daemon starts each shared server once and
+  serves it at http://127.0.0.1:{gateway_defaults.DEFAULT_PORT}/mcp/<server>; once it is
+  running, `swe mcp sync swe ...` writes that URL for shared servers
+  instead of the command. Claude Desktop takes local servers only, so it
+  keeps the command.
+
+  The daemon is the standalone warp-gate package
+  (github.com/starship-terminal/warp-gate): `warp-gate install` puts it
+  under launchd and marks mcp.json's "gateway" key enabled. swe keeps the
+  manifest side — share/unshare edit "shared" — and status reads the
+  daemon's /status endpoint, which warp-gate serves identically.
 
   Share only servers that keep no state per session (API clients such as
   GitHub, Linear, Notion or search). A browser or REPL server would hand
   every session the same page; share refuses those without --force.
-  The hub entry carries "shared": true; mcp.json's "gateway" key holds
-  the port.
 
 {c('bold', 'Flags')}
-  --port=<n>          install / serve: listen here (default {gateway_defaults.DEFAULT_PORT})
   --force             share: share a server that looks stateful anyway
   --json              status: print one JSON document
 
 {c('bold', 'Examples')}
   swe mcp gateway share dv__github dv__linear sr__brave
-  swe mcp gateway install
+  warp-gate install
   swe mcp sync swe --all --force
   swe mcp gateway status --json""",
 }
@@ -3113,7 +3113,7 @@ def cmd_help(args=None):
   {c('cyan', 'swe mcp set-type')}     Label a hub server
   {c('cyan', 'swe mcp secret set')}   Store a ${{NAME}} value in the secrets file
   {c('cyan', 'swe mcp doctor')}       Deep diagnostics
-  {c('cyan', 'swe mcp gateway')}      Run shared servers once for every session
+  {c('cyan', 'swe mcp gateway')}      Shared-server flags + daemon status
 
 {c('bold', 'Examples')}
   swe mcp list

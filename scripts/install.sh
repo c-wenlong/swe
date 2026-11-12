@@ -1,14 +1,14 @@
 #!/bin/sh
 # One-line installer for swe on Linux:
 #
-#   curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/starship-terminal/swe/releases/latest/download/install.sh | sh
 #   ... | sh -s -- --hub        # also runs `swe remote setup --apply`
 #
 # Everything lives inside functions and `main` runs last, so a truncated
 # download never executes a half-read script.  No sudo, no shell rc edits.
 set -eu
 
-REPO="https://github.com/c-wenlong/swe"
+REPO="https://github.com/starship-terminal/swe"
 
 say() {
     printf '%s\n' "$*"
@@ -180,7 +180,7 @@ main() {
     case "$(uname -s 2>/dev/null || echo unknown)" in
         Linux) ;;
         Darwin)
-            err "On macOS use Homebrew: brew install c-wenlong/swe/swe (CLI) or brew install --cask c-wenlong/swe/swe (app)"
+            err "On macOS use Homebrew: brew install starship-terminal/swe/swe (CLI) or brew install --cask starship-terminal/swe/swe (app)"
             exit 1
             ;;
         *) die "this installer supports Linux only" ;;

@@ -1,5 +1,5 @@
 """Tests for scripts/bump_tap.py, which release.yml runs to point the
-Homebrew tap (c-wenlong/homebrew-swe) at a new release."""
+Homebrew tap (starship-terminal/homebrew-swe) at a new release."""
 
 import contextlib
 import importlib.util
@@ -32,7 +32,7 @@ LEGACY_CASK = f'''cask "quiver" do
   version "1.1.1"
   sha256 "{OLD_DMG}"
 
-  url "https://github.com/c-wenlong/swe/releases/download/v#{{version}}/Quiver-#{{version}}.dmg"
+  url "https://github.com/starship-terminal/swe/releases/download/v#{{version}}/Quiver-#{{version}}.dmg"
   name "Quiver"
 
   livecheck do
@@ -51,11 +51,11 @@ CASK = f'''cask "swe" do
   version "1.2.0"
   sha256 "{NEW_DMG}"
 
-  url "https://github.com/c-wenlong/swe/releases/download/v#{{version}}/SWE-#{{version}}.dmg"
+  url "https://github.com/starship-terminal/swe/releases/download/v#{{version}}/SWE-#{{version}}.dmg"
   name "SWE"
 
   livecheck do
-    url "https://github.com/c-wenlong/swe/releases/latest/download/appcast.xml"
+    url "https://github.com/starship-terminal/swe/releases/latest/download/appcast.xml"
     strategy :sparkle, &:short_version
   end
 
@@ -69,7 +69,7 @@ end
 FORMULA = f'''class Swe < Formula
   include Language::Python::Virtualenv
 
-  url "https://github.com/c-wenlong/swe/releases/download/v1.1.1/quiver-1.1.1-py3-none-any.whl",
+  url "https://github.com/starship-terminal/swe/releases/download/v1.1.1/quiver-1.1.1-py3-none-any.whl",
       using: :nounzip
   sha256 "{OLD_WHEEL}"
   license "MIT"
@@ -113,7 +113,7 @@ class TestBumpCask(unittest.TestCase):
         self.assertIn('version "1.2.0"', text)
         self.assertIn(NEW_DMG, text)
         self.assertIn('app "SWE.app"', text)
-        self.assertIn("c-wenlong/swe/releases/download/v#{version}/SWE-#{version}.dmg", text)
+        self.assertIn("starship-terminal/swe/releases/download/v#{version}/SWE-#{version}.dmg", text)
         self.assertEqual(bump_tap.cask_version(text), "1.2.0")
 
 

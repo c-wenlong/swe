@@ -260,7 +260,7 @@ class ThreeWayMergeTest(unittest.TestCase):
 
         with contextlib.ExitStack() as stack:
             D, path = self._sandbox(stack)
-            # What `swe mcp gateway install` leaves in a hub with no servers.
+            # What enabling the gateway leaves in a hub with no servers.
             path.write_text(json.dumps({
                 "gateway": {"enabled": True, "port": 8478},
                 "updated": "2020-01-01T00:00:00"}))

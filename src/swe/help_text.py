@@ -398,7 +398,7 @@ to use their own login state and environment."""
   {c('cyan', 'swe mcp info <name>')}                 One server's full detail
   {c('cyan', 'swe mcp tools <name>')}                List a server's tools by handshake
   {c('cyan', 'swe mcp doctor')}                      Deep diagnostics
-  {c('cyan', 'swe mcp gateway [share|install]')}     Run shared servers once for every session
+  {c('cyan', 'swe mcp gateway [share|status]')}      Shared servers run once via warp-gate
 
 {c('bold', 'Help')}  {c('cyan', 'swe mcp <command> help')} for details on each — flags, examples, the exact
         model each command uses.
