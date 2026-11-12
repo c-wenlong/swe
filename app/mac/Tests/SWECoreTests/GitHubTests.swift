@@ -3,7 +3,7 @@ import Testing
 @testable import SWECore
 
 /// `swe gh … --json` contracts: fixtures captured from a real swe run
-/// against the live GitHub account (c-wenlong/swe pinned), plus the
+/// against the live GitHub account (starship-terminal/swe pinned), plus the
 /// model's per-repo board behaviour over FakeRunner.
 @Suite struct GitHubContractTests {
     private func client(_ fixtureName: String) throws -> SweClient {
@@ -14,7 +14,7 @@ import Testing
         let overview = try await client("swe-gh").ghOverview()
         #expect(overview.github.status == .ok)
         #expect(overview.github.login == "c-wenlong")
-        #expect(overview.repos.map(\.name) == ["c-wenlong/swe"])
+        #expect(overview.repos.map(\.name) == ["starship-terminal/swe"])
         #expect(overview.repos[0].addedAt == Date(timeIntervalSince1970: 1_792_528_202))
         let catalog = try #require(overview.catalog)
         #expect(catalog.repos == 128)
@@ -31,8 +31,8 @@ import Testing
     }
 
     @Test func worktreeDecodesPathAndCreated() async throws {
-        let reply = try await client("swe-gh-worktree").ghPrWorktree(repo: "c-wenlong/swe", pr: 459)
-        #expect(reply.repo == "c-wenlong/swe")
+        let reply = try await client("swe-gh-worktree").ghPrWorktree(repo: "starship-terminal/swe", pr: 459)
+        #expect(reply.repo == "starship-terminal/swe")
         #expect(reply.pr == 459)
         #expect(reply.path == "/Users/k/.swe/worktrees/c-wenlong__swe-pr459")
         #expect(reply.head == "a9463720b1c2")
@@ -41,10 +41,10 @@ import Testing
     }
 
     @Test func pullRequestsDecodeFullRows() async throws {
-        let reply = try await client("swe-gh-prs").ghPullRequests(repo: "c-wenlong/swe")
+        let reply = try await client("swe-gh-prs").ghPullRequests(repo: "starship-terminal/swe")
         #expect(reply.github.status == .ok)
         let entry = try #require(reply.results.first)
-        #expect(entry.repo == "c-wenlong/swe")
+        #expect(entry.repo == "starship-terminal/swe")
         #expect(entry.status == .ok)
         let pr = try #require(entry.pullRequests?.first)
         #expect(pr.number == 459)
@@ -58,16 +58,16 @@ import Testing
         #expect(pr.checks == .passing)
         // ISO 8601 timestamps land as Dates.
         #expect(pr.updatedAt.date != nil)
-        #expect(pr.url.hasPrefix("https://github.com/c-wenlong/swe/pull/"))
+        #expect(pr.url.hasPrefix("https://github.com/starship-terminal/swe/pull/"))
         // The draft row in the fixture marks `draft: true`.
         #expect(entry.pullRequests?.contains { $0.draft } == true)
     }
 
     @Test func repoListAndPrStatusDecode() async throws {
         let pins = try await client("swe-gh-repos").ghRepoList()
-        #expect(pins.repos.map(\.name) == ["c-wenlong/swe"])
+        #expect(pins.repos.map(\.name) == ["starship-terminal/swe"])
 
-        let status = try await client("swe-gh-pr-status").ghPrStatus(repo: "c-wenlong/swe")
+        let status = try await client("swe-gh-pr-status").ghPrStatus(repo: "starship-terminal/swe")
         let entry = try #require(status.results.first)
         #expect(entry.currentBranch == nil)
         #expect(entry.authored?.first?.number == 459)
@@ -75,7 +75,7 @@ import Testing
     }
 
     @Test func issuesDecodeLabelsAndCounts() async throws {
-        let reply = try await client("swe-gh-issues").ghIssues(repo: "c-wenlong/swe")
+        let reply = try await client("swe-gh-issues").ghIssues(repo: "starship-terminal/swe")
         let issue = try #require(reply.results.first?.issues?.first)
         #expect(issue.number == 378)
         #expect(issue.state == .open)
@@ -85,7 +85,7 @@ import Testing
     }
 
     @Test func runsDecodeInProgressAndConclusion() async throws {
-        let reply = try await client("swe-gh-runs").ghRuns(repo: "c-wenlong/swe")
+        let reply = try await client("swe-gh-runs").ghRuns(repo: "starship-terminal/swe")
         let run = try #require(reply.results.first?.runs?.first)
         #expect(run.id == 39_496_880_542)
         #expect(run.workflow == "CI")
@@ -95,27 +95,27 @@ import Testing
     }
 
     @Test func pagesDecodeSiteAndNullBuild() async throws {
-        let reply = try await client("swe-gh-pages").ghPages(repo: "c-wenlong/swe")
+        let reply = try await client("swe-gh-pages").ghPages(repo: "starship-terminal/swe")
         let entry = try #require(reply.results.first)
         #expect(entry.status == .ok)
         let pages = try #require(entry.pages)
-        #expect(pages.url == "https://c-wenlong.github.io/swe/")
+        #expect(pages.url == "https://starship-terminal.github.io/swe/")
         #expect(pages.sourceBranch == "main")
         #expect(pages.latestBuild == nil)
     }
 
     @Test func releasesTagsBranchesDecode() async throws {
-        let releases = try await client("swe-gh-releases").ghReleases(repo: "c-wenlong/swe")
+        let releases = try await client("swe-gh-releases").ghReleases(repo: "starship-terminal/swe")
         let release = try #require(releases.results.first?.releases?.first)
         #expect(release.tag == "v1.0.0")
         #expect(release.latest == true)
         #expect(release.publishedAt?.date != nil)
 
-        let tags = try await client("swe-gh-tags").ghTags(repo: "c-wenlong/swe")
+        let tags = try await client("swe-gh-tags").ghTags(repo: "starship-terminal/swe")
         #expect(tags.results.first?.tags?.first?.name == "v1.0.0")
         #expect(tags.results.first?.tags?.first?.sha == "c338858")
 
-        let branches = try await client("swe-gh-branches").ghBranches(repo: "c-wenlong/swe")
+        let branches = try await client("swe-gh-branches").ghBranches(repo: "starship-terminal/swe")
         let entry = try #require(branches.results.first)
         #expect(entry.defaultBranch == "main")
         // `main` sorts past the fixture's first page, so no row is
@@ -148,7 +148,7 @@ import Testing
     }
 
     @Test func prViewDecodesTheDetailRow() async throws {
-        let reply = try await client("swe-gh-pr-view").ghPrView(repo: "c-wenlong/swe", ref: "472")
+        let reply = try await client("swe-gh-pr-view").ghPrView(repo: "starship-terminal/swe", ref: "472")
         #expect(reply.github.status == .ok)
         #expect(reply.status == "ok")
         let pr = try #require(reply.pr)

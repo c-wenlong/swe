@@ -200,6 +200,28 @@ class LaunchdTest(unittest.TestCase):
         self.assertEqual(launchd.loaded_pid(run=FakeLaunchctl(stdout="state = waiting")), (True, None))
         self.assertEqual(launchd.loaded_pid(run=FakeLaunchctl(fail={"print"})), (False, None))
 
+    def test_install_takes_another_label_and_process_type(self):
+        # The satellite agent and any other caller share this code under
+        # their own label; Interactive keeps a latency-sensitive job
+        # off launchd's throttled Background scheduling.
+        label = "com.example.swe.other-agent"
+        calls = []
+
+        def run(argv, **kw):
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        path = launchd.install(["swe"], self.log, "/usr/bin", home=self.home,
+                               run=run, label=label)
+        self.assertEqual(path.name, f"{label}.plist")
+        self.assertEqual(plistlib.loads(path.read_bytes())["Label"], label)
+        self.assertEqual(plistlib.loads(path.read_bytes())["ProcessType"], "Background")
+        launchd.install(["swe"], self.log, "/usr/bin", home=self.home, run=run,
+                        label=label, process_type="Interactive")
+        self.assertEqual(plistlib.loads(path.read_bytes())["ProcessType"], "Interactive")
+        self.assertTrue(all(label in " ".join(c) or c[1] == "bootstrap" for c in calls))
+        self.assertFalse((self.home / "Library" / "LaunchAgents" / f"{launchd.LABEL}.plist").exists())
+
 
 
 class BootstrapRetryTest(unittest.TestCase):

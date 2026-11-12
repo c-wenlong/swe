@@ -8,7 +8,7 @@
 #     --root=DIR   where the stage goes (default: a new `mktemp -d`). DIR may
 #                  exist, but none of fork.git, machine-a, machine-b in it may.
 #     --hub=URL    the hub to copy (default: the public demo hub,
-#                  https://github.com/c-wenlong/swe-demo-hub). A git URL,
+#                  https://github.com/starship-terminal/swe-demo-hub). A git URL,
 #                  a file:// URL or a local path.
 #     --home=PATH  use PATH as machine A instead of DIR/machine-a, for the
 #                  dedicated macOS demo account (the Mac app ignores $HOME).
@@ -40,7 +40,7 @@
 
 set -euo pipefail
 
-DEFAULT_HUB="https://github.com/c-wenlong/swe-demo-hub"
+DEFAULT_HUB="https://github.com/starship-terminal/swe-demo-hub"
 DEMO_NAME="Demo User"
 DEMO_EMAIL="demo@example.com"
 

@@ -8,10 +8,10 @@
     },
     "results": [
       {
-        "repo": "c-wenlong/swe",
+        "repo": "starship-terminal/swe",
         "status": "ok",
         "pages": {
-          "url": "https://c-wenlong.github.io/swe/",
+          "url": "https://starship-terminal.github.io/swe/",
           "cname": null,
           "status": null,
           "source_branch": "main",

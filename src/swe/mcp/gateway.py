@@ -4,8 +4,9 @@ Every harness session starts its own copy of every stdio server it is
 configured with: a dozen Claude Code sessions with 17 servers each is
 about 200 processes and 8 GB. A server that keeps no per-session state
 (an API client: GitHub, Linear, Notion, Brave) can run once and serve
-them all. The gateway (``gateway_server.py``) does that: it starts each
-shared server once and serves it as streamable HTTP on 127.0.0.1, and
+them all. The gateway daemon does that — the standalone ``warp-gate``
+package (``starship-terminal/warp-gate``), which starts each shared
+server once and serves it as streamable HTTP on 127.0.0.1 — and
 ``swe mcp sync`` points harnesses at that URL instead of the command.
 
 A server is shared only when its hub entry says ``"shared": true``
@@ -15,9 +16,9 @@ servers in mcp.json:
 
     {"gateway": {"enabled": true, "port": 8478}, "mcpServers": {...}}
 
-``enabled`` is set by ``swe mcp gateway install`` and cleared by
-``uninstall``, so sync never points a harness at a gateway that isn't
-installed. Logic only: callers print.
+``enabled`` is set by ``warp-gate install`` and cleared by
+``warp-gate uninstall``, so sync never points a harness at a gateway
+that isn't installed. Logic only: callers print.
 
 Hub entries carry a second swe-side flag, ``type``: a free-form label
 (``swe mcp set-type``) grouping servers ("dev", "research", ...). It is
@@ -28,10 +29,6 @@ any other ``type``.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
-
-from swe.paths import cache_dir_for
 
 GATEWAY_KEY = "gateway"
 SHARED_KEY = "shared"
@@ -53,11 +50,6 @@ PATH_PREFIX = "/mcp/"
 # them unless told otherwise.
 STATEFUL_HINTS = ("playwright", "puppeteer", "browser", "chrome",
                   "computer-use", "computer_use", "repl")
-
-
-def log_dir_for(home: Path | None = None) -> Path:
-    """``~/.swe/cache/mcp-gateway``: the gateway's log and one per server."""
-    return cache_dir_for(home) / "mcp-gateway"
 
 
 def settings_of(hub_data: dict | None) -> dict:

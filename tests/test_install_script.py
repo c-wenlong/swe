@@ -19,7 +19,7 @@ REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "scripts" / "install.sh"
 WHEEL_NAME = "swe-1.2.3-py3-none-any.whl"
 WHEEL_BYTES = b"fake wheel bytes\n"
-LATEST_URL = "https://github.com/c-wenlong/swe/releases/tag/v1.2.3"
+LATEST_URL = "https://github.com/starship-terminal/swe/releases/tag/v1.2.3"
 
 
 def _write(path: Path, body: str) -> Path:

@@ -11,8 +11,8 @@ swe
 </p>
 
 <p align="center">
-  <a href="https://github.com/c-wenlong/swe/actions/workflows/ci.yml"><img src="https://github.com/c-wenlong/swe/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://app.codecov.io/gh/c-wenlong/swe"><img src="https://codecov.io/gh/c-wenlong/swe/graph/badge.svg?branch=main" alt="Coverage"></a>
+  <a href="https://github.com/starship-terminal/swe/actions/workflows/ci.yml"><img src="https://github.com/starship-terminal/swe/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://app.codecov.io/gh/starship-terminal/swe"><img src="https://codecov.io/gh/starship-terminal/swe/graph/badge.svg?branch=main" alt="Coverage"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11+"></a>
   <img src="https://img.shields.io/badge/deps-stdlib--only-brightgreen.svg" alt="stdlib only">
@@ -91,7 +91,7 @@ extra that adds a real dependency, and you opt into it.
 > moved to 3.11 afterwards. Pin that tag:
 >
 > ```bash
-> pipx install git+https://github.com/c-wenlong/swe.git@v0.2.9
+> pipx install git+https://github.com/starship-terminal/swe.git@v0.2.9
 > ```
 >
 > Check with `python3 --version`. Ubuntu 22.04 LTS ships 3.10, so use the
@@ -102,25 +102,25 @@ extra that adds a real dependency, and you opt into it.
 ### Homebrew (macOS)
 
 ```bash
-brew install --cask c-wenlong/swe/swe   # the Mac app (Apple silicon, macOS 26+)
-brew install c-wenlong/swe/swe          # the swe CLI on its own
+brew install --cask starship-terminal/swe/swe   # the Mac app (Apple silicon, macOS 26+)
+brew install starship-terminal/swe/swe          # the swe CLI on its own
 ```
 
-Both come from the [c-wenlong/homebrew-swe](https://github.com/c-wenlong/homebrew-swe)
+Both come from the [starship-terminal/homebrew-swe](https://github.com/starship-terminal/homebrew-swe)
 tap, which each release updates. The app updates itself through Sparkle, so
 `brew upgrade` leaves it alone unless you pass `--greedy`.
 
 Installed it as `quiver` before the rename? The `quiver` cask stays frozen
 at the last Quiver build. `app/mac/script/install-app.sh` moves an existing
 install to SWE.app itself; by brew, `brew uninstall --cask
-c-wenlong/quiver/quiver` first, then the `swe` cask.
+starship-terminal/swe/quiver` first, then the `swe` cask.
 
 ### Linux
 
 ```bash
-curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/starship-terminal/swe/releases/latest/download/install.sh | sh
 # or, to also set up the web app and phone remote:
-curl -fsSL https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh -s -- --hub
+curl -fsSL https://github.com/starship-terminal/swe/releases/latest/download/install.sh | sh -s -- --hub
 ```
 
 The script downloads the released wheel (verified against the release's
@@ -137,18 +137,18 @@ symlink).
 ### pipx
 
 ```bash
-pipx install git+https://github.com/c-wenlong/swe.git
+pipx install git+https://github.com/starship-terminal/swe.git
 swe --help
 ```
 
 ### Nix
 
-`nix run github:c-wenlong/swe -- --help` works one-off. To install, add
+`nix run github:starship-terminal/swe -- --help` works one-off. To install, add
 the flake as an input and put the package on your list:
 
 ```nix
 inputs.swe = {
-  url = "github:c-wenlong/swe";
+  url = "github:starship-terminal/swe";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 # then, in home.packages or environment.systemPackages:
@@ -161,7 +161,7 @@ of a clone. `nix develop` opens a shell with `src/` on `PYTHONPATH`.
 ### From source
 
 ```bash
-git clone https://github.com/c-wenlong/swe.git
+git clone https://github.com/starship-terminal/swe.git
 cd swe
 python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
@@ -436,7 +436,7 @@ cd ~/Projects/my-app/skills && swe skills catalog .
 swe skills catalog list
 ```
 
-Catalogs live in `~/.swe/config/skill_catalogs.json`. Nested catalogs (e.g. `gbrain/skills` inside `ai-engineering/skills`) are collapsed to the outermost match.
+Catalogs live in `~/.swe/config/skill_catalogs.json`. Nested catalogs (e.g. `gbrain/skills` inside `starship-terminal/skills`) are collapsed to the outermost match.
 
 ### Symlinks and moving skills
 
@@ -573,7 +573,7 @@ swe list                  # verify the feature works end-to-end
 For **pipx** installs (always non-editable):
 
 ```bash
-pipx install --force git+https://github.com/c-wenlong/swe.git
+pipx install --force git+https://github.com/starship-terminal/swe.git
 ```
 
 ### E2e verification checklist

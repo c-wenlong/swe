@@ -472,12 +472,6 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
     "mcp gateway status": [
         ("--json", "Machine-readable output"),
     ],
-    "mcp gateway install": [
-        ("--port=", "Listen on this port"),
-    ],
-    "mcp gateway serve": [
-        ("--port=", "Listen on this port"),
-    ],
     "mcp gateway share": [
         ("--force", "Share a server that looks stateful anyway"),
     ],
@@ -658,7 +652,6 @@ _NESTED_FLAGS: dict[str, dict[str, str]] = {
         "set-type": "mcp set-type",
         "info": "mcp info", "tools": "mcp tools",
         "gateway": "mcp gateway status", "gateway status": "mcp gateway status",
-        "gateway install": "mcp gateway install", "gateway serve": "mcp gateway serve",
         "gateway share": "mcp gateway share",
     },
     "gh": {
@@ -819,9 +812,6 @@ _NESTED_SUBCOMMANDS: dict[tuple[str, str], list[tuple[str, str]]] = {
         ("status", "Show the gateway and its shared servers"),
         ("share", "Run hub servers once for every session"),
         ("unshare", "Give each session its own copy again"),
-        ("install", "Run the gateway at login"),
-        ("uninstall", "Stop the gateway"),
-        ("serve", "Run it in the foreground"),
     ],
     ("plugins", "marketplace"): [
         ("add", "Register a plugin marketplace"),
@@ -915,7 +905,7 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("tools", "List a server's tools by handshake"),
         ("secret", "Store a ${NAME} value"),
         ("doctor", "Deep diagnostics"),
-        ("gateway", "Run shared servers once for every session"),
+        ("gateway", "Shared-server flags + daemon status"),
         ("help", "Detailed help for one command"),
     ],
     "gh": [

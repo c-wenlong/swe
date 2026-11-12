@@ -152,7 +152,7 @@ class TestAttribution(unittest.TestCase):
         m.process(202, 201, ["esbuild-child"], exe="/usr/bin/esbuild")
         m.process(210, 50, ["npx", "mcp"], exe="/usr/bin/npx", cwd="/home/u/proj")        # reparented
         m.process(220, 50, ["python3", "svc.py"], exe="/usr/bin/python3", cwd="/home/u",
-                  cgroup="0::/user.slice/user-1000.slice/user@1000.service/app.slice/quiver-hub.service")
+                  cgroup="0::/user.slice/user-1000.slice/user@1000.service/app.slice/swe-hub.service")
         m.process(230, 1, ["node", "x"], exe="/usr/bin/node", cwd="/")                    # in /
         m.process(240, 1, ["/usr/bin/tmux"], exe="/usr/bin/tmux", cwd="/home/u")          # not a runner
         m.process(250, 1, ["python3", "-m", "swe.cli"], exe="/usr/bin/python3", cwd="/home/u")  # the hub

@@ -254,7 +254,7 @@ every tailer is owed a poll, the catalog loop wakes, and a list request
 (`/v1/sessions`, `/v1/inbox`, `/v1/app/sessions`) that finds the catalog
 over 20 s old waits up to 5 s for the fresh refresh, so a client that
 polls without a stream never reads a minute-old list
-([#1520](https://github.com/c-wenlong/swe/issues/1520)).
+([#1520](https://github.com/starship-terminal/swe/issues/1520)).
 
 A write is any message that actually goes out (queue mode once the wait
 is over, steer at once), an approval answer, a control op, or an attach.
@@ -272,13 +272,13 @@ The hot window costs little because only woken sessions get it. A JSONL
 poll that finds the file the same size is one `stat`, and an opencode
 poll is a few queries on per-session indexes. Snapshot stores (Gemini,
 Cline, ...) re-read the whole window whenever their change token
-moves, which is the cost behind [#515](https://github.com/c-wenlong/swe/issues/515), so
+moves, which is the cost behind [#515](https://github.com/starship-terminal/swe/issues/515), so
 `SnapshotSource.hot_poll_s` caps them at the active cadence: they get the
 immediate wake but never poll faster than an active session already
 does.
 
 Devin reads only what changed (`reports/transcripts.py::DevinChain`,
-[#1522](https://github.com/c-wenlong/swe/issues/1522)). Its source keeps
+[#1522](https://github.com/starship-terminal/swe/issues/1522)). Its source keeps
 the window's decoded chain nodes; a moved token fetches the rows written
 since the last read (a rewrite comes back under a new `row_id`), walks
 from the head until it meets a kept node, and cuts the kept chain there,

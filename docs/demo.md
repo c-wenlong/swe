@@ -10,11 +10,11 @@ The video leads with the Mac app, with one terminal pane beside it for the
 be rehearsed in a terminal on its own (see [Rehearse in the terminal
 only](#rehearse-in-the-terminal-only)).
 
-Part of [#524](https://github.com/c-wenlong/swe/issues/524).
+Part of [#524](https://github.com/starship-terminal/swe/issues/524).
 
 ## What the demo uses
 
-- **The demo hub**, [c-wenlong/swe-demo-hub](https://github.com/c-wenlong/swe-demo-hub):
+- **The demo hub**, [starship-terminal/swe-demo-hub](https://github.com/starship-terminal/swe-demo-hub):
   an `AGENTS.md` built from two chapters in `AGENTS_MD/`, three skills
   (`review-checklist`, `debug-systematically`, `write-pr-description`), one
   plugin marketplace (`plugins/starter`, with the `git-helpers` plugin), two
@@ -30,7 +30,7 @@ Part of [#524](https://github.com/c-wenlong/swe/issues/524).
 
 - **swe 1.2.0 or newer**, which has `swe sync` (check: `swe sync --help`
   prints the sync help). Install the latest from `main` with
-  `pipx install --force git+https://github.com/c-wenlong/swe.git`.
+  `pipx install --force git+https://github.com/starship-terminal/swe.git`.
 - **git**, **Python 3.11 or newer** (`python3`), and **Node.js** (`npx`,
   which the `context7` MCP server runs on).
 - **Claude Code** (`claude`) and **Codex** (`codex`) on `PATH`. Neither has

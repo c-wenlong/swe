@@ -1,8 +1,8 @@
 """One-shot MCP handshake: ``initialize`` + ``tools/list`` over stdio.
 
 `swe mcp tools` spawns the configured command itself, asks for its tool
-list, and kills it. The gateway's child machinery is threaded and
-long-lived; this is the synchronous single-probe version. Same wire
+list, and kills it. The warp-gate daemon's child machinery is threaded
+and long-lived; this is the synchronous single-probe version. Same wire
 format: newline-delimited JSON-RPC (the stdio transport in the spec).
 """
 
@@ -18,7 +18,7 @@ import time
 
 from swe.console import sanitize
 
-PROTOCOL_VERSION = "2025-06-18"  # mirrors gateway_server.DEFAULT_PROTOCOL
+PROTOCOL_VERSION = "2025-06-18"  # the version the warp-gate daemon also speaks
 
 # Separate deadlines: a cold server (uvx resolving, npx fetching) gets the
 # gateway's patience for initialize; a live one answers tools/list fast.

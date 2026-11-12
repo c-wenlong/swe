@@ -94,6 +94,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Mac Codex account cards show monthly credits used and the credit limit** beneath the usage bars when the workspace returns those amounts.
 
+### Removed
+
+- **The in-repo MCP gateway daemon.** `swe mcp gateway serve`,
+  `install` and `uninstall` are gone: the gateway lives in the
+  standalone `warp-gate` package (repo `starship-terminal/warp-gate`,
+  installed as the LaunchAgent `com.starship-terminal.warp-gate` by
+  `warp-gate install`), serving the identical
+  `http://127.0.0.1:8478/mcp/<name>` contract. `swe mcp gateway`
+  keeps `share`, `unshare` and `status` — status still reports a
+  machine's installed agent, including a retired
+  `com.cwenlong.swe.mcp-gateway`/`com.cwenlong.quiver.mcp-gateway` one
+  left over from an older install — and `swe mcp sync` still writes the
+  gateway URL for `"shared": true` servers while `gateway.enabled` is
+  set. A stale agent left by an old swe keeps no home here: bootout and
+  delete its plist (`launchctl bootout gui/$UID/<label>`, then remove
+  `~/Library/LaunchAgents/<label>.plist`), then `warp-gate install`.
+
 
 ### Security
 
@@ -499,7 +516,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allowed; a request without one still asks you; if the agent
   fails to start, the launch falls back to tmux. Claude can run through the `claude-agent-acp` adapter with `--mode=acp` when it is installed;
   harness.json's `capabilities.acp` overrides or turns off detection
-  ([#1637](https://github.com/c-wenlong/swe/issues/1637)).
+  ([#1637](https://github.com/starship-terminal/swe/issues/1637)).
 
 - **Folders nest in the AGENTS.md rail.** Dragging a folder row onto
   another folder (or onto a file row inside it, or the "Top level"
@@ -624,7 +641,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **A one-line installer for Linux.** `curl -fsSL
-  https://github.com/c-wenlong/swe/releases/latest/download/install.sh | sh`
+  https://github.com/starship-terminal/swe/releases/latest/download/install.sh | sh`
   downloads the released wheel (verified against the release's new
   `SHA256SUMS` asset) and installs it with `uv` when it can, into a venv
   under `~/.local/share/swe` when it can't, and bootstraps `uv` when
@@ -674,7 +691,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   above them; the fold stops at a send still waiting or an
   unanswered approval, so every entry keeps its place. `SessionChat.revealSeq(seq)` expands the history down to one
   message before it scrolls there. Browser find-in-page sees only the
-  drawn entries. Closes [#1615](https://github.com/c-wenlong/swe/issues/1615).
+  drawn entries. Closes [#1615](https://github.com/starship-terminal/swe/issues/1615).
 
 - **Search indexing reads only a Devin session's new nodes.** Both index
   writers (the Mac app's `SearchDevin.swift` and swe's
@@ -685,7 +702,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `rowid` watermark the last commit left in the index's `meta` table
   (`devin_chain:<path>`, written by either side). A growing session costs
   about 1 ms; one whose head moved to a streamed copy or whose indexed
-  node was rewritten reads whole in 25 to 45 ms ([#1613](https://github.com/c-wenlong/swe/issues/1613)).
+  node was rewritten reads whole in 25 to 45 ms ([#1613](https://github.com/starship-terminal/swe/issues/1613)).
 
 ## [1.2.1] - 2026-11-04
 
@@ -740,13 +757,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Mac setup sheet name what didn't make it. The web Setup page's
   clone syncs MCP servers under the MCP page's write lock. Plain `swe mcp
   sync` still refuses to write anything while a secret is missing. Part of
-  [#524](https://github.com/c-wenlong/swe/issues/524).
+  [#524](https://github.com/starship-terminal/swe/issues/524).
 - **Demo hub link on every setup surface.** `DEMO_HUB_URL` now points at
-  the public template [c-wenlong/swe-demo-hub](https://github.com/c-wenlong/swe-demo-hub),
+  the public template [starship-terminal/swe-demo-hub](https://github.com/starship-terminal/swe-demo-hub),
   so `swe setup`, the setup wizard, the web Setup page and the Mac setup
   sheet show it beside the hub URL field. Fork it or use it as a
   template, then run `swe setup --hub=<your copy>`. Closes
-  [#1446](https://github.com/c-wenlong/swe/issues/1446).
+  [#1446](https://github.com/starship-terminal/swe/issues/1446).
 - **`scripts/demo_home.sh`: a safe stage for the primitives demo.** It
   builds a bare clone of the demo hub (`swe-demo-hub`, or `--hub=URL`)
   that stands in for the viewer's fork, so `swe sync` pushes stay on
@@ -756,7 +773,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose `~/.swe` already holds a hub. It prints `export DEMO_ROOT`,
   `DEMO_FORK`, `DEMO_A` and `DEMO_B` lines to paste or `eval`, and
   leaves `swe setup` to the demo. Part of
-  [#524](https://github.com/c-wenlong/swe/issues/524).
+  [#524](https://github.com/starship-terminal/swe/issues/524).
 - **`scripts/demo_vm.sh record DIR` films the primitives demo.** It
   starts a throwaway run of the demo VM, runs every bash block of
   `docs/demo.md` segments 1 to 10 typed out in Terminal while it clicks
@@ -767,7 +784,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Screen Recording and Accessibility grants, keeps its display awake and
   unlocked, and gets a short typeable password; a VM start that UTM drops
   is retried once after relaunching UTM. Part of
-  [#524](https://github.com/c-wenlong/swe/issues/524).
+  [#524](https://github.com/starship-terminal/swe/issues/524).
 - **`scripts/demo_vm.sh`: record the primitives demo in a UTM VM.** SWE.app
   reads the logged-in account's real `~/.swe`, so a take needs an account
   of its own. The script builds a macOS 27 guest in UTM (`create`: restore
@@ -779,7 +796,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and restores the snapshot; `shot FILE` screenshots it. No shared folders,
   clipboard, Apple ID or tokens in the guest. `docs/demo.md` gains a
   "Record in a UTM VM" section. Part of
-  [#524](https://github.com/c-wenlong/swe/issues/524).
+  [#524](https://github.com/starship-terminal/swe/issues/524).
 - **Overview across machines (web and iPhone).** Satellites now add
   their daily token and cost totals per harness to the usage report
   they post every five minutes (`daily_usage`, from their own ledger,
@@ -790,7 +807,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   iPhone's Usage tab a row of machine chips under the periods. A
   satellite's days are its own local days, and its view has no top
   models, since daily rows carry none. Closes
-  [#525](https://github.com/c-wenlong/swe/issues/525).
+  [#525](https://github.com/starship-terminal/swe/issues/525).
 - **Mac and web: Hub sync card.** Settings › Files shows `swe sync
   status` for `~/.swe` (branch mode, uncommitted changes by primitive,
   commits to push and pull, new commits on `origin/main`, files kept
@@ -800,7 +817,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   syncs the hub machine's repo through `GET /v1/app/settings?part=hub_sync`
   and `POST /v1/app/settings/hub_sync` (one at a time). Sync stays
   manual; there is no timer. Part of
-  [#525](https://github.com/c-wenlong/quiver/issues/525).
+  [#525](https://github.com/starship-terminal/swe/issues/525).
 - **`swe sync` and `swe sync status`.** Sync commits what changed in
   `~/.swe` with a generated message, merges the remote in, pushes, and
   re-links every harness (plus new plugin marketplaces, and MCP servers
@@ -815,7 +832,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under an older hub `.gitignore`. `status` shows the mode, ahead and
   behind counts and uncommitted changes by primitive; both take
   `--json`, sync takes `--dry-run`. Part of
-  [#525](https://github.com/c-wenlong/quiver/issues/525).
+  [#525](https://github.com/starship-terminal/swe/issues/525).
 - **Coding plans as launch providers for Claude Code.** Every plan in
   Settings › Providers › Inference is a provider Claude Code can launch
   on, one slug per plan region (`glm-coding-plan-china`): the launch
@@ -823,7 +840,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its own variable (never the pay-as-you-go one), and `ANTHROPIC_MODEL`
   to the plan's default model. `plan_providers.PLANS` ports the Mac
   app's `InferenceCatalog`, and a test fails when they drift. Closes
-  [#526](https://github.com/c-wenlong/swe/issues/526).
+  [#526](https://github.com/starship-terminal/swe/issues/526).
 - **Provider menu on the launch sheets (Mac, web, iPhone).** The
   new-session sheet shows a Provider menu beside Model: Harness default,
   or a provider whose key is set on the target machine and that the
@@ -832,7 +849,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a machine whose agent is too old or has no keyed provider for that
   harness. Picking a provider turns an untouched Model menu to Harness
   default, since the recent models ran on other providers; a model you
-  pick yourself is still sent. Part of [#526](https://github.com/c-wenlong/swe/issues/526).
+  pick yourself is still sent. Part of [#526](https://github.com/starship-terminal/swe/issues/526).
 - **Doctor: Fix all on the Mac and web pages.** The findings card gets
   a Fix all (N) button whenever some finding has a batch fix. It runs
   `swe doctor --fix`'s ordered batch (setup, discover, init, plugin
@@ -846,7 +863,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `mcp-sync`, through `swe doctor --fix=<check> --message=<text>
   --action=<a>`. A test fails when the Python runners, the web page's
   wording or the Mac's action list drift apart. Closes
-  [#529](https://github.com/c-wenlong/swe/issues/529).
+  [#529](https://github.com/starship-terminal/swe/issues/529).
 - **Launch a harness on a provider from the keys file.** `POST
   /v1/sessions` takes `provider: "<slug>"` and `swe use` takes
   `--provider=<slug>`: the launching machine starts the harness with
@@ -857,7 +874,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Machine rows list `providers_at_launch` (slugs whose key is set) and
   `provider_names`; the hub forwards only the slug to a satellite.
   A missing key or an undeclared slug is a 422. Part of
-  [#526](https://github.com/c-wenlong/swe/issues/526).
+  [#526](https://github.com/starship-terminal/swe/issues/526).
 - **Hub: service status pushes.** `swe remote notify
   --service-status=on` (the `service_status` flag in `notify.json`, off
   by default) starts a five-minute check of every tracked status page
@@ -870,7 +887,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `~/.swe/cache/web-service-status-notified.json` keeps a restart
   from repeating a push. The rule is `status/alerts.py`, a port of the
   Mac's `ServiceStatusAlerts`. Closes
-  [#528](https://github.com/c-wenlong/swe/issues/528).
+  [#528](https://github.com/starship-terminal/swe/issues/528).
 - **Mac: service status banners.** With "Notify about service status"
   on (Settings › Notifications, off by default), the Mac banners when a
   model provider or agent platform starts an incident on its status
@@ -879,7 +896,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flaps is quiet, two incidents opening at once are two banners, and
   scheduled maintenance never banners. Each page's first reading only
   records what is already open. A click opens Service status.
-  Part of [#528](https://github.com/c-wenlong/swe/issues/528).
+  Part of [#528](https://github.com/starship-terminal/swe/issues/528).
 - **Launch providers declared per harness.** `harness.json` gains
   `capabilities.provider`: for each provider slug a harness takes at
   launch, the variables it reads for the key (filled from named
@@ -889,7 +906,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DeepSeek, Kimi, MiniMax and OpenRouter through their
   Anthropic-compatible endpoints), each tried on a real install with
   fake keys. No launch uses it yet. Part of
-  [#526](https://github.com/c-wenlong/swe/issues/526).
+  [#526](https://github.com/starship-terminal/swe/issues/526).
 - **Doctor folds in `swe mcp doctor`.** `swe doctor` now warns about
   each MCP server a harness config holds that fails a local check (a
   stdio binary missing, an empty env value, a bad URL scheme) as
@@ -903,11 +920,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is an error. The hub copy must name only stored secrets and have a
   command or url. A config the readers cannot parse is one
   `mcp.unchecked` warning. Batches never run it, since it overwrites.
-  Part of [#529](https://github.com/c-wenlong/swe/issues/529).
+  Part of [#529](https://github.com/starship-terminal/swe/issues/529).
 - **iPhone: home screen widget.** Small and medium widgets show the
   hub's sessions waiting on you (approvals and replies), sessions still
   working, and today's spend
-  ([#1442](https://github.com/c-wenlong/swe/issues/1442)). The
+  ([#1442](https://github.com/starship-terminal/swe/issues/1442)). The
   widget fetches sessions, the inbox and today's overview about every
   15 minutes, and redraws when the app's refresh changes the snapshot
   it keeps in the App Group. When the hub can't be reached it draws
@@ -926,7 +943,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anything that is no longer a broken link directly in those folders.
   A marketplace `--fix` registers shows its uninstalled plugins to the
   next pass, which installs them. Part of
-  [#529](https://github.com/c-wenlong/swe/issues/529).
+  [#529](https://github.com/starship-terminal/swe/issues/529).
 - **Live reply text on iPhone, web and Mac.** The chat draws a reply
   word by word while a Codex app-server, opencode serve or headless
   Claude session writes it: `message.delta` text grows a bubble at the
@@ -940,7 +957,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session goes idle, or when the stream reconnects. The rules live in
   `ReplyStreams.swift` (the Mac's and iPhone's copies are identical)
   and its port in `pages/chat.js`. Closes
-  [#1444](https://github.com/c-wenlong/swe/issues/1444).
+  [#1444](https://github.com/starship-terminal/swe/issues/1444).
 - **`swe doctor --fix`.** Runs every safe local fix doctor found, in
   order (setup, then discover, then init), reads the report again after
   each step, and prints what it fixed and what is left.
@@ -954,7 +971,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fix, as a Run button does. A failed fix is reported and the rest still
   run. Plain `swe doctor` still writes nothing. The runners moved to
   `harness/doctor_fix.py`, which the web Doctor page now calls too. Part
-  of [#529](https://github.com/c-wenlong/swe/issues/529).
+  of [#529](https://github.com/starship-terminal/swe/issues/529).
 - **Unread dots on session rows: iPhone, web and Mac.** A session row
   shows a small dot when the agent said something since you last opened
   that chat on this device, from the hub's per-device `unread` flag.
@@ -965,10 +982,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   holds its reads while the tab is hidden. The Mac shows dots on local
   rows the hub lists and on Other machines rows, reading as its own
   paired device; the iPhone's app icon badge stays the Inbox count.
-  Closes [#1439](https://github.com/c-wenlong/swe/issues/1439).
+  Closes [#1439](https://github.com/starship-terminal/swe/issues/1439).
 - **iPhone: share into a session.** A share extension ("Quiver" in the
   share sheet) sends text, links, images and files from any app to a
-  session ([#1441](https://github.com/c-wenlong/swe/issues/1441)).
+  session ([#1441](https://github.com/starship-terminal/swe/issues/1441)).
   The sheet lists the active hub's attached sessions, most recent
   first, with a hub picker when the phone has more than one, and an
   optional message. Text and links go in the message; images go up as
@@ -978,14 +995,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hubs from the App Group and shared Keychain group, and says so
   instead of sending when the phone isn't paired or the hub can't be
   reached.
-- **Homebrew tap.** `brew install --cask c-wenlong/swe/swe`
-  installs the Mac app and `brew install c-wenlong/swe/swe` the CLI,
-  from [c-wenlong/homebrew-swe](https://github.com/c-wenlong/homebrew-swe).
+- **Homebrew tap.** `brew install --cask starship-terminal/swe/swe`
+  installs the Mac app and `brew install starship-terminal/swe/swe` the CLI,
+  from [starship-terminal/homebrew-swe](https://github.com/starship-terminal/homebrew-swe).
   The release workflow's new `bump-homebrew-tap` job points both at each
   release's DMG and wheel with fresh SHA-256s (`scripts/bump_tap.py`),
   once the signed DMG is on the latest published release. It needs a
   `HOMEBREW_TAP_TOKEN` secret and skips with a notice without one.
-  ([#1445](https://github.com/c-wenlong/swe/issues/1445))
+  ([#1445](https://github.com/starship-terminal/swe/issues/1445))
 - **Hub: live reply text (`message.delta`) for API channels.** Codex
   app-server, opencode serve and headless Claude sessions now send
   `message.delta` events while a reply is written: `{id, kind, text,
@@ -997,13 +1014,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replaces the streamed text. Satellites coalesce their own and relay
   them only to a hub that advertises `message_delta`. tmux sessions
   stay record-by-record. Part of
-  [#1444](https://github.com/c-wenlong/swe/issues/1444).
+  [#1444](https://github.com/starship-terminal/swe/issues/1444).
 - **iPhone: the paired hubs move to an App Group and a shared Keychain
   group.** The hub list now lives in `group.com.quiver.remote` and each
   hub's credential in the `<team>.com.quiver.remote.shared` Keychain
   group, so an app extension can read them. Groundwork for the share
-  sheet ([#1441](https://github.com/c-wenlong/swe/issues/1441)) and
-  the widget ([#1442](https://github.com/c-wenlong/swe/issues/1442)).
+  sheet ([#1441](https://github.com/starship-terminal/swe/issues/1441)) and
+  the widget ([#1442](https://github.com/starship-terminal/swe/issues/1442)).
   Existing pairings move on first launch: each credential is copied
   into the shared group and the old item dropped only after the copy
   is stored, and a copy that fails keeps reading the old item.
@@ -1020,7 +1037,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   start read. Satellite sessions work the same, stored on the hub. Each
   write prunes cursors for sessions the hub no longer lists and for
   revoked devices. Part of
-  [#1439](https://github.com/c-wenlong/swe/issues/1439); the client
+  [#1439](https://github.com/starship-terminal/swe/issues/1439); the client
   dots follow.
 - **Mac: the AGENTS.md page edits instruction chapters.** When the shared
   file is chapter-managed (`~/.quiver/AGENTS_MD/index.txt` exists), the
@@ -1047,7 +1064,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hub, and a strip in the title bar names the machine. The list holds the
   hub this Mac's satellite agent reports to and hubs added by address in
   Settings › Integrations › Remote › Other hubs; the last pick is
-  remembered ([#681](https://github.com/c-wenlong/swe/issues/681)).
+  remembered ([#681](https://github.com/starship-terminal/swe/issues/681)).
 
 - **iPhone and web: a machine strip on the Sessions page.** One chip
   per machine the hub lists, with an online dot, its name, "N working
@@ -1056,14 +1073,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   strip hides when the hub has one machine, and orders machines like
   the Mac's "Other machines" group (online first, then name). No new
   hub route
-  ([#1443](https://github.com/c-wenlong/swe/issues/1443)).
+  ([#1443](https://github.com/starship-terminal/swe/issues/1443)).
 
 - **iPhone, web and Mac: thinking cards say how long the model
   thought.** A thinking card reads "Thought for 12s" or "Thought for
   1m 5s" from the hub's `duration_s`, and plain "Thought" when the hub
   sent none. One formatting rule per client (`ThoughtLabel.text` on
   iOS and the Mac, `Fmt.thought` on the web)
-  ([#1440](https://github.com/c-wenlong/swe/issues/1440)).
+  ([#1440](https://github.com/starship-terminal/swe/issues/1440)).
 
 - **Remote approvals show and answer unnumbered menus too.** A
   tmux-mode prompt whose options are an arrow-select list ("❭ Option
@@ -1090,7 +1107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code and Codex time it from the record before the thinking record to
   the thinking record; opencode from its own reasoning `time` span.
   Other harnesses, and records with no usable timestamps, leave it out
-  ([#1440](https://github.com/c-wenlong/swe/issues/1440)).
+  ([#1440](https://github.com/starship-terminal/swe/issues/1440)).
 
 - **Mac: Settings › Remote can keep this Mac's agent running.** On a Mac
   paired as a satellite of another machine's hub, a "Keep this Mac's
@@ -1098,7 +1115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through `swe remote agent --install` / `--uninstall`, and says whether
   it is running. The switch is hidden on the Mac that hosts the hub and
   on a Mac that was never paired
-  ([#1438](https://github.com/c-wenlong/swe/issues/1438)).
+  ([#1438](https://github.com/starship-terminal/swe/issues/1438)).
 
 - **`swe remote agent --install` keeps a satellite running.** Like
   `swe remote serve --install`, it runs `swe remote agent` as a
@@ -1113,7 +1130,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent runs. `--uninstall` removes it and
   `--status [--json]` shows it. `install-app.sh` now restarts the agent
   on a new bundle as it does the hub
-  ([#1438](https://github.com/c-wenlong/swe/issues/1438)).
+  ([#1438](https://github.com/starship-terminal/swe/issues/1438)).
 
 - **`swe init`: the hub's MCP servers in extra accounts.** A fourth
   switch, `accounts.sync.mcp`, off by default (`swe config set
@@ -1130,7 +1147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writes is recorded in `data/account-mcp.json`, and switching off then
   running `swe init` removes only those, and only while the account has
   not edited them. Closes
-  [#888](https://github.com/c-wenlong/swe/issues/888).
+  [#888](https://github.com/starship-terminal/swe/issues/888).
 
 - **Hub: switch the model of an opencode session attached through
   `opencode serve`.** The `model` control op on a `serve` session
@@ -1140,7 +1157,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rows now list `serve` in `model_modes`, so the iPhone's Model menu
   shows on them with no app change. This closes model switching on
   every API channel
-  ([#643](https://github.com/c-wenlong/swe/issues/643)).
+  ([#643](https://github.com/starship-terminal/swe/issues/643)).
 
 - **Hub: switch the model of a headless Claude Code session.** The
   `model` control op on a `headless` session records the pick on the
@@ -1148,7 +1165,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it as `--model`, so the switch applies from the next turn. Claude Code
   rows now list `headless` in `model_modes`, so the iPhone's Model menu
   shows on them with no app change
-  ([#643](https://github.com/c-wenlong/swe/issues/643)).
+  ([#643](https://github.com/starship-terminal/swe/issues/643)).
 
 - **Hub: switch the model of a Codex session attached through the
   app-server.** The `model` control op on an `appserver` session
@@ -1156,7 +1173,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `turn/start` carries it as its model override, so the switch applies
   from the next turn. Codex rows now list `appserver` in `model_modes`,
   so the iPhone's Model menu shows on them with no app change
-  ([#643](https://github.com/c-wenlong/swe/issues/643)).
+  ([#643](https://github.com/starship-terminal/swe/issues/643)).
 
 - **Mac: Sessions lists other machines' sessions.** Below this Mac's
   Pinned and day groups, an "Other machines" group shows the hub's rows
@@ -1169,7 +1186,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   come from the `/v1/sessions` read the page already makes, so filters
   and search leave them alone, and the group hides when no other machine
   reports a session or the hub is down
-  ([#970](https://github.com/c-wenlong/swe/issues/970)).
+  ([#970](https://github.com/starship-terminal/swe/issues/970)).
 
 - **iPhone app: Tasks gets the scope menu and five-row groups** the Mac
   and web already have (#941, #942). A menu above the filter chips
@@ -1182,7 +1199,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   five rows, then "Show N more" / "Show less". A failed repo's error
   sits under its own group header, and a scope the next refresh drops
   falls back to All tasks
-  ([#970](https://github.com/c-wenlong/swe/issues/970)).
+  ([#970](https://github.com/starship-terminal/swe/issues/970)).
 
 - **Mac: `app/mac/script/setup-machine.sh` sets up a new dev Mac.** It
   checks that full Xcode is selected (printing the `sudo xcode-select -s`
@@ -1193,7 +1210,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checkout's dev build for the installed app. Every step can run again, and
   `--dry-run` prints the plan without changing anything. `install-app.sh`
   now runs under `caffeinate -i`, so the Mac can't idle to sleep during a
-  build driven over SSH ([#1214](https://github.com/c-wenlong/swe/issues/1214)).
+  build driven over SSH ([#1214](https://github.com/starship-terminal/swe/issues/1214)).
 
 - **Mac app: Shared content switches on Accounts.** Once you have an
   extra Claude or Codex account, the Accounts page shows Instructions,
@@ -1203,7 +1220,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   off. Anything an account already has in that place is named under the
   switches and left alone. A newly added account is synced at once when
   any switch is on. Part of
-  [#888](https://github.com/c-wenlong/swe/issues/888).
+  [#888](https://github.com/starship-terminal/swe/issues/888).
 
 - **Mac app: pin, rename and fork sessions.** The Sessions list still
   comes from `swe session --json` (tokens, cost, filters); when this
@@ -1215,7 +1232,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the row's title (and is searchable), and a rename made on another
   device shows in an open chat live. Rows the hub doesn't list, and
   every row while the hub is down, keep the list as it was
-  ([#970](https://github.com/c-wenlong/swe/issues/970)).
+  ([#970](https://github.com/starship-terminal/swe/issues/970)).
 
 - **`swe init`: shared instructions, skills and hooks in extra accounts.**
   Three switches in config.json, all off by default:
@@ -1232,7 +1249,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   previews both directions and `--json` adds `account_sync` and
   `accounts`. `swe init --accounts` runs only this pass (with `--check`
   and `--json`), never touching the default harness homes. Part of
-  [#888](https://github.com/c-wenlong/swe/issues/888).
+  [#888](https://github.com/starship-terminal/swe/issues/888).
 
 - **Remote hub: optional owner auto-approve for pair requests.** Off by
   default. `swe remote devices --auto-approve=on|off` (or the new switch
@@ -1247,7 +1264,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   poll collects its credential. Every approval, by code over HTTP or
   automatic, writes one `pair:` line to the hub's log, and device rows
   record `approved_via` (`code` or `owner_auto`). Part of
-  [#522](https://github.com/c-wenlong/swe/issues/522).
+  [#522](https://github.com/starship-terminal/swe/issues/522).
 
 - **Remote hub: Notion databases as a task source.** A `notion` section
   in `config.json` names an integration token by `${NAME}` reference,
@@ -1262,7 +1279,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Notion-Version: 2022-06-28`, paginates with a cap, waits out a 429's
   `Retry-After`, and renders a page body to markdown for a resolve
   prompt. Read-only. Part of
-  [#847](https://github.com/c-wenlong/swe/issues/847).
+  [#847](https://github.com/starship-terminal/swe/issues/847).
 
 - **Tasks on the Mac, the web and the iPhone show Notion like Linear.**
   The three clients read the hub's new `notion` env block beside
@@ -1273,7 +1290,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their detail reads "Notion · <database>", and the link-out says
   "Open in Notion". Link and unlink work as for Linear; starting an
   agent stays GitHub-only. Part of
-  [#847](https://github.com/c-wenlong/swe/issues/847).
+  [#847](https://github.com/starship-terminal/swe/issues/847).
 - **Remote iPhone app: photo and file attachments in the chat
   composer.** A paperclip left of the prompt box offers Photos and
   Files. Each pick uploads at once to the hub's
@@ -1290,7 +1307,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   held in the queued tray keeps its files (the row shows a paperclip
   count), and a retry or an edit on an older hub resends the same refs.
   Detaching clears the chips, since the hub drops the staged files.
-  Part of [#516](https://github.com/c-wenlong/swe/issues/516).
+  Part of [#516](https://github.com/starship-terminal/swe/issues/516).
 - **Web app: Setup can start from your hub repo.** While `~/.quiver` on
   the hub machine has no hub yet, step 2 shows "Start from your hub
   repo": a URL field, the note "Fork a hub repo first (or use it as a
@@ -1302,7 +1319,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a clone or setup already running a 409 `busy`, and a URL git can't
   reach or a timeout shows under the field. The URL is only ever kept
   or shown without its credentials
-  ([#696](https://github.com/c-wenlong/swe/issues/696)).
+  ([#696](https://github.com/starship-terminal/swe/issues/696)).
 
 - **Web app: photo and file attachments in the chat composer.** A
   paperclip button, dropping files on the composer, or pasting a
@@ -1316,7 +1333,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message carries the uploaded files' refs in `attachments`, which the
   hub turns into `@path` for the harness. A message still needs text
   (the hub requires it); Enter on an empty box with files says so
-  ([#516](https://github.com/c-wenlong/swe/issues/516)).
+  ([#516](https://github.com/starship-terminal/swe/issues/516)).
 
 - **Mac app: the session's model in the chat header and Sessions
   list.** A session's chat header reads `harness · folder · model`, and
@@ -1332,7 +1349,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   model), so the header follows a model that first appears with the opening reply or
   changes elsewhere. Nothing shows when the hub doesn't know it. Display
   only: the Mac doesn't switch models. Part of
-  [#643](https://github.com/c-wenlong/swe/issues/643).
+  [#643](https://github.com/starship-terminal/swe/issues/643).
 
 
 - **iOS app: comment on an issue, and post your Resolve context as a
@@ -1341,30 +1358,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the resolve, and "Also post as a comment on #<n>", on by default.
   Both post through the hub's `gh` login with `POST /v1/issues/comment`.
   A context comment that fails is a warning; the launch still goes
-  ahead. Part of [#970](https://github.com/c-wenlong/swe/issues/970).
+  ahead. Part of [#970](https://github.com/starship-terminal/swe/issues/970).
 - **Web app: the Cursor app on the Calendar.** The hub reads each Cursor
   account's `state.vscdb` (the app's own folder and every extra Cursor
   profile's) as the Mac app does, so editor chats show as blocks with
   time and responses, one legend row per account. Devin cloud stays
   Mac-only, since its sessions live in the Mac app's own store. Part of
-  [#970](https://github.com/c-wenlong/swe/issues/970).
+  [#970](https://github.com/starship-terminal/swe/issues/970).
 - **Web app: comment on an issue, and post your Resolve context as a
   comment.** The issue sheet in Repositories now has the Mac's comment
   box under the thread (Cmd or Ctrl+Return posts), and the Resolve
   panel has "Also post as a comment on #<n>", ticked by default. Both
   post through the hub's `gh` login with `POST /v1/issues/comment`. A
   context comment that fails is a warning; the launch still goes ahead.
-  Part of [#970](https://github.com/c-wenlong/swe/issues/970).
+  Part of [#970](https://github.com/starship-terminal/swe/issues/970).
 - **Web app: Freebuff on the Calendar.** The hub reads Freebuff's
   `run-state.json` chats under `~/.config/manicode/projects` as the Mac
   app does, so its work shows as blocks with time and responses. Part
-  of [#970](https://github.com/c-wenlong/swe/issues/970).
+  of [#970](https://github.com/starship-terminal/swe/issues/970).
 - **Web app: Pi and Factory Droid on the Calendar.** The hub now reads
   their session files the way the Mac app does (`~/.pi/agent/sessions`
   and `~/.factory/sessions`), so their work shows as blocks beside the
   ledger harnesses, with time and responses. Accidental sessions stay
   off, judged on the ledger's history as on the Mac. Part of
-  [#970](https://github.com/c-wenlong/swe/issues/970).
+  [#970](https://github.com/starship-terminal/swe/issues/970).
 - **Hub: `POST /v1/issues/comment` posts an issue comment.** The body
   `{repo, number, body}` goes through the hub's own `gh` login, the way
   the Mac's composer posts through `swe gh issue comment`, with the text
@@ -1372,7 +1389,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the owner's device can call it, only for a pinned repo, and only up
   to GitHub's 65,536 characters. The web and iPhone issue detail build
   their comment composer and Resolve's "Also post as a comment" on it.
-  Part of [#970](https://github.com/c-wenlong/swe/issues/970).
+  Part of [#970](https://github.com/starship-terminal/swe/issues/970).
 
 - **`swe mcp gateway`: one copy of each shared MCP server for every
   session.** Each harness session started its own copy of every stdio
@@ -1395,13 +1412,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Send becomes Save), removed, or sent now into the running turn;
   Remove all asks first. The hub holds the sends, so the tray comes
   back when the chat reopens, with sends queued, edited or removed on
-  another device ([#970](https://github.com/c-wenlong/swe/issues/970)).
+  another device ([#970](https://github.com/starship-terminal/swe/issues/970)).
 - **Web app: issue detail and Resolve from Repositories.** An issue row
   now opens a sheet with the issue's body and comments (read only, from
   the hub's `GET /v1/issues/<owner>/<repo>/<n>`), Open on GitHub, and
   Resolve with agent: harness, model, your context and the first prompt,
   posted to `POST /v1/issues/resolve`, then the chat opens. Part of
-  [#970](https://github.com/c-wenlong/swe/issues/970).
+  [#970](https://github.com/starship-terminal/swe/issues/970).
 
 - **iOS app: the overview's top models, quick figures, heatmap and
   daily table, over all seven periods.** The Usage tab's Spend half
@@ -1414,7 +1431,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table (date, total, input, output, cached, spend), newest ten days
   first, then 30 more a tap. All of it comes from the `GET /v1/app/overview`
   payload the tab already read. Part of
-  [#970](https://github.com/c-wenlong/swe/issues/970).
+  [#970](https://github.com/starship-terminal/swe/issues/970).
 
 - **iOS app: answer an approval with the pane's own menu rows.** When
   the hub reads the agent's numbered menu ("1. Approve once", "2.
@@ -1424,7 +1441,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   number goes to the hub as the decision, and the answered card names
   the row it picked. Approvals without menu rows (older hubs,
   non-tmux sessions) keep Allow, Always and Deny. Part of
-  [#970](https://github.com/c-wenlong/swe/issues/970).
+  [#970](https://github.com/starship-terminal/swe/issues/970).
 
 - **Web app: pin, rename and fork sessions.** Each Sessions row has a
   More actions button (and a right-click menu) with the iPhone's
@@ -1435,7 +1452,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back; Fork takes a first message and opens the new chat once the hub
   names it. The chat's header has the same menu, and a rename made on
   another device shows there live
-  ([#970](https://github.com/c-wenlong/swe/issues/970)).
+  ([#970](https://github.com/starship-terminal/swe/issues/970)).
 - **Mac app: Needs you on the Inbox page.** Above the GitHub
   notifications, the Inbox now lists the sessions this Mac's hub says
   wait on you, broke or finished today (`GET /v1/inbox?done=1`), in the
@@ -1444,7 +1461,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for this Mac until the session moves again (`POST /v1/inbox/dismiss`),
   and never offers a pending approval. Nothing extra shows while the
   hub isn't running
-  ([#970](https://github.com/c-wenlong/swe/issues/970)).
+  ([#970](https://github.com/starship-terminal/swe/issues/970)).
 
 - **iOS app: merge, auto-merge and re-run on the pull request
   page.** The detail page has the Mac and web merge controls: a
@@ -1458,21 +1475,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run failed) and Re-run all jobs. The phone calls the web app's
   routes the hub already serves to paired devices,
   `POST /v1/app/repositories/merge` and `…/rerun`. Part of
-  [#970](https://github.com/c-wenlong/swe/issues/970).
+  [#970](https://github.com/starship-terminal/swe/issues/970).
 
 - **Web app: Mine and Review requested pull request filters.** The
   Repositories dashboard's Pull requests tab now offers All, Mine and
   Review requested with counts, as the iOS app does, from the flags the
   hub's `GET /v1/pulls` puts on each open PR. A filter hides while the
   hub can't say (a failed `gh pr status`) instead of guessing. Part of
-  [#970](https://github.com/c-wenlong/swe/issues/970).
+  [#970](https://github.com/starship-terminal/swe/issues/970).
 
 - **Web app: Needs you in the Inbox.** The Inbox page now opens with
   the iOS Inbox's Waiting on you, Errors and Finished today sections
   from the hub's `GET /v1/inbox`, above the GitHub notifications. A row
   opens its session's chat, and Clear (a row or a whole section) posts
   `POST /v1/inbox/dismiss`; a pending approval can't be cleared. Part of
-  [#970](https://github.com/c-wenlong/swe/issues/970).
+  [#970](https://github.com/starship-terminal/swe/issues/970).
 
 - **Remote: a `limit` notification when a session hits its usage
   limit.** The hub and satellites now raise `notify` kind `limit` when
@@ -1483,7 +1500,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `resets_at` and `window`. It rings once per limit: old records read
   during backfill and retries into the same limit stay quiet. Other
   harnesses don't raise it yet
-  ([#516](https://github.com/c-wenlong/swe/issues/516)).
+  ([#516](https://github.com/starship-terminal/swe/issues/516)).
 
 - **Web app: the session's model in the chat header and Sessions
   list.** The chat's header shows the model of the transcript's newest
@@ -1500,7 +1517,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page's rows (`/v1/app/sessions`) now carry the hub's `model` as the
   catalog read it, so the page has no second transcript reader. Display
   only: the web app doesn't switch models. Part of
-  [#643](https://github.com/c-wenlong/swe/issues/643).
+  [#643](https://github.com/starship-terminal/swe/issues/643).
 
 - **Mac app: approve pair requests in Settings › Remote.** A "Pending
   requests" group under Paired devices lists the phones asking to pair
@@ -1509,13 +1526,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Approve / Deny. It reads `swe remote devices --requests --json` every
   3 seconds, only while the section is on screen, and an approval
   refreshes the device list. This covers a hub on the same Mac; a hub on
-  another machine is [#681](https://github.com/c-wenlong/swe/issues/681).
+  another machine is [#681](https://github.com/starship-terminal/swe/issues/681).
   `swe remote devices --approve=<code>` and `--deny=<code>` gain
   `--request-id=<id>`, which holds the code to that one request, as the
   hub's HTTP route already did: a code typed against one row never
   decides another, and five wrong approve codes deny it. The app always
   sends it.
-  Part of [#522](https://github.com/c-wenlong/swe/issues/522).
+  Part of [#522](https://github.com/starship-terminal/swe/issues/522).
 
 - **Web app: `@` file completion in the chat composer.** Typing `@` at
   the start of the box or after a space opens the composer's menu with
@@ -1529,7 +1546,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   120 ms after the last keystroke, and a newer query drops an older
   answer. A satellite session's refusal and an older hub's 404 are
   worded in the menu
-  ([#516](https://github.com/c-wenlong/swe/issues/516)).
+  ([#516](https://github.com/starship-terminal/swe/issues/516)).
 
 - **Compute: auto clean orphaned processes, on the Mac and the web app.**
   The Compute settings gain an "Auto clean" switch (Mac: the cleanup
@@ -1557,7 +1574,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   swe's refusal (a hub already there, a URL git can't reach, a timeout)
   shows under the field, and the card names any plugin marketplace
   that couldn't be registered
-  ([#696](https://github.com/c-wenlong/swe/issues/696)).
+  ([#696](https://github.com/starship-terminal/swe/issues/696)).
 
 - **Remote iPhone app: switch a session's model from the chat.** On a
   session attached through tmux whose harness takes `/model <id>`
@@ -1572,7 +1589,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the list has refreshed after the hub's next read, so a switch the
   harness refused shows the model that actually ran. Elsewhere (watching
   only, headless, app-server, opencode) the submenu is hidden. Part of
-  [#643](https://github.com/c-wenlong/swe/issues/643).
+  [#643](https://github.com/starship-terminal/swe/issues/643).
 
 - **Web app: Preview on tool cards that write a page, and link cards
   under replies.** In a session's chat, a tool call that writes or
@@ -1590,7 +1607,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plain words. A reply that links to web pages gets a card per page
   (host, path, Open in a new tab), up to three. File names with `+` are
   sent as `%2B`
-  ([#634](https://github.com/c-wenlong/swe/issues/634)).
+  ([#634](https://github.com/starship-terminal/swe/issues/634)).
 
 - **Remote iPhone app: the chat header and the session list show the
   model.** A session's chat header adds the model after its folder, and
@@ -1599,7 +1616,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   date stamp are dropped, so `anthropic/claude-opus-4-5` and
   `claude-opus-4-5-20251101` both read `claude-opus-4-5`. Nothing shows
   when the hub doesn't know the model or is older than the field. Part
-  of [#643](https://github.com/c-wenlong/swe/issues/643).
+  of [#643](https://github.com/starship-terminal/swe/issues/643).
 
 - **Remote hub: session rows say which model each session runs.**
   `/v1/sessions` rows, the hub's own and a satellite's, carry `model`,
@@ -1612,7 +1629,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `stat` per refresh; OpenCode, Kilo and Devin ask their database once
   per session whenever its activity time moves. Junk names (Claude's
   `<synthetic>`, Devin's `compactor`) are skipped for the reply before.
-  Part of [#643](https://github.com/c-wenlong/swe/issues/643).
+  Part of [#643](https://github.com/starship-terminal/swe/issues/643).
 
 - **`swe setup` asks for your hub repo.** While `~/.quiver` is missing or
   empty, the wizard's first step asks for your hub repo's URL, beside
@@ -1627,7 +1644,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Under `--json` a refusal goes to stderr and exits 1, and the document
   gains `hub: {can_clone, demo_url, cloned}`. The demo hub link is one
   constant, `DEMO_HUB_URL` in `init/hub.py`, shown only once it is set
-  ([#696](https://github.com/c-wenlong/swe/issues/696)).
+  ([#696](https://github.com/starship-terminal/swe/issues/696)).
 
 - **Remote iPhone app: a Model menu on every launch sheet.** New
   session, Resolve issue, Open PR in session and a task's New agent
@@ -1639,7 +1656,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recent model only when the new harness lists it, and otherwise
   moves to the new harness's newest. A hub older than `recent_models`
   offers its `last_models` entry alone. Part of
-  [#914](https://github.com/c-wenlong/swe/issues/914).
+  [#914](https://github.com/starship-terminal/swe/issues/914).
 
 - **Web app: the launch sheets' Model box is now a menu.** New session,
   a task's New agent session and a PR's Open in session list "Harness
@@ -1650,7 +1667,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   machine switch, except a recent model the new harness never used,
   which re-defaults so a sheet never sends another harness's model. An
   older hub that sends only `last_models` gives a one-item list. Part of
-  [#914](https://github.com/c-wenlong/swe/issues/914), the same menu
+  [#914](https://github.com/starship-terminal/swe/issues/914), the same menu
   as the Mac app's below.
 
 - **Mac app: the launch sheets pick a model from a menu.** New session,
@@ -1662,7 +1679,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   typed id survives a harness or machine switch; a picked model the new
   harness hasn't run re-defaults instead of travelling to it. A hub
   without `recent_models` offers its `last_models` entry alone. Part of
-  [#914](https://github.com/c-wenlong/swe/issues/914).
+  [#914](https://github.com/starship-terminal/swe/issues/914).
 
 - **Remote iPhone app: Preview on tool cards that write a page.** When
   a tool call writes or edits an `.html`, `.htm` or `.svg` file inside
@@ -1672,7 +1689,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   network and navigation off; an SVG is drawn as an image. The card's
   raw content is still one tap away, and a missing, too-big or
   unsupported file says so in plain words
-  ([#634](https://github.com/c-wenlong/swe/issues/634)).
+  ([#634](https://github.com/starship-terminal/swe/issues/634)).
 
 - **Syntax highlighting in the chat, on the web app, the remote web
   client and the Mac app.** Fenced code blocks, tool arguments and tool
@@ -1699,7 +1716,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   harness, newest first, read from the usage ledger without internal
   names like Devin's `compactor` or Cursor's `default`, and OpenCode
   names completed to `provider/model`. Part of
-  [#914](https://github.com/c-wenlong/swe/issues/914); the client
+  [#914](https://github.com/starship-terminal/swe/issues/914); the client
   pickers come next.
 
 - **A "Fan off temperature" for the Compute fan rule.** The popover's
@@ -1720,7 +1737,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   included. `/v1/sessions` rows carry the supervised `mode`, the `tmux`
   name and `kept`, and so do `session.ownership` events. The details
   sheet adds the pane, its attach command and, on a macOS hub, Run in
-  terminal ([#850](https://github.com/c-wenlong/swe/pull/850)).
+  terminal ([#850](https://github.com/starship-terminal/swe/pull/850)).
 
 - **`swe init --hub=<git url>` brings your hub onto a new machine.** It
   checks the URL with `git ls-remote`, clones it as `~/.quiver` with your
@@ -1732,7 +1749,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own `plugin marketplace add`, the same fix `swe find plugins` offers.
   That fix now covers a hub marketplace whose plugins all come from
   GitHub or a URL, which drift used to skip
-  ([#696](https://github.com/c-wenlong/swe/issues/696)).
+  ([#696](https://github.com/starship-terminal/swe/issues/696)).
 
 - **Hub route for previewing a page file.** `GET
   /v1/sessions/{key}/preview?path=` returns one `.html`, `.htm` or `.svg`
@@ -1839,7 +1856,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@path/` with the menu still open to pick inside it, and a path with
   spaces is quoted. Sessions on a satellite say file search isn't
   available there. Part of
-  [#970](https://github.com/c-wenlong/swe/issues/970).
+  [#970](https://github.com/starship-terminal/swe/issues/970).
 
 - **Mac app: Mine and Review requested pull request filters.** The
   Repositories dashboard's and a repo focus page's Pull requests tab
@@ -1848,7 +1865,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it covers the focus page's merged and closed PRs too; Review
   requested reads `swe gh pr status` per repo. A filter hides while
   its flag is unknown instead of guessing
-  ([#970](https://github.com/c-wenlong/swe/issues/970)).
+  ([#970](https://github.com/starship-terminal/swe/issues/970)).
 
 - **Mac app: the Queued tray in the session chat.** A Queue-mode
   send the hub holds until the agent's turn ends now waits in a tray
@@ -1858,7 +1875,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Remove all clears the tray after a confirm. It moves to the
   transcript once it goes out, and reopening the chat shows what the
   hub still holds (`GET`/`POST /v1/sessions/{key}/queue`). Part of
-  [#970](https://github.com/c-wenlong/swe/issues/970).
+  [#970](https://github.com/starship-terminal/swe/issues/970).
 
 ### Changed
 
@@ -1872,7 +1889,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stops after a minute so a stuck load doesn't animate forever. The
   menu bar panel's tabs unmount while the panel is closed rather than
   redraw behind it for the app's whole life. Closes
-  [#1543](https://github.com/c-wenlong/swe/issues/1543).
+  [#1543](https://github.com/starship-terminal/swe/issues/1543).
 
 - **Web Compute, Sessions search and Overview do less DOM work.**
   Compute rebuilt its totals, trend card, harness cards and chart with
@@ -1884,7 +1901,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each one. Each row's text is now built once, and the list redraws 80
   ms after typing pauses. Overview redraws its charts at most once per
   frame while the window is resized.
-  Closes [#1557](https://github.com/c-wenlong/swe/issues/1557).
+  Closes [#1557](https://github.com/starship-terminal/swe/issues/1557).
 
 - **Web app tabs in the background stop polling the hub.** Settings ›
   Integrations relisted pair requests every 3 s (each relist costs the
@@ -1894,7 +1911,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shown again. A hidden chat keeps its stream and every event but draws
   nothing until it is shown, and the pairing countdown and Calendar's
   now-line stop ticking while hidden.
-  Closes [#1554](https://github.com/c-wenlong/swe/issues/1554).
+  Closes [#1554](https://github.com/starship-terminal/swe/issues/1554).
 
 - **The web chat reads its one session row, not the whole catalog.**
   The chat read `GET /v1/sessions` (every row, read-state and machines)
@@ -1904,7 +1921,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.4 ms and under 1 KB against 34 ms and 1.6 MB for a 2,000-row
   catalog. A return to the tab reads once, unless a turn's re-reads
   are still running.
-  Closes [#1556](https://github.com/c-wenlong/swe/issues/1556).
+  Closes [#1556](https://github.com/starship-terminal/swe/issues/1556).
 
 - **Three small rendering costs in the Mac app are gone.** GitHub's
   octicons parsed their SVG path data on every layout; each glyph now
@@ -1913,7 +1930,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the pointer leaves instead of 250. A sheet's shadow was worked out from its whole content on each
   frame of the open animation; it now comes from one rounded shape
   behind the card. Closes
-  [#1545](https://github.com/c-wenlong/swe/issues/1545).
+  [#1545](https://github.com/starship-terminal/swe/issues/1545).
 
 - **The Mac app's background polls slow down while nobody can see
   them.** The GitHub inbox poll ran `swe gh inbox` every minute for the
@@ -1926,7 +1943,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that doesn't answer is retried after 1, 2, 4 and then 5 minutes,
   where before it was every minute. The accounts timer reads the cached
   login `PATH` rather than starting `zsh -il` (the whole rc chain) every
-  5 minutes. Closes [#1541](https://github.com/c-wenlong/swe/issues/1541).
+  5 minutes. Closes [#1541](https://github.com/starship-terminal/swe/issues/1541).
 
 - **The hub reads `harness.json` once per launch-field refresh and
   finds tmux once.** Every 10 s catalog tick read the registry twice
@@ -1935,7 +1952,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   walked `PATH` for the tmux binary (21 us); the path is now kept
   while `PATH` is unchanged and the file is still executable (5 us). A
   missing tmux is looked up again each time, so one installed later is
-  found. Closes [#1531](https://github.com/c-wenlong/swe/issues/1531).
+  found. Closes [#1531](https://github.com/starship-terminal/swe/issues/1531).
 - **A streaming Devin session costs the hub its new rows, not its
   whole window.** Each time a tailed Devin session changed, the hub
   re-read up to 1,064 chain nodes with one query and one JSON parse each:
@@ -1946,7 +1963,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same sessions, for 0.4 to 2 MB kept per session. A whole read still
   runs at least once a minute while the session changes, and the kept
   nodes go after five quiet minutes. Closes
-  [#1522](https://github.com/c-wenlong/swe/issues/1522).
+  [#1522](https://github.com/starship-terminal/swe/issues/1522).
 
 - **A long-running hub stops keeping state for sessions and panes that
   are gone.** The rate-limit notice memory kept one entry per session
@@ -1954,8 +1971,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   typed into. A session leaving the catalog now drops its limit entry,
   and a pane's lock lives only while a write holds it. Streamed messages
   whose channel died mid-reply were bounded in
-  [#1532](https://github.com/c-wenlong/swe/issues/1532). Closes
-  [#1533](https://github.com/c-wenlong/swe/issues/1533).
+  [#1532](https://github.com/starship-terminal/swe/issues/1532). Closes
+  [#1533](https://github.com/starship-terminal/swe/issues/1533).
 - **`swe`'s search indexer stops resolving every transcript's path.**
   Listing the transcripts called `realpath` on each one, a stat per
   folder in its path, every pass. The walk now resolves its root once
@@ -1963,7 +1980,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   order as before: 87 to 66 ms to list 1,238 transcripts here. A Devin
   session still decodes its whole chain when it grows, as the Mac app's
   indexer does; FEATURES.md notes that both writers owe that change.
-  Closes [#1538](https://github.com/c-wenlong/swe/issues/1538).
+  Closes [#1538](https://github.com/starship-terminal/swe/issues/1538).
 - **Live reply text costs the hub linear work, not quadratic.** Every
   100 ms flush of a streamed reply re-cleaned the whole message so far:
   a 100 KB reply took 3.3 s of cleaning, now 58 ms. Each message keeps
@@ -1975,7 +1992,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   15 idle minutes (a late chunk for it never streams), and its empty
   entry goes after a day. A hub event going to several open streams is now cleaned and
   encoded once, not once per stream. Closes
-  [#1532](https://github.com/c-wenlong/swe/issues/1532).
+  [#1532](https://github.com/starship-terminal/swe/issues/1532).
 - **The web chat parses only the growing end of a streaming reply.**
   Each repaint (at most every 80 ms) used to run the whole reply through
   the Markdown parser and syntax highlighter and replace the bubble's
@@ -1987,7 +2004,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rebuilds every bubble's text twice to see whether anything changed,
   and the chat log is no longer a live region, so screen readers hear a
   finished reply once from a small status node instead of each repaint.
-  Closes [#1555](https://github.com/c-wenlong/swe/issues/1555).
+  Closes [#1555](https://github.com/starship-terminal/swe/issues/1555).
 
 - **The hub's approval watcher reads the supervised registry once per
   pass.** Every 3 s it opened and parsed `supervised.json` once for each
@@ -1995,7 +2012,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name its pane. It now reads the file once per pass and takes the pane
   name from the same row. With nothing attached it spawned no `tmux`
   before and spawns none now. Closes
-  [#1530](https://github.com/c-wenlong/swe/issues/1530).
+  [#1530](https://github.com/starship-terminal/swe/issues/1530).
 
 - **Devin change checks cost microseconds instead of milliseconds.**
   Every poll of a tailed Devin session opened a new connection to
@@ -2006,7 +2023,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads the newest row id and chain head (0.03 to 0.3 ms). The row count,
   which catches a delete below the newest row, is read again at most once
   a minute per session. Closes
-  [#1521](https://github.com/c-wenlong/swe/issues/1521).
+  [#1521](https://github.com/starship-terminal/swe/issues/1521).
 
 - **The Mac app keeps fewer things in memory for its whole life.**
   Switching machines kept a live web view and WebContent process for
@@ -2016,7 +2033,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through years no longer grows it without end. The Sessions page lists
   at most 20,000 sessions instead of 100,000, with the existing note
   when older ones are left out. Closes
-  [#1544](https://github.com/c-wenlong/swe/issues/1544).
+  [#1544](https://github.com/starship-terminal/swe/issues/1544).
 - **`swe check` and `swe mcp status` probe side by side.** `swe check`
   asked each installed harness for its version one after another (up to
   three subprocesses each); it now runs them on a small thread pool,
@@ -2027,7 +2044,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each PATH directory once instead of probing every absent name in each
   (8.7 to 5.8 ms), and skill discovery enumerates the skill roots once
   instead of once per `SKILL.md`. Closes
-  [#1537](https://github.com/c-wenlong/swe/issues/1537).
+  [#1537](https://github.com/starship-terminal/swe/issues/1537).
 - **The hub stops re-parsing its small stores on every request.** The
   credential check, an open stream's revocation check, the session
   list's unread flags and the machine list read `devices.json`, the
@@ -2036,7 +2053,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parses a file again only when it changes: a session list over 2,000
   read cursors went from 1.8 ms to 0.7 ms, and a credential check from
   37 to 11 us. Closes
-  [#1528](https://github.com/c-wenlong/swe/issues/1528).
+  [#1528](https://github.com/starship-terminal/swe/issues/1528).
 - **The Mac app's background polls no longer keep the Mac awake.**
   Every `swe` the app ran held a user-initiated activity, which also
   blocks idle system sleep while the child runs, so the GitHub poll, the
@@ -2045,7 +2062,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timers now run their `swe` with no activity; runs from a button keep
   it. The activity always ended with each run, so App Nap was only off
   while a child ran, never for the whole app. Closes
-  [#1540](https://github.com/c-wenlong/swe/issues/1540).
+  [#1540](https://github.com/starship-terminal/swe/issues/1540).
 - **The Mac app's ledger ticks cost about a third of the CPU they did.**
   A background scan now counts as new usage only when it wrote a usage
   event, not when it merely read a file, so a tick that appended prompts
@@ -2054,7 +2071,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per row, grouped reads group by dimension id before joining names, and
   Codex's account comparison reads only Codex rows. Measured against a
   copy of a 415,000-event ledger, one ingest tick went from about 6.4 to
-  2.0 CPU-seconds. Closes [#1568](https://github.com/c-wenlong/swe/issues/1568).
+  2.0 CPU-seconds. Closes [#1568](https://github.com/starship-terminal/swe/issues/1568).
 - **The hub slows down while nobody is watching.** With no client
   stream open (the ntfy notifier holds one whenever it can push;
   satellite command streams don't count) and no client request for two
@@ -2068,7 +2085,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refresh instead of serving a minute-old list. An unwatched hub on this
   Mac used about 8% of a core, split about evenly between the catalog
   and tail threads. Closes
-  [#1520](https://github.com/c-wenlong/swe/issues/1520).
+  [#1520](https://github.com/starship-terminal/swe/issues/1520).
 - **`swe` starts faster: each command imports only its own code.**
   `cli.py` imported every command's module tree before dispatching, so
   `import swe.cli` took about 330 ms on a loaded machine, nearly all of
@@ -2077,7 +2094,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `import swe.cli` to about 33 ms. A rate limits call also reads its
   cache file once instead of five times, and `swe list` reads
   config.json's `list` section once instead of three times. Closes
-  [#1536](https://github.com/c-wenlong/swe/issues/1536).
+  [#1536](https://github.com/starship-terminal/swe/issues/1536).
 - **The status column reads less per session.** OpenCode's probe
   pulled the full JSON of a session's newest 50 messages and ran two
   `PRAGMA table_info` reads for every session; it now reads the table
@@ -2089,7 +2106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   probes decode JSONL lines newest-first only until the walk decides.
   CPU per pass here: OpenCode 381 sessions about 66 to 50 ms, Devin
   216 sessions about 10 to 6 ms, a 64 KB transcript tail walk about
-  half. Closes [#1535](https://github.com/c-wenlong/swe/issues/1535).
+  half. Closes [#1535](https://github.com/starship-terminal/swe/issues/1535).
 - **The Mac app's Compute sampler runs at full rate only while a
   trend view is on screen.** It used to sweep every process, the GPU
   clients and the SMC at the chosen interval (3 s on one Mac) for as
@@ -2102,7 +2119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own three-second refresh also stops while its window is minimised or
   covered, the temperature reads keep one SMC connection, and process
   attribution works each pid's harness out once. Closes
-  [#1539](https://github.com/c-wenlong/swe/issues/1539).
+  [#1539](https://github.com/starship-terminal/swe/issues/1539).
 
 - **The iPhone chat stops re-parsing a streaming reply from the top.**
   Every 80 ms repaint of a reply still being written parsed the whole
@@ -2114,7 +2131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   text and link scans are cached by block text, and unchanged blocks
   skip layout. The same reply now costs 0.9 s, and every prefix parses
   to exactly the blocks a full parse gives. Closes
-  [#1548](https://github.com/c-wenlong/swe/issues/1548).
+  [#1548](https://github.com/starship-terminal/swe/issues/1548).
 - **A snapshot session whose store can't be found no longer costs a
   read attempt every poll.** When a Cline, Continue, Gemini, Copilot,
   Forge or Crush read found no source files or a store it couldn't read,
@@ -2124,7 +2141,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files exist. Copilot and Crush tail reads also stop at the newest 1,000
   turns or rows instead of reading the whole session; the other stores
   keep one JSON document per session, which has to be parsed whole.
-  Closes [#1526](https://github.com/c-wenlong/swe/issues/1526).
+  Closes [#1526](https://github.com/starship-terminal/swe/issues/1526).
 
 - **The usage ledger reads only new Devin and OpenCode rows.** Any
   write to Devin's `sessions.db` or its WAL made the next scan (each
@@ -2135,7 +2152,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   metrics holds it back) and OpenCode's newest `time_updated`, so a scan
   after new activity reads only the rows past it, in about 3 ms. A
   recreated or rebuilt database is read again from the start. Closes
-  [#1524](https://github.com/c-wenlong/swe/issues/1524).
+  [#1524](https://github.com/starship-terminal/swe/issues/1524).
 
 - **The hub stops re-reading idle Devin sessions every minute.** A
   snapshot tailer trusted "nothing changed" for 60 s, then re-read the
@@ -2144,14 +2161,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Devin rewrites a message with `INSERT OR REPLACE`, which gives it a new
   row id. Devin sessions now re-read only when that token moves, which
   saves about 2.5% of a core with 50 idle Devin sessions tailed. Closes
-  [#1563](https://github.com/c-wenlong/swe/issues/1563).
+  [#1563](https://github.com/starship-terminal/swe/issues/1563).
 - **Devin status checks stop forking `ps` for stale locks.** The hub's
   status pass asked `ps` about every pid named by a single Devin
   session lock, and most of those pids are long dead: 131 forks and
   about 0.4 s of CPU every 10 s on a machine with 318 locks. It now
   skips dead pids with a signal-0 check, and reads the lock directory
   only when a mid-turn Devin row has a quiet transcript. Closes
-  [#1525](https://github.com/c-wenlong/swe/issues/1525).
+  [#1525](https://github.com/starship-terminal/swe/issues/1525).
 - **The Mac app is SWE.app now** (SWE Wraps Everything — the product
   takes the `swe` command's name and Quiver is decommissioned). The
   bundle is `SWE.app` with bundle id `com.cwenlong.swe`, its Swift
@@ -2177,12 +2194,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   old build still pairs and reports iOS correctly. Because the App
   Group and Keychain group change, a Quiver Remote install does not
   carry its pairing over: pair again after updating.
-- **The GitHub repos are `c-wenlong/swe` now.** `c-wenlong/quiver` was
-  renamed to `c-wenlong/swe`, `quiver-hub` to `swe-hub`,
+- **The GitHub repos are `starship-terminal/swe` now.** `starship-terminal/swe` was
+  renamed to `starship-terminal/swe`, `swe-hub` to `swe-hub`,
   `quiver-demo-hub` to `swe-demo-hub` and `homebrew-quiver` to
   `homebrew-swe`; the old names redirect. The tap is now
-  `c-wenlong/swe`: `brew install --cask c-wenlong/swe/swe` installs the
-  Mac app and `brew install c-wenlong/swe/swe` the CLI. The first SWE
+  `starship-terminal/swe`: `brew install --cask starship-terminal/swe/swe` installs the
+  Mac app and `brew install starship-terminal/swe/swe` the CLI. The first SWE
   release materializes `Casks/swe.rb` in the tap; `Casks/quiver.rb`
   stays frozen at the last Quiver build so old installs and uninstalls
   keep working.
@@ -2217,7 +2234,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and their hover notes say so. Stored rows in the old shape still
   decode. The quota text now says 100 requests a day, and a `410` reads
   "Artificial Analysis retired this API. Update SWE."
-  [#948](https://github.com/c-wenlong/swe/issues/948).
+  [#948](https://github.com/starship-terminal/swe/issues/948).
 
 - **Mac app: less CPU while idle.** The trend sampler no longer reads
   every HID temperature sensor each tick when the SMC already gave the
@@ -2236,7 +2253,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `compaction` event in `EVENT_TYPES`, docs/json-contracts.md and
   docs/remote-control.md was never emitted. The hub still accepts one
   from an older satellite
-  ([#516](https://github.com/c-wenlong/swe/issues/516)).
+  ([#516](https://github.com/starship-terminal/swe/issues/516)).
 
 - **`--hub` clones around the state a machine already has.** `swe init
   --hub` and `swe setup --hub` used to refuse any `~/.quiver` with files
@@ -2253,7 +2270,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `data/web-ledger/`, the web app's ledger, and a clone whose own
   `.gitignore` is older gets the missing patterns in its
   `.git/info/exclude`, so this machine's state never reaches the hub's
-  git ([#696](https://github.com/c-wenlong/swe/issues/696)).
+  git ([#696](https://github.com/starship-terminal/swe/issues/696)).
 
 - **Usage problems say what to do, graded by how much they need you.**
   A stale login or a credentials file macOS won't let SWE read puts
@@ -2268,7 +2285,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   login command, and an extra Devin or Cursor account's Doctor row keeps
   the fix aimed at that account's files. Issues of a harness you unstar
   close instead of holding the badge, and the issue store's file work
-  runs off the main thread ([#797](https://github.com/c-wenlong/swe/issues/797)).
+  runs off the main thread ([#797](https://github.com/starship-terminal/swe/issues/797)).
 
 - **The menu bar fan popover's notes fold into an ⓘ mark.** The
   captions under the Automatic and Manual controls move into the app's
@@ -2370,7 +2387,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stops at the client's cursor, in 0.2 ms for 5 events and 0.4 ms for
   100. A full replay (`last=0`) still reads the file once, forward.
   Appends encode each line once for both the write and the byte count.
-  Closes [#1529](https://github.com/c-wenlong/swe/issues/1529).
+  Closes [#1529](https://github.com/starship-terminal/swe/issues/1529).
 - **The status and model caches stop stat'ing every entry on each
   rewrite.** The hub's status probes rewrite `session_status_cache.json`
   up to once a second while a session is busy, and every rewrite checked
@@ -2379,7 +2396,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cache file in a process; a deleted file's entry just waits for the
   next one. A process-resident store was not worth it: the cache files
   are 210 to 245 KB here (not 10 to 50 MB) and load in about 1 ms.
-  Closes [#1527](https://github.com/c-wenlong/swe/issues/1527).
+  Closes [#1527](https://github.com/starship-terminal/swe/issues/1527).
 - **Session listings read Devin prompts once and Cline files once per
   change.** Devin's title provenance ran one `prompt_history` query per
   session (210 here); it now runs one for all of them. Cline's session
@@ -2387,7 +2404,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listing parsed in full every time (about 3 ms per 2 MB file); each file
   now goes through the parse cache, so an unchanged one costs a `stat`.
   `json_engine` joins the parse cache's fingerprint. Closes
-  [#1534](https://github.com/c-wenlong/swe/issues/1534).
+  [#1534](https://github.com/starship-terminal/swe/issues/1534).
 - **The iPhone chat's working pill stops redrawing every frame.** The
   cycling verb under a working agent ran on a `.animation` timeline,
   so for the whole turn it rebuilt its gradient mask and glow on every
@@ -2398,7 +2415,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while the word rests, and the same picture (the test renders both).
   The queued-send spinner turns with one repeating rotation instead of
   its own per-frame timeline. Closes
-  [#1550](https://github.com/c-wenlong/swe/issues/1550).
+  [#1550](https://github.com/starship-terminal/swe/issues/1550).
 - **The iPhone app's 15 s poll changes only what changed.** Every poll
   of `/v1/sessions` and `/v1/inbox` wrote the sessions, inbox and
   machines back even when the hub sent the same lists, and
@@ -2411,7 +2428,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fewer requests), and the poll pauses
   while the app is inactive (the app switcher, Control Centre, a call),
   not only in the background. Closes
-  [#1549](https://github.com/c-wenlong/swe/issues/1549).
+  [#1549](https://github.com/starship-terminal/swe/issues/1549).
 - **The iPhone console, uploads and Devices page wake the app less.**
   The console hopped to the main queue once per SSH read, hundreds of
   times a second while a command printed; reads now queue up and reach
@@ -2421,7 +2438,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fetched both pair requests and the device list every 5 s while open;
   it now loads devices once (and again after an approval, a removal or
   a pull to refresh) and asks for pending requests every 10 s. Closes
-  [#1553](https://github.com/c-wenlong/swe/issues/1553).
+  [#1553](https://github.com/starship-terminal/swe/issues/1553).
 - **The iPhone composer keeps picked files on disk, not in memory.** A
   file from Files was read whole into memory (up to 20 MB, or 200 MB
   for an image to convert), a photo from Photos loaded as one `Data`,
@@ -2432,7 +2449,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file. A failed upload keeps only the file; it goes once the hub has
   it or the chip is removed or sent, and what a crash left behind is
   swept at the next launch. Closes
-  [#1551](https://github.com/c-wenlong/swe/issues/1551).
+  [#1551](https://github.com/starship-terminal/swe/issues/1551).
 
 ### Fixed
 
@@ -2481,7 +2498,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while the Overview is on screen, its selected period; the other
   periods and the heatmap's older days are rebuilt when the Overview
   next opens. The Rescan and refresh buttons still rebuild everything.
-  [#1542](https://github.com/c-wenlong/swe/issues/1542).
+  [#1542](https://github.com/starship-terminal/swe/issues/1542).
 
 - **`swe init` links a Codex skills folder that holds only Codex's own
   skills.** Codex 0.166 writes its bundled skills to
@@ -2524,7 +2541,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `.system` folder at the top of a skills root; other dot folders are
   still listed. `data/web-status-services.json` no longer travels between
   machines. Found while rehearsing `docs/demo.md` segment 10
-  ([#524](https://github.com/c-wenlong/swe/issues/524)).
+  ([#524](https://github.com/starship-terminal/swe/issues/524)).
 
 - **`swe init` points at the chapters when the hub has them.** Its
   summary always said to edit `~/.swe/AGENTS.md` to change every
@@ -2543,7 +2560,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it; one that doesn't shows and sends its own default, and the next
   harness that lists it gets it back. What the menu shows is still what
   gets sent, and a recent model is sent trimmed. The same rule as the
-  Mac app's fix in [#951](https://github.com/c-wenlong/quiver/pull/951).
+  Mac app's fix in [#951](https://github.com/starship-terminal/swe/pull/951).
 
 - **The iPhone app's Model menu keeps your pick across a harness round
   trip.** On the New session, Resolve issue, pull request and task
@@ -2551,7 +2568,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   harness that doesn't list it) and back used to land on Claude's
   newest model instead. The menu now remembers a picked recent model
   until you pick something else, the rule the Mac app got in
-  [#951](https://github.com/c-wenlong/swe/pull/951). A harness or
+  [#951](https://github.com/starship-terminal/swe/pull/951). A harness or
   machine that lists it shows it; one that doesn't shows and sends its
   own default, and the next one that lists it gets it back. What the
   menu shows is still what gets sent.
@@ -2598,13 +2615,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sidebar nested inside the native one. While a hub is up the window is
   all its web app; the title-bar strip names the machine and is the
   machine menu, the way back to This Mac or to another hub
-  ([#681](https://github.com/c-wenlong/swe/issues/681)).
+  ([#681](https://github.com/starship-terminal/swe/issues/681)).
 
 - **Hub: old `/app/` links keep their query string.** The redirects from
   `/app/…` and `/index.html` to the web app at `/` now carry the query
   onto `Location` (the browser already kept `#pair=` and `#approve`
   fragments), and a test pins that no `/v1/` route falls through to the
-  app's page ([#943](https://github.com/c-wenlong/swe/issues/943)).
+  app's page ([#943](https://github.com/starship-terminal/swe/issues/943)).
 
 - **Remote: attached files reach harnesses that don't read `@` refs.**
   Every channel used to put a phone attachment into the prompt as
@@ -2615,7 +2632,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own tools. Which harness gets which is harness.json
   `capabilities.attachments.at_refs`, over a fallback table in
   `remote/attachments.py`
-  ([#516](https://github.com/c-wenlong/swe/issues/516)).
+  ([#516](https://github.com/starship-terminal/swe/issues/516)).
 
 - **MCP gateway: no longer throttled by macOS.** The LaunchAgent was
   written with `ProcessType: Background`, as the remote hub's is, and
@@ -2648,7 +2665,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now sign the app, and the bundled Python that runs the hub, with
   `app/mac/script/SWE.entitlements`, which grants it; the existing
   `NSAppleEventsUsageDescription` gives the prompt its text
-  ([#968](https://github.com/c-wenlong/swe/issues/968)).
+  ([#968](https://github.com/starship-terminal/swe/issues/968)).
 
 - **Remote: queue-mode sends wait for idle on satellites too.** A
   `queue`-mode message to a session on another machine used to fail
@@ -2661,7 +2678,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The hub's and the satellite's idle wait both probe with the tailer's
   activity time, so a turn that started since the last catalog refresh
   no longer reads as "interrupted" and gets a queued send typed into it
-  ([#516](https://github.com/c-wenlong/swe/issues/516)).
+  ([#516](https://github.com/starship-terminal/swe/issues/516)).
 
 - **The Mac app's Model menu keeps your pick across a harness round
   trip.** On New session, Resolve issue and a task's New agent session,
@@ -2672,7 +2689,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Codex, or Kilo, which takes no model) shows and sends its own
   default, and the next harness that lists it gets it back. What the
   menu shows is still what gets sent. Follows
-  [#914](https://github.com/c-wenlong/swe/issues/914).
+  [#914](https://github.com/starship-terminal/swe/issues/914).
 - **The fan rule comes back on its own after the helper stops
   answering.** A fan request the root helper never took used to switch
   the rule off until someone toggled it or set a speed by hand, and a
@@ -2694,14 +2711,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PR open`, `Merged`, `Closed`, `Open`, or a Linear workflow state's
   name), and its stepper reads Open → Agent → PR open → Merged for
   GitHub and Open → Started → Done elsewhere
-  ([#875](https://github.com/c-wenlong/swe/issues/875)).
+  ([#875](https://github.com/starship-terminal/swe/issues/875)).
 - **The iPhone app's tab bar fits again.** The Tasks tab made six tabs,
   and iPhone shows four plus "More" past five, so Issues and Usage were
   hidden behind More and `quiver://issue` links landed inside it.
   Issues and Pull requests now share one GitHub tab with an Issues /
   Pull requests switch at the top, each side keeping what it loaded,
   and issue links open GitHub on its Issues side
-  ([#875](https://github.com/c-wenlong/swe/issues/875)).
+  ([#875](https://github.com/starship-terminal/swe/issues/875)).
 - **Tasks say what the source says, and say when GitHub didn't
   answer.** The web Tasks page and the iPhone Tasks tab showed the
   hub's internal ladder as each task's status, so an issue whose agent
@@ -2718,7 +2735,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plain launch reloads the list, an old unlink error clears, both
   clients count a pull task as "PR open" until it lands, and linking,
   unlinking or closing the launch sheet no longer refetches every
-  repo from `gh` ([#875](https://github.com/c-wenlong/swe/issues/875)).
+  repo from `gh` ([#875](https://github.com/starship-terminal/swe/issues/875)).
 - **Cursor usage works for editor-only users on macOS.** The Cursor
   editor now stores its session token encrypted
   (`cursor-safe-storage:v1:` in `state.vscdb`), so usage showed only
@@ -2733,7 +2750,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before asking again. To allow it for good, run
   `security find-generic-password -w -s "Cursor Safe Storage" >/dev/null`
   in Terminal and choose Always Allow. Other platforms keep reading
-  plaintext tokens ([#796](https://github.com/c-wenlong/swe/issues/796)).
+  plaintext tokens ([#796](https://github.com/starship-terminal/swe/issues/796)).
 - **Stored tasks keep their last-known state when a source can't be
   read.** A linked issue last seen closed or merged read `in_progress`
   again on `GET /v1/tasks` while `gh` was signed out, Linear was down,
@@ -2751,21 +2768,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   folders never arrived. Doctor's Setup section now gives one warning per
   harness listing them, with a fix that names the file to edit, or says
   the file is managed by Nix when it is a store link
-  ([#696](https://github.com/c-wenlong/swe/issues/696)).
+  ([#696](https://github.com/starship-terminal/swe/issues/696)).
 - **The web app's Plugins page says once where missing marketplaces were
   looked for.** A `~/.claude/settings.json` from another machine can
   register several marketplaces whose folders are not on this one, and
   the page printed "no marketplace manifest on disk" once per name. Each
   harness now gets one line naming them and the folder they were looked
   in, and swe's catalog errors carry that folder as `path`
-  ([#696](https://github.com/c-wenlong/swe/issues/696)).
+  ([#696](https://github.com/starship-terminal/swe/issues/696)).
 - **`swe init` builds and repairs every hub folder.** It used to create
   only `skills/` and `backups/`, so a hub that reached a second machine
   as a bare `AGENTS.md` never got `plugins/`, `hooks/` or `mcp/`. The
   hub's folders are now one list in `paths.py` (`HUB_SUBDIRS`), and init
   creates whichever are missing on a new or existing `~/.quiver` without
   touching files already there
-  ([#696](https://github.com/c-wenlong/swe/issues/696)).
+  ([#696](https://github.com/starship-terminal/swe/issues/696)).
 - **Mac app sidebar toggle works in a normal window.** Since the toggle
   moved into the traffic lights' row, a click on it in a window that was
   not full screen did nothing: the sidebar list or the page reached up
@@ -2847,7 +2864,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answers them. Prompts without a menu show Allow and Deny (no Always).
   Any other decision on a live token burns it and gets a 403
   (`decision_not_allowed`) plus a hub log line
-  ([#1464](https://github.com/c-wenlong/swe/issues/1464)).
+  ([#1464](https://github.com/starship-terminal/swe/issues/1464)).
 
 - **Remote: revoking a lost phone works when it shares the owner's
   tailnet login.** The owner's own tailnet devices get in without
@@ -2861,7 +2878,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it are signed out, until a pair request from it is approved again.
   Revoking a device paired through a tailnet request revokes its node
   too. The owner's other devices keep working
-  ([#966](https://github.com/c-wenlong/swe/issues/966)).
+  ([#966](https://github.com/starship-terminal/swe/issues/966)).
 
 - **Mac app: the fan helper is checked against SWE's own signature
   before it runs as root.** The one-time install copied
@@ -2877,7 +2894,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   otherwise. Ad-hoc builds have no signature to check against and keep
   the hash check alone. Installed helpers are not reinstalled, so nobody
   is asked for their password again
-  ([#967](https://github.com/c-wenlong/swe/issues/967)).
+  ([#967](https://github.com/starship-terminal/swe/issues/967)).
 
 - **Mac app: the fan helper only takes requests from SWE itself,
   checked by its code signature.** The running root helper held the fans
@@ -2897,7 +2914,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unused, the fans stay with macOS, and both fan popovers show the
   reason with an "Update fan helper" button; Set speed or the
   temperature rule's switch also updates it
-  ([#967](https://github.com/c-wenlong/swe/issues/967)).
+  ([#967](https://github.com/starship-terminal/swe/issues/967)).
 
 - **Remote: a local process can no longer claim the owner's tailnet
   identity.** Behind `tailscale serve` the hub read the client from
@@ -2913,7 +2930,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serve's local listener forwards any local process as that node. The
   owner's phones and other computers get in as before, and paired
   devices are unaffected; a browser on the hub machine now pairs
-  ([#965](https://github.com/c-wenlong/swe/issues/965)).
+  ([#965](https://github.com/starship-terminal/swe/issues/965)).
 
 - **The remote hub refuses wildcard and non-tailnet binds.** `swe
   remote serve --host=0.0.0.0` — or a LAN address, a link-local
@@ -4434,7 +4451,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **A docs site** at <https://c-wenlong.github.io/quiver/>, built with
+- **A docs site** at <https://starship-terminal.github.io/swe/>, built with
   Zensical from the existing Markdown (README, architecture and
   contributing docs, the app docs) plus a generated `swe help` reference
   page. `scripts/docs_site.py` stages it into `build/docs-site/` and a
@@ -4933,7 +4950,7 @@ service / model layering, tests with an 84% coverage floor).
   plain import. The CI test matrix moves to 3.11 and 3.13 and coverage drops to
   a single leg, taking CI from 7 check runs to 6. Users on 3.10 should pin `v0.2.9`,
   the last release that runs on it: `pipx install
-  git+https://github.com/c-wenlong/swe.git@v0.2.9`. Ubuntu 22.04 LTS ships
+  git+https://github.com/starship-terminal/swe.git@v0.2.9`. Ubuntu 22.04 LTS ships
   3.10, while Debian 12 and Ubuntu 24.04 ship 3.11 and 3.12 respectively.
 
   One behaviour improves: a timestamp carrying nanosecond precision, such as
@@ -4995,7 +5012,7 @@ service / model layering, tests with an 84% coverage floor).
   tag against `project.version`, runs `twine check`, smoke-tests the wheel,
   and attaches both files to the GitHub release. Publishing to PyPI stays
   commented out because the name `quiver` belongs to another project.
-- **A `flake.nix` in the repo.** `nix run github:c-wenlong/swe` builds
+- **A `flake.nix` in the repo.** `nix run github:starship-terminal/swe` builds
   and runs `swe` with no clone, and `packages.default` is a flake input any
   nix-darwin or Home Manager config can consume. The build runs the whole
   unittest suite inside the sandbox, so `nix flake check` doubles as the
@@ -5948,15 +5965,15 @@ service / model layering, tests with an 84% coverage floor).
 - Stdlib-only core; optional FastMCP server extra for session history MCP tool
 - Test suite (15 unit tests) with isolated `$HOME` fixtures
 
-[Unreleased]: https://github.com/c-wenlong/swe/compare/v1.2.2...HEAD
-[1.2.2]: https://github.com/c-wenlong/swe/releases/tag/v1.2.2
-[1.2.1]: https://github.com/c-wenlong/swe/releases/tag/v1.2.1
-[1.2.0]: https://github.com/c-wenlong/swe/releases/tag/v1.2.0
-[1.1.1]: https://github.com/c-wenlong/swe/releases/tag/v1.1.1
-[1.0.0]: https://github.com/c-wenlong/swe/releases/tag/v1.0.0
-[0.2.9]: https://github.com/c-wenlong/swe/releases/tag/v0.2.9
-[0.2.8]: https://github.com/c-wenlong/swe/releases/tag/v0.2.8
-[0.2.7]: https://github.com/c-wenlong/swe/releases/tag/v0.2.7
-[0.2.5]: https://github.com/c-wenlong/swe/releases/tag/v0.2.5
-[0.2.2]: https://github.com/c-wenlong/swe/releases/tag/v0.2.2
-[0.1.0]: https://github.com/c-wenlong/swe/releases/tag/v0.1.0
+[Unreleased]: https://github.com/starship-terminal/swe/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/starship-terminal/swe/releases/tag/v1.2.2
+[1.2.1]: https://github.com/starship-terminal/swe/releases/tag/v1.2.1
+[1.2.0]: https://github.com/starship-terminal/swe/releases/tag/v1.2.0
+[1.1.1]: https://github.com/starship-terminal/swe/releases/tag/v1.1.1
+[1.0.0]: https://github.com/starship-terminal/swe/releases/tag/v1.0.0
+[0.2.9]: https://github.com/starship-terminal/swe/releases/tag/v0.2.9
+[0.2.8]: https://github.com/starship-terminal/swe/releases/tag/v0.2.8
+[0.2.7]: https://github.com/starship-terminal/swe/releases/tag/v0.2.7
+[0.2.5]: https://github.com/starship-terminal/swe/releases/tag/v0.2.5
+[0.2.2]: https://github.com/starship-terminal/swe/releases/tag/v0.2.2
+[0.1.0]: https://github.com/starship-terminal/swe/releases/tag/v0.1.0

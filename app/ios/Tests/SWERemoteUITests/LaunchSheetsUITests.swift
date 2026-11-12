@@ -13,7 +13,7 @@ import XCTest
 /// assertions wait rather than assume, so a slow hub still passes.
 /// The default cases also need real ledger data on that hub — a harness
 /// that has never launched has no recent model to start on — and the
-/// resolve-sheet case needs the hub to see c-wenlong/swe issues. What
+/// resolve-sheet case needs the hub to see starship-terminal/swe issues. What
 /// the hub lacks (an unpaired simulator, no second harness, no Kilo, the
 /// issue out of reach) skips the case instead of failing it.
 final class LaunchSheetsUITests: XCTestCase {
@@ -217,10 +217,10 @@ final class LaunchSheetsUITests: XCTestCase {
         // Deep links need a paired app on screen first.
         try XCTSkipUnless(app.buttons["New session"].waitForExistence(timeout: 15),
                           "no paired hub on this simulator — pair once with a swe://pair link")
-        XCUIDevice.shared.system.open(URL(string: "swe://issue/c-wenlong/swe/914")!)
+        XCUIDevice.shared.system.open(URL(string: "swe://issue/starship-terminal/swe/914")!)
         let resolve = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Resolve with agent")).firstMatch
         try XCTSkipUnless(resolve.waitForExistence(timeout: 15),
-                          "the hub can't show c-wenlong/swe#914 (not pinned, or gh signed out)")
+                          "the hub can't show starship-terminal/swe#914 (not pinned, or gh signed out)")
         resolve.tap()
         XCTAssertTrue(modelMenu.waitForExistence(timeout: 10), "Model menu missing on the resolve sheet")
         XCTAssertNotEqual(menuValue(), "Harness default", "resolve-sheet Model menu did not start on a recent model")

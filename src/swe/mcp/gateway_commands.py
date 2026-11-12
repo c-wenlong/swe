@@ -1,28 +1,33 @@
-"""``swe mcp gateway``: run shared MCP servers once for every harness.
+"""``swe mcp gateway``: the shared-server flags and the daemon's status.
 
-See ``swe.mcp.gateway`` for what is shared and ``gateway_server`` for
-how one server process serves many sessions.
+The daemon itself is the standalone ``warp-gate`` package
+(``starship-terminal/warp-gate``): it runs each ``"shared": true`` stdio
+server once and serves it as streamable HTTP on 127.0.0.1 at
+``/mcp/<name>``, installed as a LaunchAgent by ``warp-gate install``.
+swe keeps the manifest side — ``share``/``unshare`` edit ``"shared"`` in
+mcp.json, ``swe mcp sync`` writes the gateway URLs — and ``status`` reads
+the daemon's ``/status`` endpoint, which warp-gate serves identically.
 """
 
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import sys
-import time
 import urllib.error
 import urllib.request
 
 from swe.console import c, cpad
-from swe.flags import expand_value_flags
 from swe.json_output import emit, take_json_flag
 from swe.mcp import gateway as gw
 from swe.remote import launchd
 
-LABEL = "com.cwenlong.swe.mcp-gateway"
-# The label Quiver.app installed under; install/uninstall clear it.
-OLD_LABEL = "com.cwenlong.quiver.mcp-gateway"
+# warp-gate's LaunchAgent (``warp-gate install``); ``installed``/``pid``
+# in status describe it.
+WARP_GATE_LABEL = "com.starship-terminal.warp-gate"
+# The labels swe's retired gateway and Quiver.app installed under. A
+# machine can still carry one, so status counts it as installed rather
+# than calling its still-answering daemon absent.
+LEGACY_LABELS = ("com.cwenlong.swe.mcp-gateway", "com.cwenlong.quiver.mcp-gateway")
 
 
 def _hub_data() -> dict:
@@ -59,132 +64,6 @@ def _fetch(port: int, path: str, timeout: float = 2.0):
             return json.loads(resp.read() or b"null")
     except (urllib.error.URLError, OSError, ValueError):
         return None
-
-
-def _parse_port(args: list[str]) -> int | None:
-    """``--port=N`` from argv, or None; raises ValueError on a bad one."""
-    expanded = expand_value_flags(args, {"--port"})
-    unknown = [a for a in expanded if a.startswith("-") and a != "--port"]
-    if unknown:
-        raise ValueError(f"Unknown flag(s): {', '.join(unknown)}")
-    if "--port" not in expanded:
-        return None
-    value = expanded[expanded.index("--port") + 1]
-    if not value.isdigit() or not 0 < int(value) < 65536:
-        raise ValueError(f"--port must be 1-65535, not {value!r}")
-    return int(value)
-
-
-# -- serve ---------------------------------------------------------------
-
-
-def _serve(args: list[str]) -> int:
-    from swe.mcp.gateway_server import serve
-
-    try:
-        port = _parse_port(args) or current_settings()["port"]
-    except ValueError as exc:
-        print(c("red", str(exc)), file=sys.stderr)
-        return 1
-    try:
-        return serve(port, gw.log_dir_for())
-    except OSError as exc:
-        print(c("red", f"cannot bind {gw.HOST}:{port}: {exc}"), file=sys.stderr, flush=True)
-        return 1
-
-
-# -- install / uninstall --------------------------------------------------
-
-
-def _supports_gateway(swe: str) -> bool:
-    try:
-        res = subprocess.run([swe, "mcp", "help", "gateway"], capture_output=True,
-                             text=True, timeout=30, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return res.returncode == 0
-
-
-def gateway_program(port: int) -> tuple[list[str], str | None]:
-    """The LaunchAgent's command line, or an error saying why there is none.
-
-    SWE.app's bundled swe first, as for the remote hub (a launchd agent
-    can't read a checkout in ~/Desktop), but only once it knows this
-    command; an app built before the gateway would exit at every start.
-    """
-    bundled = launchd.bundled_swe()
-    if bundled and _supports_gateway(str(bundled)):
-        swe = str(bundled)
-    else:
-        swe = os.path.abspath(sys.argv[0])
-        if not os.access(swe, os.X_OK) or not _supports_gateway(swe):
-            return [], (f"cannot find a swe with `mcp gateway` to run ({sys.argv[0]}); "
-                        "run this as `swe mcp gateway install`")
-        folder = launchd.protected_dir(swe)
-        if folder:
-            return [], (f"{swe} is in ~/{folder}, which macOS blocks a LaunchAgent from "
-                        "reading. Install SWE.app (app/mac/script/install-app.sh) and "
-                        "run install again: the agent then runs the app's bundled swe.")
-    # Always spelled out: an agent left to read the port from mcp.json
-    # could start before install saves the new one and bind the old.
-    return [swe, "mcp", "gateway", "serve", f"--port={port}"], None
-
-
-def _install(args: list[str]) -> int:
-    if sys.platform != "darwin":
-        print(c("red", "install runs the gateway under launchd, so macOS only for now; "
-                       "elsewhere run `swe mcp gateway serve` under your init system"),
-              file=sys.stderr)
-        return 1
-    try:
-        port = _parse_port(args) or current_settings()["port"]
-    except ValueError as exc:
-        print(c("red", str(exc)), file=sys.stderr)
-        return 1
-    program, err = gateway_program(port)
-    if err:
-        print(c("red", err), file=sys.stderr)
-        return 1
-    log_path = gw.log_dir_for() / "gateway.log"
-    try:
-        # Interactive: harness sessions wait on every answer, and macOS
-        # throttles a Background job (a 6 MB tool list went 1.3 s to 6.9 s).
-        path = launchd.install(program, log_path, os.environ.get("PATH", ""), label=LABEL,
-                    old_label=OLD_LABEL,
-                               process_type="Interactive")
-    except RuntimeError as exc:
-        print(c("red", f"launchctl could not load the gateway: {exc}"), file=sys.stderr)
-        return 1
-    _save_settings(enabled=True, port=port)
-    print(f"installed {path}")
-    print(f"  runs  {' '.join(program)}")
-    print(f"  log   {log_path}")
-    for _ in range(20):
-        if _fetch(port, "/health", timeout=1.0):
-            print(c("green", f"  ✓ answering on http://{gw.HOST}:{port}"))
-            break
-        time.sleep(0.5)
-    else:
-        print(c("yellow", f"  not answering on port {port} yet; see {log_path}"), file=sys.stderr)
-    _sync_hint()
-    return 0
-
-
-def _uninstall(args: list[str]) -> int:
-    if sys.platform == "darwin":
-        try:
-            removed = launchd.uninstall(label=LABEL, old_label=OLD_LABEL)
-        except RuntimeError as exc:
-            print(c("red", f"could not stop the gateway: {exc}"), file=sys.stderr)
-            return 1
-        print(f"stopped the gateway and removed {launchd.plist_path(label=LABEL)}" if removed
-              else c("dim", "no gateway LaunchAgent was installed"))
-    was = current_settings()["enabled"]
-    _save_settings(enabled=False)
-    if was:
-        # Harnesses still point at the gateway's URLs until synced back.
-        _sync_hint()
-    return 0
 
 
 def _sync_hint(names: list[str] | None = None) -> None:
@@ -240,7 +119,8 @@ def _share(args: list[str], shared: bool) -> int:
     if changed and settings["enabled"]:
         _sync_hint(changed)
     elif changed and shared:
-        print(c("dim", "  the gateway is not installed yet: swe mcp gateway install"))
+        print(c("dim", "  the gateway daemon is a separate package now: "
+                      "install it with `warp-gate install`"))
     return 0
 
 
@@ -253,15 +133,17 @@ def gateway_status() -> dict:
 
     settings = current_settings()
     installed = False
+    agent = None
     pid = None
     if sys.platform == "darwin":
-        # Either label counts: a Quiver.app install still runs as the
-        # gateway until the renamed job replaces it. A loaded job wins
-        # over a stopped plist: a failed install leaves the new plist
-        # behind while the old job keeps answering.
-        for name in (LABEL, OLD_LABEL):
+        # Any of the labels counts: a retired swe/quiver agent still runs
+        # a gateway that answers /status. A loaded job wins over a
+        # stopped plist: a failed install leaves the plist behind while
+        # the old job keeps answering.
+        for name in (WARP_GATE_LABEL, *LEGACY_LABELS):
             if launchd.plist_path(label=name).exists():
                 installed = True
+                agent = name
                 loaded, pid = launchd.loaded_pid(label=name)
                 if loaded:
                     break
@@ -281,7 +163,8 @@ def gateway_status() -> dict:
                                                 "calls", "calls_by_tool", "call_errors",
                                                 "last_call")}})
     return {"enabled": settings["enabled"], "port": settings["port"],
-            "installed": installed, "pid": pid, "reachable": live is not None,
+            "installed": installed, "agent": agent, "pid": pid,
+            "reachable": live is not None,
             "error": (live or {}).get("error"), "servers": rows}
 
 
@@ -300,10 +183,14 @@ def _status(args: list[str]) -> int:
     print(f"\n  {c('bold', 'MCP gateway')}  {head}")
     if status["error"]:
         print(c("yellow", f"  {status['error']}"))
+    if status.get("agent") and status["agent"] != WARP_GATE_LABEL:
+        print(c("yellow", f"  the installed agent ({status['agent']}) is swe's retired "
+                          "gateway; the daemon now runs as warp-gate: `warp-gate install`, "
+                          "then bootout and delete the old plist"))
     if status["enabled"] != status["installed"] and sys.platform == "darwin":
-        note = ("sync points harnesses here, but no LaunchAgent runs it: swe mcp gateway install"
+        note = ("sync points harnesses here, but no LaunchAgent runs it: warp-gate install"
                 if status["enabled"] else "installed, but sync still writes commands; "
-                "run swe mcp gateway install again")
+                "run warp-gate install again")
         print(c("yellow", f"  {note}"))
     if not status["servers"]:
         print(c("dim", "  no shared servers yet: swe mcp gateway share <server...>\n"))
@@ -331,9 +218,6 @@ def cmd_gateway(args: list[str]) -> int:
         return 0
     handlers = {
         "status": _status,
-        "serve": _serve,
-        "install": _install,
-        "uninstall": _uninstall,
         "share": lambda a: _share(a, True),
         "unshare": lambda a: _share(a, False),
     }

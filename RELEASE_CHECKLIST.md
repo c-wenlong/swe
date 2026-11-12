@@ -23,7 +23,7 @@ A SWE release delivers these to one GitHub Release page:
    verify the update.
 
 After the attachment, the workflow also points the Homebrew tap
-(`c-wenlong/homebrew-swe`) at the new DMG and wheel, when the release is the
+(`starship-terminal/homebrew-swe`) at the new DMG and wheel, when the release is the
 latest one and carries a signed DMG.
 
 The one thing the pipeline deliberately does **not** do is create the
@@ -79,16 +79,16 @@ host's. Extra steps for that one release:
   Dragging SWE.app in from the DMG does only that first-launch part —
   a remote hub, satellite or MCP gateway installed under Quiver.app
   still points into the old bundle, so those users reinstall the service
-  (`swe remote ... --install` / `swe mcp gateway install`, then delete
+  (`swe remote ... --install` / `warp-gate install`, then delete
   Quiver.app) or run the script. A Quiver.app that checks the feed will
   see the new appcast entry and fail validation — that is expected, not
   a bug.
 - [ ] **The release notes tell `quiver` cask users to switch to `swe`.**
   The first SWE release materializes `Casks/swe.rb` in
-  `c-wenlong/homebrew-swe` (`bump_tap` writes it whole, then bumps
+  `starship-terminal/homebrew-swe` (`bump_tap` writes it whole, then bumps
   version and sha256 on later releases). `Casks/quiver.rb` stays frozen
   at the last Quiver build so old installs and uninstalls keep working;
-  new installs use `brew install --cask c-wenlong/swe/swe`.
+  new installs use `brew install --cask starship-terminal/swe/swe`.
 - [ ] **The stable DMG link changes name.** `releases/latest/download/
   SWE.dmg` replaces `…/Quiver.dmg` anywhere it is documented.
 
@@ -108,7 +108,7 @@ and variables → Actions and survive every release.
 | `NOTARY_KEY_ID` | The key's ID, e.g. `P3VHYCSWKN` | App Store Connect → Integrations → App Store Connect API |
 | `NOTARY_ISSUER` | The issuer UUID | Same page as the key ID |
 | `SPARKLE_PRIVATE_KEY` | The EdDSA private key matching the `SUPublicEDKey` baked into the app | Sparkle's `generate_keys`; stored locally at `~/.swe/secrets/` |
-| `HOMEBREW_TAP_TOKEN` | A fine-grained token with Contents read and write on `c-wenlong/homebrew-swe` only | GitHub → Settings → Developer settings → Fine-grained tokens |
+| `HOMEBREW_TAP_TOKEN` | A fine-grained token with Contents read and write on `starship-terminal/homebrew-swe` only | GitHub → Settings → Developer settings → Fine-grained tokens |
 
 Three failure-mode notes that change how this scene ends:
 
@@ -173,7 +173,7 @@ jobs follow it:
   Homebrew tap`** — run only when a signed DMG was attached to a published
   release, the release is the latest one and `HOMEBREW_TAP_TOKEN` is set.
   They hash the uploaded DMG and wheel and push the bump to
-  `c-wenlong/homebrew-swe` through `scripts/bump_tap.py`, which never moves
+  `starship-terminal/homebrew-swe` through `scripts/bump_tap.py`, which never moves
   the tap to an older version.
 
 Because the workflow never creates the release, the human half of this
@@ -198,7 +198,7 @@ themselves.
 - [ ] **The appcast is live and signed.** The feed URL is tag-independent:
 
   ```bash
-  curl -sL https://github.com/c-wenlong/swe/releases/latest/download/appcast.xml
+  curl -sL https://github.com/starship-terminal/swe/releases/latest/download/appcast.xml
   ```
 
   must return the new `<item>` carrying a `sparkle:edSignature`.

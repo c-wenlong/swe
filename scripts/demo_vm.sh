@@ -411,12 +411,12 @@ defaults write com.apple.Terminal NSQuitAlwaysKeepsWindows -bool false
 defaults write com.apple.Terminal ApplePersistenceIgnoreState -bool true
 defaults write com.apple.loginwindow TALLogoutSavesState -bool false
 brew install --quiet python@3.12 node pipx
-pipx install --force "git+https://github.com/c-wenlong/swe.git"
+pipx install --force "git+https://github.com/starship-terminal/swe.git"
 npm install -g --silent @anthropic-ai/claude-code @openai/codex
 if [ -d ~/swe/.git ]; then
     git -C ~/swe fetch --quiet origin && git -C ~/swe checkout --quiet main && git -C ~/swe reset --quiet --hard origin/main
 else
-    git clone --quiet https://github.com/c-wenlong/swe.git ~/swe
+    git clone --quiet https://github.com/starship-terminal/swe.git ~/swe
 fi
 EOF
     guest 'bash /tmp/swe-demo-provision.sh </dev/null && rm -f /tmp/swe-demo-provision.sh'

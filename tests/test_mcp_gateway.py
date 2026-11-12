@@ -1,9 +1,10 @@
-"""The MCP gateway: one copy of a shared server serving every session.
+"""The MCP gateway's swe side: shared-server flags and daemon status.
 
-``GatewayServerTest`` runs the real HTTP server in-process against a fake
-stdio server (``fixtures/fake_stdio_mcp.py``). The CLI tests run
-``python -m swe.mcp`` against a throwaway HOME, the way
-``test_mcp_sync_integration`` does.
+The daemon itself is the standalone ``warp-gate`` package — its own repo
+tests the server — so these tests cover what stays here: the
+``swe.mcp.gateway`` helpers, ``swe mcp gateway share/unshare/status`` in
+process, and the end-to-end ``python -m swe.mcp`` path against a
+throwaway HOME, the way ``test_mcp_sync_integration`` does it.
 """
 
 import json
@@ -12,23 +13,14 @@ import pathlib
 import subprocess
 import sys
 import tempfile
-import threading
-import time
 import unittest
-import urllib.error
-import urllib.request
 from unittest.mock import patch
 
 from swe.mcp import gateway
-from swe.mcp import gateway_server
-from swe.mcp.gateway_server import Gateway, make_server
 from swe.remote import launchd
 
 FAKE = pathlib.Path(__file__).resolve().parent / "fixtures" / "fake_stdio_mcp.py"
 PROJECT_SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
-INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-    "protocolVersion": "2025-06-18", "capabilities": {},
-    "clientInfo": {"name": "test", "version": "0"}}}
 
 
 class GatewayHelpersTest(unittest.TestCase):
@@ -71,409 +63,6 @@ class GatewayHelpersTest(unittest.TestCase):
         self.assertTrue(gateway.looks_stateful("dv__playwright", {"command": "node"}))
         self.assertTrue(gateway.looks_stateful("web", {"command": "npx", "args": ["@playwright/mcp"]}))
         self.assertFalse(gateway.looks_stateful("dv__linear", {"command": "node", "args": ["l.js"]}))
-
-
-class GatewayStatsTest(unittest.TestCase):
-    def test_record_counts_calls_tools_and_errors(self):
-        stats = gateway_server.GatewayStats()
-        stats.record("srv", "echo", False)
-        stats.record("srv", "echo", False)
-        stats.record("srv", None, True)
-        row = stats.row("srv")
-        self.assertEqual(row["calls"], 3)
-        self.assertEqual(row["calls_by_tool"], {"echo": 2})
-        self.assertEqual(row["call_errors"], 1)
-        self.assertTrue(row["last_call"])
-
-    def test_counts_survive_a_restart_and_a_broken_file_starts_over(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = pathlib.Path(tmp) / "stats.json"
-            gateway_server.GatewayStats(path).record("srv", "echo", False)
-            row = gateway_server.GatewayStats(path).row("srv")
-            self.assertEqual(row["calls"], 1)
-            self.assertEqual(row["calls_by_tool"], {"echo": 1})
-            for bad in ("not json", "[]", '{"servers": []}',
-                        '{"servers": {"srv": {"calls": "lots"}}}'):
-                path.write_text(bad)
-                self.assertEqual(gateway_server.GatewayStats(path).row("srv")["calls"], 0)
-
-    def test_tool_names_fold_into_one_bucket_past_the_cap(self):
-        stats = gateway_server.GatewayStats()
-        for i in range(70):
-            stats.record("srv", f"tool{i}", False)
-        row = stats.row("srv")
-        self.assertEqual(row["calls"], 70)
-        self.assertEqual(len(row["calls_by_tool"]), 65)
-        self.assertEqual(row["calls_by_tool"]["<other>"], 6)
-
-    def test_a_server_with_no_calls_reads_as_zero(self):
-        self.assertEqual(gateway_server.GatewayStats().row("nope"),
-                         {"calls": 0, "calls_by_tool": {}, "call_errors": 0,
-                          "last_call": None})
-
-
-class _GatewayServerCase(unittest.TestCase):
-    """A live gateway on localhost and the helpers to talk to it.
-
-    Holds no tests, so the classes built on it each run only their own.
-    """
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.specs = {"fake": {"command": sys.executable, "args": [str(FAKE)]}}
-        self.gateway = Gateway(pathlib.Path(self.tmp.name), load=lambda: (dict(self.specs), {}),
-                               watched=lambda: [])
-        self.server = make_server(self.gateway, 0)
-        self.port = self.server.server_address[1]
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-
-    def tearDown(self):
-        self.server.shutdown()
-        self.server.server_close()
-        self.gateway.stop()
-        self.tmp.cleanup()
-
-    def request(self, body=None, *, method="POST", path="/mcp/fake", headers=None):
-        data = None if body is None else json.dumps(body).encode()
-        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=data, method=method,
-                                     headers={"Content-Type": "application/json", **(headers or {})})
-        try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                raw = resp.read()
-                return resp.status, dict(resp.headers), json.loads(raw) if raw else None
-        except urllib.error.HTTPError as exc:
-            with exc:
-                raw = exc.read()
-                return exc.code, dict(exc.headers), json.loads(raw) if raw else None
-
-    def call(self, tool, args=None, msg_id=7):
-        status, _, body = self.request({"jsonrpc": "2.0", "id": msg_id, "method": "tools/call",
-                                        "params": {"name": tool, "arguments": args or {}}})
-        self.assertEqual(status, 200)
-        return body
-
-    @staticmethod
-    def payload(body):
-        return json.loads(body["result"]["content"][0]["text"])
-
-
-class GatewayServerTest(_GatewayServerCase):
-    def test_initialize_comes_from_one_handshake(self):
-        status, headers, body = self.request(INIT)
-        self.assertEqual(status, 200)
-        self.assertTrue(headers.get("Mcp-Session-Id"))
-        self.assertEqual(body["id"], 1)
-        # The gateway drops notifications, so it doesn't promise them.
-        self.assertEqual(body["result"]["capabilities"], {"tools": {}, "resources": {}})
-        _, again, _ = self.request(INIT)
-        self.assertNotEqual(again["Mcp-Session-Id"], headers["Mcp-Session-Id"])
-        self.assertEqual(self.gateway.backends["fake"].starts, 1)
-
-    def test_concurrent_sessions_share_one_process_and_keep_their_ids(self):
-        results = {}
-
-        def run(i):
-            results[i] = self.call("echo", {"i": i}, msg_id=1)
-
-        threads = [threading.Thread(target=run, args=(i,)) for i in range(10)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        pids = {self.payload(r)["pid"] for r in results.values()}
-        self.assertEqual(len(pids), 1)
-        for i, body in results.items():
-            self.assertEqual(body["id"], 1)
-            self.assertEqual(self.payload(body)["args"], {"i": i})
-
-    def test_unknown_methods_are_answered_here_and_the_server_survives(self):
-        pid = self.payload(self.call("echo"))["pid"]
-        _, _, body = self.request({"jsonrpc": "2.0", "id": 2, "method": "server/discover"})
-        self.assertEqual(body["error"]["code"], gateway_server.METHOD_NOT_FOUND)
-        _, _, body = self.request({"jsonrpc": "2.0", "id": 3, "method": "ping"})
-        self.assertEqual(body["result"], {})
-        self.assertEqual(self.payload(self.call("echo"))["pid"], pid)
-
-    def test_notifications_and_batches(self):
-        status, _, body = self.request({"jsonrpc": "2.0", "method": "notifications/initialized"})
-        self.assertEqual((status, body), (202, None))
-        status, _, body = self.request([
-            {"jsonrpc": "2.0", "id": "a", "method": "tools/list"},
-            {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            {"jsonrpc": "2.0", "id": "b", "method": "ping"},
-        ])
-        self.assertEqual(status, 200)
-        self.assertEqual([r["id"] for r in body], ["a", "b"])
-
-    def test_a_cancel_with_malformed_params_is_dropped(self):
-        # `params: [1]` raised AttributeError in the handler and the
-        # connection closed with no answer.
-        for params in ([1], "x", None):
-            status, _, body = self.request(
-                {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": params})
-            self.assertEqual((status, body), (202, None))
-        self.assertEqual(self.request({"jsonrpc": "2.0", "id": 3, "method": "ping"})[2]["result"], {})
-
-    def test_the_gateway_names_itself_swe(self):
-        _, headers, _ = self.request({"jsonrpc": "2.0", "id": 3, "method": "ping"})
-        self.assertTrue(headers.get("Server", "").startswith("swe-mcp-gateway"))
-
-    def test_server_to_client_requests_are_refused(self):
-        answer = self.payload(self.call("ask"))["args"]["answer"]
-        self.assertEqual(answer["id"], "srv-1")
-        self.assertEqual(answer["error"]["code"], gateway_server.METHOD_NOT_FOUND)
-
-    def test_a_crashed_server_restarts_on_the_next_request(self):
-        first = self.payload(self.call("echo"))["pid"]
-        backend = self.gateway.backends["fake"]
-        # The reader thread notes the failure once it has cleared the dead
-        # child; wait for that instead of polling the state.
-        noted = threading.Event()
-        note_failure = backend._note_failure
-
-        def note(lived):
-            note_failure(lived)
-            noted.set()
-
-        with patch.object(gateway_server, "BACKOFF_MIN_S", 0.0), \
-                patch.object(backend, "_note_failure", note):
-            body = self.call("crash")
-            self.assertIn("exited", body["error"]["message"])
-            self.assertTrue(noted.wait(10))
-            self.assertNotEqual(backend.status()["state"], "running")
-            second = self.payload(self.call("echo"))["pid"]
-        self.assertNotEqual(first, second)
-        self.assertEqual(self.gateway.backends["fake"].starts, 2)
-
-    def test_a_server_that_keeps_exiting_backs_off(self):
-        self.specs["fake"] = {"command": sys.executable, "args": ["-c", "import sys; sys.exit(2)"]}
-        self.gateway.reload(force=True)
-        body = self.call("echo")
-        self.assertIn("initialize failed", body["error"]["message"])
-        body = self.call("echo")
-        self.assertIn("next start in", body["error"]["message"])
-        self.assertEqual(self.gateway.backends["fake"].starts, 1)
-
-    def test_browser_shaped_requests_are_refused(self):
-        status, _, _ = self.request(INIT, headers={"Origin": "https://evil.example"})
-        self.assertEqual(status, 403)
-        status, _, _ = self.request(INIT, headers={"Host": "evil.example"})
-        self.assertEqual(status, 403)
-        self.assertNotIn("fake", [b for b, be in self.gateway.backends.items() if be.starts])
-
-    def test_get_head_delete_and_unknown_servers(self):
-        self.assertEqual(self.request(method="GET")[0], 405)
-        self.assertEqual(self.request(method="HEAD")[0], 200)
-        self.assertEqual(self.request(method="HEAD", path="/mcp/nope")[0], 404)
-        self.assertEqual(self.request(INIT, path="/mcp/nope")[0], 404)
-        self.assertEqual(self.request(method="DELETE")[0], 200)
-        status, _, body = self.request(method="GET", path="/health")
-        self.assertEqual((status, body["ok"]), (200, True))
-        # HEAD starts nothing: `swe mcp status` probes every URL server.
-        self.assertEqual(self.gateway.backends["fake"].starts, 0)
-
-    def test_a_changed_definition_stops_the_old_process(self):
-        old = self.payload(self.call("echo"))["pid"]
-        self.specs["fake"] = {"command": sys.executable, "args": [str(FAKE)], "env": {"X": "1"}}
-        self.gateway.reload(force=True)
-        self.assertNotEqual(self.payload(self.call("echo"))["pid"], old)
-        del self.specs["fake"]
-        self.gateway.reload(force=True)
-        self.assertEqual(self.request(INIT)[0], 404)
-
-    def test_a_burst_of_connections_is_queued_not_reset(self):
-        # One session opens every shared server at once; 5 queued
-        # connections (Python 3.13's default) reset the rest.
-        self.assertGreaterEqual(self.server.request_queue_size, 64)
-        results = []
-
-        def ping(i):
-            results.append(self.request({"jsonrpc": "2.0", "id": i, "method": "ping"})[0])
-
-        threads = [threading.Thread(target=ping, args=(i,)) for i in range(40)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        self.assertEqual(results, [200] * 40)
-
-    def test_status_lists_problems(self):
-        self.gateway.problems = {"broken": "no value for TOKEN"}
-        rows = {r["name"]: r for r in self.gateway.status()["servers"]}
-        self.assertEqual(rows["broken"]["error"], "no value for TOKEN")
-        self.assertEqual(rows["fake"]["state"], "idle")
-
-    def test_status_counts_tool_calls_only(self):
-        self.call("echo")
-        self.call("echo")
-        self.request({"jsonrpc": "2.0", "id": 8, "method": "tools/list"})
-        row = {r["name"]: r for r in self.gateway.status()["servers"]}["fake"]
-        self.assertEqual(row["calls"], 2)
-        self.assertEqual(row["calls_by_tool"], {"echo": 2})
-        self.assertEqual(row["call_errors"], 0)
-        self.assertTrue(row["last_call"])
-        self.assertTrue((pathlib.Path(self.tmp.name) / "stats.json").exists())
-
-    def test_a_tool_result_with_iserror_counts_as_an_error(self):
-        self.call("fail")
-        row = {r["name"]: r for r in self.gateway.status()["servers"]}["fake"]
-        self.assertEqual(row["calls"], 1)
-        self.assertEqual(row["call_errors"], 1)
-        self.assertEqual(row["calls_by_tool"], {"fail": 1})
-
-
-class GatewayHardeningTest(_GatewayServerCase):
-    """The review's findings: smuggled requests, bad lengths, stray
-    processes, pipe errors, unreadable hubs and unbounded logs."""
-
-    def raw(self, data: bytes) -> bytes:
-        import socket
-
-        with socket.create_connection(("127.0.0.1", self.port), timeout=10) as sock:
-            sock.sendall(data)
-            chunks = []
-            while True:
-                try:
-                    chunk = sock.recv(65536)
-                except socket.timeout:
-                    break
-                if not chunk:
-                    break
-                chunks.append(chunk)
-            return b"".join(chunks)
-
-    def test_a_refused_request_cannot_smuggle_a_second_one(self):
-        inner = json.dumps({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
-                            "params": {"name": "echo", "arguments": {}}}).encode()
-        smuggled = (f"POST /mcp/fake HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n"
-                    f"Content-Type: application/json\r\nContent-Length: {len(inner)}\r\n\r\n").encode() + inner
-        outer = (f"POST /mcp/fake HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n"
-                 f"Origin: https://evil.example\r\nContent-Type: text/plain\r\n"
-                 f"Content-Length: {len(smuggled)}\r\n\r\n").encode() + smuggled
-        reply = self.raw(outer)
-        self.assertEqual(reply.count(b"HTTP/1.1 "), 1, reply)
-        self.assertIn(b"403", reply.split(b"\r\n", 1)[0])
-        self.assertIn(b"Connection: close", reply)
-        self.assertEqual(self.gateway.backends["fake"].starts, 0)
-
-    def test_only_json_bodies_with_a_real_length(self):
-        status, _, _ = self.request(INIT, headers={"Content-Type": "text/plain"})
-        self.assertEqual(status, 415)
-        reply = self.raw((f"POST /mcp/fake HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n"
-                          "Content-Type: application/json\r\nContent-Length: -1\r\n\r\n{}").encode())
-        self.assertIn(b"411", reply.split(b"\r\n", 1)[0])
-        self.assertEqual(self.gateway.backends["fake"].starts, 0)
-
-    def test_an_unreadable_hub_keeps_the_running_servers(self):
-        pid = self.payload(self.call("echo"))["pid"]
-
-        def broken():
-            raise ValueError("Expecting value: line 1 column 1")
-
-        self.gateway._load = broken
-        self.gateway.reload(force=True)
-        self.assertEqual(self.payload(self.call("echo"))["pid"], pid)
-        self.assertIn("keeping the last good servers", self.gateway.status()["error"])
-        self.gateway._load = lambda: (dict(self.specs), {})
-        self.gateway.reload(force=True)
-        self.assertIsNone(self.gateway.status()["error"])
-
-    def test_a_pipe_error_in_the_handshake_is_a_json_rpc_error(self):
-        import io
-
-        read_end, write_end = os.pipe()
-        os.close(read_end)  # a server that is gone: writes get EPIPE
-
-        class Pipe:
-            closed = False
-
-            def fileno(self):
-                return write_end
-
-            def close(self):
-                if not self.closed:
-                    # The reader thread's child.close() races this one:
-                    # whoever loses finds the fd already gone.
-                    try:
-                        os.close(write_end)
-                    except OSError:
-                        pass
-                self.closed = True
-
-        class Proc:
-            pid = 2 ** 22 + 12345  # no such process group
-            stdin = Pipe()
-            stdout = io.BytesIO()
-            stderr = io.BytesIO()
-
-            def poll(self):
-                return 1
-
-            def wait(self, timeout=None):
-                return 1
-
-            def terminate(self):
-                pass
-
-            kill = terminate
-
-        backend = gateway_server.Backend("dead", {"command": "x"}, pathlib.Path(self.tmp.name),
-                                         popen=lambda *a, **k: Proc())
-        body = backend.call({"jsonrpc": "2.0", "id": 4, "method": "tools/list"}, "2025-06-18")
-        self.assertEqual(body["id"], 4)
-        self.assertIn("exited before initialize", body["error"]["message"])
-        Proc.stdin.close()
-
-    def test_a_server_that_stops_reading_times_the_write_out(self):
-        # Initialized, then it never reads stdin again.
-        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"],
-                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, start_new_session=True)
-        backend = gateway_server.Backend("stuck", {"command": "x"}, pathlib.Path(self.tmp.name))
-        child = gateway_server._Child(proc)
-        backend._child, backend._init_result = child, {"capabilities": {}}
-        big = {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
-               "params": {"name": "echo", "arguments": {"blob": "x" * 1_000_000}}}
-        with patch.object(gateway_server, "WRITE_TIMEOUT_S", 0.5), \
-                patch.object(gateway_server, "KILL_GRACE_S", 0.5):
-            started = time.monotonic()
-            body = backend.call(big, "2025-06-18")
-            self.assertLess(time.monotonic() - started, 5)
-            self.assertIn("stopped reading", body["error"]["message"])
-            # The lock is free again and the stuck server is being stopped.
-            self.assertTrue(child.write_lock.acquire(timeout=1))
-            child.write_lock.release()
-            proc.wait(timeout=5)
-        child.close()
-
-    def test_stopping_reaches_the_whole_process_group(self):
-        # The leader (a wrapper) exits at once; one member ignores SIGTERM.
-        proc = subprocess.Popen(
-            ["sh", "-c", "sleep 60 & (trap '' TERM; exec sleep 61) & echo $!; wait"],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            start_new_session=True)
-        stubborn = int(proc.stdout.readline())
-        child = gateway_server._Child(proc)
-        backend = gateway_server.Backend("g", {"command": "sh"}, pathlib.Path(self.tmp.name))
-        with patch.object(gateway_server, "KILL_GRACE_S", 0.5):
-            backend._kill(child)
-        self.assertFalse(gateway_server._group_alive(proc.pid))
-        with self.assertRaises(ProcessLookupError):
-            os.kill(stubborn, 0)
-        proc.wait()
-        child.close()
-
-    def test_the_log_starts_over_at_its_limit(self):
-        import io
-
-        backend = gateway_server.Backend("noisy", {"command": "x"}, pathlib.Path(self.tmp.name))
-        stream = io.BytesIO(b"".join(b"line %04d of noise\n" % i for i in range(500)))
-        with patch.object(gateway_server, "MAX_LOG", 1000):
-            backend._log(stream)
-        text = (pathlib.Path(self.tmp.name) / "noisy.log").read_bytes()
-        self.assertLessEqual(len(text), 1000)
-        self.assertIn(b"log started over", text)
-        self.assertIn(b"line 0499", text)
 
 
 class GatewayCommandsInProcessTest(unittest.TestCase):
@@ -530,14 +119,11 @@ class GatewayCommandsInProcessTest(unittest.TestCase):
         self.assertEqual(self.run_cmd("bogus")[0], 1)
         self.assertIn("swe mcp gateway share", self.run_cmd("help")[1])
 
-    def test_load_hub_specs(self):
-        self.run_cmd("share", "api")
-        specs, problems = gateway_server.load_hub_specs()
-        self.assertEqual(specs["api"]["env"], {"T": "tok"})
-        self.assertEqual(problems, {"nokey": "no value for MISSING", "web": "not a stdio server"})
-        self.hub.write_text("{ not json")
-        with self.assertRaises(Exception):
-            gateway_server.load_hub_specs()
+    def test_removed_daemon_verbs_are_unknown(self):
+        for verb in ("serve", "install", "uninstall"):
+            code, out, _ = self.run_cmd(verb)
+            self.assertEqual(code, 1, verb)
+            self.assertIn(f"Unknown gateway command: {verb}", out)
 
     def test_status_text_and_json(self):
         from swe.mcp import gateway_commands as gc
@@ -571,93 +157,23 @@ class GatewayCommandsInProcessTest(unittest.TestCase):
             self.assertIn("not installed", out)
             self.assertIn("down", out)
 
-    def test_install_and_uninstall(self):
+    def test_share_with_the_gateway_on_hints_a_sync_of_just_those(self):
         from swe.mcp import gateway_commands as gc
 
-        installed = {}
-
-        def fake_install(program, log_path, path_env, label, process_type, old_label=None):
-            installed.update(program=program, label=label, process_type=process_type)
-            return self.home / "agent.plist"
-
-        with patch.object(gc.sys, "platform", "darwin"), \
-                patch.object(gc, "gateway_program", return_value=(["swe", "mcp", "gateway", "serve", "--port=9300"], None)), \
-                patch.object(gc.launchd, "install", side_effect=fake_install), \
-                patch.object(gc, "_fetch", return_value={"ok": True}):
-            code, out, _ = self.run_cmd("install", "--port=9300")
+        gc._save_settings(enabled=True)
+        code, out, _ = self.run_cmd("share", "api")
         self.assertEqual(code, 0)
-        self.assertEqual(installed["label"], gc.LABEL)
-        # Not throttled like the Background hub: sessions wait on it.
-        self.assertEqual(installed["process_type"], "Interactive")
-        self.assertIn("answering on http://127.0.0.1:9300", out)
-        self.assertEqual(self.hub_data()["gateway"], {"enabled": True, "port": 9300})
-        with patch.object(gc.sys, "platform", "darwin"), \
-                patch.object(gc.launchd, "uninstall", return_value=True):
-            code, out, _ = self.run_cmd("uninstall")
+        self.assertIn("swe mcp sync swe --all --only=api --force", out)
+
+    def test_sharing_without_a_daemon_points_at_warp_gate(self):
+        code, out, _ = self.run_cmd("share", "api")
         self.assertEqual(code, 0)
-        self.assertIn("swe mcp sync swe --all", out)
-        self.assertIs(self.hub_data()["gateway"]["enabled"], False)
-        with patch.object(gc.sys, "platform", "linux"):
-            self.assertEqual(self.run_cmd("install")[0], 1)
-        with patch.object(gc.sys, "platform", "darwin"), \
-                patch.object(gc, "gateway_program", return_value=([], "no swe here")):
-            code, _, err = self.run_cmd("install")
-        self.assertEqual((code, "no swe here" in err), (1, True))
-
-    def test_gateway_program_always_names_the_port(self):
-        from swe.mcp import gateway_commands as gc
-
-        with patch.object(gc.launchd, "bundled_swe", return_value=pathlib.Path("/Apps/swe")), \
-                patch.object(gc, "_supports_gateway", return_value=True):
-            program, err = gc.gateway_program(gateway.DEFAULT_PORT)
-        self.assertIsNone(err)
-        self.assertEqual(program, ["/Apps/swe", "mcp", "gateway", "serve", f"--port={gateway.DEFAULT_PORT}"])
-        swe = self.home / "Desktop" / "swe"
-        swe.parent.mkdir()
-        swe.write_text("#!/bin/sh\n")
-        swe.chmod(0o755)
-        with patch.object(gc.launchd, "bundled_swe", return_value=None), \
-                patch.object(gc, "_supports_gateway", return_value=True), \
-                patch.object(gc.sys, "argv", [str(swe)]):
-            program, err = gc.gateway_program(9300)
-        self.assertEqual(program, [])
-        self.assertIn("~/Desktop", err)
-
-    def test_serve_runs_until_interrupted_and_stops_servers(self):
-        import io
-
-        from swe.mcp import gateway_commands as gc
-
-        class Stub:
-            def serve_forever(self):
-                raise KeyboardInterrupt
-
-            def server_close(self):
-                pass
-
-        self.run_cmd("share", "api")
-        out = io.StringIO()
-        previous = gateway_server.signal.getsignal(gateway_server.signal.SIGTERM)
-        try:
-            with patch.object(gateway_server, "make_server", return_value=Stub()):
-                self.assertEqual(gateway_server.serve(9300, self.home / "logs", out=out), 0)
-        finally:
-            gateway_server.signal.signal(gateway_server.signal.SIGTERM, previous)
-        self.assertIn("shared: api", out.getvalue())
-        self.assertIn("MCP gateway stopped", out.getvalue())
-        with patch.object(gateway_server, "serve", return_value=0) as serve:
-            self.assertEqual(self.run_cmd("serve", "--port=9301")[0], 0)
-        self.assertEqual(serve.call_args[0][0], 9301)
-        with patch.object(gateway_server, "serve", side_effect=OSError("in use")):
-            code, _, err = self.run_cmd("serve")
-        self.assertEqual(code, 1)
-        self.assertIn("cannot bind", err)
-
+        self.assertIn("warp-gate install", out)
 
 
 class GatewayCommandEdgeTest(unittest.TestCase):
-    """The refusals and in-between states of install, uninstall, share and
-    status. launchctl, the network and sleeps are all stubbed."""
+    """_fetch and the in-between states of share and status. launchctl,
+    the network and sleeps are all stubbed."""
 
     setUp = GatewayCommandsInProcessTest.setUp
     tearDown = GatewayCommandsInProcessTest.tearDown
@@ -685,104 +201,6 @@ class GatewayCommandEdgeTest(unittest.TestCase):
         with answering(b"<html>"):
             self.assertIsNone(gc._fetch(9300, "/health"))
 
-    def test_supports_gateway_needs_a_swe_that_knows_the_command(self):
-        gc = self.gc()
-        for outcome, expected in ((subprocess.CompletedProcess([], 0), True),
-                                  (subprocess.CompletedProcess([], 2), False),
-                                  (FileNotFoundError(2, "gone"), False),
-                                  (subprocess.TimeoutExpired("swe", 30), False)):
-            kwargs = ({"side_effect": outcome} if isinstance(outcome, BaseException)
-                      else {"return_value": outcome})
-            with patch.object(gc.subprocess, "run", **kwargs):
-                self.assertIs(gc._supports_gateway("/x/swe"), expected, outcome)
-
-    def test_gateway_program_without_a_runnable_swe(self):
-        gc = self.gc()
-        with patch.object(gc.launchd, "bundled_swe", return_value=None), \
-                patch.object(gc.sys, "argv", [str(self.home / "missing-swe")]):
-            program, err = gc.gateway_program(9300)
-        self.assertEqual(program, [])
-        self.assertIn("cannot find a swe with `mcp gateway`", err)
-
-    def test_gateway_program_runs_a_swe_outside_the_protected_folders(self):
-        gc = self.gc()
-        swe = self.home / "bin" / "swe"
-        swe.parent.mkdir()
-        swe.write_text("#!/bin/sh\n")
-        swe.chmod(0o755)
-        with patch.object(gc.launchd, "bundled_swe", return_value=pathlib.Path("/Old.app/swe")), \
-                patch.object(gc, "_supports_gateway", side_effect=lambda p: p == str(swe)), \
-                patch.object(gc.sys, "argv", [str(swe)]):
-            program, err = gc.gateway_program(9300)
-        self.assertIsNone(err)
-        self.assertEqual(program, [str(swe), "mcp", "gateway", "serve", "--port=9300"])
-
-    def test_install_refuses_an_unknown_flag(self):
-        with patch.object(self.gc().sys, "platform", "darwin"):
-            code, _, err = self.run_cmd("install", "--verbose")
-        self.assertEqual(code, 1)
-        self.assertIn("Unknown flag(s): --verbose", err)
-        self.assertNotIn("gateway", self.hub_data())
-
-    def test_install_that_launchctl_refuses_saves_nothing(self):
-        gc = self.gc()
-        with patch.object(gc.sys, "platform", "darwin"), \
-                patch.object(gc, "gateway_program", return_value=(["swe"], None)), \
-                patch.object(gc.launchd, "install", side_effect=RuntimeError("bootstrap failed: 5")):
-            code, _, err = self.run_cmd("install")
-        self.assertEqual(code, 1)
-        self.assertIn("launchctl could not load the gateway: bootstrap failed: 5", err)
-        self.assertNotIn("gateway", self.hub_data())
-
-    def test_install_that_never_answers_still_saves_and_says_where_to_look(self):
-        gc = self.gc()
-        with patch.object(gc.sys, "platform", "darwin"), \
-                patch.object(gc, "gateway_program", return_value=(["swe"], None)), \
-                patch.object(gc.launchd, "install", return_value=self.home / "agent.plist"), \
-                patch.object(gc, "_fetch", return_value=None) as fetch, \
-                patch.object(gc.time, "sleep") as sleep:
-            code, out, err = self.run_cmd("install", "--port=9301")
-        self.assertEqual(code, 0)
-        self.assertIn("not answering on port 9301 yet", err)
-        self.assertEqual((fetch.call_count, sleep.call_count), (20, 20))
-        self.assertEqual(self.hub_data()["gateway"], {"enabled": True, "port": 9301})
-
-    def test_uninstall_off_macos_only_switches_sync_back(self):
-        gc = self.gc()
-        gc._save_settings(enabled=True)
-        with patch.object(gc.sys, "platform", "linux"), \
-                patch.object(gc.launchd, "uninstall") as uninstall:
-            code, out, _ = self.run_cmd("uninstall")
-        uninstall.assert_not_called()
-        self.assertEqual(code, 0)
-        self.assertIn("swe mcp sync swe --all", out)
-        self.assertIs(self.hub_data()["gateway"]["enabled"], False)
-
-    def test_uninstall_with_nothing_installed_or_enabled_hints_nothing(self):
-        gc = self.gc()
-        with patch.object(gc.sys, "platform", "darwin"), \
-                patch.object(gc.launchd, "uninstall", return_value=False):
-            code, out, _ = self.run_cmd("uninstall")
-        self.assertEqual(code, 0)
-        self.assertIn("no gateway LaunchAgent was installed", out)
-        self.assertNotIn("swe mcp sync", out)
-
-    def test_uninstall_that_launchctl_refuses_keeps_the_setting(self):
-        gc = self.gc()
-        gc._save_settings(enabled=True)
-        with patch.object(gc.sys, "platform", "darwin"), \
-                patch.object(gc.launchd, "uninstall", side_effect=RuntimeError("busy")):
-            code, _, err = self.run_cmd("uninstall")
-        self.assertEqual(code, 1)
-        self.assertIn("could not stop the gateway: busy", err)
-        self.assertIs(self.hub_data()["gateway"]["enabled"], True)
-
-    def test_share_with_the_gateway_on_hints_a_sync_of_just_those(self):
-        self.gc()._save_settings(enabled=True)
-        code, out, _ = self.run_cmd("share", "api")
-        self.assertEqual(code, 0)
-        self.assertIn("swe mcp sync swe --all --only=api --force", out)
-
     def _status(self, *, platform="darwin", plists=(), loaded=(False, None)):
         gc = self.gc()
         for label in plists:
@@ -797,21 +215,31 @@ class GatewayCommandEdgeTest(unittest.TestCase):
         return out, pid
 
     def test_status_off_macos_never_asks_launchd(self):
-        out, pid = self._status(platform="linux", plists=[self.gc().LABEL])
+        out, pid = self._status(platform="linux", plists=[self.gc().WARP_GATE_LABEL])
         pid.assert_not_called()
         self.assertIn("not installed", out)
 
-    def test_status_of_an_old_label_plist_that_is_not_running(self):
+    def test_status_of_a_warp_gate_plist_that_is_not_running(self):
         gc = self.gc()
-        out, pid = self._status(plists=[gc.OLD_LABEL])
-        self.assertEqual([c.kwargs["label"] for c in pid.call_args_list], [gc.OLD_LABEL])
+        out, pid = self._status(plists=[gc.WARP_GATE_LABEL])
+        self.assertEqual([c.kwargs["label"] for c in pid.call_args_list],
+                         [gc.WARP_GATE_LABEL])
         self.assertIn("installed but not answering on port 8478", out)
+        self.assertNotIn("retired", out)
+
+    def test_status_of_a_legacy_agent_plist_that_is_not_running(self):
+        gc = self.gc()
+        out, pid = self._status(plists=[gc.LEGACY_LABELS[0]])
+        self.assertEqual([c.kwargs["label"] for c in pid.call_args_list],
+                         [gc.LEGACY_LABELS[0]])
+        self.assertIn("installed but not answering on port 8478", out)
+        self.assertIn("retired", out)
         self.assertIn("installed, but sync still writes commands", out)
 
-    def test_status_enabled_without_an_agent_says_to_install(self):
+    def test_status_enabled_without_an_agent_says_to_install_warp_gate(self):
         self.gc()._save_settings(enabled=True)
         out, _ = self._status()
-        self.assertIn("no LaunchAgent runs it: swe mcp gateway install", out)
+        self.assertIn("no LaunchAgent runs it: warp-gate install", out)
 
     def test_status_with_nothing_shared(self):
         hub = self.hub_data()
@@ -870,7 +298,7 @@ class GatewayCliTest(unittest.TestCase):
         result = self.run_mcp("gateway", "share", "api")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIs(self.hub_data()["mcpServers"]["api"]["shared"], True)
-        self.assertIn("not installed yet", result.stdout)
+        self.assertIn("warp-gate install", result.stdout)
         result = self.run_mcp("gateway", "unshare", "api")
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("shared", self.hub_data()["mcpServers"]["api"])
@@ -943,414 +371,11 @@ class GatewayCliTest(unittest.TestCase):
         self.assertEqual([(r["name"], r["state"], r["url"]) for r in data["servers"]],
                          [("api", "down", "http://127.0.0.1:1/mcp/api")])
 
-    def test_unknown_subcommand_and_bad_port(self):
-        self.assertEqual(self.run_mcp("gateway", "nope").returncode, 1)
-        result = self.run_mcp("gateway", "serve", "--port=abc")
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("--port must be", result.stderr)
-
-
-class GatewayLaunchdTest(unittest.TestCase):
-    def test_the_agent_gets_its_own_label(self):
-        from swe.mcp.gateway_commands import LABEL
-
-        with tempfile.TemporaryDirectory() as tmp:
-            home = pathlib.Path(tmp)
-            calls = []
-
-            def run(argv, **kw):
-                calls.append(argv)
-                return subprocess.CompletedProcess(argv, 0, "", "")
-
-            path = launchd.install(["swe", "mcp", "gateway", "serve"], home / "g.log", "/usr/bin",
-                                   home=home, run=run, label=LABEL)
-            self.assertEqual(path.name, f"{LABEL}.plist")
-            import plistlib
-            self.assertEqual(plistlib.loads(path.read_bytes())["Label"], LABEL)
-            self.assertEqual(plistlib.loads(path.read_bytes())["ProcessType"], "Background")
-            launchd.install(["swe"], home / "g.log", "/usr/bin", home=home, run=run,
-                            label=LABEL, process_type="Interactive")
-            self.assertEqual(plistlib.loads(path.read_bytes())["ProcessType"], "Interactive")
-            self.assertTrue(all(LABEL in " ".join(c) or c[1] == "bootstrap" for c in calls))
-            self.assertFalse((home / "Library" / "LaunchAgents" / f"{launchd.LABEL}.plist").exists())
-
-
-
-def _script(folder: pathlib.Path, name: str, body: str) -> dict:
-    """A stdio server spec running ``body`` as a Python script."""
-    path = folder / f"{name}.py"
-    path.write_text("import json, sys\n" + body)
-    return {"command": sys.executable, "args": [str(path)]}
-
-
-class GatewayBackendEdgeTest(unittest.TestCase):
-    """How a backend behaves when its server misbehaves at start-up, stops
-    answering, or has nowhere to log; each against a real child process
-    or a stand-in, never a real hub."""
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.dir = pathlib.Path(self.tmp.name)
-
-    def backend(self, name, spec):
-        backend = gateway_server.Backend(name, spec, self.dir / "logs")
-        self.addCleanup(backend.stop)
-        return backend
-
-    def test_an_initialize_result_of_the_wrong_shape_stops_the_server(self):
-        # Regression: a non-object result raised ValueError out of ready(),
-        # so the process was never stopped and every later request started
-        # another one beside it.
-        spec = _script(self.dir, "bad", (
-            "for line in sys.stdin:\n"
-            "    m = json.loads(line)\n"
-            "    if m.get('method') == 'initialize':\n"
-            "        print(json.dumps({'jsonrpc': '2.0', 'id': m['id'], 'result': 'ok'}), flush=True)\n"))
-        backend = self.backend("bad", spec)
-        with patch.object(gateway_server, "KILL_GRACE_S", 2):
-            body = backend.call({"jsonrpc": "2.0", "id": 3, "method": "tools/list"},
-                                "2025-06-18")
-        self.assertEqual(body["id"], 3)
-        self.assertIn("initialize failed: the result is not an object",
-                      body["error"]["message"])
-        self.assertIsNone(backend._child)
-        self.assertEqual(backend.status()["state"], "error")
-        # The failure backs off rather than starting a second copy at once.
-        again = backend.call({"jsonrpc": "2.0", "id": 4, "method": "tools/list"},
-                             "2025-06-18")
-        self.assertIn("keeps exiting", again["error"]["message"])
-        self.assertEqual(backend.starts, 1)
-
-    def test_an_initialize_error_names_its_message_whatever_its_shape(self):
-        for error, detail in (({"code": -1, "message": "bad token"}, "bad token"),
-                              ("plain text", "plain text"),
-                              (None, "no result")):
-            with self.subTest(error=error):
-                answer = {"jsonrpc": "2.0", "id": "ID"}
-                if error is not None:
-                    answer["error"] = error
-                spec = _script(self.dir, "err", (
-                    f"answer = {json.dumps(answer)}\n"
-                    "for line in sys.stdin:\n"
-                    "    m = json.loads(line)\n"
-                    "    answer['id'] = m['id']\n"
-                    "    print(json.dumps(answer), flush=True)\n"))
-                backend = self.backend("err", spec)
-                with patch.object(gateway_server, "KILL_GRACE_S", 2):
-                    with self.assertRaises(RuntimeError) as raised:
-                        backend.ready("2025-06-18")
-                self.assertIn(f"initialize failed: {detail}", str(raised.exception))
-                self.assertIsNone(backend._child)
-
-    def test_stdout_noise_is_skipped_and_server_requests_are_refused(self):
-        # A banner, a JSON list and an answer to an id nobody asked for come
-        # before the real answer; a request to "the client" gets an error back.
-        spec = _script(self.dir, "noisy", (
-            "for line in sys.stdin:\n"
-            "    m = json.loads(line)\n"
-            "    if 'id' not in m:\n"
-            "        continue\n"
-            "    if m.get('method') == 'initialize':\n"
-            "        print('Server ready on stdio', flush=True)\n"
-            "        print('[1, 2]', flush=True)\n"
-            "        print(json.dumps({'jsonrpc': '2.0', 'id': 999, 'result': {}}), flush=True)\n"
-            "        print(json.dumps({'jsonrpc': '2.0', 'id': m['id'], 'result': {'capabilities': {}}}), flush=True)\n"
-            "    elif m.get('method') == 'tools/list':\n"
-            "        print(json.dumps({'jsonrpc': '2.0', 'id': 's1', 'method': 'sampling/createMessage'}), flush=True)\n"
-            "        refusal = json.loads(sys.stdin.readline())\n"
-            "        print(json.dumps({'jsonrpc': '2.0', 'id': m['id'], 'result': {'seen': refusal}}), flush=True)\n"))
-        backend = self.backend("noisy", spec)
-        body = backend.call({"jsonrpc": "2.0", "id": "a", "method": "tools/list"},
-                            "2025-06-18")
-        self.assertEqual(body["id"], "a")
-        seen = body["result"]["seen"]
-        self.assertEqual(seen["id"], "s1")
-        self.assertEqual(seen["error"]["code"], gateway_server.METHOD_NOT_FOUND)
-
-    def test_a_server_that_never_answers_initialize_times_out(self):
-        spec = _script(self.dir, "mute", "for line in sys.stdin:\n    pass\n")
-        backend = self.backend("mute", spec)
-        with patch.object(gateway_server, "INIT_TIMEOUT_S", 0.2), \
-                patch.object(gateway_server, "KILL_GRACE_S", 2):
-            with self.assertRaises(RuntimeError) as raised:
-                backend.ready("2025-06-18")
-        self.assertIn("no answer to initialize", str(raised.exception))
-        self.assertIsNone(backend._child)
-
-    def test_a_request_nobody_answers_is_cancelled_at_the_server(self):
-        log = self.dir / "seen.jsonl"
-        spec = _script(self.dir, "slow", (
-            f"log = open({str(log)!r}, 'a')\n"
-            "for line in sys.stdin:\n"
-            "    log.write(line); log.flush()\n"
-            "    m = json.loads(line)\n"
-            "    if m.get('method') == 'initialize':\n"
-            "        print(json.dumps({'jsonrpc': '2.0', 'id': m['id'], 'result': {}}), flush=True)\n"
-            "    if m.get('method') == 'notifications/cancelled':\n"
-            "        sys.exit(0)\n"))
-        backend = self.backend("slow", spec)
-        # Taken before the call: the cancel makes the server exit, and the
-        # reader thread then clears _child, possibly before call returns.
-        child, _ = backend.ready("2025-06-18")
-        sent = []
-        body = backend.call({"jsonrpc": "2.0", "id": 8, "method": "tools/call",
-                             "params": {"name": "x"}}, "2025-06-18",
-                            on_sent=sent.append, timeout=0.2)
-        self.assertEqual(body["id"], 8)
-        self.assertIn("did not answer in 0s", body["error"]["message"])
-        self.assertNotIn(sent[0], child.pending)
-        # The server hears the cancel for the gateway's own id (and exits
-        # on it, so the wait below needs no polling).
-        self.assertEqual(child.proc.wait(timeout=10), 0)
-        lines = [json.loads(line) for line in log.read_text().splitlines()]
-        cancels = [m for m in lines if m.get("method") == "notifications/cancelled"]
-        self.assertEqual(cancels[0]["params"]["requestId"], sent[0])
-        self.assertEqual(cancels[0]["params"]["reason"], "gateway timeout")
-
-    def test_a_command_that_cannot_start_backs_off(self):
-        backend = self.backend("ghost", {"command": str(self.dir / "no-such-binary")})
-        body = backend.call({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, "2025-06-18")
-        self.assertIn("ghost: cannot start", body["error"]["message"])
-        self.assertEqual(backend.status()["state"], "error")
-        body = backend.call({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, "2025-06-18")
-        self.assertIn("keeps exiting (cannot start", body["error"]["message"])
-        self.assertEqual(backend.starts, 0)
-
-    def test_a_stopped_backend_refuses_and_notify_without_a_server_is_quiet(self):
-        backend = self.backend("gone", {"command": "x"})
-        backend.notify({"jsonrpc": "2.0", "method": "notifications/cancelled"})
-        backend.stop()
-        body = backend.call({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, "2025-06-18")
-        self.assertIn("no longer shared", body["error"]["message"])
-
-    def test_backoff_doubles_and_a_long_run_resets_it(self):
-        backend = self.backend("b", {"command": "x"})
-        with patch.object(gateway_server.time, "monotonic", return_value=1000.0):
-            delays = []
-            for _ in range(7):
-                backend._note_failure(1)
-                delays.append(backend._retry_at - 1000.0)
-            self.assertEqual(delays, [2, 4, 8, 16, 32, 60, 60])
-            backend._note_failure(gateway_server.HEALTHY_AFTER_S)
-            self.assertEqual(backend._retry_at - 1000.0, gateway_server.BACKOFF_MIN_S)
-
-    def test_a_log_that_cannot_be_opened_is_still_drained(self):
-        # Left unread, a full stderr pipe blocks the server mid-request.
-        class Stderr:
-            read = 0
-            closed = False
-
-            def __iter__(self):
-                for _ in range(1000):
-                    self.read += 1
-                    yield b"noise\n"
-
-            def close(self):
-                self.closed = True
-
-        backend = gateway_server.Backend("nolog", {"command": "x"}, self.dir)
-        (self.dir / "nolog.log").mkdir()  # opening it as a file fails
-        stream = Stderr()
-        backend._log(stream)
-        self.assertEqual(stream.read, 1000)
-        self.assertTrue(stream.closed)
-
-    def test_a_write_waits_its_turn_then_gives_up(self):
-        proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
-                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL)
-        child = gateway_server._Child(proc)
-        self.assertTrue(child.write_lock.acquire())
-        try:
-            with self.assertRaisesRegex(TimeoutError, "another write"):
-                child.send({"jsonrpc": "2.0", "method": "x"}, timeout=0.05)
-        finally:
-            child.write_lock.release()
-        child.close()
-        with self.assertRaisesRegex(BrokenPipeError, "server exited"):
-            child.send({"jsonrpc": "2.0", "method": "x"})
-        proc.wait(timeout=5)
-        # A server gone before the request is registered says so.
-        child.fail_all("gone")
-        with self.assertRaises(BrokenPipeError):
-            child.expect(1)
-
-
-class GatewayRoutingEdgeTest(unittest.TestCase):
-    """Gateway.handle and reload against stand-in backends: no process."""
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.specs = {"a": {"command": "x"}}
-        self.watched = [pathlib.Path(self.tmp.name) / "mcp.json"]
-        self.loads = 0
-
-        def load():
-            self.loads += 1
-            return dict(self.specs), {}
-
-        self.gateway = Gateway(pathlib.Path(self.tmp.name), load=load,
-                               watched=lambda: self.watched)
-
-    def test_a_cancel_reaches_the_server_under_the_gateways_id(self):
-        backend = self.gateway.backends["a"]
-        notified = []
-
-        def call(message, protocol, on_sent=None, timeout=None):
-            on_sent(42)
-            # The client gives up while its request is in flight.
-            self.gateway.handle(backend, {"jsonrpc": "2.0", "method": "notifications/cancelled",
-                                          "params": {"requestId": 7, "reason": "user"}},
-                                "session-1", protocol)
-            # Another session's cancel for the same id is not this request.
-            self.gateway.handle(backend, {"jsonrpc": "2.0", "method": "notifications/cancelled",
-                                          "params": {"requestId": 7}}, "session-2", protocol)
-            return {"jsonrpc": "2.0", "id": message["id"], "result": {}}
-
-        with patch.object(backend, "call", side_effect=call), \
-                patch.object(backend, "notify", side_effect=notified.append):
-            reply = self.gateway.handle(backend, {"jsonrpc": "2.0", "id": 7,
-                                                  "method": "tools/call"},
-                                        "session-1", "2025-06-18")
-        self.assertEqual(reply["id"], 7)
-        self.assertEqual(notified, [{"jsonrpc": "2.0", "method": "notifications/cancelled",
-                                     "params": {"requestId": 42, "reason": "user"}}])
-        # Finished requests are forgotten, so a late cancel goes nowhere.
-        self.assertEqual(self.gateway._inflight, {})
-
-    def test_messages_that_are_not_requests(self):
-        backend = self.gateway.backends["a"]
-        with patch.object(backend, "call") as call, \
-                patch.object(backend, "ready", return_value=(None, {"capabilities": {}})) as ready:
-            self.assertEqual(self.gateway.handle(backend, [1], "s", "p")["error"]["code"],
-                             gateway_server.INVALID_REQUEST)
-            bad = self.gateway.handle(backend, {"id": 5, "method": "ping"}, "s", "p")
-            self.assertEqual((bad["id"], bad["error"]["code"]),
-                             (5, gateway_server.INVALID_REQUEST))
-            # A client's answer to a request: nothing to say back.
-            self.assertIsNone(self.gateway.handle(backend, {"jsonrpc": "2.0", "id": 1,
-                                                            "result": {}}, "s", "p"))
-            # A protocol version that is not a string falls back to the default.
-            init = self.gateway.handle(backend, {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-                                                 "params": {"protocolVersion": 7}}, "s", "p")
-            self.assertEqual(init["result"], {"capabilities": {}})
-            ready.assert_called_with(gateway_server.DEFAULT_PROTOCOL)
-        call.assert_not_called()
-
-    def test_reload_waits_between_checks_and_skips_an_unchanged_hub(self):
-        self.assertEqual(self.loads, 1)
-        # Within RELOAD_EVERY_S nothing is read, even with the file changed.
-        self.watched[0].write_text("{}")
-        self.gateway.reload()
-        self.assertEqual(self.loads, 1)
-        # Past it, an unchanged fingerprint skips the load.
-        self.gateway._checked -= gateway_server.RELOAD_EVERY_S
-        stamp = self.gateway._stamp
-        self.gateway._stamp = self.gateway._fingerprint()
-        self.gateway.reload()
-        self.assertEqual(self.loads, 1)
-        # A changed file is read again.
-        self.gateway._checked -= gateway_server.RELOAD_EVERY_S
-        self.gateway._stamp = stamp
-        self.gateway.reload()
-        self.assertEqual(self.loads, 2)
-
-    def test_a_missing_watched_file_still_has_a_fingerprint(self):
-        self.assertEqual(self.gateway._fingerprint(),
-                         ((str(self.watched[0]), None, None),))
-
-
-class GatewayHttpEdgeTest(_GatewayServerCase):
-    """The HTTP refusals and views the main tests do not reach."""
-
-    def raw(self, data: bytes) -> bytes:
-        import socket
-
-        with socket.create_connection(("127.0.0.1", self.port), timeout=10) as sock:
-            sock.sendall(data)
-            chunks = []
-            while True:
-                chunk = sock.recv(65536)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-            return b"".join(chunks)
-
-    def post(self, body: bytes, length: str | None = None) -> bytes:
-        size = str(len(body)) if length is None else length
-        return self.raw((f"POST /mcp/fake HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n"
-                         f"Content-Type: application/json\r\nContent-Length: {size}\r\n"
-                         "Connection: close\r\n\r\n").encode() + body)
-
-    def test_status_reloads_and_lists_the_servers(self):
-        status, _, body = self.request(method="GET", path="/status")
-        self.assertEqual(status, 200)
-        self.assertEqual([row["name"] for row in body["servers"]], ["fake"])
-        self.assertIsNone(body["error"])
-
-    def test_every_verb_refuses_a_browser(self):
-        for method in ("GET", "HEAD", "DELETE"):
-            with self.subTest(method):
-                status, headers, _ = self.request(method=method,
-                                                  headers={"Origin": "https://evil.example"})
-                self.assertEqual(status, 403)
-                self.assertEqual(headers.get("Connection"), "close")
-
-    def test_unknown_paths(self):
-        self.assertEqual(self.request(method="GET", path="/nope")[0], 404)
-        self.assertEqual(self.request(method="GET", path="/mcp/nope")[0], 404)
-        self.assertEqual(self.request(method="DELETE", path="/mcp/nope")[0], 404)
-        self.assertEqual(self.request(INIT, path="/other/fake")[0], 404)
-        # A query string and a trailing slash still name the server.
-        self.assertEqual(self.request(method="HEAD", path="/mcp/fake/?x=1")[0], 200)
-
-    def test_bad_bodies_are_refused_before_the_server_starts(self):
-        self.assertIn(b" 411 ", self.post(b"{}", length="ten").split(b"\r\n", 1)[0])
-        with patch.object(gateway_server, "MAX_BODY", 10):
-            self.assertIn(b" 413 ", self.post(b'{"jsonrpc": "2.0"}').split(b"\r\n", 1)[0])
-        reply = self.post(b"{not json")
-        self.assertIn(b" 400 ", reply.split(b"\r\n", 1)[0])
-        self.assertIn(b"invalid JSON", reply)
-        self.assertEqual(self.gateway.backends["fake"].starts, 0)
-
-    def test_a_batch_of_only_notifications_is_accepted_with_no_body(self):
-        status, _, body = self.request([{"jsonrpc": "2.0", "method": "notifications/initialized"}])
-        self.assertEqual((status, body), (202, None))
-
-    def test_a_dropped_connection_is_not_logged_as_an_error(self):
-        import sys as _sys
-
-        server = self.server
-        try:
-            raise ConnectionResetError("peer went away")
-        except ConnectionResetError:
-            with patch("socketserver.BaseServer.handle_error") as base:
-                server.handle_error(None, ("127.0.0.1", 1))
-            base.assert_not_called()
-        try:
-            raise ValueError("a real bug")
-        except ValueError:
-            with patch("socketserver.BaseServer.handle_error") as base:
-                server.handle_error(None, ("127.0.0.1", 1))
-            base.assert_called_once()
-        self.assertIsNone(_sys.exc_info()[0])
-
-
-class LoadHubSpecsEdgeTest(unittest.TestCase):
-    def test_servers_that_are_not_an_object_are_an_error(self):
-        from swe.mcp import cli as mcp_cli
-
-        with tempfile.TemporaryDirectory() as tmp:
-            hub = pathlib.Path(tmp) / "mcp.json"
-            hub.write_text(json.dumps({"mcpServers": ["api"]}))
-            with patch.object(mcp_cli, "MCP_SOURCE_FILE", hub), \
-                    patch("swe.mcp.secrets.load_secrets", return_value={}):
-                with self.assertRaisesRegex(ValueError, "mcpServers is not an object"):
-                    gateway_server.load_hub_specs()
-                hub.write_text(json.dumps({}))
-                self.assertEqual(gateway_server.load_hub_specs(), ({}, {}))
+    def test_removed_daemon_verbs_are_unknown(self):
+        for verb in ("serve", "install", "uninstall"):
+            result = self.run_mcp("gateway", verb)
+            self.assertEqual(result.returncode, 1, verb)
+            self.assertIn(f"Unknown gateway command: {verb}", result.stdout)
 
 
 if __name__ == "__main__":
