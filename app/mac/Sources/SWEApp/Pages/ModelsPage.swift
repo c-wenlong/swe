@@ -758,11 +758,11 @@ struct ColumnTip: Equatable {
             ColumnTip(title: "Reasoning: Humanity's Last Exam",
                       text: "Percent of expert-level questions answered correctly, about 40% of them maths. It replaces Artificial Analysis's Maths Index, retired in January 2026.")
         case .speed:
-            ColumnTip(title: "Speed: Median output speed",
-                      text: "Output tokens per second (t/s), the median across the providers Artificial Analysis tests.")
+            ColumnTip(title: "Speed: Mean output speed",
+                      text: "Output tokens per second (t/s), the mean across the providers Artificial Analysis tests (older stored rows hold the median).")
         case .ttft:
             ColumnTip(title: "Latency: Time to first token",
-                      text: "Median seconds until the first token arrives, lower is better.")
+                      text: "Mean seconds until the first token arrives, lower is better (older stored rows hold the median).")
         case .cost:
             blended
         }

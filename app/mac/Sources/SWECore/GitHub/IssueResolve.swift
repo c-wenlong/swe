@@ -46,11 +46,17 @@ public enum IssueResolve {
         guard parts.count == 2 else { return false }
         let components = (cwd as NSString).standardizingPath
             .split(separator: "/").map { $0.lowercased() }
-        // The repo was quiver before it became swe, and checkouts and
-        // worktrees made before the rename keep the old folder name.
-        let names = parts[0] == "c-wenlong" && parts[1] == "swe" ? ["swe", "quiver"] : [parts[1]]
+        // This project moved from c-wenlong/quiver to c-wenlong/swe to
+        // starship-terminal/swe. Checkouts and worktrees made under an
+        // earlier owner or name stay on disk with the old folder names.
+        let isThisProject = parts[1] == "swe" && ["c-wenlong", "starship-terminal"].contains(parts[0])
+        let owners = isThisProject ? ["starship-terminal", "c-wenlong"] : [parts[0]]
+        let names = isThisProject ? ["swe", "quiver"] : [parts[1]]
         return components.contains { component in
-            names.contains { component == $0 || component.hasPrefix("\(parts[0])__\($0)") }
+            names.contains { name in
+                component == name
+                    || owners.contains { component.hasPrefix("\($0)__\(name)") }
+            }
         }
     }
 

@@ -353,8 +353,15 @@ struct MultiSelectMenu<Value: Hashable>: View {
     @Binding var selection: Set<Value>
     /// The face for two or more picks: "2 harnesses".
     var countTitle: (Int) -> String
+    /// What the face says, when the caller knows better than the picks
+    /// (a stored selection that includes names no longer offered).
+    var title: String? = nil
+    /// A status dot before an option's logo, by option value, in the
+    /// open list only.
+    var dots: [Value: Color] = [:]
     @State private var open = false
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The picks in option order, for a stable face.
     private var picked: [(value: Value, title: String, icon: String?)] {
@@ -362,10 +369,11 @@ struct MultiSelectMenu<Value: Hashable>: View {
     }
 
     private var current: String {
+        if let title { return title }
         switch picked.count {
-        case 0: allTitle
-        case 1: picked[0].title
-        default: countTitle(picked.count)
+        case 0: return allTitle
+        case 1: return picked[0].title
+        default: return countTitle(picked.count)
         }
     }
 
@@ -395,26 +403,38 @@ struct MultiSelectMenu<Value: Hashable>: View {
         .onHover { hovering = $0 }
         .fixedSize()
         .popover(isPresented: $open, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 0) {
-                row(title: allTitle, icon: nil, on: selection.isEmpty) { selection = [] }
-                Divider().padding(.vertical, 4)
-                ForEach(options, id: \.value) { option in
-                    row(title: option.title, icon: option.icon, on: selection.contains(option.value)) {
-                        if selection.contains(option.value) { selection.remove(option.value) }
-                        else { selection.insert(option.value) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    row(title: allTitle, icon: nil, dot: nil, on: selection.isEmpty) { selection = [] }
+                    Divider().padding(.vertical, 4)
+                    ForEach(options, id: \.value) { option in
+                        row(title: option.title, icon: option.icon, dot: dots[option.value],
+                            on: selection.contains(option.value)) {
+                            if selection.contains(option.value) { selection.remove(option.value) }
+                            else { selection.insert(option.value) }
+                        }
                     }
                 }
+                .padding(.vertical, 6)
             }
-            .padding(.vertical, 6)
-            .frame(minWidth: 200)
+            // A long list scrolls the way SelectOptionList does; a short
+            // one keeps its own height.
+            .frame(minWidth: 200, maxHeight: 360)
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 
-    private func row(title: String, icon: String?, on: Bool, action: @escaping () -> Void) -> some View {
+    private func row(title: String, icon: String?, dot: Color?, on: Bool,
+                     action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: on ? "checkmark.square.fill" : "square")
                     .foregroundStyle(on ? Theme.interactive : Theme.textMuted)
+                    .animation(reduceMotion ? nil : .easeOut(duration: Theme.fadeDuration), value: on)
+                if !dots.isEmpty {
+                    Circle().fill(dot ?? .clear)
+                        .frame(width: Theme.statusDot, height: Theme.statusDot)
+                }
                 if let icon, HarnessIcon.exists(for: icon) { HarnessIcon(harness: icon, size: 16) }
                 Text(title).font(Theme.bodySmall).foregroundStyle(Theme.textPrimary).lineLimit(1)
                 Spacer(minLength: 0)

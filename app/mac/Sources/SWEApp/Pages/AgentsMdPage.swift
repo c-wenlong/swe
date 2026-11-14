@@ -145,6 +145,7 @@ struct CompileView: View {
     /// is the All-harnesses view, one linked name is that harness's view.
     @AppStorage("agentsMd.compile.filter") private var filter = ""
     @State private var error: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Every harness name the link report shows, first-seen order.
     private var harnesses: [String] { report.instructionHarnessNames }
@@ -176,26 +177,10 @@ struct CompileView: View {
         return check.output
     }
 
-    /// Chapter names compiled for this filter's output (from `outputs`
-    /// when the swe sends them, else computed locally).
-    private var count: Int {
-        if let outputs = check.outputs {
-            let output = harness.flatMap { h in outputs.first { $0.harness == h } }
-                ?? outputs.first { $0.harness == nil }
-            if let output { return output.chapters.count }
-        }
-        return check.chapters.filter {
-            harness == nil
-                || CompileToggle.receives(rule: rule(for: $0.name), harness: harness!)
-        }.count
-    }
-
     var body: some View {
         let chapters = app.chapters
         VStack(alignment: .leading, spacing: 12) {
             filterStrip
-            Text(summary).font(Theme.caption).foregroundStyle(Theme.textSecondary)
-                .padding(.horizontal, 4)
             // A harness whose link doesn't reach its file still compiles,
             // but the file goes nowhere: say so with the same fix the
             // Edit strip offers.
@@ -229,40 +214,42 @@ struct CompileView: View {
         .frame(maxHeight: .infinity)
     }
 
-    private var summary: String {
-        if let harness {
-            let name = HarnessMark(harness).name
-            if check.outputs?.contains(where: { $0.harness == harness }) == true {
-                return "\(name) reads \(displayPath(outputPath)) (\(count) chapters)"
-            }
-            return "\(name) reads the shared AGENTS.md (\(count) chapters)"
-        }
-        let own = check.outputs?.filter { $0.harness != nil }.count ?? 0
-        return "Shared \(displayPath(check.output)): \(count) chapters"
-            + (own == 0 ? "" : ". \(own) harness\(own == 1 ? "" : "es") have their own file.")
-    }
-
-    /// The harness links as a filter: All plus one chip per harness, the
-    /// dot kept from the links strip.
+    /// The harness filter as one multi-select dropdown, each harness with
+    /// its logo and link-state dot in the menu; the compiled file's
+    /// preview button stays on the right.
     private var filterStrip: some View {
         Strip {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            HStack(spacing: 12) {
                 Text("Harnesses").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
-                FlowLayout(spacing: 8, lineSpacing: 6) {
-                    chip(nil, title: "All harnesses")
-                    ForEach(harnesses, id: \.self) { name in
-                        let link = report.instructionRows
-                            .first(where: { $0.name == name })?.instructions
-                        chip(name, title: HarnessMark(name).name, link: link,
-                             mark: name)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                MultiSelectMenu(
+                    allTitle: "All harnesses",
+                    options: harnesses.map { (value: $0, title: HarnessMark($0).name, icon: $0) },
+                    selection: Binding(
+                        get: { Set(CompileFilter.picked(stored: filter, known: harnesses)) },
+                        set: { picks in
+                            withAnimation(reduceMotion ? nil : .easeOut(duration: Theme.fadeDuration)) {
+                                filter = CompileFilter.stored(picking: picks, known: harnesses)
+                            }
+                        }),
+                    countTitle: { "\($0) harnesses" },
+                    title: CompileFilter.label(stored: filter, known: harnesses),
+                    dots: Dictionary(uniqueKeysWithValues: harnesses.map { name in
+                        (name, Self.linkColor(report.instructionRows
+                            .first(where: { $0.name == name })?.instructions))
+                    }))
+                Spacer(minLength: 0)
                 ViewCompiledButton(outputPath: outputPath,
                                    onOpenChapter: onOpenChapter)
-                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
             }
         }
+    }
+
+    /// The status dot's colour for a harness's instruction link.
+    private static func linkColor(_ link: InitCheck.Link?) -> Color {
+        guard let link else { return Theme.textMuted }
+        return link.state == .linked ? Theme.success
+            : link.state.isBlocked ? Theme.danger
+            : link.state.initFixes ? Theme.warning : Theme.textMuted
     }
 
     /// A harness's logo only, falling back to the full mark where a
@@ -278,32 +265,6 @@ struct CompileView: View {
         }
     }
 
-    private func chip(_ name: String?, title: String,
-                      link: InitCheck.Link? = nil, mark: String? = nil) -> some View {
-        let selected = name == harness
-        return Button {
-            filter = CompileFilter.serialise(name.map { [$0] } ?? [])
-        } label: {
-            HStack(spacing: 5) {
-                if let link {
-                    Circle().fill(link.state == .linked ? Theme.success
-                                  : link.state.isBlocked ? Theme.danger
-                                  : link.state.initFixes ? Theme.warning : Theme.textMuted)
-                        .frame(width: Theme.statusDot, height: Theme.statusDot)
-                }
-                if let mark { Self.markIcon(mark, size: 12) }
-                Text(title).font(Theme.bodySmall)
-                    .foregroundStyle(selected ? Theme.textPrimary : Theme.textNav)
-            }
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(selected ? Theme.navActive : .clear,
-                        in: .rect(cornerRadius: Theme.controlRadius))
-        }
-        .plainButton()
-        .hoverTip(name.map { HarnessMark($0).name } ?? "Every harness",
-                  replacesLabel: false)
-    }
-
     /// Every file's membership row for this filter, plus the folder the
     /// members roll up into.
     private var includeRail: some View {
@@ -312,12 +273,15 @@ struct CompileView: View {
             HStack(spacing: 6) {
                 Text("Include").font(Theme.cardTitle).foregroundStyle(Theme.textPrimary)
                 Spacer(minLength: 4)
+                Text("KiB").font(Theme.caption).foregroundStyle(Theme.textMuted)
+                    .frame(width: Self.kibColumn, alignment: .trailing)
+                    .padding(.trailing, 8)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(chapters.tree) { node in
                         IncludeNode(node: node, depth: 0, check: check,
-                                    harness: harness,
+                                    harness: harness, sizes: chapters.sizes,
                                     state: { self.state(for: $0) },
                                     rule: { self.rule(for: $0) }) { problem in
                             error = problem
@@ -338,10 +302,29 @@ struct CompileView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // One harness picked: what that harness's file is built from.
+            if harness != nil {
+                HStack(spacing: 6) {
+                    Text("Total").font(Theme.nav).foregroundStyle(Theme.textPrimary)
+                    Spacer(minLength: 4)
+                    Text(IncludeSizes.cell(bytes: IncludeSizes.bytes(
+                        of: ChapterTree.files(under: "", in: chapters.tree) + chapters.missing,
+                        sizes: chapters.sizes, included: receives)))
+                        .font(Theme.caption).monospacedDigit()
+                        .foregroundStyle(Theme.textPrimary)
+                        .frame(width: Self.kibColumn, alignment: .trailing)
+                }
+                .padding(.horizontal, 8).padding(.top, 6)
+                .overlay(alignment: .top) { SettingsDivider() }
+                .transition(.opacity)
+            }
         }
         .frame(width: 300)
         .frame(maxHeight: .infinity)
     }
+
+    /// The right-aligned size column under the Include header's `KiB`.
+    static let kibColumn: CGFloat = 40
 
     /// An Include row for an indexed chapter that has no outline row:
     /// checked (it is compiled) with "missing"/"hidden" saying why.
@@ -379,6 +362,12 @@ struct CompileView: View {
         }
     }
 
+    /// The harness columns the Order matrix draws: the dropdown's picks,
+    /// or every harness.
+    private var columns: [String] {
+        CompileFilter.columns(stored: filter, known: harnesses)
+    }
+
     /// The fixed-width harness column shared by the matrix header and
     /// every Order row, so the chips line up vertically.
     private static let matrixColumn: CGFloat = 30
@@ -398,10 +387,10 @@ struct CompileView: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if harness == nil && !harnesses.isEmpty {
+                    if harness == nil && !columns.isEmpty {
                         HStack(spacing: 8) {
                             Spacer(minLength: 0)
-                            ForEach(harnesses, id: \.self) { name in
+                            ForEach(columns, id: \.self) { name in
                                 Button { filter = name } label: {
                                     Self.markIcon(name, size: 12)
                                         .frame(width: Self.matrixColumn)
@@ -416,7 +405,7 @@ struct CompileView: View {
                         Task { await chapters.move(chapter: name, before: before, swe: app.swe) }
                     } row: { chapter in
                         OrderRow(chapter: chapter, check: check, harness: harness,
-                                 harnesses: harnesses,
+                                 harnesses: columns,
                                  column: Self.matrixColumn,
                                  rule: { self.rule(for: $0) }) { problem in
                             error = problem
@@ -436,6 +425,8 @@ struct CompileView: View {
         var depth: Int
         var check: InstructionsCheck
         var harness: String?
+        /// Bytes per file path, read off the main actor by the model.
+        var sizes: [String: Int]
         var state: (String) -> CompileState
         var rule: (String) -> [String: [String]]?
         var onError: (String?) -> Void
@@ -444,13 +435,15 @@ struct CompileView: View {
         @AppStorage private var expanded: Bool
 
         init(node: ChapterNode, depth: Int, check: InstructionsCheck,
-             harness: String?, state: @escaping (String) -> CompileState,
+             harness: String?, sizes: [String: Int],
+             state: @escaping (String) -> CompileState,
              rule: @escaping (String) -> [String: [String]]?,
              onError: @escaping (String?) -> Void) {
             self.node = node
             self.depth = depth
             self.check = check
             self.harness = harness
+            self.sizes = sizes
             self.state = state
             self.rule = rule
             self.onError = onError
@@ -474,6 +467,14 @@ struct CompileView: View {
 
         private var tri: CompileToggle.TriState {
             CompileToggle.triState(files.map(receipt))
+        }
+
+        /// The size column: a file's own size, a folder's checked files.
+        private var sizeText: String {
+            node.isFolder
+                ? IncludeSizes.cell(bytes: IncludeSizes.bytes(
+                    of: files, sizes: sizes, included: receipt))
+                : IncludeSizes.cell(bytes: sizes[node.path])
         }
 
         var body: some View {
@@ -505,6 +506,10 @@ struct CompileView: View {
                             .font(Theme.caption).foregroundStyle(Theme.textMuted)
                     }
                     Spacer(minLength: 4)
+                    Text(sizeText).font(Theme.caption).monospacedDigit()
+                        .foregroundStyle(node.isFolder || receipt(node.path)
+                                         ? Theme.textSecondary : Theme.textMuted)
+                        .frame(width: CompileView.kibColumn, alignment: .trailing)
                 }
                 .padding(.leading, CGFloat(depth) * 14 + 8)
                 .padding(.trailing, 8).padding(.vertical, 4)
@@ -522,7 +527,8 @@ struct CompileView: View {
                 if node.isFolder && expanded {
                     ForEach(node.children) { child in
                         IncludeNode(node: child, depth: depth + 1, check: check,
-                                    harness: harness, state: state, rule: rule,
+                                    harness: harness, sizes: sizes,
+                                    state: state, rule: rule,
                                     onError: onError)
                     }
                 }
