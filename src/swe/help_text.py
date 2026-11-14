@@ -563,6 +563,20 @@ to use their own login state and environment."""
   {c('cyan', 'swe hooks enable <name>')}         Re-link a disabled hook
   {c('cyan', 'swe hooks delete <name>')}         Remove the hub file (--foreign: the real file;
                                     --yes skips the confirmation)
+  {c('cyan', 'swe hooks stats')}                 Fires, blocks, block rate and top reasons per hook
+  {c('cyan', 'swe hooks log <name>')}            The hook's most recent runs, newest first
+
+{c('bold', 'Stats')}
+  {c('cyan', 'swe hooks stats [--since=7d] [--hook=<name>] [--harness=<h>] [--repo=<path>]')}
+  {c('cyan', 'swe hooks log <name> [--since=7d] [--decision=block] [--limit=20]')}
+  --since takes 90m, 24h, 7d, 2w or all. Both add {c('cyan', '--no-backfill')} to skip the
+  Claude transcripts, and {c('cyan', '--json')} for the machine-readable form.
+  Each hook run is one line in {c('dim', '~/.swe/cache/hooks/events.jsonl')} (5 MB, one
+  rotated copy; never committed or sent anywhere), written by the shared-hook
+  shim: run {c('cyan', 'swe hooks sync')} once so it carries the logger. Only the first
+  line of a hook's message is kept. Claude Code history from before that is
+  read from its transcripts, and a run in both counts once. SWE_HOOK_LOG=0
+  stops the logging.
 
 {c('bold', 'Tiers')}
   {c('cyan', 'shared')}    ~/.swe/hooks/shared/<name>.py — one script deployed

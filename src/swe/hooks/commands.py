@@ -10,8 +10,10 @@ that points outside the hub. ``list`` shows all three, ``check`` reports
 where declarations and links disagree, ``info`` and ``edit`` work on one
 script, ``new`` writes the skeleton plus the stanza to paste, ``delete``
 removes the hub file (``--foreign`` the real file), ``disable`` /
-``enable`` flip a hook without deleting it, and ``sync`` regenerates the
-wrappers and re-applies the link plan. The settings files are read-only
+``enable`` flip a hook without deleting it, ``sync`` regenerates the
+wrappers and re-applies the link plan, and ``stats`` / ``log`` report what
+the hooks did from the run log and the Claude transcripts
+(``hooks/stats_commands.py``). The settings files are read-only
 here — declaring stays with you, and deleting never touches a stanza.
 """
 
@@ -58,7 +60,7 @@ from swe.hooks.models import HookRow
 from swe.table import Table
 
 SUBCOMMANDS = ("list", "info", "edit", "new", "check", "delete",
-               "disable", "enable", "sync")
+               "disable", "enable", "sync", "stats", "log")
 
 # Same vocabulary swe init prints; colour is what you would do about it.
 _STATE_COLOR = {
@@ -116,6 +118,11 @@ def cmd_hooks(args) -> int:
         return _toggle(rest, json_view, fail, off=False)
     if sub == "sync":
         return _sync(rest, json_view, fail)
+    if sub in ("stats", "log"):
+        from swe.hooks import stats_commands
+
+        run = stats_commands.stats if sub == "stats" else stats_commands.log
+        return run(rest, json_view, fail)
     return fail(c("red", f"Unknown subcommand: {sub}. "
                        f"Use one of {', '.join(SUBCOMMANDS)}."))
 

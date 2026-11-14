@@ -788,6 +788,20 @@ Actions  Each one checks first and does nothing if the plugin is
   swe hooks enable &lt;name&gt;         Re-link a disabled hook
   swe hooks delete &lt;name&gt;         Remove the hub file (--foreign: the real file;
                                     --yes skips the confirmation)
+  swe hooks stats                 Fires, blocks, block rate and top reasons per hook
+  swe hooks log &lt;name&gt;            The hook's most recent runs, newest first
+
+Stats
+  swe hooks stats [--since=7d] [--hook=&lt;name&gt;] [--harness=&lt;h&gt;] [--repo=&lt;path&gt;]
+  swe hooks log &lt;name&gt; [--since=7d] [--decision=block] [--limit=20]
+  --since takes 90m, 24h, 7d, 2w or all. Both add --no-backfill to skip the
+  Claude transcripts, and --json for the machine-readable form.
+  Each hook run is one line in ~/.swe/cache/hooks/events.jsonl (5 MB, one
+  rotated copy; never committed or sent anywhere), written by the shared-hook
+  shim: run swe hooks sync once so it carries the logger. Only the first
+  line of a hook's message is kept. Claude Code history from before that is
+  read from its transcripts, and a run in both counts once. SWE_HOOK_LOG=0
+  stops the logging.
 
 Tiers
   shared    ~/.swe/hooks/shared/&lt;name&gt;.py — one script deployed
