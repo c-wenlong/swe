@@ -32,6 +32,8 @@ and the fixture that pins the shape. Fixtures live under
 | `swe hooks delete <name> [--harness=<id>] [--foreign] [--yes] --json` | `{"deleted": [str], "declarations_left": [file]}` — deletes need `--yes` or a tty confirm; foreign files need `--foreign` | |
 | `swe hooks disable <name>` / `swe hooks enable <name>` `[--harness=<id>] --json` | `{"name", "state": "disabled"|"enabled", "sources": [path], "links": {state: count}}` | |
 | `swe hooks new <harness> <name> --json` | `{"path", "harness", "command", "settings": [file], "stanza"}`; `swe hooks new shared <name> --json` returns `{"path", "harness": "shared", "tier", "commands": {h: cmd}, "deploys_to": [h], "stanza"}` | |
+| `swe hooks stats [--since=<span>] [--hook=<name>] [--harness=<id>] [--repo=<path>] [--no-backfill] --json` | `{"window", "since", "until", "filters": {"hook", "harness", "repo"}, "sources": {"helper", "transcript", "duplicates", "backfill"}, "totals": {...}, "hooks": [HookStats]}`; see "`swe hooks stats` shape" below | |
+| `swe hooks log <name> [--since=<span>] [--harness=<id>] [--repo=<path>] [--decision=<d>] [--limit=<n>] [--no-backfill] --json` | `{"hook", "window", "since", "matched", "events": [HookEvent]}`, newest first; see "`swe hooks stats` shape" below | |
 | `swe mcp list --json` · `swe mcp status --json` | `McpInventory` — each `servers[]` row also carries `type`: the hub entry's `swe mcp set-type` label, or null when none is set (a transport word like `sse` is the wire marker, never a label), and `adopted_from`: the harness a sync/discover adoption pulled the hub entry from, or null | `swe-mcp-list.json`, `swe-mcp-status.json` |
 | `swe mcp sync ... --no-interactive --json` | `McpSyncReport` — plus `adopted`: the harness-only servers the run pulled into the hub at the end (each scoped off for the harnesses that lack it, `swe.adopted_from` holds the donor); `[]` when none or `--no-adopt` | |
 | `swe mcp enable/disable NAME [--for=h1,h2] --json` | `ToggleReply`: `{name, enabled_in?, disabled_in?, failed_in?}` — the places the verb switched plus (enable only) the targets that stayed off because the restore could not land. Exits 1 when nothing switched; the document still prints | `swe-mcp-disable.json` |
@@ -414,3 +416,60 @@ part in order; one bad part fails the command before any fetch.
 ### Cursor plugin controls
 
 Cursor harness state can carry `allowed_actions: [enable|disable|uninstall]` and `control_detail: string|null`. An absent allowlist keeps legacy behavior; an empty list is read-only. Cursor entries use `installed`/`enabled` only after authoritative API reads. Signed-out/unavailable state remains null and cached copies remain unknown. The existing `PluginActionResult` covers account mutations (`ran: []`, `edited: null`, with resulting installed/enabled state and a refresh note). No tokens or configured values enter catalog/action JSON.
+
+### `swe hooks stats` shape
+
+Built by `hooks/events.py::build_stats`; the Hooks pages in the Mac app and
+the web app read it, so a field is only ever added, never renamed.
+Timestamps are epoch seconds (floats). Counts cover the window
+(`--since`, default `7d`; `all` for everything) and the filters.
+
+```json
+{
+  "window": "7d", "since": 1731000000.0, "until": 1731604800.0,
+  "filters": {"hook": null, "harness": null, "repo": null},
+  "sources": {"helper": 120, "transcript": 292, "duplicates": 14,
+              "backfill": true},
+  "totals": {"fires": 412, "blocks": 41, "warns": 3, "errors": 1,
+             "allows": 367, "recovered": 28, "block_rate": 0.0995,
+             "last_fired": 1731604700.0, "last_block": 1731601000.0,
+             "avg_duration_ms": 36, "hooks": 5},
+  "hooks": [{
+    "hook": "prose-guard", "harness": "claude",
+    "fires": 200, "blocks": 30, "warns": 0, "errors": 0, "allows": 170,
+    "recovered": 25, "block_rate": 0.15,
+    "last_fired": 1731604700.0, "last_block": 1731601000.0,
+    "avg_duration_ms": 41,
+    "top_reasons": [{"decision": "block", "count": 12,
+                     "reason": "done-followups: missing Follow-ups"}]
+  }]
+}
+```
+
+- One `hooks` row per (hook, harness), most blocks first. `hook` is the
+  script name without its extension: join it to `swe hooks list`'s `name`
+  after dropping `.py`/`.sh`.
+- `fires` is every run; `block_rate` is `blocks / fires` (0 to 1, four
+  places; 0 with no runs). `decision` is `block`, `warn`, `allow` or
+  `error` (the hook failed open).
+- `recovered` counts Stop runs that allowed after the same hook blocked
+  that session ("blocked, then the rewrite was accepted"): `allow` events
+  whose `stop_hook_active` is true. Transcript runs carry no flag, so it
+  is inferred: a Stop run directly after a block of the same hook.
+- `top_reasons` ranks the non-allow runs by `(decision, reason)`, at most
+  five, count descending. `reason` is the first line of the hook's own
+  message, capped at 200 characters.
+- `sources` says where the runs came from after merging: `helper` is the
+  hook log (`cache/hooks/events.jsonl`), `transcript` Claude Code
+  transcripts, `duplicates` transcript runs the log already held (same
+  `session_id`, hook and event name before any `:`, timestamps within 5
+  seconds, matched one to one; the log's copy wins). `backfill` is false
+  under `--no-backfill`. Counts before the filters apply to `hook`,
+  `harness` and `repo`.
+- `HookEvent` (the `swe hooks log` rows): `ts`, `hook`, `harness`,
+  `event`, `session_id`, `cwd`, `repo`, `git_branch`, `decision`,
+  `reason`, `duration_ms`, `exit_code`, `stop_hook_active` (null when
+  unknown), `source` (`helper` or `transcript`). Any of the strings and
+  `duration_ms`/`exit_code` can be null.
+- A bad `--since`, `--limit` or `--decision` exits 1 with the reason on
+  stderr and nothing on stdout.

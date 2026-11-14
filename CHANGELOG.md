@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`swe hooks stats` and `swe hooks log` show what each hook did.** The shared-hook shim now appends one line per run to `~/.swe/cache/hooks/events.jsonl` (5 MiB, one rotated copy, never sent or committed): hook, harness, event, session, repo and branch, `block`/`warn`/`allow`/`error`, the first line of the hook's message and its duration, plus `stop_hook_active` so a Stop block followed by an accepted rewrite reads apart from a plain allow. Logging fails open and `SWE_HOOK_LOG=0` turns it off; run `swe hooks sync` once to refresh the shim. `swe hooks stats [--since=7d] [--hook=<name>] [--harness=<h>] [--repo=<path>] [--json]` prints fires, blocks, block rate and top reasons per hook, and `swe hooks log <name>` the recent runs. Claude Code history from before the log is recovered from its transcripts and merged without double counting (`--no-backfill` skips it). The Mac and web Hooks pages are still to come. Part of #1888.
+
 - **Cursor personal plugin controls.** SWE reads account state instead of guessing from downloaded folders, adds on/off for unconfigured, unpinned personal plugins and personal removal, and keeps team-controlled plugins read-only. Protected credentials and failed API reads keep cache state unknown.
 
 - **Devin and OpenCode plugin controls.** Devin resolved installs can be removed through its native CLI. OpenCode global file plugins can be suspended into SWE storage, restored, imported, and removed. Controls are available on Mac, web and CLI; Devin has no per-plugin toggle, and OpenCode package/project controls remain unsupported.
