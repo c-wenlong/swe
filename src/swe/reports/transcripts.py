@@ -99,10 +99,8 @@ def _read_mirror_copy(session: Session) -> NormalizedTranscript | None:
     the transcript and swe kept one (``sessions/transcript_mirror.py``)."""
     from swe.sessions import transcript_mirror
 
-    base = transcript_mirror.mirror_dir(session.tool_name, session.account_home)
-    if base is None:
-        return None
-    path = _find_session_file(base, session.session_id)
+    path = transcript_mirror.find_copy(
+        session.tool_name, session.session_id, session.account_home)
     if path is None:
         return None
     transcript = _new(session, [path])

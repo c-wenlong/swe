@@ -94,6 +94,7 @@ class Root:
     path: str  # resolved, as ``search_writer._walk`` resolves it
     prefix: str  # subdirectory of the mirror root
     account_home: str  # "" for the harness's own home
+    home: str = ""  # the harness home directory this root sits in
 
 
 def roots(home: Path) -> list[Root]:
@@ -103,7 +104,8 @@ def roots(home: Path) -> list[Root]:
 
     def add(harness: str, homedir: Path, prefix: str, account: str, subdirs) -> None:
         for sub in subdirs:
-            out.append(Root(harness, os.path.realpath(homedir / sub), prefix, account))
+            out.append(Root(harness, os.path.realpath(homedir / sub), prefix, account,
+                            str(homedir)))
 
     add("claude", home / ".claude", "claude", "", ("projects",))
     add("codex", home / ".codex", "codex", "", ("sessions", "archived_sessions"))
@@ -115,11 +117,14 @@ def roots(home: Path) -> list[Root]:
     return out
 
 
-def _mirror_rel(path: str, harness: str, table: list[Root]) -> tuple[str, str] | None:
+def _mirror_rel(path: str, harness: str, table: list[Root],
+                origin: str | None = None) -> tuple[str, str] | None:
     """``(mirror-relative path, account_home)`` for a resolved source
     path, or None when the harness is not mirrored. A file that sits
     outside every root (a symlink pointing elsewhere) goes under a folder
-    named for a hash of its path, so two of them cannot collide."""
+    named for a hash of its path, so two of them cannot collide, inside
+    the mirror root of the harness home it was found in (``origin``), so
+    it keeps its account."""
     if harness not in MIRRORED:
         return None
     for root in table:
@@ -130,9 +135,14 @@ def _mirror_rel(path: str, harness: str, table: list[Root]) -> tuple[str, str] |
     # Shaped so the listing's scans reach it: Claude only enters project
     # folders whose name starts with "-", and Codex globs `*/*/*/*.jsonl`
     # (dated) and `*.jsonl` (flat).
+    prefix, account = harness, ""
+    for root in table:
+        if root.harness == harness and origin is not None and root.home == origin:
+            prefix, account = root.prefix, root.account_home
+            break
     if harness == "claude":
-        return f"claude/-external-{digest}/{name}", ""
-    return f"codex/external/{digest}/0/{name}", ""
+        return f"{prefix}/-external-{digest}/{name}", account
+    return f"{prefix}/external/{digest}/0/{name}", account
 
 
 # -- settings ------------------------------------------------------------
@@ -392,7 +402,8 @@ def sync(home: Path, sources: Iterable, should_stop=None, *, wait: bool = True) 
             for source in sources:
                 if should_stop is not None and should_stop():
                     break
-                located = _mirror_rel(source.path, source.harness, table)
+                located = _mirror_rel(source.path, source.harness, table,
+                                      getattr(source, "home", None))
                 if located is None:
                     continue
                 rel, account_home = located
@@ -546,6 +557,31 @@ def mirror_dir(harness: str, account_home: str = "", home: Path | None = None) -
     path = (base / "accounts" / harness / Path(account_home).parent.name
             if account_home else base / harness)
     return path if path.is_dir() else None
+
+
+def find_copy(harness: str, session_id: str, account_home: str = "",
+              home: Path | None = None) -> Path | None:
+    """The mirror copy a read should use for a session: among the copies
+    whose file name is ``<session_id>.jsonl`` in the session's account
+    folder, the one with the newest mtime (a copy keeps its source's), the
+    same rule the listing applies when one id has several files. Uses the
+    manifest, and walks the folder only when it holds no entry for the id
+    (a lost manifest)."""
+    base = mirror_dir(harness, account_home, home)
+    if base is None or not session_id:
+        return None
+    name = f"{Path(session_id).stem}.jsonl"
+    found: list[Path] = []
+    for rel in load_manifest(home):
+        if os.path.basename(rel) == name:
+            path = Path(_mirror_path(home, rel))
+            if path.is_file() and path.is_relative_to(Path(os.path.realpath(base))):
+                found.append(path)
+    if not found:
+        found = [p for p in base.rglob(name) if p.is_file()]
+    if not found:
+        return None
+    return max(found, key=lambda p: (p.stat().st_mtime_ns, str(p)))
 
 
 def status(home: Path | None = None) -> dict:

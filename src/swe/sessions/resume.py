@@ -72,7 +72,14 @@ def launch_tool_name(tool_name: str) -> str:
 
 
 def resume_flags(session) -> list[str]:
-    """The flags that reopen ``session`` in its harness, or [] when none do."""
+    """The flags that reopen ``session`` in its harness, or [] when none do.
+
+    A mirrored session has none: its harness deleted the transcript, so no
+    resume could find it. Every launch path (``swe session use``, the
+    follow-up work plan, the hub's attach and the catalog's ``resume``)
+    reads its flags here."""
+    if getattr(session, "mirrored", False):
+        return []
     builder = RESUME_FLAGS.get(session.tool_name)
     return builder(session.session_id) if builder else []
 

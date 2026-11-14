@@ -84,7 +84,7 @@ FORK_SUPPORT: dict[str, ForkSpec] = {
 def fork_argv(session: Session, new_id: str = "") -> list[str]:
     """The full command line that forks ``session``, or [] when none does."""
     spec = FORK_SUPPORT.get(session.tool_name)
-    if spec is None:
+    if spec is None or getattr(session, "mirrored", False):
         return []
     args = spec.build(session.session_id or "", new_id or str(uuid.uuid4()))
     return [launch_tool_name(session.tool_name), *args] if args else []

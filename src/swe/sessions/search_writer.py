@@ -1120,6 +1120,11 @@ class Source:
     session_id: str | None = None
     meta_path: str | None = None
     pair: str | None = None
+    # The harness home directory whose tree this file was found in (the
+    # default ``~/.claude`` or an SWE account's home), for the sources that
+    # have more than one. The mirror uses it to keep a symlinked transcript,
+    # whose resolved path sits outside every root, with its account.
+    home: str | None = None
 
 
 # Kiro session files are `<uuid>.json` (Orca's KIRO_SESSION_FILE_PATTERN).
@@ -1152,20 +1157,21 @@ def sources(home: Path) -> list[Source]:
     seen: set[str] = set()
 
     def add(found: list[str], harness: str, document: bool = False, meta=None,
-            pair=None, session_id=None) -> None:
+            pair=None, session_id=None, origin: str | None = None) -> None:
         for path in found:
             if path not in seen:
                 seen.add(path)
                 out.append(Source(path, harness, document,
                                   session_id=session_id(path) if session_id else None,
                                   meta_path=meta(path) if meta else None,
-                                  pair=pair(path) if pair else None))
+                                  pair=pair(path) if pair else None,
+                                  home=origin))
 
     for claude_home in _homes(home, "claude", ".claude"):
-        add(_walk(claude_home / "projects"), "claude")
+        add(_walk(claude_home / "projects"), "claude", origin=str(claude_home))
     for codex_home in _homes(home, "codex", ".codex"):
-        add(_walk(codex_home / "sessions"), "codex")
-        add(_walk(codex_home / "archived_sessions"), "codex")
+        add(_walk(codex_home / "sessions"), "codex", origin=str(codex_home))
+        add(_walk(codex_home / "archived_sessions"), "codex", origin=str(codex_home))
     # Devin's ATIF exports beside sessions.db (`Ledger`'s devinTranscripts).
     # The database holds the same sessions and more; both are read, and
     # search shows one hit per session.

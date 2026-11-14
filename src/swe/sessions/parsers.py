@@ -515,9 +515,9 @@ def parse_claude():
     # The default home first, then every SWE account home: each holds
     # its own projects tree in the same layout, and sessions from one are
     # tagged with their home so their account can be named and resumed.
-    roots = [(os.path.expanduser("~/.claude/projects/"), "", frozenset())]
+    roots = [(os.path.expanduser("~/.claude/projects/"), "", frozenset(), False)]
     roots += [
-        (os.path.join(home, "projects"), home, frozenset())
+        (os.path.join(home, "projects"), home, frozenset(), False)
         for home in _account_homes("claude")
     ]
 
@@ -542,7 +542,7 @@ def parse_claude():
         )
 
     sessions: list[Session] = []
-    for base, account_home, _skip in roots:
+    for base, account_home, _skip, _mirror in roots:
         batch = scan(base)
         if account_home:
             for sess in batch:
@@ -560,7 +560,7 @@ def parse_claude():
             sess.account_home = account_home
             sess.mirrored = True
             sessions.append(sess)
-    roots += [(base, account_home, skip) for base, account_home, skip in mirror_roots]
+    roots += [(base, account_home, skip, True) for base, account_home, skip in mirror_roots]
 
     # The same session id resumed under a second project dir would list
     # twice: one conversation, one row — the newest timestamp is the
@@ -591,12 +591,15 @@ def parse_claude():
         for sess in sessions if sess.session_id
     }
     superseded: set[tuple[str, str]] = set()
-    for base, account_home, skip in roots:
+    for base, account_home, skip, is_mirror in roots:
         for session_id, file_path in _claude_transcript_paths(base).items():
             if (session_id, account_home) not in by_id:
                 continue
-            if f"{session_id}.jsonl" in skip:
-                continue  # a mirror copy of a file still on disk
+            if is_mirror and ((session_id, account_home) in live
+                              or f"{session_id}.jsonl" in skip):
+                # A copy never speaks for a session a live file carries
+                # (its marker may be stale), nor for a file still on disk.
+                continue
             # The tail read depends on the file alone; whether the successor is
             # listed is decided fresh every run.
             successor = parse_cache.lookup(
@@ -605,7 +608,10 @@ def parse_claude():
                 lambda fp=file_path: _claude_handed_off(fp),
                 valid=lambda v: isinstance(v, str),
             )
-            if successor and (successor, account_home) in by_id:
+            # A live session is superseded only by a live successor: a
+            # copy of the successor proves nothing is on disk.
+            known = live if (session_id, account_home) in live else by_id
+            if successor and (successor, account_home) in known:
                 superseded.add((session_id, account_home))
     if not superseded:
         return sessions

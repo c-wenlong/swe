@@ -144,6 +144,11 @@ def prepare_follow_up_work(
             raise FollowUpWorkError("--harness is only valid when starting a new session")
         sessions = (session_loader or (lambda: get_all_sessions(limit=None)))()
         source = find_source_session(follow_up, sessions, project_root)
+        if getattr(source, "mirrored", False):
+            raise FollowUpWorkError(
+                f"{source.tool_name or source.agent} deleted that session's transcript; "
+                "swe keeps a read-only copy, so it cannot be resumed"
+            )
         if source.tool_name not in _RESUME_FLAGS or not source.session_id:
             raise FollowUpWorkError(
                 f"{source.tool_name or source.agent} does not support CLI session resume"

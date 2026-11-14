@@ -343,6 +343,186 @@ class HandleTests(MirrorCase):
         self.assertLessEqual(self.open_fds(), before)
 
 
+class LiveNeverChangesTests(MirrorCase):
+    """Can a mirror copy ever change what a user sees for a session whose
+    source still exists? No, whatever state the mirror is in."""
+
+    SUCCESSOR = "99999999-2222-3333-4444-555555555555"
+    OTHER = "88888888-2222-3333-4444-555555555555"
+
+    def seed_live(self):
+        self.claude()
+        # A live session that handed off to a live successor: superseded
+        # with or without a mirror.
+        write_jsonl(self.home / ".claude/projects/-work-proj" / f"{self.OTHER}.jsonl",
+                    claude_records("older work") + [
+                        {"type": "continued-in", "continuedInSessionId": self.SUCCESSOR}], MTIME + 3)
+        write_jsonl(self.home / ".claude/projects/-work-proj" / f"{self.SUCCESSOR}.jsonl",
+                    claude_records("successor work"), MTIME + 4)
+        self.codex(), self.archived()
+
+    def live_rows(self) -> list[dict]:
+        return [r for r in self.sessions() if not r["mirrored"]]
+
+    def put_copy(self, rel: str, records, mtime=MTIME + 500) -> Path:
+        return write_jsonl(self.mirror_root / rel, records, mtime)
+
+    def test_every_mirror_state_leaves_live_rows_unchanged(self):
+        self.seed_live()
+        baseline = self.sessions()
+        self.assertTrue(all(not r["mirrored"] for r in baseline))
+        self.assertEqual(len(baseline), 4)  # the superseded one is not listed
+
+        # 1. a normal pass, then the manifest lost, then corrupt
+        self.sync()
+        self.assertEqual(self.sessions(), baseline)
+        mirror.manifest_path(self.home).unlink()
+        self.assertEqual(self.sessions(), baseline)
+        mirror.manifest_path(self.home).write_text("{nope")
+        self.assertEqual(self.sessions(), baseline)
+
+        # 2. stale, newer, differently titled copies of live ids, one
+        #    ending in a handoff marker to a successor that exists
+        stale = claude_records("a stale title") + [
+            {"type": "continued-in", "continuedInSessionId": self.SUCCESSOR}]
+        self.put_copy(f"claude/-work-proj/{CLAUDE_ID}.jsonl", stale)
+        self.put_copy(f"claude/-other-proj/{CLAUDE_ID}.jsonl", stale, MTIME + 900)
+        self.put_copy(f"codex/2026/09/01/{CODEX_STEM}.jsonl", codex_records("stale codex"), MTIME + 900)
+        # a copy of the archived thread under its dated name
+        self.put_copy(f"codex/2026/09/02/{ARCHIVED_STEM}.jsonl", codex_records("stale arch"), MTIME + 900)
+        self.assertEqual(self.live_rows(), baseline)
+
+        # 3. a live predecessor whose marker names a successor that only a
+        #    copy carries must not be superseded by it
+        lone = "77777777-2222-3333-4444-555555555555"
+        write_jsonl(self.home / ".claude/projects/-work-proj" / f"{lone}.jsonl",
+                    claude_records("predecessor") + [
+                        {"type": "continued-in", "continuedInSessionId": "66666666-0000-0000-0000-000000000000"}],
+                    MTIME + 7)
+        without = {r["id"] for r in self.live_rows()}
+        self.assertIn(lone, without)
+        self.put_copy("claude/-work-proj/66666666-0000-0000-0000-000000000000.jsonl",
+                      claude_records("only a copy"))
+        after = self.sessions()
+        self.assertIn(lone, {r["id"] for r in after if not r["mirrored"]})
+
+    def test_a_stale_handoff_copy_cannot_hide_a_live_session_when_the_manifest_is_lost(self):
+        claude = self.claude()
+        write_jsonl(self.home / ".claude/projects/-work-proj" / f"{self.SUCCESSOR}.jsonl",
+                    claude_records("successor"), MTIME + 1)
+        self.sync()
+        # The live file moved on after being mirrored with a handoff
+        # marker at its end; the manifest is gone.
+        copy = self.mirror_root / "claude/-work-proj" / claude.name
+        with open(copy, "a") as handle:
+            handle.write(json.dumps({"type": "continued-in",
+                                     "continuedInSessionId": self.SUCCESSOR}) + "\n")
+        mirror.manifest_path(self.home).unlink()
+        ids = {r["id"] for r in self.sessions()}
+        self.assertIn(CLAUDE_ID, ids)
+
+    def test_a_live_session_is_never_marked_mirrored_or_unresumable(self):
+        self.seed_live()
+        self.sync()
+        for row in self.sessions():
+            self.assertFalse(row["mirrored"])
+            self.assertIsNotNone(row["resume"])
+
+    def test_reads_of_a_live_session_ignore_a_newer_copy(self):
+        with mock.patch.dict(os.environ, {"HOME": str(self.home)}):
+            self.claude()
+            self.put_copy(f"claude/-other-proj/{CLAUDE_ID}.jsonl",
+                          claude_records("stale copy text"))
+            session = Session(timestamp=1.0, agent="Claude Code", path="/work/proj",
+                              session_id=CLAUDE_ID, tool_name="claude")
+            transcript = read_transcript(session)
+            self.assertEqual(transcript.messages[0].text, "fix the login bug")
+            self.assertNotIn("transcripts", transcript.source_paths[0])
+
+
+class ReadChoiceTests(MirrorCase):
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_reads_and_listing_choose_the_same_newest_copy(self):
+        # Several older copies, so no scan order can hand back the newest
+        # by luck.
+        for n in range(8):
+            write_jsonl(self.mirror_root / f"claude/-old-{n}/{CLAUDE_ID}.jsonl",
+                        claude_records(f"older text {n}"), MTIME + n)
+        older = write_jsonl(self.mirror_root / f"claude/-a-first/{CLAUDE_ID}.jsonl",
+                            claude_records("older text"), MTIME)
+        newer = write_jsonl(self.mirror_root / f"claude/-z-last/{CLAUDE_ID}.jsonl",
+                            claude_records("newer text") + claude_records("more")[1:], MTIME + 50)
+        self.assertTrue(older.is_file() and newer.is_file())
+        rows = self.sessions()
+        self.assertEqual([(r["id"], r["title"], r["last_active_at"]) for r in rows],
+                         [(CLAUDE_ID, "newer text", float(MTIME + 50))])
+        session = Session(timestamp=1.0, agent="Claude Code", path="/work/proj",
+                          session_id=CLAUDE_ID, tool_name="claude")
+        transcript = read_transcript(session)
+        self.assertEqual(transcript.source_paths, [str(newer)])
+        # Whichever order the folders hold them in.
+        for p in (older, newer):
+            os.utime(p, (MTIME + (50 if p is newer else 0),) * 2)
+        self.assertEqual(read_transcript(session).source_paths, [str(newer)])
+
+    def test_a_symlinked_transcript_in_an_account_home_keeps_its_account(self):
+        account = self.home / ".swe/accounts/claude/work/home"
+        elsewhere = temp_dir(self)
+        target = write_jsonl(elsewhere / f"{CLAUDE_ID}.jsonl", claude_records())
+        link = account / "projects/-work-proj" / target.name
+        link.parent.mkdir(parents=True)
+        link.symlink_to(target)
+        self.sync()
+        entry = next(iter(mirror.load_manifest(self.home).items()))
+        self.assertTrue(entry[0].startswith("accounts/claude/work/"), entry[0])
+        self.assertEqual(entry[1]["account_home"], str(account))
+        link.unlink()
+        target.unlink()
+        rows = self.sessions()
+        self.assertEqual([(r["account_home"], r["mirrored"]) for r in rows], [(str(account), True)])
+        session = Session(timestamp=1.0, agent="Claude Code", path="/work/proj",
+                          session_id=CLAUDE_ID, tool_name="claude", account_home=str(account))
+        self.assertTrue(read_transcript(session).readable)
+
+
+class ResumePathTests(MirrorCase):
+    def mirrored(self) -> Session:
+        return Session(timestamp=1.0, agent="Claude Code", path=str(self.home),
+                       session_id=CLAUDE_ID, tool_name="claude", mirrored=True)
+
+    def test_the_one_flag_builder_refuses_a_mirrored_session(self):
+        from swe.sessions.resume import resume_flags, resume_json
+
+        live = Session(timestamp=1.0, agent="Claude Code", path="/p",
+                       session_id=CLAUDE_ID, tool_name="claude")
+        self.assertEqual(resume_flags(live), ["--resume", CLAUDE_ID])
+        self.assertEqual(resume_flags(self.mirrored()), [])
+        self.assertIsNone(resume_json(self.mirrored()))
+
+    def test_a_follow_up_cannot_resume_a_mirrored_session(self):
+        from swe.reports.models import FollowUp
+        from swe.reports.work import FollowUpWorkError, prepare_follow_up_work
+
+        follow_up = FollowUp(id="fu", text="x", project_root=str(self.home),
+                             source_session_ids=[CLAUDE_ID])
+        with self.assertRaises(FollowUpWorkError) as ctx:
+            prepare_follow_up_work(follow_up, mode="resume",
+                                   session_loader=lambda: [self.mirrored()])
+        self.assertIn("cannot be resumed", str(ctx.exception))
+
+    def test_a_mirrored_session_cannot_fork_or_attach(self):
+        from swe.remote.fork import can_fork
+
+        pi = Session(timestamp=1.0, agent="Pi", path="/p", session_id="s",
+                     tool_name="pi", mirrored=True)
+        self.assertFalse(can_fork(pi))
+
+
 class SafetyTests(MirrorCase):
     def test_an_interrupted_copy_leaves_no_partial_file(self):
         claude = self.claude()
