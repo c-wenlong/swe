@@ -158,6 +158,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Models speed and latency survive Artificial Analysis dropping `performance` on Dec 10, 2026.** The Mac app reads output speed, time to first token and time to first answer token from `performance_v3` (means) first, then the old `performance` medians, then the legacy top-level keys, so the Models page columns stay filled once `performance` goes null.
+
 - **`swe init` saves the harness executable even when it is off PATH.**
   Registering `~/.vibe/skills` before `vibe` was installed stored an empty
   `command` under `mistral-vibe`, so `swe list` kept reporting the harness as
