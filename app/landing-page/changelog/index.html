@@ -279,6 +279,13 @@ canonical key (<code>vibe</code>, <code>qwen</code>, <code>droid</code>), and a 
 harness.json is never overwritten. Follow-up to
 <a href="https://github.com/starship-terminal/swe/pull/1916">#1916</a>.</p>
 </li>
+<li><p><strong>A collapsed sidebar no longer blocks clicks beside the rail (Mac).</strong> The
+rail kept its icons laid out at the expanded width, and <code>.clipped()</code> hides
+that overflow without removing its hit area, so it swallowed clicks up to
+the expanded width, such as the AGENTS.md Edit tab. The list now takes
+clicks only over its visible width, and the title bar reader no longer
+takes clicks. Closes #1892.</p>
+</li>
 <li><p><strong>Codex education monthly usage reads the workspace billing allowance</strong> when the standard usage response omits it, showing both the percentage and credit amounts.</p>
 </li>
 <li><p><strong>Installed plugins can be switched and removed before import.</strong> Claude Code and Codex on/off and uninstall controls work for harness-owned plugins. The Mac row and per-harness action menus use themed popovers, with confirmed removal from one or all harnesses; import remains separate for SWE file ownership.</p>
