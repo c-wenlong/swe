@@ -197,7 +197,7 @@ struct MainWindow: View {
 /// the unseen part keeps taking clicks and blocks whatever page control
 /// sits under it (the AGENTS.md Edit tab, #1892). The header stays outside
 /// this frame: its toggle reaches past the rail.
-private struct SidebarListFrame: ViewModifier {
+struct SidebarListFrame: ViewModifier {
     var visibleWidth: CGFloat
 
     func body(content: Content) -> some View {
