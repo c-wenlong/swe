@@ -268,6 +268,15 @@ comments in <code>--json</code> gain <code>association</code>.</p>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong><code>swe init</code> saves the harness executable even when it is off PATH.</strong>
+Registering <code>~/.vibe/skills</code> before <code>vibe</code> was installed stored an empty
+<code>command</code> under <code>mistral-vibe</code>, so <code>swe list</code> kept reporting the harness as
+not installed after <code>vibe</code> appeared, because it looked for a binary named
+<code>mistral-vibe</code>. Init now takes the command from the built-in catalog for the
+canonical key (<code>vibe</code>, <code>qwen</code>, <code>droid</code>), and a <code>command</code> already set in
+harness.json is never overwritten. Follow-up to
+<a href="https://github.com/starship-terminal/swe/pull/1916">#1916</a>.</p>
+</li>
 <li><p><strong>Codex education monthly usage reads the workspace billing allowance</strong> when the standard usage response omits it, showing both the percentage and credit amounts.</p>
 </li>
 <li><p><strong>Installed plugins can be switched and removed before import.</strong> Claude Code and Codex on/off and uninstall controls work for harness-owned plugins. The Mac row and per-harness action menus use themed popovers, with confirmed removal from one or all harnesses; import remains separate for SWE file ownership.</p>

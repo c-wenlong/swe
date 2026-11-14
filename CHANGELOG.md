@@ -158,6 +158,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`swe init` saves the harness executable even when it is off PATH.**
+  Registering `~/.vibe/skills` before `vibe` was installed stored an empty
+  `command` under `mistral-vibe`, so `swe list` kept reporting the harness as
+  not installed after `vibe` appeared, because it looked for a binary named
+  `mistral-vibe`. Init now takes the command from the built-in catalog for the
+  canonical key (`vibe`, `qwen`, `droid`), and a `command` already set in
+  harness.json is never overwritten. Follow-up to
+  [#1916](https://github.com/starship-terminal/swe/pull/1916).
 - **Codex education monthly usage reads the workspace billing allowance** when the standard usage response omits it, showing both the percentage and credit amounts.
 - **Installed plugins can be switched and removed before import.** Claude Code and Codex on/off and uninstall controls work for harness-owned plugins. The Mac row and per-harness action menus use themed popovers, with confirmed removal from one or all harnesses; import remains separate for SWE file ownership.
 
