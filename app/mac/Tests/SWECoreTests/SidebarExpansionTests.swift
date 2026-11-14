@@ -307,4 +307,29 @@ struct HoverExpansionTests {
         #expect(hover.isExpanded)
         #expect(!hover.isFloating)
     }
+
+    @Test func collapsedRailCoversOnlyTheRail() {
+        let e = SidebarExpansion(collapsed: true)
+        #expect(e.visibleWidth(expanded: 196, rail: 72) == 72)
+    }
+
+    @Test func pinnedOpenCoversTheExpandedWidth() {
+        let e = SidebarExpansion()
+        #expect(e.visibleWidth(expanded: 196, rail: 72) == 196)
+    }
+
+    @Test func floatingRailCoversTheExpandedWidthOnlyWhileHovered() {
+        var e = SidebarExpansion(collapsed: true)
+        e.pointer(inside: true)
+        #expect(e.visibleWidth(expanded: 196, rail: 72) == 196)
+        e.pointer(inside: false)
+        #expect(e.visibleWidth(expanded: 196, rail: 72) == 72)
+    }
+
+    @Test func suppressedHoverAfterCollapseKeepsTheRailWidth() {
+        var e = SidebarExpansion()
+        e.pointer(inside: true)
+        e.toggle()
+        #expect(e.visibleWidth(expanded: 196, rail: 72) == 72)
+    }
 }

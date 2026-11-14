@@ -24,6 +24,14 @@ public struct SidebarExpansion: Equatable, Sendable {
     /// Expanded only because the pointer is inside: an overlay, not layout.
     public var isFloating: Bool { collapsed && isExpanded }
 
+    /// The width the sidebar occupies on screen, for its frame and its hit
+    /// area: `expanded` while open (pinned or floating), `rail` otherwise.
+    /// A collapsed sidebar must take no click beyond this, so content to
+    /// the right of the rail stays reachable.
+    public func visibleWidth(expanded: Double, rail: Double) -> Double {
+        isExpanded ? expanded : rail
+    }
+
     /// Flip the pinned state. Collapsing with the pointer inside
     /// suppresses the hover expansion it would otherwise trigger.
     public mutating func toggle() {

@@ -194,6 +194,73 @@ class InteractivePickerTest(unittest.TestCase):
             _, picker = _init(home, ["--full"], supported=True, chosen=[])
             self.assertFalse(picker.called)
 
+    def test_aliased_labels_save_known_command_off_path(self):
+        # The executable is not on PATH at registration time. The catalog
+        # still names it, so a later install reads as installed instead of
+        # falling back to the registry key ("mistral-vibe" is no binary).
+        for label, key, command in (
+            ("vibe", "mistral-vibe", "vibe"),
+            ("qwen", "qwen-code", "qwen"),
+            ("factory", "droid", "droid"),
+        ):
+            for declined in (False, True):
+                with self.subTest(label=label, declined=declined), \
+                        tempfile.TemporaryDirectory() as tmp, \
+                        mock.patch.object(manage.shutil, "which",
+                                          lambda _: None):
+                    home = _home(tmp)
+                    root = home / f".{label}" / "skills"
+                    root.mkdir(parents=True)
+                    registry = manage.register(
+                        home, {},
+                        {} if declined else {label: (root, None)},
+                        {label: root} if declined else {},
+                    )
+                    self.assertEqual(registry[key]["command"], command)
+                    self.assertEqual(_registry(home)[key]["command"], command)
+
+    def test_unknown_label_keeps_path_rule_for_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            root = home / ".foo" / "skills"
+            root.mkdir(parents=True)
+            with mock.patch.object(manage.shutil, "which", lambda _: None):
+                registry = manage.register(home, {}, {"foo": (root, None)}, {})
+            self.assertEqual(registry["foo"]["command"], "")
+            with mock.patch.object(manage.shutil, "which", lambda _: "/x/foo"):
+                registry = manage.register(home, {}, {"foo": (root, None)}, {})
+            self.assertEqual(registry["foo"]["command"], "foo")
+
+    def test_user_command_wins_over_catalog_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            root = home / ".vibe" / "skills"
+            root.mkdir(parents=True)
+            existing = {"mistral-vibe": {"command": "my-vibe-wrapper"}}
+            with mock.patch.object(manage.shutil, "which", lambda _: None):
+                registry = manage.register(
+                    home, existing, {"vibe": (root, None)}, {}
+                )
+            self.assertEqual(registry["mistral-vibe"]["command"],
+                             "my-vibe-wrapper")
+
+    def test_installed_after_registration_reads_installed(self):
+        from swe.harness.tools import is_installed
+        with tempfile.TemporaryDirectory() as tmp:
+            home = _home(tmp)
+            root = home / ".vibe" / "skills"
+            root.mkdir(parents=True)
+            with mock.patch.object(manage.shutil, "which", lambda _: None):
+                registry = manage.register(home, {}, {"vibe": (root, None)}, {})
+            command = registry["mistral-vibe"]["command"]
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            exe = bin_dir / "vibe"
+            exe.write_text("#!/bin/sh\n")
+            exe.chmod(0o755)
+            with mock.patch.dict("os.environ", {"PATH": str(bin_dir)}):
+                self.assertTrue(is_installed(command))
+
     def test_skip_leaves_no_instruction_capability(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = _home(tmp)
