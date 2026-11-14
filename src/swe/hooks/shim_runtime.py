@@ -27,6 +27,7 @@ can pass the event as an argument, the way superset's hooks do).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -49,6 +50,244 @@ _ALIASES = {
     "agent_transcript_path": ("agent_transcript",),
     "error": ("error_message",),
 }
+
+
+# --- the event log ----------------------------------------------------------
+#
+# One JSON line per hook run goes to ~/.swe/cache/hooks/events.jsonl, which
+# ``swe hooks stats`` and ``swe hooks log`` read (docs/data-model.md has the
+# schema). The writer lives here, in the one file a harness can run, so it is
+# stdlib-only and imports nothing from swe. Harness-tier scripts that want
+# the same line call ``record`` themselves:
+#
+#     sys.path.insert(0, os.path.expanduser("~/.swe/hooks/_runtime"))
+#     import shim
+#     shim.record("my-hook", "block", "why", harness="claude",
+#                 event="PreToolUse:Bash", session_id=payload.get("session_id"),
+#                 cwd=payload.get("cwd"))
+#
+# ``record`` never raises and never blocks: one O_APPEND write, no locks.
+
+EVENTS_VERSION = 1
+# One generation is kept: events.jsonl rotates to events.jsonl.1 at this
+# size, so the log never holds more than twice the cap (about 40,000 runs).
+EVENTS_CAP_BYTES = 5 * 1024 * 1024
+REASON_MAX = 200
+_OFF_VALUES = ("0", "off", "false", "no")
+# Normalized events whose native name carries the tool, the way Claude
+# spells a matcher: ``PreToolUse:Bash``.
+_TOOL_EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure",
+                "PermissionRequest")
+
+
+def events_path(home: str | None = None) -> str:
+    """``~/.swe/cache/hooks/events.jsonl``, spelled by hand (see above)."""
+    root = home if home is not None else os.path.expanduser("~")
+    return os.path.join(root, ".swe", "cache", "hooks", "events.jsonl")
+
+
+def reason_line(text) -> str:
+    """The first non-empty line of ``text``, trimmed and capped.
+
+    Only this line is ever stored: never the rest of a message, a reply
+    or a command.
+    """
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if line:
+            return line[:REASON_MAX]
+    return ""
+
+
+def _read_head(path: str) -> str | None:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read(512).strip()
+    except OSError:
+        return None
+
+
+def repo_info(cwd: str | None) -> tuple[str | None, str | None]:
+    """(repo root, branch) for ``cwd`` from ``.git`` alone, no subprocess.
+
+    Walks up to the first ``.git`` (a worktree's is a file naming its git
+    dir) and reads ``HEAD``. A detached HEAD reports its short sha. Both
+    come back None when there is no repository.
+    """
+    if not cwd or not isinstance(cwd, str):
+        return None, None
+    directory = os.path.abspath(cwd)
+    for _ in range(64):
+        dotgit = os.path.join(directory, ".git")
+        if os.path.isdir(dotgit):
+            git_dir = dotgit
+        elif os.path.isfile(dotgit):
+            pointer = _read_head(dotgit) or ""
+            if not pointer.startswith("gitdir:"):
+                return directory, None
+            git_dir = os.path.join(directory, pointer[7:].strip())
+        else:
+            parent = os.path.dirname(directory)
+            if parent == directory:
+                return None, None
+            directory = parent
+            continue
+        head = _read_head(os.path.join(git_dir, "HEAD")) or ""
+        if head.startswith("ref:"):
+            branch = head[4:].strip()
+            if branch.startswith("refs/heads/"):
+                branch = branch[len("refs/heads/"):]
+            return directory, branch or None
+        return directory, head[:7] or None
+    return None, None
+
+
+def record(hook: str, decision: str, reason: str = "", *, harness: str = "",
+           event: str = "", session_id: str | None = None,
+           cwd: str | None = None, duration_ms: int | None = None,
+           exit_code: int | None = None,
+           stop_hook_active: bool | None = None,
+           home: str | None = None, ts: float | None = None) -> bool:
+    """Append one hook run to the event log; True when a line was written.
+
+    Fails open: any error (an unwritable folder, a full disk, a bad
+    argument) is swallowed and the caller's result is unchanged.
+    ``SWE_HOOK_LOG=0`` switches recording off. ``decision`` is one of
+    ``block``, ``warn``, ``allow`` or ``error``; ``ts`` defaults to now,
+    the moment the run finished.
+    """
+    try:
+        if os.environ.get("SWE_HOOK_LOG", "").strip().lower() in _OFF_VALUES:
+            return False
+        repo, branch = repo_info(cwd)
+        line = json.dumps({
+            "v": EVENTS_VERSION,
+            "ts": round(time.time() if ts is None else ts, 3),
+            "hook": str(hook),
+            "harness": str(harness or ""),
+            "event": str(event or ""),
+            "session_id": session_id if isinstance(session_id, str) else None,
+            "cwd": cwd if isinstance(cwd, str) else None,
+            "repo": repo,
+            "git_branch": branch,
+            "decision": str(decision),
+            "reason": reason_line(reason),
+            "duration_ms": (int(duration_ms)
+                            if duration_ms is not None else None),
+            "exit_code": exit_code if isinstance(exit_code, int) else None,
+            "stop_hook_active": (stop_hook_active
+                                 if isinstance(stop_hook_active, bool)
+                                 else None),
+        }, ensure_ascii=False, separators=(",", ":")) + "\n"
+        path = events_path(home)
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        _rotate(path)
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.write(fd, line.encode("utf-8"))
+        finally:
+            os.close(fd)
+        return True
+    except Exception:
+        return False
+
+
+def _rotate(path: str) -> None:
+    """Move a full log to ``<path>.1``, replacing the older generation.
+
+    Best effort: two runs that rotate at once can swap a fresh file over
+    ``.1``, which costs one generation of history and nothing else. The
+    size is read twice so the window stays a few microseconds wide.
+    """
+    try:
+        if os.stat(path).st_size >= EVENTS_CAP_BYTES:
+            if os.stat(path).st_size >= EVENTS_CAP_BYTES:
+                os.replace(path, path + ".1")
+    except OSError:
+        pass
+
+
+def _decide(returncode: int, stdout: str, stderr: str,
+            contract: dict | None = None) -> tuple[str, str]:
+    """(decision, reason line) for one finished script.
+
+    Exit 2 blocks. Exit 0 blocks too when stdout is a JSON object that
+    denies (``decision: block``, ``permissionDecision: deny``,
+    ``continue: false``), warns when anything went to stderr, and
+    otherwise allows. Any other exit is the harness's non-blocking error:
+    the hook failed open. A contract that must print JSON and is not the
+    flat schema (gemini, qwen) has no "ask": ``translate`` sends deny, so
+    an ``ask`` is logged as the block the harness received.
+    """
+    if returncode == 2:
+        return "block", reason_line(stderr) or reason_line(
+            _json_reason(stdout))
+    if returncode == 0:
+        text = (stdout or "").strip()
+        if text.startswith("{"):
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                parsed = None
+            verdict = _permission_of(parsed) if isinstance(parsed, dict) \
+                else None
+            contract = contract or {}
+            asks_deny = (verdict == "ask" and contract.get("must_print_json")
+                         and contract.get("schema") != "flat")
+            if verdict == "deny" or asks_deny:
+                return "block", reason_line(_json_reason(stdout)) or \
+                    reason_line(stderr)
+        if (stderr or "").strip():
+            return "warn", reason_line(stderr)
+        return "allow", ""
+    return "error", reason_line(stderr) or f"exit {returncode}"
+
+
+def _json_reason(stdout: str) -> str:
+    """The ``reason`` a JSON answer carries, or ''."""
+    try:
+        parsed = json.loads((stdout or "").strip())
+    except ValueError:
+        return ""
+    if not isinstance(parsed, dict):
+        return ""
+    hso = parsed.get("hookSpecificOutput")
+    for source in (parsed, hso if isinstance(hso, dict) else {}):
+        for key in ("reason", "permissionDecisionReason", "stopReason"):
+            if isinstance(source.get(key), str) and source[key].strip():
+                return source[key]
+    return ""
+
+
+def _event_label(norm: dict, native: str) -> str:
+    """The harness's own event name, with ``:<tool>`` on tool events."""
+    tool = norm.get("tool_name")
+    if isinstance(tool, str) and tool and norm.get("event") in _TOOL_EVENTS:
+        return f"{native}:{tool}"
+    return native
+
+
+def _log_run(norm: dict, native: str, script: str, started: float,
+             returncode: int | None, stdout: str, stderr: str,
+             contract: dict | None = None) -> None:
+    """Record one shim run; never raises."""
+    try:
+        if returncode is None:
+            decision, reason = "error", "shim could not run the script"
+        else:
+            decision, reason = _decide(returncode, stdout, stderr, contract)
+        hook = os.path.splitext(os.path.basename(script))[0]
+        active = norm.get("stop_hook_active")
+        record(
+            hook, decision, reason,
+            harness=str(norm.get("harness") or ""),
+            event=_event_label(norm, native),
+            session_id=norm.get("session_id"), cwd=norm.get("cwd"),
+            duration_ms=int((time.time() - started) * 1000),
+            exit_code=returncode,
+            stop_hook_active=active if isinstance(active, bool) else None)
+    except Exception:
+        pass
 
 
 def normalize(raw: dict, contract: dict, argv_event: str) -> tuple[dict, str]:
@@ -262,15 +501,19 @@ def main(argv: list[str]) -> int:
     norm, native = normalize(raw, contract, argv_event)
 
     must_print = bool(contract.get("must_print_json"))
+    started = time.time()
     try:
         proc = subprocess.run(
             [sys.executable, script] + extra,
             input=json.dumps(norm), capture_output=True, text=True,
             close_fds=True)
     except Exception:
+        _log_run(norm, native, script, started, None, "", "")
         if must_print:
             sys.stdout.write(default_output(contract, native) + "\n")
         return 0
+    _log_run(norm, native, script, started, proc.returncode,
+             proc.stdout, proc.stderr, contract)
 
     if proc.stderr:
         sys.stderr.write(proc.stderr)

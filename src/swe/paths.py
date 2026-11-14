@@ -327,6 +327,15 @@ def session_model_cache_file_for(home: Path | None = None) -> Path:
     return cache_dir_for(home) / "session_model_cache.json"
 
 
+def hook_events_file_for(home: Path | None = None) -> Path:
+    """The hook run log: one JSON line per run, size-rotated to ``.1``.
+
+    The hook shim writes it by hand-spelled path (``shim_runtime.events_path``
+    cannot import swe); a test pins the two together.
+    """
+    return cache_dir_for(home) / "hooks" / "events.jsonl"
+
+
 def task_states_cache_for(home: Path | None = None) -> Path:
     """The last state each stored task's source reported, which
     ``GET /v1/tasks`` serves while that source can't be read."""

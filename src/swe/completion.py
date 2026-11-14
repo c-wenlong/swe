@@ -325,6 +325,23 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
         ("--force", "Replace conflicting real files"),
         ("--json", "Generated, pruned and link results as JSON"),
     ],
+    "hooks stats": [
+        ("--since=", "Window to count: 90m, 24h, 7d, 2w or all (default 7d)"),
+        ("--hook=", "Only one hook"),
+        ("--harness=", "Only one harness"),
+        ("--repo=", "Only runs in one repository"),
+        ("--no-backfill", "Skip the Claude Code transcripts"),
+        ("--json", "Per-hook counts, rates and reasons as JSON"),
+    ],
+    "hooks log": [
+        ("--since=", "Window to read: 90m, 24h, 7d, 2w or all (default 7d)"),
+        ("--harness=", "Only one harness"),
+        ("--repo=", "Only runs in one repository"),
+        ("--decision=", "Only block, warn, allow or error runs"),
+        ("--limit=", "How many runs to show (default 20)"),
+        ("--no-backfill", "Skip the Claude Code transcripts"),
+        ("--json", "The recent runs as JSON"),
+    ],
     "plugins catalog": [
         ("--json", "Every marketplace and plugin as JSON"),
     ],
@@ -712,7 +729,7 @@ _NESTED_FLAGS: dict[str, dict[str, str]] = {
         "new": "hooks new", "check": "hooks check",
         "delete": "hooks delete", "rm": "hooks delete",
         "disable": "hooks disable", "enable": "hooks enable",
-        "sync": "hooks sync",
+        "sync": "hooks sync", "stats": "hooks stats", "log": "hooks log",
     },
     "providers": {
         "list": "providers list", "ls": "providers list", "add": "providers add",
@@ -956,6 +973,8 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("disable", "Unlink a hook without deleting it"),
         ("enable", "Re-link a disabled hook"),
         ("sync", "Regenerate shared wrappers and re-apply the link plan"),
+        ("stats", "Fires, blocks and block rate per hook"),
+        ("log", "One hook's recent runs"),
     ],
     "skills": [
         ("list", "Every skill, nested under the root that holds it"),
