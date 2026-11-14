@@ -55,6 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unsaved changes and jumps to it; it appears only while there are drafts.
   The View AGENTS.md button and popup now show the generated file's size in
   KiB as last built, per harness output on the Compile tab. Part of #1894.
+- **AGENTS.md Compile tab: a KiB column and one harness dropdown (macOS
+  app).** The Include tree gains a `KiB` column: each chapter file's size
+  on disk with one decimal, each folder the sum of its checked files, and a
+  Total row while one harness is picked. The row of harness chips becomes a
+  multi-select dropdown (All harnesses, the harness name, or "N harnesses")
+  that keeps each logo and link-state dot in its menu; picking several
+  narrows the Order matrix to those harnesses. The "Shared ~/.swe/AGENTS.md:
+  N chapters" summary line under the harness bar is gone. Closes #1893.
 - **The AGENTS.md chapter outline has search, keyboard navigation and drag
   handles (Mac).** A Filter chapters field above the Edit tab's outline
   matches file names and paths and keeps matching files' folders open;
@@ -164,6 +172,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preselected the harness last used there. Folders made under the old
   `c-wenlong` owner or the `quiver` name still match.
 
+- **Models speed and latency survive Artificial Analysis dropping `performance` on Dec 10, 2026.** The Mac app reads output speed, time to first token and time to first answer token from `performance_v3` (means) first, then the old `performance` medians, then the legacy top-level keys, so the Models page columns stay filled once `performance` goes null.
+
 - **`swe init` saves the harness executable even when it is off PATH.**
   Registering `~/.vibe/skills` before `vibe` was installed stored an empty
   `command` under `mistral-vibe`, so `swe list` kept reporting the harness as
@@ -172,6 +182,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   canonical key (`vibe`, `qwen`, `droid`), and a `command` already set in
   harness.json is never overwritten. Follow-up to
   [#1916](https://github.com/starship-terminal/swe/pull/1916).
+
+- **A collapsed sidebar no longer blocks clicks beside the rail (Mac).** The
+  rail kept its icons laid out at the expanded width, and `.clipped()` hides
+  that overflow without removing its hit area, so it swallowed clicks up to
+  the expanded width, such as the AGENTS.md Edit tab. The list now takes
+  clicks only over its visible width, and the title bar reader no longer
+  takes clicks. Closes #1892.
 - **Codex education monthly usage reads the workspace billing allowance** when the standard usage response omits it, showing both the percentage and credit amounts.
 - **Installed plugins can be switched and removed before import.** Claude Code and Codex on/off and uninstall controls work for harness-owned plugins. The Mac row and per-harness action menus use themed popovers, with confirmed removal from one or all harnesses; import remains separate for SWE file ownership.
 

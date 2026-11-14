@@ -162,6 +162,90 @@ private final class StubHTTP: HTTPTransport, Sendable {
         #expect(kimi.priceBlended == nil && kimi.speed == nil)
     }
 
+    /// After 2026-12-10 AA returns `performance: null` and puts the speed and
+    /// latency means under `performance_v3`.
+    @Test func decodesPerformanceV3WhenPerformanceIsNull() throws {
+        let json = """
+        {"data": [{"id": "v3", "name": "V3 Only", "slug": "v3-only",
+           "model_creator": {"id": "c", "name": "Anthropic"},
+           "evaluations": {}, "pricing": {},
+           "performance": null,
+           "performance_v3": {"mean_output_tokens_per_second": 91.5,
+                              "mean_time_to_first_token_seconds": 1.25,
+                              "mean_time_to_first_answer_token_seconds": 14.5}}]}
+        """
+        let model = try #require(try AAModelsResponse.decode(Data(json.utf8)).first)
+        #expect(model.speed == 91.5)
+        #expect(model.timeToFirstToken == 1.25)
+        #expect(model.timeToFirstAnswer == 14.5)
+    }
+
+    /// While both objects are live, `performance_v3` wins; a null v3
+    /// field falls back to `performance`, then to the legacy keys.
+    @Test func performanceV3WinsOverPerformance() throws {
+        let json = """
+        {"data": [{"id": "both", "name": "Both", "slug": "both",
+           "model_creator": {"id": "c", "name": "Anthropic"},
+           "evaluations": {}, "pricing": {},
+           "performance": {"median_output_tokens_per_second": 80.0,
+                           "median_time_to_first_token_seconds": 2.0,
+                           "median_time_to_first_answer_token_seconds": 20.0},
+           "performance_v3": {"mean_output_tokens_per_second": 90.0,
+                              "mean_time_to_first_token_seconds": null,
+                              "mean_time_to_first_answer_token_seconds": 18.0}}]}
+        """
+        let model = try #require(try AAModelsResponse.decode(Data(json.utf8)).first)
+        #expect(model.speed == 90.0)
+        #expect(model.timeToFirstToken == 2.0)
+        #expect(model.timeToFirstAnswer == 18.0)
+    }
+
+    /// A payload with only the old `performance` object still decodes.
+    @Test func decodesPerformanceWithoutV3() throws {
+        let json = """
+        {"data": [{"id": "old", "name": "Old", "slug": "old",
+           "model_creator": {"id": "c", "name": "Anthropic"},
+           "evaluations": {}, "pricing": {},
+           "performance": {"median_output_tokens_per_second": 70.0,
+                           "median_time_to_first_token_seconds": 1.5,
+                           "median_time_to_first_answer_token_seconds": 9.0}}]}
+        """
+        let model = try #require(try AAModelsResponse.decode(Data(json.utf8)).first)
+        #expect(model.speed == 70.0)
+        #expect(model.timeToFirstToken == 1.5)
+        #expect(model.timeToFirstAnswer == 9.0)
+    }
+
+    /// With `performance_v3` and `performance` both null, or missing a
+    /// field, the legacy top-level key supplies the value.
+    @Test func legacyTopLevelKeysFillWhatBothPerformanceObjectsLack() throws {
+        let json = """
+        {"data": [{"id": "n", "name": "Both Null", "slug": "n",
+           "model_creator": {"id": "c", "name": "Anthropic"},
+           "evaluations": {}, "pricing": {},
+           "performance": null, "performance_v3": null,
+           "median_output_tokens_per_second": 55.0,
+           "median_time_to_first_token_seconds": 0.9,
+           "median_time_to_first_answer_token": 3.5},
+          {"id": "m", "name": "Missing Fields", "slug": "m",
+           "model_creator": {"id": "c", "name": "Anthropic"},
+           "evaluations": {}, "pricing": {},
+           "performance": {"median_output_tokens_per_second": 60.0},
+           "performance_v3": {"mean_time_to_first_token_seconds": 1.1},
+           "median_output_tokens_per_second": 1.0,
+           "median_time_to_first_token_seconds": 2.0,
+           "median_time_to_first_answer_token": 4.5}]}
+        """
+        let models = try AAModelsResponse.decode(Data(json.utf8))
+        #expect(models[0].speed == 55.0)
+        #expect(models[0].timeToFirstToken == 0.9)
+        #expect(models[0].timeToFirstAnswer == 3.5)
+        // Present v3 and `performance` values still win over the legacy keys.
+        #expect(models[1].speed == 60.0)
+        #expect(models[1].timeToFirstToken == 1.1)
+        #expect(models[1].timeToFirstAnswer == 4.5)
+    }
+
     @Test func rejectsAResponseWithNoDataArray() {
         #expect(throws: AAError.badResponse) {
             _ = try AAModelsResponse.decode(#"{"status": 200}"#.data(using: .utf8)!)
