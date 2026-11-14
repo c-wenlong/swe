@@ -24,7 +24,7 @@ from swe.sessions.engines import (
     strip_file_uri,
 )
 from swe.sessions.engines.jsonl_engine import event_cwd
-from swe.sessions import cursor_store, failures, opencode_store, parse_cache
+from swe.sessions import cursor_store, failures, opencode_store, parse_cache, transcript_mirror
 from swe.sessions.models import Session
 
 
@@ -515,13 +515,14 @@ def parse_claude():
     # The default home first, then every SWE account home: each holds
     # its own projects tree in the same layout, and sessions from one are
     # tagged with their home so their account can be named and resumed.
-    roots = [(os.path.expanduser("~/.claude/projects/"), "")]
+    roots = [(os.path.expanduser("~/.claude/projects/"), "", frozenset())]
     roots += [
-        (os.path.join(home, "projects"), home) for home in _account_homes("claude")
+        (os.path.join(home, "projects"), home, frozenset())
+        for home in _account_homes("claude")
     ]
-    sessions: list[Session] = []
-    for base, account_home in roots:
-        batch = parse_jsonl_projects(
+
+    def scan(base: str, skip=frozenset()) -> list[Session]:
+        return parse_jsonl_projects(
             JsonlParserConfig(
                 tool_name="claude",
                 agent="Claude Code",
@@ -536,12 +537,30 @@ def parse_claude():
                 # One row per jsonl so multi-chat projects all appear in swe session
                 one_session_per_file=True,
                 require_path=True,
+                skip_basenames=set(skip),
             )
         )
+
+    sessions: list[Session] = []
+    for base, account_home, _skip in roots:
+        batch = scan(base)
         if account_home:
             for sess in batch:
                 sess.account_home = account_home
         sessions += batch
+
+    # Transcripts swe mirrored before Claude Code pruned them. Only a
+    # session no live file carries is added, so nothing lists twice.
+    live = {(s.session_id, s.account_home) for s in sessions if s.session_id}
+    mirror_roots = transcript_mirror.listing_roots("claude")
+    for base, account_home, skip in mirror_roots:
+        for sess in scan(base, skip):
+            if sess.session_id and (sess.session_id, account_home) in live:
+                continue
+            sess.account_home = account_home
+            sess.mirrored = True
+            sessions.append(sess)
+    roots += [(base, account_home, skip) for base, account_home, skip in mirror_roots]
 
     # The same session id resumed under a second project dir would list
     # twice: one conversation, one row — the newest timestamp is the
@@ -572,10 +591,12 @@ def parse_claude():
         for sess in sessions if sess.session_id
     }
     superseded: set[tuple[str, str]] = set()
-    for base, account_home in roots:
+    for base, account_home, skip in roots:
         for session_id, file_path in _claude_transcript_paths(base).items():
             if (session_id, account_home) not in by_id:
                 continue
+            if f"{session_id}.jsonl" in skip:
+                continue  # a mirror copy of a file still on disk
             # The tail read depends on the file alone; whether the successor is
             # listed is decided fresh every run.
             successor = parse_cache.lookup(
@@ -906,9 +927,9 @@ def parse_codex():
         (os.path.join(home, "archived_sessions"), home, "*.jsonl")
         for home in _account_homes("codex")
     ]
-    sessions: list[Session] = []
-    for base, account_home, pattern in roots:
-        batch = parse_jsonl_projects(
+
+    def scan(base: str, pattern: str, skip=frozenset()) -> list[Session]:
+        return parse_jsonl_projects(
             JsonlParserConfig(
                 tool_name="codex",
                 agent="Codex CLI",
@@ -919,12 +940,33 @@ def parse_codex():
                 title_from_event=title_from_event,
                 title_max_len=80,
                 require_path=True,
+                skip_basenames=set(skip),
             )
         )
+
+    sessions: list[Session] = []
+    for base, account_home, pattern in roots:
+        batch = scan(base, pattern)
         if account_home:
             for sess in batch:
                 sess.account_home = account_home
         sessions += batch
+
+    # Rollouts swe mirrored before Codex pruned them (the mirror keeps the
+    # dated and the flat archived layouts as they were). A thread any live
+    # rollout carries is already listed, so only the lost ones are added.
+    def thread_key(sess: Session) -> tuple[str, str]:
+        return (codex_thread_id(sess.session_id) or sess.session_id, sess.account_home)
+
+    live = {thread_key(s) for s in sessions}
+    for base, account_home, skip in transcript_mirror.listing_roots("codex"):
+        for pattern in ("*/*/*/*.jsonl", "*.jsonl"):
+            for sess in scan(base, pattern, skip):
+                sess.account_home = account_home
+                if thread_key(sess) in live:
+                    continue
+                sess.mirrored = True
+                sessions.append(sess)
 
     # Resuming a thread writes another rollout file, and every file of one
     # thread carries the same thread uuid in its stem — so the files collapse

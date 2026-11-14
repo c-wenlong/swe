@@ -1172,6 +1172,10 @@ def session_statuses(sessions: list[Session], now: float | None = None) -> list[
 
 
 def _one_status(session: Session, now: float, ctx: dict) -> str:
+    if getattr(session, "mirrored", False):
+        # Its harness deleted the transcript: nothing live to probe, and
+        # a stale copy must never read as a running session.
+        return UNKNOWN
     probe = _PROBES.get(session.tool_name)
     if probe is None:
         return UNKNOWN

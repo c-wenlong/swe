@@ -1132,13 +1132,17 @@ class HubState:
 
     def _search_index_loop(self) -> None:
         """Keep this machine's transcript search index current while
-        ``swe session index --on`` says so. The setting is read every
-        cycle, so turning it on or off needs no restart."""
+        ``swe session index --on`` says so, and its transcript mirror
+        while ``swe session mirror --off`` has not said otherwise. Both
+        settings are read every cycle, so changing one needs no
+        restart."""
         from swe.sessions import search_writer
+        from swe.sessions import transcript_mirror
 
         while not self._stop.is_set():
             if search_writer.is_enabled(self.home):
                 try:
+                    # Mirrors the transcripts first, from the same walk.
                     search_writer.run_pass(self.home, should_stop=self._stop.is_set)
                 except search_writer.IndexBusy:
                     pass  # a `swe session index` run has it; next cycle
@@ -1147,6 +1151,15 @@ class HubState:
                     # as last_error for `swe session index --status` and
                     # the Settings row, and the next cycle tries again.
                     pass
+            elif transcript_mirror.is_enabled(self.home):
+                # Search indexing is off, and the mirror is on by default:
+                # it must not depend on the index to keep what the
+                # harnesses are about to prune.
+                try:
+                    transcript_mirror.run_pass(
+                        self.home, should_stop=self._stop.is_set, wait=False)
+                except Exception:
+                    pass  # busy, or a disk problem; the next cycle tries again
             self._stop.wait(search_writer.INDEX_INTERVAL_S)
 
     def _refresh_launchable(self) -> None:

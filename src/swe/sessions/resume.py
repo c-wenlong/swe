@@ -82,8 +82,12 @@ def resume_json(session) -> dict | None:
 
     A harness in ``LIMITED_RESUME`` only launches in the session's
     directory, and a session whose id yields no flags (a codex rollout with
-    no uuid in its name) has nothing to reopen. Neither is a resume.
+    no uuid in its name) has nothing to reopen. Neither is a resume. Nor
+    is a mirrored session: the harness no longer has its transcript, so
+    `claude --resume <id>` would only fail.
     """
+    if getattr(session, "mirrored", False):
+        return None
     flags = resume_flags(session)
     if not flags:
         return None

@@ -470,6 +470,10 @@ Examples
   swe session index            Index agent transcripts for --search
   swe session index --on|--off Whether the remote hub keeps the index current
   swe session index --status   What the index holds, without a pass
+  swe session mirror           Copy Claude Code and Codex transcripts into ~/.swe so they outlive
+                                            the harnesses' 30-day pruning (nothing is ever deleted)
+  swe session mirror --on|--off Whether the hub and swe session index keep mirroring (default on)
+  swe session mirror --status  What the mirror holds, without a pass
 
 Flags
   --agent=&lt;name&gt;               Filter by agent (claude, codex, opencode, droid, ...)
@@ -483,6 +487,8 @@ Flags
   -e, --end=&lt;YYYY-MM-DD&gt;       Inclusive range end; use together with --start
   -i, --interactive            Pick with arrow keys; Enter resumes, space opens the transcript
   --json                       Print the listing as one JSON document; not with use or -i
+                                            (a row with mirrored: true lost its transcript to the
+                                            harness; it lists and reads from swe's copy but cannot resume)
 
 Examples
   swe session
@@ -497,6 +503,7 @@ Examples
   swe session --search=login
   swe session 30 -q refactor
   swe session index --on
+  swe session mirror --json
 </code></pre>
 <h3 id="swe-report"><a class="anchor" href="#swe-report"></a><code>swe report</code></h3>
 <p><em>Summarize coding sessions and manage follow-ups</em></p>

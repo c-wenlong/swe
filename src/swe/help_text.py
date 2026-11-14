@@ -232,6 +232,10 @@ HELP = {
   {c('cyan', 'swe session index')}            Index agent transcripts for --search
   {c('cyan', 'swe session index --on|--off')} Whether the remote hub keeps the index current
   {c('cyan', 'swe session index --status')}   What the index holds, without a pass
+  {c('cyan', 'swe session mirror')}           Copy Claude Code and Codex transcripts into ~/.swe so they outlive
+                                            the harnesses' 30-day pruning (nothing is ever deleted)
+  {c('cyan', 'swe session mirror --on|--off')} Whether the hub and swe session index keep mirroring (default on)
+  {c('cyan', 'swe session mirror --status')}  What the mirror holds, without a pass
 
 {c('bold', 'Flags')}
   {c('cyan', '--agent=<name>')}               Filter by agent (claude, codex, opencode, droid, ...)
@@ -245,6 +249,8 @@ HELP = {
   {c('cyan', '-e, --end=<YYYY-MM-DD>')}       Inclusive range end; use together with --start
   {c('cyan', '-i, --interactive')}            Pick with arrow keys; Enter resumes, space opens the transcript
   {c('cyan', '--json')}                       Print the listing as one JSON document; not with use or -i
+                                            (a row with mirrored: true lost its transcript to the
+                                            harness; it lists and reads from swe's copy but cannot resume)
 
 {c('bold', 'Examples')}
   swe session
@@ -258,7 +264,8 @@ HELP = {
   swe session -s 2026-07-01 -e 2026-07-30
   swe session --search=login
   swe session 30 -q refactor
-  swe session index --on"""
+  swe session index --on
+  swe session mirror --json"""
     ),
     "report": (
         "Summarize coding sessions and manage follow-ups",

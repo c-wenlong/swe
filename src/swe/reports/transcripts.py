@@ -83,10 +83,31 @@ def read_transcript(session: Session) -> NormalizedTranscript:
         return _unreadable(session, f"no transcript reader for {session.tool_name}")
     try:
         transcript = reader(session)
+        if not transcript.readable and transcript.error == _NOT_FOUND:
+            transcript = _read_mirror_copy(session) or transcript
         transcript.messages = _deduplicate(transcript.messages)
         return transcript
     except Exception as exc:
         return _unreadable(session, f"{type(exc).__name__}: {exc}")
+
+
+_NOT_FOUND = "transcript file not found"
+
+
+def _read_mirror_copy(session: Session) -> NormalizedTranscript | None:
+    """The session read from swe's mirror copy, when its harness deleted
+    the transcript and swe kept one (``sessions/transcript_mirror.py``)."""
+    from swe.sessions import transcript_mirror
+
+    base = transcript_mirror.mirror_dir(session.tool_name, session.account_home)
+    if base is None:
+        return None
+    path = _find_session_file(base, session.session_id)
+    if path is None:
+        return None
+    transcript = _new(session, [path])
+    transcript.messages = _read_jsonl(path)
+    return transcript
 
 
 def _new(session: Session, paths: Iterable[Path] = ()) -> NormalizedTranscript:
@@ -449,7 +470,7 @@ def _jsonl_reader(root: str, patterns: tuple[str, ...] = ("*.jsonl",)) -> Reader
             base = os.path.join(session.account_home, subdir)
         path = _find_session_file(Path(os.path.expanduser(base)), session.session_id, patterns)
         if path is None:
-            return _unreadable(session, "transcript file not found")
+            return _unreadable(session, _NOT_FOUND)
         transcript = _new(session, [path])
         transcript.messages = _read_jsonl(path)
         return transcript
@@ -530,7 +551,7 @@ def _read_cursor(session: Session) -> NormalizedTranscript:
         transcript = _new(session, [path])
         transcript.messages = _read_jsonl(path)
         return transcript
-    return _unreadable(session, "transcript file not found")
+    return _unreadable(session, _NOT_FOUND)
 
 
 @register_reader("codex")
@@ -546,7 +567,7 @@ def _read_codex(session: Session) -> NormalizedTranscript:
     else:
         found = _codex_rollout_path(session.session_id, session.account_home)
     if not found:
-        return _unreadable(session, "transcript file not found")
+        return _unreadable(session, _NOT_FOUND)
     path = Path(found)
     transcript = _new(session, [path])
     transcript.messages = _read_jsonl(path)

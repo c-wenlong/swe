@@ -51,6 +51,7 @@ CONFIG_SUBDIR = "config"
 DATA_SUBDIR = "data"
 SEARCH_SUBDIR = "search"
 SEARCH_INDEX_BASENAME = "search.sqlite"
+TRANSCRIPTS_SUBDIR = "transcripts"
 INSIGHTS_SUBDIR = "insights"
 INSIGHTS_BASENAME = "insights.sqlite"
 GITHUB_SUBDIR = "github"
@@ -361,6 +362,14 @@ def data_dir_for(home: Path | None = None) -> Path:
 def search_index_for(home: Path | None = None) -> Path:
     """The FTS5 transcript-search index the app and ``swe session index`` share."""
     return data_dir_for(home) / SEARCH_SUBDIR / SEARCH_INDEX_BASENAME
+
+
+def transcripts_dir_for(home: Path | None = None) -> Path:
+    """``~/.swe/data/transcripts`` — the mirror of Claude and Codex
+    transcripts kept past the harnesses' own retention
+    (:mod:`swe.sessions.transcript_mirror`). Never delete a file in it
+    unless the user asked for that session to go."""
+    return data_dir_for(home) / TRANSCRIPTS_SUBDIR
 
 
 def insights_db_for(home: Path | None = None) -> Path:

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Transcript mirror: sessions survive the harnesses' 30-day pruning.** Claude Code and Codex delete transcripts after about 30 days. swe now copies each one into `~/.swe/data/transcripts/` while it exists (on by default; `swe session mirror --off` stops it) and never deletes a copy: not when its source disappears, not to save space. `swe session mirror` runs a pass and `--json` reports copied, unchanged and orphaned counts and bytes; the hub's loop and `swe session index` run one too, from the same walk the search index uses. A session whose harness deleted the transcript stays in `swe session` (and `--json`, as `mirrored: true`, with no resume command), `swe report` and the transcript view read it from the copy, and `--search` counts it once. Restoring a copy to the harness, purging on delete, a doctor check and the Mac app's side are follow-ups ([#1918](https://github.com/starship-terminal/swe/issues/1918)).
+
 - **Cursor personal plugin controls.** SWE reads account state instead of guessing from downloaded folders, adds on/off for unconfigured, unpinned personal plugins and personal removal, and keeps team-controlled plugins read-only. Protected credentials and failed API reads keep cache state unknown.
 
 - **Devin and OpenCode plugin controls.** Devin resolved installs can be removed through its native CLI. OpenCode global file plugins can be suspended into SWE storage, restored, imported, and removed. Controls are available on Mac, web and CLI; Devin has no per-plugin toggle, and OpenCode package/project controls remain unsupported.

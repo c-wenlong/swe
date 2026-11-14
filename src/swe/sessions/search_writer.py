@@ -31,6 +31,13 @@ The pass covers the transcript files :func:`sources` lists plus the
 sessions inside Devin's ``sessions.db`` and OpenCode's ``opencode.db``
 (:mod:`swe.sessions.search_containers`). Rows for other harnesses,
 written by the app, are never touched.
+
+The same enumeration feeds the transcript mirror
+(:mod:`swe.sessions.transcript_mirror`): the pass hands it :func:`sources`
+before it reads anything, then indexes the mirror copies whose source is
+gone. A copy is indexed only when the index holds no session for its
+source path, so a session read live and later pruned is never counted
+twice, and the schema is unchanged.
 """
 
 from __future__ import annotations
@@ -47,8 +54,9 @@ import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from swe.paths import locked_beside, swe_dir_for, search_index_for
+from swe.paths import locked_beside, swe_dir_for, search_index_for, transcripts_dir_for
 from swe.sessions import search_containers as containers
+from swe.sessions import transcript_mirror as mirror
 from swe.sessions import search_decode as decode
 from swe.sessions.engines.common import sqlite_uri
 
@@ -1294,6 +1302,33 @@ def _index_container(indexer: "Indexer", db_path: Path, entries, result: "PassRe
         conn.close()
 
 
+def _index_mirror_only(indexer: "Indexer", home: Path, result: "PassResult",
+                       should_stop) -> None:
+    """Index the mirror copies whose source is gone, once.
+
+    A session the index already read from its live file has rows keyed by
+    that source's path and they stay after the file is pruned, so a copy
+    is read only when no session is recorded for its source; reading it
+    too would count the session twice. Rows keyed by a mirror path are
+    dropped again when their copy stops being the only one (the source
+    is back, or the index now covers it), which keeps the rule true in
+    both directions without touching the schema."""
+    prefix = os.path.join(os.path.realpath(transcripts_dir_for(home)), "")
+    held = set(indexer.store.files_with_prefix(prefix))
+    wanted: set[str] = set()
+    for orphan in mirror.orphans(home):
+        if should_stop is not None and should_stop():
+            return
+        row = indexer.store.file_row(orphan.source) if orphan.source else None
+        if row is not None and row.session_row_id is not None:
+            continue  # the index already holds this session from its source
+        wanted.add(orphan.path)
+        result.files += 1
+        result.count(indexer.index_file(orphan.path, orphan.harness))
+    for path in held - wanted:
+        indexer.store.remove_file(path)
+
+
 @dataclass
 class PassResult:
     files: int = 0
@@ -1303,6 +1338,10 @@ class PassResult:
     moved: int = 0
     drained: int = 0
     seconds: float = 0.0
+    # What the mirror step of this pass did (``MirrorResult.as_dict``), or
+    # None when mirroring is off. Not in ``as_dict``: that is the shape
+    # ``indexer.json`` records.
+    mirror: dict | None = None
 
     def count(self, outcome: str) -> None:
         if outcome == "indexed":
@@ -1420,12 +1459,23 @@ def run_pass(home: Path | None = None, *, should_stop=None) -> PassResult:
 def _pass(home: Path, path: Path, should_stop) -> PassResult:
     started = time.monotonic()
     result = PassResult()
+    # One enumeration for both jobs. The mirror goes first and before the
+    # index is opened: copying a transcript that is about to be pruned
+    # matters more than indexing it, and it must not wait on, or fail
+    # with, a search index that cannot be written here.
+    listed = sources(home)
+    if mirror.is_enabled(home):
+        try:
+            result.mirror = mirror.sync(home, listed, should_stop).as_dict()
+        except Exception as exc:
+            # Never stop the index pass: the mirror reports its own state.
+            result.mirror = {"error": str(exc) or type(exc).__name__}
     conn = open_index(path)
     prints_path = path.parent / PRINTS_FILE
     prints = _load_prints(prints_path)
     try:
         indexer = Indexer(Store(conn), prints=prints)
-        for source in sources(home):
+        for source in listed:
             if should_stop is not None and should_stop():
                 break
             result.files += 1
@@ -1434,6 +1484,7 @@ def _pass(home: Path, path: Path, should_stop) -> PassResult:
                                             session_id=source.session_id,
                                             meta_path=source.meta_path,
                                             pair=source.pair))
+        _index_mirror_only(indexer, home, result, should_stop)
         for db, entries in ((DEVIN_DB, _devin_entries), (OPENCODE_DB, _opencode_entries)):
             if should_stop is not None and should_stop():
                 break

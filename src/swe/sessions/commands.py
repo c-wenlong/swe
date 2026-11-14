@@ -375,16 +375,21 @@ _STATUS_GLYPHS = {
     "error": ("✗", "red", "error"),
     "interrupted": ("■", "blue", "interrupted"),
 }
+# Shown in the ST column for a session whose harness deleted its transcript
+# and only swe's mirror copy is left. Kept out of ``_STATUS_GLYPHS`` so the
+# legend names it only on a listing that has one.
+_MIRRORED_STATUS = "mirrored"
+_MIRRORED_GLYPH = ("◇", "dim", "mirrored")
 
 
 def _status_legend(statuses) -> str | None:
     """The one-line key for the ST column, or None when nothing is known."""
     if not any(statuses):
         return None
-    parts = [
-        f"{c(colour, glyph)} {c('dim', label)}"
-        for glyph, colour, label in _STATUS_GLYPHS.values()
-    ]
+    glyphs = list(_STATUS_GLYPHS.values())
+    if _MIRRORED_STATUS in statuses:
+        glyphs.append(_MIRRORED_GLYPH)
+    parts = [f"{c(colour, glyph)} {c('dim', label)}" for glyph, colour, label in glyphs]
     return "  " + "  ·  ".join(parts)
 
 
@@ -486,7 +491,10 @@ def _build_session_table(sessions, reserve: int = 0, statuses=None) -> Table:
         # outside cpad to keep the ANSI wrap contiguous.
         title_raw = _display_title(session, title_w)
         title = title_raw + " " * max(0, title_w - visible_len(title_raw))
-        glyph, colour, _ = _STATUS_GLYPHS.get(status, ("-", "dim", ""))
+        if getattr(session, "mirrored", False):
+            glyph, colour, _ = _MIRRORED_GLYPH
+        else:
+            glyph, colour, _ = _STATUS_GLYPHS.get(status, ("-", "dim", ""))
         table.add_row({
             "idx": idx_cell,
             "time": cpad("cyan", t_str, time_w),
@@ -564,6 +572,11 @@ def _session_preview(session) -> list[str]:
 
 
 def _resume_session(session) -> int:
+    if getattr(session, "mirrored", False):
+        print(c("red", "This session's transcript was deleted by "
+                       f"{sanitize(session.agent)}; swe keeps a read-only copy, "
+                       "so it cannot be resumed."))
+        return 1
     if not os.path.exists(session.path):
         print(c("red", f"Directory not found: {sanitize(session.path)}"))
         return 1
@@ -635,6 +648,7 @@ def cmd_session_index(args) -> int:
     if json_view:
         if result is not None:
             body["pass"] = result.as_dict()
+            body["mirror"] = result.mirror
         emit(body)
         return 1 if body.get("error") else 0
     if result is not None:
@@ -642,6 +656,11 @@ def cmd_session_index(args) -> int:
               f"({result.current:,} already current) in {result.seconds:.1f}s.")
         if result.failed:
             print(c("yellow", f"{result.failed:,} transcripts could not be read."))
+        if result.mirror and result.mirror.get("copied"):
+            print(f"Mirrored {result.mirror['copied']:,} transcripts "
+                  "(swe session mirror --status).")
+        if result.mirror and result.mirror.get("error"):
+            print(c("yellow", f"The transcript mirror failed: {result.mirror['error']}"))
     if body.get("error"):
         print(c("red", f"Couldn't read the search index: {body['error']}"))
     else:
@@ -653,13 +672,77 @@ def cmd_session_index(args) -> int:
     return 1 if body.get("error") else 0
 
 
+def _bytes(n: int) -> str:
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{int(size)} B" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{n} B"  # pragma: no cover
+
+
+_MIRROR_FLAGS = {"--on", "--off", "--status", "--json"}
+
+
+def cmd_session_mirror(args) -> int:
+    """``swe session mirror``: copy new and changed Claude Code and Codex
+    transcripts into ``~/.swe/data/transcripts/`` so they outlive the
+    harnesses' 30-day pruning, or with ``--on``/``--off`` choose whether
+    the hub and ``swe session index`` keep doing it. Nothing is deleted."""
+    from swe.sessions import transcript_mirror
+
+    args, json_view = take_json_flag(args)
+    out = error_stream(json_view)
+    unknown = [a for a in args if a not in _MIRROR_FLAGS]
+    if unknown:
+        print(c("red", f"Unknown option for swe session mirror: {unknown[0]}"), file=out)
+        return 1
+    if "--on" in args and "--off" in args:
+        print(c("red", "pick one of --on and --off"), file=out)
+        return 1
+    home = Path.home()
+    if "--on" in args or "--off" in args:
+        transcript_mirror.set_enabled(home, "--on" in args)
+    result = None
+    if "--status" not in args and "--off" not in args and transcript_mirror.is_enabled(home):
+        try:
+            result = transcript_mirror.run_pass(home, wait=False)
+        except transcript_mirror.MirrorBusy as exc:
+            print(c("red", f"Transcript mirror: {exc}"), file=out)
+            return 1
+        except OSError as exc:
+            print(c("red", f"Transcript mirror: {exc.strerror or exc}"), file=out)
+            return 1
+    body = transcript_mirror.status(home)
+    if json_view:
+        body["pass"] = result.as_dict() if result is not None else None
+        return emit(body)
+    if result is not None:
+        print(f"Copied {result.copied:,} transcript{'' if result.copied == 1 else 's'} "
+              f"({_bytes(result.copied_bytes)}); "
+              f"{result.unchanged:,} already current; "
+              f"{result.orphaned:,} kept after their source was deleted "
+              f"({_bytes(result.orphaned_bytes)}).")
+        if result.failed:
+            print(c("yellow", f"{result.failed:,} transcripts could not be copied."))
+        if result.conflicts:
+            print(c("yellow", f"{result.conflicts:,} transcripts share a mirror path with "
+                              "another file and were left alone."))
+    count = body["entries"]
+    print(f"{count:,} transcript{'' if count == 1 else 's'} mirrored "
+          f"({_bytes(body['bytes'])}) in {tilde(body['root'])}")
+    state = "on" if body["enabled"] else "off"
+    print(c("dim", f"Mirroring is {state} (swe session mirror --on|--off)"))
+    return 0
+
+
 def cmd_session(args):
-    if args and args[0] == "index":
+    if args and args[0] in ("index", "mirror"):
         if any(a in ("-h", "--help", "help") for a in args[1:]):
             from swe.help_text import cmd_help
 
             return cmd_help(["session"]) or 0
-        return cmd_session_index(args[1:])
+        return (cmd_session_index if args[0] == "index" else cmd_session_mirror)(args[1:])
     # `session --help` mid-listing (`session use --help`, `session -i -h`)
     # still prints help; bare `help` counts only in first position and
     # flag values are skipped, so `--search help` / `--search -h` search.
@@ -780,7 +863,8 @@ def cmd_session(args):
 
     # The picker prefixes every row with a 2-char pointer + space, so its
     # table has to be built 2 columns narrower or the redraw wraps.
-    statuses = session_statuses(sessions)
+    statuses = [_MIRRORED_STATUS if getattr(s, "mirrored", False) else status
+                for s, status in zip(sessions, session_statuses(sessions))]
     table = _build_session_table(
         sessions, reserve=2 if parsed.interactive else 0, statuses=statuses
     )
