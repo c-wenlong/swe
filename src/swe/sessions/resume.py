@@ -72,7 +72,14 @@ def launch_tool_name(tool_name: str) -> str:
 
 
 def resume_flags(session) -> list[str]:
-    """The flags that reopen ``session`` in its harness, or [] when none do."""
+    """The flags that reopen ``session`` in its harness, or [] when none do.
+
+    A mirrored session has none: its harness deleted the transcript, so no
+    resume could find it. Every launch path (``swe session use``, the
+    follow-up work plan, the hub's attach and the catalog's ``resume``)
+    reads its flags here."""
+    if getattr(session, "mirrored", False):
+        return []
     builder = RESUME_FLAGS.get(session.tool_name)
     return builder(session.session_id) if builder else []
 
@@ -82,8 +89,12 @@ def resume_json(session) -> dict | None:
 
     A harness in ``LIMITED_RESUME`` only launches in the session's
     directory, and a session whose id yields no flags (a codex rollout with
-    no uuid in its name) has nothing to reopen. Neither is a resume.
+    no uuid in its name) has nothing to reopen. Neither is a resume. Nor
+    is a mirrored session: the harness no longer has its transcript, so
+    `claude --resume <id>` would only fail.
     """
+    if getattr(session, "mirrored", False):
+        return None
     flags = resume_flags(session)
     if not flags:
         return None

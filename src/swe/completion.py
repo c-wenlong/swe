@@ -140,6 +140,12 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
         ("--status", "Show what the index holds, without a pass"),
         ("--json", "Print the index status as JSON"),
     ],
+    "session mirror": [
+        ("--on", "Keep mirroring transcripts (the default)"),
+        ("--off", "Stop mirroring transcripts"),
+        ("--status", "Show what the mirror holds, without a pass"),
+        ("--json", "Print the mirror status as JSON"),
+    ],
     "remote serve": [
         ("--host=", "Bind address (default: this machine's Tailscale IP)"),
         ("--port=", "Port (default 8477)"),
@@ -630,7 +636,7 @@ _COMMAND_FLAGS: dict[str, list[tuple[str, str]]] = {
 # --<TAB>` consults the "mcp sync" table; `swe hs list` shares `swe list`'s.
 _NESTED_FLAGS: dict[str, dict[str, str]] = {
     "list": {"edit": "list edit"},
-    "session": {"index": "session index"},
+    "session": {"index": "session index", "mirror": "session mirror"},
     "sync": {"status": "sync status"},
     "worktree": {"list": "worktree list", "ls": "worktree list",
                  "show": "worktree show", "add": "worktree add",
@@ -870,6 +876,7 @@ _SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
     "session": [
         ("use", "Resume a session by index"),
         ("index", "Index transcripts for session search"),
+        ("mirror", "Keep copies of transcripts the harnesses prune"),
     ],
     "worktree": [
         ("list", "Every worktree with its state, PR and size"),

@@ -78,6 +78,7 @@ def _load_cached_sessions() -> list[Session] | None:
                 tool_name=s["tool_name"],
                 title_source=s.get("title_source", ""),
                 account_home=s.get("account_home", ""),
+                mirrored=bool(s.get("mirrored", False)),
             )
             for s in raw
         ]
@@ -101,6 +102,7 @@ def _save_cached_sessions(sessions: list[Session]) -> None:
                     "tool_name": s.tool_name,
                     "title_source": s.title_source,
                     "account_home": s.account_home,
+                    "mirrored": s.mirrored,
                 }
                 for s in sessions
             ],

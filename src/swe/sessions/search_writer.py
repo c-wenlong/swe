@@ -31,6 +31,13 @@ The pass covers the transcript files :func:`sources` lists plus the
 sessions inside Devin's ``sessions.db`` and OpenCode's ``opencode.db``
 (:mod:`swe.sessions.search_containers`). Rows for other harnesses,
 written by the app, are never touched.
+
+The same enumeration feeds the transcript mirror
+(:mod:`swe.sessions.transcript_mirror`): the pass hands it :func:`sources`
+before it reads anything. The index itself is untouched by the mirror: no
+mirror copy is read, and no row is written or removed because of one.
+Searching copies of pruned sessions the index never read is a follow-up
+(it needs a rule that cannot double count or leave stale rows).
 """
 
 from __future__ import annotations
@@ -49,6 +56,7 @@ from pathlib import Path
 
 from swe.paths import locked_beside, swe_dir_for, search_index_for
 from swe.sessions import search_containers as containers
+from swe.sessions import transcript_mirror as mirror
 from swe.sessions import search_decode as decode
 from swe.sessions.engines.common import sqlite_uri
 
@@ -1112,6 +1120,11 @@ class Source:
     session_id: str | None = None
     meta_path: str | None = None
     pair: str | None = None
+    # The harness home directory whose tree this file was found in (the
+    # default ``~/.claude`` or an SWE account's home), for the sources that
+    # have more than one. The mirror uses it to keep a symlinked transcript,
+    # whose resolved path sits outside every root, with its account.
+    home: str | None = None
 
 
 # Kiro session files are `<uuid>.json` (Orca's KIRO_SESSION_FILE_PATTERN).
@@ -1144,20 +1157,21 @@ def sources(home: Path) -> list[Source]:
     seen: set[str] = set()
 
     def add(found: list[str], harness: str, document: bool = False, meta=None,
-            pair=None, session_id=None) -> None:
+            pair=None, session_id=None, origin: str | None = None) -> None:
         for path in found:
             if path not in seen:
                 seen.add(path)
                 out.append(Source(path, harness, document,
                                   session_id=session_id(path) if session_id else None,
                                   meta_path=meta(path) if meta else None,
-                                  pair=pair(path) if pair else None))
+                                  pair=pair(path) if pair else None,
+                                  home=origin))
 
     for claude_home in _homes(home, "claude", ".claude"):
-        add(_walk(claude_home / "projects"), "claude")
+        add(_walk(claude_home / "projects"), "claude", origin=str(claude_home))
     for codex_home in _homes(home, "codex", ".codex"):
-        add(_walk(codex_home / "sessions"), "codex")
-        add(_walk(codex_home / "archived_sessions"), "codex")
+        add(_walk(codex_home / "sessions"), "codex", origin=str(codex_home))
+        add(_walk(codex_home / "archived_sessions"), "codex", origin=str(codex_home))
     # Devin's ATIF exports beside sessions.db (`Ledger`'s devinTranscripts).
     # The database holds the same sessions and more; both are read, and
     # search shows one hit per session.
@@ -1303,6 +1317,10 @@ class PassResult:
     moved: int = 0
     drained: int = 0
     seconds: float = 0.0
+    # What the mirror step of this pass did (``MirrorResult.as_dict``), or
+    # None when mirroring is off. Not in ``as_dict``: that is the shape
+    # ``indexer.json`` records.
+    mirror: dict | None = None
 
     def count(self, outcome: str) -> None:
         if outcome == "indexed":
@@ -1420,12 +1438,23 @@ def run_pass(home: Path | None = None, *, should_stop=None) -> PassResult:
 def _pass(home: Path, path: Path, should_stop) -> PassResult:
     started = time.monotonic()
     result = PassResult()
+    # One enumeration for both jobs. The mirror goes first and before the
+    # index is opened: copying a transcript that is about to be pruned
+    # matters more than indexing it, and it must not wait on, or fail
+    # with, a search index that cannot be written here.
+    listed = sources(home)
+    if mirror.is_enabled(home):
+        try:
+            result.mirror = mirror.sync(home, listed, should_stop).as_dict()
+        except Exception as exc:
+            # Never stop the index pass: the mirror reports its own state.
+            result.mirror = {"error": str(exc) or type(exc).__name__}
     conn = open_index(path)
     prints_path = path.parent / PRINTS_FILE
     prints = _load_prints(prints_path)
     try:
         indexer = Indexer(Store(conn), prints=prints)
-        for source in sources(home):
+        for source in listed:
             if should_stop is not None and should_stop():
                 break
             result.files += 1

@@ -20,6 +20,10 @@ class Session:
     # "" for a session in the default home. The consumer labels the row
     # with the account's name and resumes under this home, not the default.
     account_home: str = ""
+    # True for a session whose transcript the harness has deleted and only
+    # swe's mirror copy remains (``transcript_mirror``). Such a session
+    # lists and reads, but the harness cannot resume it.
+    mirrored: bool = False
 
     def __post_init__(self) -> None:
         # Coerce at the boundary so one malformed record cannot poison the
@@ -84,6 +88,9 @@ class SessionRow:
     # The SWE account home holding the session's transcripts, or None
     # for the harness's default home.
     account_home: str | None = None
+    # The harness deleted this transcript; swe's mirror copy is all that is
+    # left. ``resume`` is None for such a row.
+    mirrored: bool = False
 
     @classmethod
     def of(cls, session, status: str, resume: dict | None) -> "SessionRow":
@@ -100,6 +107,7 @@ class SessionRow:
             status=status or None,
             resume=resume,
             account_home=session.account_home or None,
+            mirrored=bool(session.mirrored),
         )
 
     def to_json(self) -> dict:
@@ -114,4 +122,5 @@ class SessionRow:
             "status": self.status,
             "resume": self.resume,
             "account_home": self.account_home,
+            "mirrored": self.mirrored,
         }
