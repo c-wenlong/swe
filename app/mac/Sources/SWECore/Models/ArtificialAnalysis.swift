@@ -24,11 +24,11 @@ public struct AALanguageModel: Sendable, Equatable, Identifiable {
     public var priceBlended: Double?
     public var priceInput: Double?
     public var priceOutput: Double?
-    /// Median output tokens per second.
+    /// Output tokens per second: the `performance_v3` mean, or the median in older stored rows.
     public var speed: Double?
-    /// Median seconds to first token.
+    /// Seconds to first token: the `performance_v3` mean, or the median in older stored rows.
     public var timeToFirstToken: Double?
-    /// Median seconds to first answer token (reasoning models).
+    /// Seconds to first answer token (reasoning models): the `performance_v3` mean, or the median in older stored rows.
     public var timeToFirstAnswer: Double?
 
     public init(id: String, name: String, slug: String,

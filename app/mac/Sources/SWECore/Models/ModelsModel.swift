@@ -57,8 +57,8 @@ public final class ModelsModel {
                 "Artificial Analysis Intelligence Index: a blend of their independent evaluations (reasoning, knowledge, coding, agentic tasks)."
             case .coding: "Agentic coding and terminal tasks passed, run by Artificial Analysis. Replaces their Coding Index, which they stopped computing for new models in September 2026."
             case .reasoning: "Expert-level questions answered correctly, about 40% of them maths, run by Artificial Analysis. Replaces their Maths Index, which they retired in January 2026."
-            case .speed: "Median output tokens per second across providers."
-            case .ttft: "Median seconds to the first token, lower is better."
+            case .speed: "Mean output tokens per second across providers (older stored rows hold the median)."
+            case .ttft: "Mean seconds to the first token, lower is better (older stored rows hold the median)."
             case .cost: "Artificial Analysis's blended price per 1M tokens (3:1 input to output), lower is better. The table's Cost column is the LiteLLM price the ledger charges."
             }
         }

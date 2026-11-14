@@ -216,6 +216,36 @@ private final class StubHTTP: HTTPTransport, Sendable {
         #expect(model.timeToFirstAnswer == 9.0)
     }
 
+    /// With `performance_v3` and `performance` both null, or missing a
+    /// field, the legacy top-level key supplies the value.
+    @Test func legacyTopLevelKeysFillWhatBothPerformanceObjectsLack() throws {
+        let json = """
+        {"data": [{"id": "n", "name": "Both Null", "slug": "n",
+           "model_creator": {"id": "c", "name": "Anthropic"},
+           "evaluations": {}, "pricing": {},
+           "performance": null, "performance_v3": null,
+           "median_output_tokens_per_second": 55.0,
+           "median_time_to_first_token_seconds": 0.9,
+           "median_time_to_first_answer_token": 3.5},
+          {"id": "m", "name": "Missing Fields", "slug": "m",
+           "model_creator": {"id": "c", "name": "Anthropic"},
+           "evaluations": {}, "pricing": {},
+           "performance": {"median_output_tokens_per_second": 60.0},
+           "performance_v3": {"mean_time_to_first_token_seconds": 1.1},
+           "median_output_tokens_per_second": 1.0,
+           "median_time_to_first_token_seconds": 2.0,
+           "median_time_to_first_answer_token": 4.5}]}
+        """
+        let models = try AAModelsResponse.decode(Data(json.utf8))
+        #expect(models[0].speed == 55.0)
+        #expect(models[0].timeToFirstToken == 0.9)
+        #expect(models[0].timeToFirstAnswer == 3.5)
+        // Present v3 and `performance` values still win over the legacy keys.
+        #expect(models[1].speed == 60.0)
+        #expect(models[1].timeToFirstToken == 1.1)
+        #expect(models[1].timeToFirstAnswer == 4.5)
+    }
+
     @Test func rejectsAResponseWithNoDataArray() {
         #expect(throws: AAError.badResponse) {
             _ = try AAModelsResponse.decode(#"{"status": 200}"#.data(using: .utf8)!)
