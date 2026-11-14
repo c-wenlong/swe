@@ -403,19 +403,24 @@ struct MultiSelectMenu<Value: Hashable>: View {
         .onHover { hovering = $0 }
         .fixedSize()
         .popover(isPresented: $open, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 0) {
-                row(title: allTitle, icon: nil, dot: nil, on: selection.isEmpty) { selection = [] }
-                Divider().padding(.vertical, 4)
-                ForEach(options, id: \.value) { option in
-                    row(title: option.title, icon: option.icon, dot: dots[option.value],
-                        on: selection.contains(option.value)) {
-                        if selection.contains(option.value) { selection.remove(option.value) }
-                        else { selection.insert(option.value) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    row(title: allTitle, icon: nil, dot: nil, on: selection.isEmpty) { selection = [] }
+                    Divider().padding(.vertical, 4)
+                    ForEach(options, id: \.value) { option in
+                        row(title: option.title, icon: option.icon, dot: dots[option.value],
+                            on: selection.contains(option.value)) {
+                            if selection.contains(option.value) { selection.remove(option.value) }
+                            else { selection.insert(option.value) }
+                        }
                     }
                 }
+                .padding(.vertical, 6)
             }
-            .padding(.vertical, 6)
-            .frame(minWidth: 200)
+            // A long list scrolls the way SelectOptionList does; a short
+            // one keeps its own height.
+            .frame(minWidth: 200, maxHeight: 360)
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 

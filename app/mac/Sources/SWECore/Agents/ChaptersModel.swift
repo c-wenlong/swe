@@ -934,6 +934,11 @@ public final class ChaptersModel {
     private func refreshTree(under directory: String, order: [String],
                              current: () -> Bool = { true }) async {
         let root = directory
+        // Indexed chapters the outline skips (a hidden name, a linked
+        // folder) still compile, so they are weighed too.
+        var indexed: [String] = []
+        if case .loaded(let check) = status { indexed = check.uniqueChapters.map(\.name) }
+        let extra = indexed
         let found: (files: [String], folders: [String], sizes: [String: Int]) = await offMain {
             var files: [String] = []
             var sizes: [String: Int] = [:]
@@ -967,13 +972,19 @@ public final class ChaptersModel {
                     }
                 }
             }
+            for name in extra where sizes[name] == nil && !files.contains(name) {
+                guard let url = Self.inside(name, under: root),
+                      let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+                else { continue }
+                sizes[name] = size
+            }
             return (files, folders, sizes)
         }
         guard current() else { return }
         let confined = found.files.filter { Self.inside($0, under: root) != nil }
         tree = ChapterTree.build(files: confined, folders: found.folders,
                                  order: order)
-        let inside = Set(confined)
+        let inside = Set(confined).union(extra)
         sizes = found.sizes.filter { inside.contains($0.key) }
         files = confined.sorted {
             $0.localizedCaseInsensitiveCompare($1) == .orderedAscending

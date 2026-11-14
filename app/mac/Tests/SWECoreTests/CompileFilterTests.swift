@@ -78,4 +78,17 @@ import Testing
         #expect(CompileFilter.columns(stored: "devin,claude", known: Self.known) == ["claude", "devin"])
         #expect(CompileFilter.columns(stored: "gone", known: Self.known) == Self.known)
     }
+
+    /// The label and the scope of checkbox writes share one rule: a
+    /// filter naming every offered harness is All for both.
+    @Test func filterNamingEveryOfferedHarnessIsAllEverywhere() {
+        #expect(CompileFilter.harness(stored: "claude", known: ["claude"]) == nil)
+        #expect(CompileFilter.label(stored: "claude", known: ["claude"]) == "All harnesses")
+        let all = Self.known.joined(separator: ",")
+        #expect(CompileFilter.harness(stored: all, known: Self.known) == nil)
+        #expect(CompileFilter.label(stored: all, known: Self.known) == "All harnesses")
+        // One of several is still that harness, label and scope alike.
+        #expect(CompileFilter.harness(stored: "claude", known: Self.known) == "claude")
+        #expect(CompileFilter.label(stored: "claude", known: Self.known) == HarnessMark("claude").name)
+    }
 }

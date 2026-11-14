@@ -308,7 +308,7 @@ struct CompileView: View {
                     Text("Total").font(Theme.nav).foregroundStyle(Theme.textPrimary)
                     Spacer(minLength: 4)
                     Text(IncludeSizes.cell(bytes: IncludeSizes.bytes(
-                        of: ChapterTree.files(under: "", in: chapters.tree),
+                        of: ChapterTree.files(under: "", in: chapters.tree) + chapters.missing,
                         sizes: chapters.sizes, included: receives)))
                         .font(Theme.caption).monospacedDigit()
                         .foregroundStyle(Theme.textPrimary)

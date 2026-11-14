@@ -207,9 +207,11 @@ public enum CompileFilter {
 
     /// The one harness the tab shows, or nil for the All view: the stored
     /// names that are still linked (`known`, or all of them before the
-    /// link report loads) must come down to exactly one.
+    /// link report loads) must come down to exactly one, by the same
+    /// `picked` rule the dropdown's label uses, so a checkbox never writes
+    /// to a scope the label does not name.
     public static func harness(stored: String, known: [String]) -> String? {
-        let names = parse(stored).filter { known.isEmpty || known.contains($0) }
+        let names = picked(stored: stored, known: known)
         return names.count == 1 ? names[0] : nil
     }
 
