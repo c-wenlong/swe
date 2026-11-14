@@ -84,6 +84,8 @@ extension AALanguageModel: Decodable {
         case id, name, slug
         case creator = "model_creator"
         case evaluations, pricing, performance
+        // `performance` goes null on 2026-12-10; `performance_v3` replaces it.
+        case performanceV3 = "performance_v3"
         // Legacy top-level keys; V2 nests them under `performance`.
         case speed = "median_output_tokens_per_second"
         case ttft = "median_time_to_first_token_seconds"
@@ -94,6 +96,13 @@ extension AALanguageModel: Decodable {
         case speed = "median_output_tokens_per_second"
         case ttft = "median_time_to_first_token_seconds"
         case ttfat = "median_time_to_first_answer_token_seconds"
+    }
+
+    /// `performance_v3` reports means where `performance` reported medians.
+    private enum PerformanceV3Keys: String {
+        case speed = "mean_output_tokens_per_second"
+        case ttft = "mean_time_to_first_token_seconds"
+        case ttfat = "mean_time_to_first_answer_token_seconds"
     }
 
     private enum PricingKeys: String, CodingKey {
@@ -127,12 +136,18 @@ extension AALanguageModel: Decodable {
         // The Free tier has no blended price: blend 3:1 the way AA does.
         priceBlended = measured(pricing[PricingKeys.blended.rawValue] ?? nil)
             ?? priceInput.flatMap { input in priceOutput.map { (3 * input + $0) / 4 } }
+        // Prefer `performance_v3` (means), then `performance` (medians, null
+        // from 2026-12-10), then the legacy top-level keys.
+        let v3 = try c.decodeIfPresent([String: Double?].self, forKey: .performanceV3) ?? [:]
         let performance = try c.decodeIfPresent([String: Double?].self, forKey: .performance) ?? [:]
-        speed = measured(try (performance[PerformanceKeys.speed.rawValue] ?? nil)
+        speed = measured(try (v3[PerformanceV3Keys.speed.rawValue] ?? nil)
+            ?? (performance[PerformanceKeys.speed.rawValue] ?? nil)
             ?? c.decodeIfPresent(Double.self, forKey: .speed))
-        timeToFirstToken = measured(try (performance[PerformanceKeys.ttft.rawValue] ?? nil)
+        timeToFirstToken = measured(try (v3[PerformanceV3Keys.ttft.rawValue] ?? nil)
+            ?? (performance[PerformanceKeys.ttft.rawValue] ?? nil)
             ?? c.decodeIfPresent(Double.self, forKey: .ttft))
-        timeToFirstAnswer = measured(try (performance[PerformanceKeys.ttfat.rawValue] ?? nil)
+        timeToFirstAnswer = measured(try (v3[PerformanceV3Keys.ttfat.rawValue] ?? nil)
+            ?? (performance[PerformanceKeys.ttfat.rawValue] ?? nil)
             ?? c.decodeIfPresent(Double.self, forKey: .ttfat))
     }
 

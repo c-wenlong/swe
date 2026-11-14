@@ -268,6 +268,8 @@ comments in <code>--json</code> gain <code>association</code>.</p>
 </ul>
 <h3 id="fixed"><a class="anchor" href="#fixed"></a>Fixed</h3>
 <ul>
+<li><p><strong>Models speed and latency survive Artificial Analysis dropping <code>performance</code> on Dec 10, 2026.</strong> The Mac app reads output speed, time to first token and time to first answer token from <code>performance_v3</code> (means) first, then the old <code>performance</code> medians, then the legacy top-level keys, so the Models page columns stay filled once <code>performance</code> goes null.</p>
+</li>
 <li><p><strong>Codex education monthly usage reads the workspace billing allowance</strong> when the standard usage response omits it, showing both the percentage and credit amounts.</p>
 </li>
 <li><p><strong>Installed plugins can be switched and removed before import.</strong> Claude Code and Codex on/off and uninstall controls work for harness-owned plugins. The Mac row and per-harness action menus use themed popovers, with confirmed removal from one or all harnesses; import remains separate for SWE file ownership.</p>

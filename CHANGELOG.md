@@ -158,6 +158,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Models speed and latency survive Artificial Analysis dropping `performance` on Dec 10, 2026.** The Mac app reads output speed, time to first token and time to first answer token from `performance_v3` (means) first, then the old `performance` medians, then the legacy top-level keys, so the Models page columns stay filled once `performance` goes null.
+
 - **Codex education monthly usage reads the workspace billing allowance** when the standard usage response omits it, showing both the percentage and credit amounts.
 - **Installed plugins can be switched and removed before import.** Claude Code and Codex on/off and uninstall controls work for harness-owned plugins. The Mac row and per-harness action menus use themed popovers, with confirmed removal from one or all harnesses; import remains separate for SWE file ownership.
 
