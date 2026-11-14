@@ -138,9 +138,39 @@ def legacy_registry_pending(home: Path) -> bool:
     )
 
 
+def _command_for(label: str) -> str:
+    """The executable a discovered label runs, known even when off PATH.
+
+    The catalog names it under the canonical key (``vibe`` files as
+    ``mistral-vibe`` whose command is ``vibe``; ``qwen`` as ``qwen-code``,
+    ``factory`` as ``droid``). A label the catalog does not know keeps the
+    old rule: itself when it resolves on PATH, empty otherwise. Saving an
+    empty command makes ``HarnessRow.of`` look for an executable named after
+    the registry key, so an installed ``vibe`` would read as missing.
+    """
+    known = HARNESS_CATALOG.get(registry_name(label), {}).get("command")
+    if known:
+        return known
+    return label if shutil.which(label) else ""
+
+
+def _merge(registry: dict, label: str, entry: dict) -> dict:
+    """The entry to store under the canonical key, keeping a user's command.
+
+    Fresh fields win over the old entry, except a non-empty ``command``
+    already in harness.json: the user may have pointed it at a wrapper.
+    """
+    name = registry_name(label)
+    old = {**registry.get(label, {}), **registry.get(name, {})}
+    merged = {**old, **entry}
+    if old.get("command"):
+        merged["command"] = old["command"]
+    return merged
+
+
 def _entry(label: str, root: Path, home: Path, now: str) -> dict:
     return {
-        "command": label if shutil.which(label) else "",
+        "command": _command_for(label),
         "description": f"Registered by swe init from {home_relative(root, home)}",
         "version": None,
         "tags": ["agentic", "coding"],
@@ -189,7 +219,7 @@ def register(
         # "vibe" label files as "mistral-vibe", matching the catalog and
         # REGISTRY_ALIASES. A stale entry under the raw label is absorbed.
         name = registry_name(label)
-        merged = {**registry.get(label, {}), **registry.get(name, {}), **entry}
+        merged = _merge(registry, label, entry)
         if name != label:
             registry.pop(label, None)
         registry[name] = merged
@@ -205,7 +235,7 @@ def register(
             "skills": {"supported": True, "root": home_relative(root, home)},
         }
         name = registry_name(label)
-        merged = {**registry.get(label, {}), **registry.get(name, {}), **entry}
+        merged = _merge(registry, label, entry)
         merged.pop("pin", None)  # archived and starred are exclusive
         if name != label:
             registry.pop(label, None)
