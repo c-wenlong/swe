@@ -791,6 +791,10 @@ public final class ChaptersModel {
     public var selected: String?
     /// The AGENTS_MD outline the rail draws, refreshed with `load`.
     public private(set) var tree: [ChapterNode] = []
+    /// Each outline file's size in bytes on disk (the file a link points
+    /// at, not unsaved edits), read off the main actor with the walk that
+    /// builds `tree`; the Compile tab's KiB column.
+    public private(set) var sizes: [String: Int] = [:]
     /// Dirty drafts whose files are gone: the rail shows a "deleted" row
     /// for each so its unsaved text stays reachable.
     public private(set) var ghosts: [String] = []
@@ -930,8 +934,9 @@ public final class ChaptersModel {
     private func refreshTree(under directory: String, order: [String],
                              current: () -> Bool = { true }) async {
         let root = directory
-        let found: (files: [String], folders: [String]) = await offMain {
+        let found: (files: [String], folders: [String], sizes: [String: Int]) = await offMain {
             var files: [String] = []
+            var sizes: [String: Int] = [:]
             var folders: [String] = []
             var stack: [(url: URL, rel: String)] = [(URL(fileURLWithPath: root), "")]
             while let (url, rel) = stack.popLast() {
@@ -956,15 +961,20 @@ public final class ChaptersModel {
                     } else if name.lowercased().hasSuffix(".md"),
                               name != "index.txt", name != "targets.json" {
                         files.append(path)
+                        // A linked chapter weighs what it points at.
+                        sizes[path] = (try? entry.resolvingSymlinksInPath()
+                            .resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
                     }
                 }
             }
-            return (files, folders)
+            return (files, folders, sizes)
         }
         guard current() else { return }
         let confined = found.files.filter { Self.inside($0, under: root) != nil }
         tree = ChapterTree.build(files: confined, folders: found.folders,
                                  order: order)
+        let inside = Set(confined)
+        sizes = found.sizes.filter { inside.contains($0.key) }
         files = confined.sorted {
             $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
         }

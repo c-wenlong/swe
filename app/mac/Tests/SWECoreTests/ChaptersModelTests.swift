@@ -121,6 +121,15 @@ import Testing
         }
     }
 
+    /// The Include column's sizes come from the same off-main walk as the
+    /// outline, one entry per chapter file and none for index.txt.
+    @Test func loadReadsEachChapterFilesSize() async throws {
+        let dir = try TempDir()
+        try dir.write("long.md", String(repeating: "x", count: 3072))
+        let model = try await model(dir, runner: Runner([check(dir.url)]))
+        #expect(model.sizes == ["a.md": 4, "b.md": 4, "long.md": 3072])
+    }
+
     @Test func moveRewritesTheIndexAndRebuilds() async throws {
         let dir = try TempDir()
         let runner = Runner([check(dir.url), check(dir.url, chapters: [("b.md", true), ("a.md", true)])])
