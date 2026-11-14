@@ -307,7 +307,10 @@ import Testing
 
     @Test func repoFoldersMatchCheckoutsAndWorktrees() {
         #expect(IssueResolve.inRepo("/Users/k/src/Swe", repo: "starship-terminal/swe"))
+        #expect(IssueResolve.inRepo("/Users/k/.swe/worktrees/starship-terminal__swe-issue816", repo: "starship-terminal/swe"))
+        // Worktrees made under the old owner still match, from either slug.
         #expect(IssueResolve.inRepo("/Users/k/.swe/worktrees/c-wenlong__swe-issue816", repo: "starship-terminal/swe"))
+        #expect(IssueResolve.inRepo("/Users/k/.swe/worktrees/starship-terminal__swe-issue816", repo: "c-wenlong/swe"))
         // Folders made before the quiver -> swe rename still match.
         #expect(IssueResolve.inRepo("/Users/k/src/Quiver", repo: "starship-terminal/swe"))
         #expect(IssueResolve.inRepo("/Users/k/.swe/worktrees/c-wenlong__quiver-issue816", repo: "starship-terminal/swe"))

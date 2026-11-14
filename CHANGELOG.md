@@ -166,6 +166,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Mac app recognises sessions in `starship-terminal/swe` worktrees again.**
+  After the rebrand, the issue Resolve dialog stopped matching checkouts and
+  `starship-terminal__swe-…` worktrees to this repo, so it no longer
+  preselected the harness last used there. Folders made under the old
+  `c-wenlong` owner or the `quiver` name still match.
+
 - **Models speed and latency survive Artificial Analysis dropping `performance` on Dec 10, 2026.** The Mac app reads output speed, time to first token and time to first answer token from `performance_v3` (means) first, then the old `performance` medians, then the legacy top-level keys, so the Models page columns stay filled once `performance` goes null.
 
 - **`swe init` saves the harness executable even when it is off PATH.**
