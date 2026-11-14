@@ -158,6 +158,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Mac app recognises sessions in `starship-terminal/swe` worktrees again.**
+  After the rebrand, the issue Resolve dialog stopped matching checkouts and
+  `starship-terminal__swe-…` worktrees to this repo, so it no longer
+  preselected the harness last used there. Folders made under the old
+  `c-wenlong` owner or the `quiver` name still match.
+
 - **`swe init` saves the harness executable even when it is off PATH.**
   Registering `~/.vibe/skills` before `vibe` was installed stored an empty
   `command` under `mistral-vibe`, so `swe list` kept reporting the harness as
