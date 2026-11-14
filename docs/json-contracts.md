@@ -452,10 +452,12 @@ Timestamps are epoch seconds (floats). Counts cover the window
 - `fires` is every run; `block_rate` is `blocks / fires` (0 to 1, four
   places; 0 with no runs). `decision` is `block`, `warn`, `allow` or
   `error` (the hook failed open).
-- `recovered` counts Stop runs that allowed after the same hook blocked
-  that session ("blocked, then the rewrite was accepted"): `allow` events
-  whose `stop_hook_active` is true. Transcript runs carry no flag, so it
-  is inferred: a Stop run directly after a block of the same hook.
+- `recovered` counts Stop runs that allowed right after the same hook
+  blocked in the same session ("blocked, then the rewrite was accepted").
+  `stop_hook_active` alone is not enough, since the harness sets it when
+  any Stop hook blocked; transcript runs carry no flag, so it is inferred
+  from that same-hook rule. The window reads an hour back so a retry just
+  inside it still sees its block.
 - `top_reasons` ranks the non-allow runs by `(decision, reason)`, at most
   five, count descending. `reason` is the first line of the hook's own
   message, capped at 200 characters.
@@ -465,7 +467,11 @@ Timestamps are epoch seconds (floats). Counts cover the window
   `session_id`, hook and event name before any `:`, timestamps within 5
   seconds, matched one to one; the log's copy wins). `backfill` is false
   under `--no-backfill`. Counts before the filters apply to `hook`,
-  `harness` and `repo`.
+  `harness` and `repo`. `--repo` matches an event's recorded repository
+  root; only an event with none falls back to its cwd being under the path,
+  so a nested repository is a different project. Transcript runs include
+  subagent transcripts. A Claude `hook_success` with stderr and no matching
+  `hook error` tool result or Stop feedback is a `warn`, not a block.
 - `HookEvent` (the `swe hooks log` rows): `ts`, `hook`, `harness`,
   `event`, `session_id`, `cwd`, `repo`, `git_branch`, `decision`,
   `reason`, `duration_ms`, `exit_code`, `stop_hook_active` (null when

@@ -158,46 +158,60 @@ def merge_events(helper: list[dict], transcript: list[dict],
     second apart in one session still count twice. The helper's event
     wins, since it carries the exact reason and ``stop_hook_active``.
     """
-    unmatched: dict[tuple, list[dict]] = {}
+    pools: dict[tuple, list[dict]] = {}
     for event in helper:
-        key = (event["session_id"], event["hook"], _base_event(event["event"]))
-        unmatched.setdefault(key, []).append(event)
+        pools.setdefault(_run_key(event), []).append(event)
+    by_key: dict[tuple, list[dict]] = {}
+    for event in transcript:
+        by_key.setdefault(_run_key(event), []).append(event)
     kept: list[dict] = list(helper)
     dropped = 0
-    for event in sorted(transcript, key=lambda e: e["ts"]):
-        key = (event["session_id"], event["hook"], _base_event(event["event"]))
-        pool = unmatched.get(key, [])
-        best = None
-        for candidate in pool:
-            gap = abs(candidate["ts"] - event["ts"])
-            if gap <= window and (best is None or gap < best[0]):
-                best = (gap, candidate)
-        if best is not None:
-            pool.remove(best[1])
-            dropped += 1
-        else:
-            kept.append(event)
+    for key, group in by_key.items():
+        pool = sorted(pools.get(key, []), key=lambda e: e["ts"])
+        free = 0  # first helper event not yet passed or used
+        for event in sorted(group, key=lambda e: e["ts"]):
+            # Both lists are time sorted, so a helper event too old for
+            # this transcript event is too old for every later one: an
+            # ordered greedy pass finds the most matches the window
+            # allows, where taking the nearest copy first can strand one.
+            while free < len(pool) and pool[free]["ts"] < event["ts"] - window:
+                free += 1
+            if free < len(pool) and pool[free]["ts"] <= event["ts"] + window:
+                free += 1
+                dropped += 1
+            else:
+                kept.append(event)
     kept.sort(key=lambda e: e["ts"])
     return kept, dropped
 
 
-def mark_recovered(events: list[dict]) -> None:
-    """Fill ``stop_hook_active`` on events that lack it, in place.
+def _run_key(event: dict) -> tuple:
+    return (event["session_id"], event["hook"], _base_event(event["event"]))
 
-    A Stop hook that blocks makes the harness continue, and the hook's next
-    run in that session is the one that sees ``stop_hook_active``: so a
-    Stop event whose predecessor (same session and hook) was a block ran
-    with the flag set, and any other Stop event ran without it. Events that
-    already carry the flag, which is every helper event, keep it.
+
+def mark_recovered(events: list[dict]) -> None:
+    """Set ``recovered`` on every event and fill ``stop_hook_active``.
+
+    ``recovered`` is "blocked, then the rewrite was accepted": a Stop run
+    that allowed, right after the same hook blocked in the same session.
+    ``stop_hook_active`` alone cannot say it, because the harness sets it
+    when any Stop hook blocked, so it must agree with that hook's own
+    previous run. A Stop event with no flag (every transcript event) gets
+    it from the same rule. Events outside the Stop family are never
+    recovered.
     """
-    last_decision: dict[tuple, str] = {}
+    previous: dict[tuple, str] = {}
     for event in sorted(events, key=lambda e: e["ts"]):
+        event["recovered"] = False
         if _base_event(event["event"]) not in ("Stop", "SubagentStop"):
             continue
         key = (event["session_id"], event["hook"], event["event"])
+        after_block = previous.get(key) == "block"
         if event["stop_hook_active"] is None:
-            event["stop_hook_active"] = last_decision.get(key) == "block"
-        last_decision[key] = event["decision"]
+            event["stop_hook_active"] = after_block
+        event["recovered"] = (event["decision"] == "allow" and after_block
+                              and event["stop_hook_active"] is True)
+        previous[key] = event["decision"]
 
 
 # --- filters ----------------------------------------------------------------
@@ -226,9 +240,11 @@ def _within(path: str | None, root: str) -> bool:
 def repo_filter(path: str):
     """A predicate for ``--repo=<path>``: the event ran in that repository.
 
-    ``path`` may be the repo root or any folder inside it. An event
-    matches when its recorded repo is that repo's root, or its cwd sits
-    under ``path``.
+    ``path`` may be the repo root or any folder inside it. An event with a
+    recorded repo matches when that is this repo's root: a nested
+    repository or submodule below ``path`` is another project. Only an
+    event with no recorded repo (a transcript whose folder is gone) falls
+    back to its cwd sitting under ``path``.
     """
     root = _real(os.path.expanduser(path))
     top, _ = shim_runtime.repo_info(root)
@@ -236,8 +252,8 @@ def repo_filter(path: str):
 
     def match(event: dict) -> bool:
         repo = event.get("repo")
-        if repo and _real(repo) == top:
-            return True
+        if repo:
+            return _real(repo) == top
         return _within(event.get("cwd"), root)
 
     return match
@@ -291,9 +307,7 @@ def _fold(events: list[dict]) -> dict:
         "allows": counts["allow"],
         # Stop runs that came right after a block of the same hook and
         # let the turn end: "blocked, then the rewrite was accepted".
-        "recovered": sum(1 for e in events
-                         if e["decision"] == "allow"
-                         and e["stop_hook_active"] is True),
+        "recovered": sum(1 for e in events if e.get("recovered")),
         "block_rate": _rate(counts["block"], fires),
         "last_fired": max((e["ts"] for e in events), default=None),
         "last_block": max(blocks, default=None),

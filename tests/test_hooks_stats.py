@@ -250,15 +250,30 @@ class ShimLoggingTest(unittest.TestCase):
         self.assertIsInstance(row["duration_ms"], int)
 
     def test_stop_hook_active_marks_the_accepted_rewrite(self):
+        _, rows = self._shim(
+            "import sys\nsys.stderr.write('no\\n')\nsys.exit(2)\n",
+            {"hook_event_name": "Stop", "session_id": "s9",
+             "stop_hook_active": False})
         rc, rows = self._shim(
             "pass\n", {"hook_event_name": "Stop", "session_id": "s9",
                        "stop_hook_active": True})
         self.assertEqual(rc, 0)
-        (row,) = rows
-        self.assertEqual(row["decision"], "allow")
-        self.assertIs(row["stop_hook_active"], True)
+        self.assertEqual([r["decision"] for r in rows], ["block", "allow"])
+        self.assertIs(rows[1]["stop_hook_active"], True)
+        events.mark_recovered(rows)
         stats = events.build_stats(rows)["hooks"][0]
         self.assertEqual(stats["recovered"], 1)
+
+    def test_a_gemini_ask_is_logged_as_the_deny_the_harness_gets(self):
+        ask = ("import json\nprint(json.dumps({'hookSpecificOutput': "
+               "{'permissionDecision': 'ask'}}))\n")
+        gemini = {"harness": "gemini", "schema": "grouped",
+                  "must_print_json": True}
+        _, rows = self._shim(ask, {"hook_event_name": "BeforeTool"}, gemini)
+        self.assertEqual(rows[-1]["decision"], "block")
+        # Claude has a real "ask": the run is not a block there.
+        _, rows = self._shim(ask, {"hook_event_name": "PreToolUse"})
+        self.assertEqual(rows[-1]["decision"], "allow")
 
     def test_tool_events_carry_the_tool_name(self):
         _, rows = self._shim(
@@ -810,6 +825,257 @@ class RuntimeCopyTest(unittest.TestCase):
         self.assertLessEqual(
             imports,
             {"__future__", "json", "os", "subprocess", "sys", "time"})
+
+
+# --- shapes seen in real transcripts (paths and ids anonymised) -------------
+
+
+class RealShapeTest(unittest.TestCase):
+    NSP = 'python3 "/h/.claude/hooks/no-sleep-poll.py"'
+    PG = 'python3 "/h/.claude/hooks/prose-guard.py"'
+    GUARD = ('f="$HOME/.swe/hooks/command-guard/command_guard.py"; '
+             '[ -f "$f" ] || exit 0; exec python3 "$f"')
+
+    def setUp(self):
+        self.now = time.time() - 600
+
+    def test_names_from_real_command_strings(self):
+        names = {
+            self.GUARD: "command_guard",
+            self.NSP: "no-sleep-poll",
+            'python3 "/h/.swe/hooks/claude/_generated/prose-guard.py"':
+                "prose-guard",
+            '"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"':
+                "claude-plugin/session-start",
+            "${CLAUDE_PLUGIN_ROOT}/scripts/on-stop.sh":
+                "claude-plugin/on-stop",
+            'PATH="/etc/profiles/per-user/$USER/bin:$PATH" node '
+            '"/h/.pixel-agents/hooks/claude-hook.js"':
+                ".pixel-agents/claude-hook",
+            '[ -n "$SUPERSET_HOME_DIR" ] && [ -x '
+            '"$SUPERSET_HOME_DIR/hooks/notify.sh" ] && '
+            'SUPERSET_AGENT_ID=claude "$SUPERSET_HOME_DIR/hooks/notify.sh" '
+            '|| true': "superset/notify",
+            "callback": "callback",
+            "A lot of things have happened so far. I pushed many PRs and "
+            "another agent is resolving them. Please update yourself": "prompt",
+            "": "",
+        }
+        for command, name in names.items():
+            self.assertEqual(transcripts.command_hook(command), name,
+                             command[:40])
+
+    def test_the_log_and_the_transcript_name_a_shared_hook_alike(self):
+        stub = '/h/.swe/hooks/claude/_generated/prose-guard.py'
+        self.assertEqual(transcripts.command_hook(f'python3 "{stub}"'),
+                         events.hook_stem(stub))
+
+    def test_exit_2_block_is_one_block_not_a_warning(self):
+        # Claude records the exit 2 as a hook_success carrying the stderr,
+        # then the tool result. Together they are one block.
+        rows = transcripts.parse_lines([
+            _rec(self.now, "attachment", attachment={
+                "type": "hook_success", "hookName": "PreToolUse:Bash",
+                "hookEvent": "PreToolUse", "toolUseID": "toolu_1",
+                "content": "", "stdout": "", "exitCode": 0,
+                "stderr": "Blocked: synchronous polling. Arm the monitor",
+                "command": self.NSP, "durationMs": 22}),
+            _rec(self.now + 0.1, "user", message={"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_1",
+                 "is_error": True,
+                 "content": f"PreToolUse:Bash hook error: [{self.NSP}]: "
+                            "Blocked: synchronous polling. Arm the monitor"
+                 }]}),
+        ])
+        self.assertEqual([(e["hook"], e["decision"], e["duration_ms"])
+                          for e in rows], [("no-sleep-poll", "block", 22)])
+
+    def test_hook_success_with_stderr_and_no_block_is_a_warning(self):
+        rows = transcripts.parse_lines([_rec(
+            self.now, "attachment", attachment={
+                "type": "hook_success", "hookName": "PreToolUse:Bash",
+                "toolUseID": "toolu_2", "stdout": "", "exitCode": 0,
+                "stderr": "Blocked: synchronous polling",
+                "command": self.NSP, "durationMs": 9})])
+        self.assertEqual([e["decision"] for e in rows], ["warn"])
+
+    def test_block_with_a_bracketed_shell_command(self):
+        rows = transcripts.parse_lines([_rec(
+            self.now, "user", message={"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t", "is_error": True,
+                 "content": f"PreToolUse:Bash hook error: [{self.GUARD}]: "
+                            "command-guard blocked this command."}]})])
+        self.assertEqual([(e["hook"], e["decision"], e["reason"])
+                          for e in rows],
+                         [("command_guard", "block",
+                           "command-guard blocked this command.")])
+
+    def test_a_stop_run_in_three_records_is_one_block(self):
+        rows = transcripts.parse_lines([
+            _rec(self.now, "attachment", attachment={
+                "type": "hook_success", "hookName": "Stop",
+                "hookEvent": "Stop", "toolUseID": "u", "exitCode": 0,
+                "stderr": "Your reply breaks the style rules.",
+                "stdout": "", "command": self.PG, "durationMs": 61}),
+            _rec(self.now + 0.05, "system", subtype="stop_hook_summary",
+                 hookCount=2, hookInfos=[
+                     {"command": self.PG, "durationMs": 61},
+                     {"command": "${CLAUDE_PLUGIN_ROOT}/scripts/on-stop.sh",
+                      "durationMs": 12}], hookErrors=[],
+                 preventedContinuation=False, stopReason=""),
+            _rec(self.now + 1, "user", isMeta=True, message={
+                "role": "user", "content":
+                    f"Stop hook feedback:\n[{self.PG}]: Your reply breaks "
+                    "the style rules."}),
+        ])
+        got = sorted((e["hook"], e["decision"]) for e in rows)
+        self.assertEqual(got, [("claude-plugin/on-stop", "allow"),
+                               ("prose-guard", "block")])
+
+    def test_stop_attachment_and_summary_entry_are_one_run(self):
+        rows = transcripts.parse_lines([
+            _rec(self.now, "attachment", attachment={
+                "type": "hook_non_blocking_error", "hookName": "Stop",
+                "hookEvent": "Stop", "toolUseID": "u", "exitCode": 1,
+                "stderr": "Failed with non-blocking status code: boom\ntrace",
+                "stdout": "", "durationMs": 40,
+                "command": 'node "/h/.pixel-agents/hooks/claude-hook.js"'}),
+            _rec(self.now + 0.01, "system", subtype="stop_hook_summary",
+                 hookInfos=[{"command":
+                             'node "/h/.pixel-agents/hooks/claude-hook.js"',
+                             "durationMs": 40}],
+                 hookErrors=["Failed with non-blocking status code: boom"]),
+        ])
+        self.assertEqual([(e["decision"], e["reason"]) for e in rows],
+                         [("error", "Failed with non-blocking status code: "
+                                    "boom")])
+
+    def test_additional_context_is_not_a_run(self):
+        self.assertEqual(transcripts.parse_lines([_rec(
+            self.now, "attachment", attachment={
+                "type": "hook_additional_context", "hookName": "SessionStart",
+                "toolUseID": "SessionStart", "hookEvent": "SessionStart",
+                "content": ["some context"]})]), [])
+
+    def test_timed_out_hook(self):
+        rows = transcripts.parse_lines([_rec(
+            self.now, "attachment", attachment={
+                "type": "hook_cancelled", "hookName": "SessionStart:compact",
+                "toolUseID": "c", "hookEvent": "SessionStart",
+                "command": '"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"',
+                "durationMs": 8037, "timedOut": True, "timeoutMs": 8000})])
+        self.assertEqual([(e["decision"], e["reason"]) for e in rows],
+                         [("error", "timed out")])
+
+    def test_a_line_that_only_talks_about_hooks_is_never_parsed(self):
+        with mock.patch.object(transcripts.json, "loads",
+                               side_effect=AssertionError) as loads:
+            transcripts.parse_lines([
+                b'{"type":"assistant","text":"the hook ran and it was fine"}'])
+        loads.assert_not_called()
+
+    def test_an_error_names_only_the_hook_it_names(self):
+        rows = transcripts.parse_lines([_rec(
+            self.now, "system", subtype="stop_hook_summary",
+            hookInfos=[
+                {"command": 'python3 "/h/hooks/guard.py"', "durationMs": 1},
+                {"command": 'python3 "/h/hooks/prose-guard.py"',
+                 "durationMs": 2}],
+            hookErrors=['[python3 "/h/hooks/prose-guard.py"]: crashed'])])
+        self.assertEqual(
+            sorted((e["hook"], e["decision"]) for e in rows),
+            [("guard", "allow"), ("prose-guard", "error")])
+        # An error that names no command is not pinned on anyone.
+        rows = transcripts.parse_lines([_rec(
+            self.now, "system", subtype="stop_hook_summary",
+            hookInfos=[{"command": 'python3 "/h/hooks/guard.py"',
+                        "durationMs": 1}],
+            hookErrors=["Failed with non-blocking status code: boom"])])
+        self.assertEqual([e["decision"] for e in rows], ["allow"])
+
+
+class ReviewFixesTest(unittest.TestCase):
+    """The behaviours the PR review asked for."""
+
+    def _ev(self, ts, **kw):
+        return MergeTest._ev(self, ts, **kw)
+
+    def test_the_window_matches_copies_across_the_whole_group(self):
+        # Helper runs at 100 and 104, transcript copies at 104 and 108.
+        helper = [self._ev(100.0), self._ev(104.0)]
+        transcript = [self._ev(104.0, source="transcript"),
+                      self._ev(108.0, source="transcript")]
+        merged, dropped = events.merge_events(helper, transcript)
+        self.assertEqual((len(merged), dropped), (2, 2))
+
+    def test_a_retry_inside_the_window_keeps_its_block_from_before_it(self):
+        home = temp_dir(self)
+        now = time.time()
+        pg = "python3 /h/prose-guard.py"
+        project = home / ".claude" / "projects" / "-p"
+        project.mkdir(parents=True)
+        since = now - HOUR
+        (project / "s.jsonl").write_text("\n".join([
+            _rec(since - 30, "user", isMeta=True, sessionId="x", message={
+                "role": "user", "content":
+                    f"Stop hook feedback:\n[{pg}]: no"}),
+            _rec(since + 30, "system", subtype="stop_hook_summary",
+                 sessionId="x",
+                 hookInfos=[{"command": pg, "durationMs": 3}]),
+        ]) + "\n")
+        recent = stats_commands.collect(home, since, True)["events"]
+        self.assertEqual([(e["decision"], e["recovered"]) for e in recent],
+                         [("allow", True)])
+        everything = stats_commands.collect(home, None, True)["events"]
+        self.assertEqual([e["recovered"] for e in everything],
+                         [False, True])
+
+    def test_recovery_needs_a_block_from_the_same_hook(self):
+        rows = [self._ev(1.0, hook="blocker", decision="block"),
+                self._ev(2.0, hook="always-allows", decision="allow",
+                         stop_hook_active=True),
+                self._ev(2.1, hook="blocker", decision="allow",
+                         stop_hook_active=True)]
+        events.mark_recovered(rows)
+        self.assertEqual({r["hook"]: r["recovered"] for r in rows
+                          if r["decision"] == "allow"},
+                         {"always-allows": False, "blocker": True})
+
+    def test_repo_filter_leaves_out_a_nested_repository(self):
+        rows = [
+            {**self._ev(1.0), "repo": "/work/app", "cwd": "/work/app/src"},
+            {**self._ev(2.0), "repo": "/work/app/vendor/lib",
+             "cwd": "/work/app/vendor/lib"},
+            {**self._ev(3.0), "repo": None, "cwd": "/work/app/gone"},
+        ]
+        kept = events.filter_events(rows, repo="/work/app")
+        self.assertEqual([r["ts"] for r in kept], [1.0, 3.0])
+
+    def test_subagent_transcripts_are_read(self):
+        home = temp_dir(self)
+        now = time.time()
+        pg = "python3 /h/prose-guard.py"
+        session = home / ".claude" / "projects" / "-p" / "sess-9"
+        (session / "subagents").mkdir(parents=True)
+        (home / ".claude" / "projects" / "-p" / "sess-9.jsonl").write_text(
+            _rec(now - 5, "user", message={"role": "user", "content": "hi"})
+            + "\n")
+        (session / "subagents" / "agent-1.jsonl").write_text(_rec(
+            now - 4, "attachment", attachment={
+                "type": "hook_success", "hookName": "SubagentStop",
+                "hookEvent": "SubagentStop", "toolUseID": "z",
+                "exitCode": 0, "stderr": "", "command": pg,
+                "durationMs": 5}) + "\n")
+        rows = transcripts.backfill(home, now - DAY)
+        self.assertEqual([(e["hook"], e["event"]) for e in rows],
+                         [("prose-guard", "SubagentStop")])
+
+    def test_cold_scan_time_is_linear_in_command_length(self):
+        # A long command once took milliseconds per call in the path regex.
+        start = time.time()
+        for i in range(200):
+            transcripts.command_hook("x" * 4000 + f" {i} --flag=" + "y" * 500)
+        self.assertLess(time.time() - start, 2.0)
 
 
 if __name__ == "__main__":

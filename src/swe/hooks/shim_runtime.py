@@ -207,14 +207,17 @@ def _rotate(path: str) -> None:
         pass
 
 
-def _decide(returncode: int, stdout: str, stderr: str) -> tuple[str, str]:
+def _decide(returncode: int, stdout: str, stderr: str,
+            contract: dict | None = None) -> tuple[str, str]:
     """(decision, reason line) for one finished script.
 
     Exit 2 blocks. Exit 0 blocks too when stdout is a JSON object that
     denies (``decision: block``, ``permissionDecision: deny``,
     ``continue: false``), warns when anything went to stderr, and
     otherwise allows. Any other exit is the harness's non-blocking error:
-    the hook failed open.
+    the hook failed open. A contract that must print JSON and is not the
+    flat schema (gemini, qwen) has no "ask": ``translate`` sends deny, so
+    an ``ask`` is logged as the block the harness received.
     """
     if returncode == 2:
         return "block", reason_line(stderr) or reason_line(
@@ -226,7 +229,12 @@ def _decide(returncode: int, stdout: str, stderr: str) -> tuple[str, str]:
                 parsed = json.loads(text)
             except ValueError:
                 parsed = None
-            if isinstance(parsed, dict) and _permission_of(parsed) == "deny":
+            verdict = _permission_of(parsed) if isinstance(parsed, dict) \
+                else None
+            contract = contract or {}
+            asks_deny = (verdict == "ask" and contract.get("must_print_json")
+                         and contract.get("schema") != "flat")
+            if verdict == "deny" or asks_deny:
                 return "block", reason_line(_json_reason(stdout)) or \
                     reason_line(stderr)
         if (stderr or "").strip():
@@ -260,13 +268,14 @@ def _event_label(norm: dict, native: str) -> str:
 
 
 def _log_run(norm: dict, native: str, script: str, started: float,
-             returncode: int | None, stdout: str, stderr: str) -> None:
+             returncode: int | None, stdout: str, stderr: str,
+             contract: dict | None = None) -> None:
     """Record one shim run; never raises."""
     try:
         if returncode is None:
             decision, reason = "error", "shim could not run the script"
         else:
-            decision, reason = _decide(returncode, stdout, stderr)
+            decision, reason = _decide(returncode, stdout, stderr, contract)
         hook = os.path.splitext(os.path.basename(script))[0]
         active = norm.get("stop_hook_active")
         record(
@@ -504,7 +513,7 @@ def main(argv: list[str]) -> int:
             sys.stdout.write(default_output(contract, native) + "\n")
         return 0
     _log_run(norm, native, script, started, proc.returncode,
-             proc.stdout, proc.stderr)
+             proc.stdout, proc.stderr, contract)
 
     if proc.stderr:
         sys.stderr.write(proc.stderr)

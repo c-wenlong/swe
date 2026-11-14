@@ -31,6 +31,7 @@ import json
 import os
 import re
 import shlex
+from functools import lru_cache
 from datetime import datetime
 from pathlib import Path
 
@@ -38,8 +39,12 @@ from swe.hooks import shim_runtime
 from swe.hooks.events import SCRIPT_EXTENSIONS, hook_stem
 
 # A cheap byte test before json.loads: every record this module reads
-# mentions "hook". Most transcript lines do not.
-_NEEDLE = b"hook"
+# carries one of these. Most transcript lines carry none, and a line that
+# only talks about hooks (an assistant message, say) does not match.
+_NEEDLES = (b'"hook_success"', b'"hook_non_blocking_error"',
+            b'"hook_cancelled"', b'"hook_blocking_error"',
+            b"stop_hook_summary", b" hook error: [", b" hook error from",
+            b"hook feedback:")
 
 # A feedback block or a summary that follows a block is the same run when
 # it lands this close (seconds).
@@ -56,21 +61,88 @@ _FEEDBACK = re.compile(r"^(?P<event>[A-Za-z]+) hook feedback:\s*\n?(?P<body>.*)\
 _FEEDBACK_ENTRY = re.compile(r"^\[(?P<command>.*?)\]:\s*", re.MULTILINE)
 
 
+# Where a path ends inside a shell command: whitespace, quotes and the
+# operators that glue commands together. ``=`` too, so ``f=/x/y.py`` and
+# ``PATH=...`` split before the path. Splitting is linear; a path regex
+# with a greedy class backtracked for milliseconds per long command.
+_PATH_BREAKS = re.compile(r"[\s\"'`;|&()<>=]+")
+
+# Stems that say nothing about which hook it is: the parent folder joins
+# them (``.pixel-agents/claude-hook``).
+_GENERIC_STEMS = frozenset({
+    "hook", "hooks", "run", "main", "index", "handler", "entry", "callback",
+    "notify", "claude-hook", "on-stop", "on-start", "stop", "start",
+    "session-start", "session-end", "pre-tool-use", "post-tool-use",
+    "user-prompt-submit"})
+# Folders that only say "this is a hook script".
+_PLAIN_FOLDERS = frozenset({"hooks", "scripts", "bin", "_generated", "src",
+                            "lib", "dist", "."})
+_INTERPRETERS = frozenset({"python", "python3", "node", "bash", "sh", "zsh",
+                           "env", "exec", "ruby", "perl", "bun", "deno"})
+
+
+def _variable_label(folder: str) -> str:
+    """``superset`` for ``$SUPERSET_HOME_DIR``, ``claude-plugin`` for
+    ``${CLAUDE_PLUGIN_ROOT}``."""
+    name = folder.strip("${}\"'").lower()
+    for suffix in ("_home_dir", "_root", "_dir", "_home"):
+        if name.endswith(suffix) and len(name) > len(suffix):
+            name = name[:-len(suffix)]
+            break
+    return re.sub(r"[^a-z0-9]+", "-", name).strip("-")
+
+
+@lru_cache(maxsize=1024)
 def command_hook(command: str) -> str:
     """The hook's name for a declared command line.
 
-    ``python3 ~/.claude/hooks/_generated/prose-guard.py`` is
-    ``prose-guard``: the first token that looks like a script, else the
-    first token's basename.
+    The name comes from the script path inside the command: the last
+    path-like token ending in a script extension, its basename without the
+    extension. So these all work::
+
+        python3 "/h/.claude/hooks/prose-guard.py"           -> prose-guard
+        f="$HOME/.swe/hooks/x/command_guard.py"; ... "$f"   -> command_guard
+        "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"      -> session-start
+        PATH="..." node "/h/.pixel-agents/hooks/claude-hook.js"
+                                                   -> .pixel-agents/claude-hook
+
+    That is also how the hook shim names a shared hook (the stem of its
+    script), so a run in the log and the same run in a transcript group
+    together. A generic stem (``callback``, ``notify``) takes its nearest
+    meaningful folder as a prefix. A command with no script path falls back
+    to its first word that is not a ``VAR=value`` or an interpreter.
     """
+    command = command or ""
+    paths = [t for t in _PATH_BREAKS.split(command)
+             if t.lower().endswith(SCRIPT_EXTENSIONS)
+             and len(t) > 3]
+    if paths:
+        path = paths[-1]
+        stem = hook_stem(os.path.basename(path))
+        if stem.lower() in _GENERIC_STEMS:
+            for folder in reversed(path.split("/")[:-1]):
+                if not folder or folder.lower() in _PLAIN_FOLDERS:
+                    continue
+                if folder == "~":
+                    break
+                if "$" in folder:
+                    label = _variable_label(folder)
+                    return f"{label}/{stem}" if label else stem
+                return f"{folder}/{stem}"
+        return stem
     try:
-        tokens = shlex.split(command or "")
+        tokens = shlex.split(command)
     except ValueError:
-        tokens = (command or "").split()
-    for token in tokens:
-        if token.lower().endswith(SCRIPT_EXTENSIONS):
-            return hook_stem(token)
-    return hook_stem(tokens[0]) if tokens else ""
+        tokens = command.split()
+    words = [t for t in tokens if not re.match(r"^[A-Za-z_]\w*=", t)]
+    if len(words) > 6 and "/" not in command:
+        # A prompt hook stores its prompt where a command would go.
+        return "prompt"
+    for word in words:
+        base = hook_stem(word)
+        if base.lower() not in _INTERPRETERS:
+            return base
+    return hook_stem(words[0]) if words else ""
 
 
 def _epoch(stamp) -> float | None:
@@ -149,7 +221,8 @@ def _attachment(record: dict, ts: float) -> list[dict]:
     if kind == "hook_success":
         decision, reason = ("warn", stderr) if stderr else ("allow", "")
     elif kind == "hook_cancelled":
-        decision, reason = "error", "cancelled"
+        decision = "error"
+        reason = "timed out" if att.get("timedOut") else "cancelled"
     elif kind == "hook_blocking_error":
         blocking = att.get("blockingError")
         message = blocking.get("blockingError") if isinstance(
@@ -182,9 +255,14 @@ def _stop_summary(record: dict, ts: float) -> list[dict]:
             continue
         decision, reason = "allow", ""
         for error in errors:
-            if info["command"] in error or hook in error:
-                decision = "error"
-                reason = re.sub(r"^\[.*?\]:\s*", "", error.strip())
+            # An error counts against a hook only when it names that
+            # hook's command: ``[<command>]: <stderr>``. One that names
+            # nothing is left to the run's own attachment.
+            named = re.match(r"^\[(?P<command>.*?)\]:\s*(?P<rest>.*)\Z",
+                             error.strip(), re.DOTALL)
+            if named and (named.group("command") == info["command"]
+                          or command_hook(named.group("command")) == hook):
+                decision, reason = "error", named.group("rest")
                 break
         event = _event(record, ts, hook, "Stop", decision, reason,
                        info.get("durationMs"), None, record.get("toolUseID"))
@@ -244,7 +322,7 @@ def parse_lines(lines) -> list[dict]:
     found: list[dict] = []
     for line in lines:
         raw = line if isinstance(line, bytes) else line.encode("utf-8")
-        if _NEEDLE not in raw:
+        if not any(needle in raw for needle in _NEEDLES):
             continue
         try:
             record = json.loads(raw)
@@ -266,45 +344,95 @@ def parse_lines(lines) -> list[dict]:
             content = message.get("content") if isinstance(
                 message, dict) else None
             text = _text_of(content)
+            if not text and isinstance(record.get("content"), str):
+                text = record["content"]
             if record.get("isMeta") and "hook feedback" in text:
                 found += _feedback(record, ts, text)
     return _collapse(found)
 
 
-def _collapse(events: list[dict]) -> list[dict]:
-    absorbed: set[int] = set()
-    blocks = [i for i, e in enumerate(events) if e["_kind"] == "block"]
-    by_use: dict[tuple, int] = {}
-    for i, event in enumerate(events):
-        if event["_kind"] == "attachment" and event["_tool_use_id"]:
-            by_use[(event["_tool_use_id"], event["hook"])] = i
-    for i in blocks:
-        event = events[i]
-        j = by_use.get((event["_tool_use_id"], event["hook"]))
-        if j is not None and j != i:
-            if event["duration_ms"] is None:
-                event["duration_ms"] = events[j]["duration_ms"]
-            absorbed.add(j)
-    summaries = [i for i, e in enumerate(events) if e["_kind"] == "summary"]
-    for i, event in enumerate(events):
-        if event["_kind"] != "feedback":
+_ATTACH_WINDOW = 5.0
+
+
+def _pair(events, one_kind: str, other_kind: str, window: float,
+          same_tool_use: bool = False):
+    """(one index, other index) pairs: the same run seen in two records.
+
+    ``other`` is the nearest unused record of the same hook, session and
+    event name within ``window`` seconds (or with the same tool use id);
+    each record pairs at most once. Records are bucketed first, because a
+    long transcript holds thousands of hook records.
+    """
+    def key(event):
+        tail = event["_tool_use_id"] if same_tool_use else event["event"]
+        return (event["hook"], event["session_id"], tail)
+
+    buckets: dict[tuple, list[int]] = {}
+    for j, other in enumerate(events):
+        if other["_kind"] == other_kind:
+            buckets.setdefault(key(other), []).append(j)
+    pairs = []
+    for i, one in enumerate(events):
+        if one["_kind"] != one_kind:
+            continue
+        if same_tool_use and not one["_tool_use_id"]:
+            continue
+        pool = buckets.get(key(one))
+        if not pool:
             continue
         best = None
-        for j in summaries:
-            other = events[j]
-            if j in absorbed or other["hook"] != event["hook"] \
-                    or other["event"] != event["event"] \
-                    or other["session_id"] != event["session_id"]:
-                continue
-            gap = abs(other["ts"] - event["ts"])
-            if gap <= _STOP_WINDOW and (best is None or gap < best[0]):
+        for j in pool:
+            gap = 0.0 if same_tool_use else abs(events[j]["ts"] - one["ts"])
+            if gap <= window and (best is None or gap < best[0]):
                 best = (gap, j)
         if best is not None:
-            event["duration_ms"] = events[best[1]]["duration_ms"]
-            absorbed.add(best[1])
+            pool.remove(best[1])
+            pairs.append((i, best[1]))
+    return pairs
+
+
+def _collapse(events: list[dict]) -> list[dict]:
+    """One event per run when two or three records describe it.
+
+    * A PreToolUse block's tool result and the ``hook_success`` attachment
+      with the same tool use id are one run: the block wins and takes the
+      attachment's duration. (An exit-2 hook is recorded as an exit 0
+      ``hook_success`` carrying the stderr, so without the tool result it
+      would read as a warning.)
+    * A Stop hook that has output leaves an attachment and also an entry in
+      that turn's ``stop_hook_summary``: the attachment, which carries the
+      exit code and stderr, wins.
+    * A ``Stop hook feedback`` message is the block of the nearest Stop run
+      of that hook (attachment or summary entry) and replaces it.
+    """
+    dropped: set[int] = set()
+    for block, attachment in _pair(events, "block", "attachment", 0.0,
+                                   same_tool_use=True):
+        if events[block]["duration_ms"] is None:
+            events[block]["duration_ms"] = events[attachment]["duration_ms"]
+        dropped.add(attachment)
+    live = [e if i not in dropped else dict(e, _kind="gone")
+            for i, e in enumerate(events)]
+    for attachment, summary in _pair(live, "attachment", "summary",
+                                     _ATTACH_WINDOW):
+        if live[attachment]["event"] == "Stop" or \
+                live[attachment]["event"].startswith("Stop"):
+            if live[attachment]["duration_ms"] is None:
+                live[attachment]["duration_ms"] = live[summary]["duration_ms"]
+            dropped.add(summary)
+            live[summary]["_kind"] = "gone"
+    for feedback, run in _pair(live, "feedback", "summary", _STOP_WINDOW):
+        events[feedback]["duration_ms"] = live[run]["duration_ms"]
+        dropped.add(run)
+        live[run]["_kind"] = "gone"
+    for feedback, run in _pair(live, "feedback", "attachment", _STOP_WINDOW):
+        if events[feedback]["duration_ms"] is None:
+            events[feedback]["duration_ms"] = live[run]["duration_ms"]
+        dropped.add(run)
+        live[run]["_kind"] = "gone"
     kept = []
     for i, event in enumerate(events):
-        if i in absorbed:
+        if i in dropped:
             continue
         event.pop("_tool_use_id", None)
         event.pop("_kind", None)
@@ -322,25 +450,51 @@ def parse_file(path: str, since: float | None = None) -> list[dict]:
     return [e for e in events if since is None or e["ts"] >= since]
 
 
+def _subagent_transcripts(main: list[str]) -> list[str]:
+    """``<project>/<session>/subagents/*.jsonl`` beside the main transcripts.
+
+    The session enumeration leaves ``subagents`` folders out on purpose
+    (they are not conversations), but their hook runs are real. Each
+    project folder is listed once, then each session folder once for its
+    ``subagents`` child: no glob, no walk below that.
+    """
+    out: list[str] = []
+    for project in sorted({os.path.dirname(path) for path in main}):
+        try:
+            with os.scandir(project) as entries:
+                sessions = [e.path for e in entries if e.is_dir()]
+        except OSError:
+            continue
+        for session in sessions:
+            try:
+                with os.scandir(os.path.join(session, "subagents")) as inner:
+                    out += [e.path for e in inner if e.name.endswith(".jsonl")
+                            and not e.name.startswith(".")]
+            except OSError:
+                continue
+    return out
+
+
 def claude_transcripts(home: Path, since: float | None = None) -> list[str]:
     """Claude transcript files that can hold events newer than ``since``.
 
-    One enumeration of the roots (``search_writer.sources``), then a stat
-    each: a transcript last written before ``since`` holds nothing newer.
+    One enumeration of the roots (``search_writer.sources``) plus the
+    subagent transcripts beside them, then a stat each: a transcript last
+    written before ``since`` holds nothing newer.
     """
     from swe.sessions import search_writer
 
+    main = [source.path for source in search_writer.sources(home)
+            if source.harness == "claude"]
     out = []
-    for source in search_writer.sources(home):
-        if source.harness != "claude":
-            continue
+    for path in main + _subagent_transcripts(main):
         if since is not None:
             try:
-                if os.stat(source.path).st_mtime < since:
+                if os.stat(path).st_mtime < since:
                     continue
             except OSError:
                 continue
-        out.append(source.path)
+        out.append(path)
     return out
 
 

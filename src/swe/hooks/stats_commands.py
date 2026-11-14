@@ -22,6 +22,8 @@ from swe.table import Table
 
 DEFAULT_SINCE = "7d"
 DEFAULT_LIMIT = 20
+# How far before the window to read, so a Stop retry can see its block.
+LOOKBACK = 3600.0
 
 _DECISION_COLOR = {"block": "red", "warn": "yellow", "error": "yellow",
                    "allow": "green"}
@@ -70,17 +72,25 @@ def collect(home: Path, since: float | None, backfill: bool,
     the runs each source supplied after the merge and how many transcript
     runs the log already held.
     """
-    helper = _events.read_log(home, since)
-    transcript = _transcripts.backfill(home, since) if backfill else []
-    merged, duplicates = _events.merge_events(helper, transcript)
+    # A retry that lands just inside the window may follow a block that
+    # fell just outside it, so read a little further back, decide what each
+    # run was, and cut to the window afterwards.
+    context = None if since is None else since - LOOKBACK
+    helper = _events.read_log(home, context)
+    transcript = _transcripts.backfill(home, context) if backfill else []
+    merged, _ = _events.merge_events(helper, transcript)
     _events.mark_recovered(merged)
+    if since is not None:
+        merged = [e for e in merged if e["ts"] >= since]
+        helper = [e for e in helper if e["ts"] >= since]
+        transcript = [e for e in transcript if e["ts"] >= since]
     from_helper = sum(1 for e in merged if e["source"] == "helper")
     return {
         "events": merged,
         "sources": {
             "helper": from_helper,
             "transcript": len(merged) - from_helper,
-            "duplicates": duplicates,
+            "duplicates": len(helper) + len(transcript) - len(merged),
             "backfill": backfill,
         },
     }
