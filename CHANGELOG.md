@@ -166,6 +166,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   canonical key (`vibe`, `qwen`, `droid`), and a `command` already set in
   harness.json is never overwritten. Follow-up to
   [#1916](https://github.com/starship-terminal/swe/pull/1916).
+
+- **A collapsed sidebar no longer blocks clicks beside the rail (Mac).** The
+  rail kept its icons laid out at the expanded width, and `.clipped()` hides
+  that overflow without removing its hit area, so it swallowed clicks up to
+  the expanded width, such as the AGENTS.md Edit tab. The list now takes
+  clicks only over its visible width, and the title bar reader no longer
+  takes clicks. Closes #1892.
 - **Codex education monthly usage reads the workspace billing allowance** when the standard usage response omits it, showing both the percentage and credit amounts.
 - **Installed plugins can be switched and removed before import.** Claude Code and Codex on/off and uninstall controls work for harness-owned plugins. The Mac row and per-harness action menus use themed popovers, with confirmed removal from one or all harnesses; import remains separate for SWE file ownership.
 

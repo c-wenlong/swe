@@ -169,7 +169,7 @@ scaffolds; `PageHeader` is the non-scrolling variant used by sheets.
 
 ## Gotchas
 
-- **Sidebar clipping is not hit testing** (`SidebarListFrame` in `MainWindow.swift`): the rail keeps its scroll content at expanded width to preserve icon positions. `.clipped()` alone leaves that content intercepting page clicks; apply `.contentShape(.rect)` at the visible list frame. Keep the title-bar toggle outside that frame because it extends beyond the rail.
+- **Sidebar clipping is not hit testing** (`SidebarListFrame` in `app/mac/Sources/SWEApp/Navigation/MainWindow.swift`): the rail keeps its scroll content at expanded width to preserve icon positions. `.clipped()` alone leaves that overflow intercepting page clicks ([#1892](https://github.com/starship-terminal/swe/issues/1892): the AGENTS.md Edit tab); the modifier adds `.contentShape(.rect)` at the visible list frame. Keep the title-bar toggle outside that frame because it extends beyond the rail, and never give a background `NSView` (`TitleBarReader`) a hit area. The visible width comes from `SidebarExpansion.visibleWidth`, which `SidebarExpansionTests` pins.
 
 Non-obvious decisions and traps in `app/mac/`, recorded so they are not re-learned. Read the entry for a file before changing it. The Python side's entries are in [backend-architecture.md](backend-architecture.md#gotchas).
 

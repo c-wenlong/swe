@@ -190,6 +190,24 @@ struct MainWindow: View {
     }
 }
 
+/// Crops the sidebar's scroll content to the visible width, for drawing
+/// and for clicks. The list is always laid out at the expanded width so
+/// the icons never move; in the rail that leaves it wider than its frame.
+/// `.clipped()` only crops the drawing, so without `.contentShape(.rect)`
+/// the unseen part keeps taking clicks and blocks whatever page control
+/// sits under it (the AGENTS.md Edit tab, #1892). The header stays outside
+/// this frame: its toggle reaches past the rail.
+private struct SidebarListFrame: ViewModifier {
+    var visibleWidth: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: visibleWidth, alignment: .leading)
+            .clipped()
+            .contentShape(.rect)
+    }
+}
+
 private struct Sidebar: View {
     /// The live expanded width: the model's value, or the pointer's
     /// while the resize strip is being dragged.
@@ -206,6 +224,11 @@ private struct Sidebar: View {
     private var animation: Animation? { reduceMotion ? nil : Theme.sidebarAnimation }
     private var isExpanded: Bool { expansion.isExpanded }
     private var isFloating: Bool { expansion.isFloating }
+    /// What the sidebar covers on screen: the expanded width while open,
+    /// the icon rail while collapsed.
+    private var visibleWidth: CGFloat {
+        CGFloat(expansion.visibleWidth(expanded: Double(width), rail: Double(Theme.sidebarCollapsedWidth)))
+    }
     /// Whether the list has scrolled under the header, which then shows
     /// a hairline along its bottom edge.
     @State private var scrolled = false
@@ -213,18 +236,14 @@ private struct Sidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Color.clear.frame(height: headerHeight)
-            list
-                .frame(width: isExpanded ? width : Theme.sidebarCollapsedWidth,
-                       alignment: .leading)
-                .clipped()
+            list.modifier(SidebarListFrame(visibleWidth: visibleWidth))
         }
         // Over the list, not above it: the list's scroll view reaches up
         // into the title bar and would otherwise lie on top of the toggle
         // and take its clicks. Unclipped, so in the rail the toggle sits
         // past the traffic lights, over the page's top edge.
         .overlay(alignment: .topLeading) { header }
-        .frame(width: isExpanded ? width : Theme.sidebarCollapsedWidth,
-               alignment: .leading)
+        .frame(width: visibleWidth, alignment: .leading)
         // A floating rail covers the page: it needs the window surface,
         // a hairline edge and a shadow, fading in with the expansion.
         // The shadow sits on the surface only, so the labels stay crisp.
@@ -350,7 +369,7 @@ private struct Sidebar: View {
         .frame(width: width, height: headerHeight, alignment: .leading)
         .overlay(alignment: .bottomLeading) {
             Theme.border
-                .frame(width: isExpanded ? width : Theme.sidebarCollapsedWidth, height: 1)
+                .frame(width: visibleWidth, height: 1)
                 .opacity(scrolled ? 1 : 0)
         }
         .background(TitleBarReader(titleBar: $titleBar))
@@ -620,6 +639,9 @@ struct TitleBarReader: NSViewRepresentable {
 
     final class View: NSView {
         var report: ((TitleBar) -> Void)?
+        /// Only reads the window: as a background it must never take a
+        /// click meant for what lies under it.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
         private var last: TitleBar?
         private var observers: [NSObjectProtocol] = []
 
