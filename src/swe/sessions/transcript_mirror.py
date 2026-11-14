@@ -3,7 +3,7 @@ harnesses' own retention (#1918).
 
 Both harnesses delete transcripts after about 30 days. This module copies
 each one into ``~/.swe/data/transcripts/`` while it still exists, so the
-session stays listed, readable and searchable afterwards.
+session stays listed and readable afterwards.
 
 Layout keeps the source's structure::
 
@@ -118,15 +118,21 @@ def roots(home: Path) -> list[Root]:
 def _mirror_rel(path: str, harness: str, table: list[Root]) -> tuple[str, str] | None:
     """``(mirror-relative path, account_home)`` for a resolved source
     path, or None when the harness is not mirrored. A file that sits
-    outside every root (a symlink pointing elsewhere) goes under
-    ``_external/<hash of its path>/`` so two of them cannot collide."""
+    outside every root (a symlink pointing elsewhere) goes under a folder
+    named for a hash of its path, so two of them cannot collide."""
     if harness not in MIRRORED:
         return None
     for root in table:
         if root.harness == harness and path.startswith(root.path + os.sep):
             return f"{root.prefix}/{path[len(root.path) + 1:]}", root.account_home
     digest = hashlib.sha1(path.encode("utf-8", "surrogateescape")).hexdigest()[:12]
-    return f"{harness}/_external/{digest}/{os.path.basename(path)}", ""
+    name = os.path.basename(path)
+    # Shaped so the listing's scans reach it: Claude only enters project
+    # folders whose name starts with "-", and Codex globs `*/*/*/*.jsonl`
+    # (dated) and `*.jsonl` (flat).
+    if harness == "claude":
+        return f"claude/-external-{digest}/{name}", ""
+    return f"codex/external/{digest}/0/{name}", ""
 
 
 # -- settings ------------------------------------------------------------
@@ -528,26 +534,6 @@ def listing_roots(harness: str, home: Path | None = None) -> list[tuple[str, str
             skip.setdefault(_group(rel, entry), set()).add(os.path.basename(rel))
     return [(path, account, skip.get(account, set()))
             for account, path in groups if os.path.isdir(path)]
-
-
-@dataclass(frozen=True)
-class Orphan:
-    """A mirror copy whose source is gone."""
-
-    path: str  # the copy, resolved, as the search index keys it
-    harness: str
-    source: str  # where it came from, as the index keyed it
-
-
-def orphans(home: Path | None = None) -> list[Orphan]:
-    """Every copy whose source is gone and which is still on disk."""
-    out = []
-    for rel, entry in sorted(load_manifest(home).items()):
-        if entry.get("harness") in MIRRORED and _is_gone(entry):
-            path = _mirror_path(home, rel)
-            if os.path.isfile(path):
-                out.append(Orphan(path, entry["harness"], entry.get("source", "")))
-    return out
 
 
 def mirror_dir(harness: str, account_home: str = "", home: Path | None = None) -> Path | None:

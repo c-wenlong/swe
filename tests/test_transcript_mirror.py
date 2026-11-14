@@ -285,6 +285,64 @@ class FallbackTests(MirrorCase):
                 mirror._clone("a", "b")
 
 
+class ExternalTests(MirrorCase):
+    def test_a_symlinked_claude_transcript_outside_the_roots_lists_after_pruning(self):
+        elsewhere = temp_dir(self)
+        target = write_jsonl(elsewhere / f"{CLAUDE_ID}.jsonl", claude_records())
+        link = self.home / ".claude/projects/-work-proj" / target.name
+        link.parent.mkdir(parents=True)
+        link.symlink_to(target)
+        self.assertEqual(self.sync().files, 1)
+        self.assertEqual(len(self.sessions()), 1)
+        link.unlink()
+        target.unlink()
+        rows = self.sessions()
+        self.assertEqual([(r["id"], r["mirrored"]) for r in rows], [(CLAUDE_ID, True)])
+
+    def test_a_symlinked_codex_rollout_outside_the_roots_lists_after_pruning(self):
+        elsewhere = temp_dir(self)
+        target = write_jsonl(elsewhere / f"{CODEX_STEM}.jsonl", codex_records())
+        link = self.home / ".codex/sessions/2026/09/01" / target.name
+        link.parent.mkdir(parents=True)
+        link.symlink_to(target)
+        self.sync()
+        link.unlink()
+        target.unlink()
+        rows = self.sessions()
+        self.assertEqual([(r["id"], r["mirrored"]) for r in rows], [(CODEX_STEM, True)])
+
+
+class HandleTests(MirrorCase):
+    def open_fds(self) -> int:
+        return len(os.listdir("/dev/fd"))
+
+    def test_failed_copies_leak_no_file_handles(self):
+        claude = self.claude()
+        sources = writer.sources(self.home)
+        before = self.open_fds()
+        for _ in range(20):
+            real_open = open
+
+            def refuse(path, *a, **kw):
+                if str(path) == str(claude):
+                    raise PermissionError(13, "denied")
+                return real_open(path, *a, **kw)
+
+            with mock.patch("builtins.open", refuse):
+                self.assertEqual(mirror.sync(self.home, sources).failed, 1)
+        self.assertLessEqual(self.open_fds(), before)
+        self.assertEqual([p for p in (self.mirror_root / "claude").rglob("*") if p.is_file()], [])
+
+    def test_a_source_that_vanishes_after_the_walk_leaks_nothing(self):
+        claude = self.claude()
+        sources = writer.sources(self.home)
+        claude.unlink()
+        before = self.open_fds()
+        for _ in range(20):
+            mirror.sync(self.home, sources)
+        self.assertLessEqual(self.open_fds(), before)
+
+
 class SafetyTests(MirrorCase):
     def test_an_interrupted_copy_leaves_no_partial_file(self):
         claude = self.claude()
@@ -537,10 +595,19 @@ class ReadTests(MirrorCase):
 
 
 class SearchTests(MirrorCase):
-    def count(self, text="login") -> int:
-        return len({h.session_id for h in search_index.search(self.home, text)})
+    """The mirror leaves the search index exactly as it was: it writes no
+    row for a copy and removes none because of one."""
 
-    def rows(self) -> int:
+    def rows(self) -> list[tuple]:
+        import sqlite3
+        conn = sqlite3.connect(search_index.index_path(self.home))
+        try:
+            return conn.execute(
+                "SELECT path, session_row_id, size_bytes FROM files ORDER BY path").fetchall()
+        finally:
+            conn.close()
+
+    def sessions_count(self) -> int:
         import sqlite3
         conn = sqlite3.connect(search_index.index_path(self.home))
         try:
@@ -548,36 +615,43 @@ class SearchTests(MirrorCase):
         finally:
             conn.close()
 
-    def test_an_indexed_session_is_not_counted_again_after_its_source_is_pruned(self):
+    def test_a_pruned_session_stays_at_one_row_and_no_row_names_a_copy(self):
         claude = self.claude()
-        writer.run_pass(self.home)  # indexes the live file, and mirrors it
-        self.assertEqual(self.rows(), 1)
+        writer.run_pass(self.home)
         claude.unlink()
         result = writer.run_pass(self.home)
-        self.assertEqual(self.rows(), 1)
         self.assertEqual(result.mirror["orphaned"], 1)
-        self.assertEqual(self.count(), 1)
+        self.assertEqual(self.sessions_count(), 1)
+        self.assertTrue(all(str(self.mirror_root) not in r[0] for r in self.rows()))
 
-    def test_a_pruned_session_the_index_never_read_is_indexed_from_its_copy(self):
+    def test_the_index_is_the_same_with_the_mirror_off(self):
+        self.claude(), self.codex()
+        mirror.set_enabled(self.home, False)
+        writer.run_pass(self.home)
+        off = self.rows()
+        mirror.set_enabled(self.home, True)
+        writer.run_pass(self.home)
+        self.assertEqual(self.rows(), off)
+
+    def test_losing_the_manifest_changes_no_index_row(self):
         claude = self.claude()
-        mirror.run_pass(self.home)  # mirrored, never indexed
+        writer.run_pass(self.home)
         claude.unlink()
         writer.run_pass(self.home)
-        self.assertEqual(self.rows(), 1)
-        self.assertEqual(self.count(), 1)
+        before = self.rows()
+        mirror.manifest_path(self.home).write_text("{not json")
         writer.run_pass(self.home)
-        self.assertEqual(self.rows(), 1)
+        mirror.manifest_path(self.home).unlink()
+        writer.run_pass(self.home)
+        self.assertEqual(self.rows(), before)
+        self.assertEqual(len(list(self.mirror_root.rglob("*.jsonl"))), 1)
 
-    def test_a_returning_source_retires_the_copys_rows(self):
+    def test_a_copy_of_a_session_the_index_never_read_is_not_indexed(self):
         claude = self.claude()
         mirror.run_pass(self.home)
         claude.unlink()
         writer.run_pass(self.home)
-        self.assertEqual(self.rows(), 1)
-        write_jsonl(claude, claude_records(), MTIME + 100)  # restored by hand
-        writer.run_pass(self.home)
-        self.assertEqual(self.rows(), 1)
-        self.assertEqual(self.count(), 1)
+        self.assertEqual(self.sessions_count(), 0)
 
     def test_the_index_schema_is_untouched(self):
         self.claude()
@@ -593,7 +667,7 @@ class SearchTests(MirrorCase):
     def test_the_index_pass_reports_what_it_mirrored(self):
         self.claude()
         result = writer.run_pass(self.home)
-        self.assertEqual(result.mirror["copied"], 1)
+        self.assertEqual(result.mirror["copied"] + result.mirror["cloned"], 1)
         self.assertNotIn("mirror", result.as_dict())
 
 

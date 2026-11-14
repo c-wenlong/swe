@@ -365,7 +365,7 @@ def search_index_for(home: Path | None = None) -> Path:
 
 
 def transcripts_dir_for(home: Path | None = None) -> Path:
-    """``~/.swe/data/transcripts`` — the mirror of Claude and Codex
+    """``~/.swe/data/transcripts`` : the mirror of Claude and Codex
     transcripts kept past the harnesses' own retention
     (:mod:`swe.sessions.transcript_mirror`). Never delete a file in it
     unless the user asked for that session to go."""
