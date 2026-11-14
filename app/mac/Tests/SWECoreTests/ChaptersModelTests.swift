@@ -121,6 +121,30 @@ import Testing
         }
     }
 
+    /// The Include column's sizes come from the same off-main walk as the
+    /// outline, one entry per chapter file and none for index.txt.
+    @Test func loadReadsEachChapterFilesSize() async throws {
+        let dir = try TempDir()
+        try dir.write("long.md", String(repeating: "x", count: 3072))
+        let model = try await model(dir, runner: Runner([check(dir.url)]))
+        #expect(model.sizes == ["a.md": 4, "b.md": 4, "long.md": 3072])
+    }
+
+    /// A chapter the outline skips (a hidden name) still compiles, so its
+    /// size is recorded for the Total row.
+    @Test func hiddenIndexedChaptersAreWeighedToo() async throws {
+        let dir = try TempDir()
+        try dir.write(".hidden.md", String(repeating: "x", count: 2048))
+        let model = ChaptersModel()
+        try dir.write("a.md", "# A\n")
+        try dir.write("index.txt", "a.md\n.hidden.md\n")
+        await model.load(swe: SweClient(runner: Runner([check(
+            dir.url, chapters: [("a.md", true), (".hidden.md", true)])])))
+        #expect(model.sizes[".hidden.md"] == 2048)
+        #expect(model.missing == [".hidden.md"])
+        #expect(model.tree.map(\.path) == ["a.md"])
+    }
+
     @Test func moveRewritesTheIndexAndRebuilds() async throws {
         let dir = try TempDir()
         let runner = Runner([check(dir.url), check(dir.url, chapters: [("b.md", true), ("a.md", true)])])

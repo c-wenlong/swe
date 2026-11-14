@@ -207,10 +207,48 @@ public enum CompileFilter {
 
     /// The one harness the tab shows, or nil for the All view: the stored
     /// names that are still linked (`known`, or all of them before the
-    /// link report loads) must come down to exactly one.
+    /// link report loads) must come down to exactly one, by the same
+    /// `picked` rule the dropdown's label uses, so a checkbox never writes
+    /// to a scope the label does not name.
     public static func harness(stored: String, known: [String]) -> String? {
-        let names = parse(stored).filter { known.isEmpty || known.contains($0) }
+        let names = picked(stored: stored, known: known)
         return names.count == 1 ? names[0] : nil
+    }
+
+    /// The harnesses the dropdown shows ticked: the stored names that are
+    /// still linked, or none when nothing is stored or every linked
+    /// harness is (both read as All harnesses).
+    public static func picked(stored: String, known: [String]) -> [String] {
+        let names = parse(stored).filter { known.isEmpty || known.contains($0) }
+        if !known.isEmpty && Set(names) == Set(known) { return [] }
+        return names
+    }
+
+    /// The value to store for a dropdown selection: names in `known`
+    /// order, "" for none or all of them.
+    public static func stored(picking selection: Set<String>, known: [String]) -> String {
+        let ordered = known.filter(selection.contains)
+        let names = known.isEmpty ? Array(selection).sorted() : ordered
+        if !known.isEmpty && Set(names) == Set(known) { return "" }
+        return serialise(names)
+    }
+
+    /// The dropdown's face: "All harnesses", the one harness's name, or
+    /// "N harnesses".
+    public static func label(stored: String, known: [String]) -> String {
+        let names = picked(stored: stored, known: known)
+        switch names.count {
+        case 0: return "All harnesses"
+        case 1: return HarnessMark(names[0]).name
+        default: return "\(names.count) harnesses"
+        }
+    }
+
+    /// The harness columns the Order matrix draws: the picked ones in
+    /// `known` order, or every linked harness for the All view.
+    public static func columns(stored: String, known: [String]) -> [String] {
+        let names = picked(stored: stored, known: known)
+        return names.isEmpty ? known : known.filter(names.contains)
     }
 
     private static func normalise(_ names: [String]) -> [String] {

@@ -55,6 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unsaved changes and jumps to it; it appears only while there are drafts.
   The View AGENTS.md button and popup now show the generated file's size in
   KiB as last built, per harness output on the Compile tab. Part of #1894.
+- **AGENTS.md Compile tab: a KiB column and one harness dropdown (macOS
+  app).** The Include tree gains a `KiB` column: each chapter file's size
+  on disk with one decimal, each folder the sum of its checked files, and a
+  Total row while one harness is picked. The row of harness chips becomes a
+  multi-select dropdown (All harnesses, the harness name, or "N harnesses")
+  that keeps each logo and link-state dot in its menu; picking several
+  narrows the Order matrix to those harnesses. The "Shared ~/.swe/AGENTS.md:
+  N chapters" summary line under the harness bar is gone. Closes #1893.
 - **The AGENTS.md chapter outline has search, keyboard navigation and drag
   handles (Mac).** A Filter chapters field above the Edit tab's outline
   matches file names and paths and keeps matching files' folders open;
