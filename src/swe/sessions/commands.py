@@ -656,8 +656,9 @@ def cmd_session_index(args) -> int:
               f"({result.current:,} already current) in {result.seconds:.1f}s.")
         if result.failed:
             print(c("yellow", f"{result.failed:,} transcripts could not be read."))
-        if result.mirror and result.mirror.get("copied"):
-            print(f"Mirrored {result.mirror['copied']:,} transcripts "
+        made = ((result.mirror or {}).get("copied", 0) + (result.mirror or {}).get("cloned", 0))
+        if made:
+            print(f"Mirrored {made:,} transcripts "
                   "(swe session mirror --status).")
         if result.mirror and result.mirror.get("error"):
             print(c("yellow", f"The transcript mirror failed: {result.mirror['error']}"))
@@ -718,8 +719,10 @@ def cmd_session_mirror(args) -> int:
         body["pass"] = result.as_dict() if result is not None else None
         return emit(body)
     if result is not None:
-        print(f"Copied {result.copied:,} transcript{'' if result.copied == 1 else 's'} "
-              f"({_bytes(result.copied_bytes)}); "
+        made = result.copied + result.cloned
+        print(f"Mirrored {made:,} transcript{'' if made == 1 else 's'} "
+              f"({result.cloned:,} cloned, {result.copied:,} copied, "
+              f"{_bytes(result.copied_bytes + result.cloned_bytes)}); "
               f"{result.unchanged:,} already current; "
               f"{result.orphaned:,} kept after their source was deleted "
               f"({_bytes(result.orphaned_bytes)}).")

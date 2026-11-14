@@ -19,6 +19,10 @@ Rules that keep user data safe, in the order they matter:
   (that is the feature), not when a copy fails, not to make room. The one
   thing a pass removes is its own half-written temp file. There is no
   purge path yet.
+- **A copy is a clone where it can be.** On APFS ``clonefile(2)`` makes a
+  copy-on-write clone: no bytes move, no extra disk is used while the
+  source exists, and the blocks outlive the source. Anywhere else (or on
+  any error) the file is streamed.
 - **A copy is atomic.** Bytes go to a temp name beside the target, are
   synced, then renamed over it, so a crash leaves the old copy or the new
   one and never half a file.
@@ -42,10 +46,12 @@ goes into ``parse_cache``.
 from __future__ import annotations
 
 import contextlib
+import errno
 import hashlib
 import json
 import os
-import tempfile
+import sys
+import uuid
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -234,20 +240,22 @@ def _ensure_dir(path: Path, stop: Path) -> None:
 @dataclass
 class MirrorResult:
     files: int = 0  # mirrored-harness transcripts the enumeration held
-    copied: int = 0
+    copied: int = 0  # streamed copies
+    cloned: int = 0  # copy-on-write clones (macOS/APFS): no bytes moved
     unchanged: int = 0
     orphaned: int = 0  # copies whose source is gone: kept, as intended
     failed: int = 0
     conflicts: int = 0  # a copy owned by another source: left alone
     copied_bytes: int = 0
+    cloned_bytes: int = 0
     unchanged_bytes: int = 0
     orphaned_bytes: int = 0
     seconds: float = 0.0
 
     def as_dict(self) -> dict:
         return {k: getattr(self, k) for k in (
-            "files", "copied", "unchanged", "orphaned", "failed", "conflicts",
-            "copied_bytes", "unchanged_bytes", "orphaned_bytes", "seconds")}
+            "files", "copied", "cloned", "unchanged", "orphaned", "failed", "conflicts",
+            "copied_bytes", "cloned_bytes", "unchanged_bytes", "orphaned_bytes", "seconds")}
 
 
 def _unchanged(entry: dict | None, path: str, st: os.stat_result, dest: Path) -> bool:
@@ -278,32 +286,73 @@ def _keep_shrunk(dest: Path, written: int) -> None:
         pass  # this exact version is already kept
 
 
-def _copy(source: str, dest: Path, root: Path) -> tuple[os.stat_result, int]:
-    """Copy ``source`` to ``dest`` atomically. Returns the source's stat
-    taken from the open handle *before* any byte is read (so a file that
-    grows while it is copied reads as changed next pass) and the bytes
-    written."""
-    _ensure_dir(dest.parent, root)
-    fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.", suffix=".tmp")
+def _clone(source: str, target: str) -> None:
+    """``clonefile(2)``: a copy-on-write clone on APFS. No bytes move and
+    no extra disk is used while the source exists; the blocks stay alive
+    after the harness deletes the source. ``target`` must not exist.
+    Raises ``OSError`` for anything that stops it (not macOS, a missing
+    symbol, another volume, a filesystem without clones)."""
+    import ctypes
+
+    if sys.platform != "darwin":
+        raise OSError(errno.ENOTSUP, "clonefile is macOS only")
     try:
-        with open(source, "rb") as src, os.fdopen(fd, "wb") as out:
-            st = os.fstat(src.fileno())
-            written = 0
-            while True:
-                chunk = src.read(1 << 20)
-                if not chunk:
-                    break
-                out.write(chunk)
-                written += len(chunk)
-            out.flush()
-            os.fsync(out.fileno())
+        fn = ctypes.CDLL(None, use_errno=True).clonefile
+    except (AttributeError, OSError) as exc:
+        raise OSError(errno.ENOTSUP, "clonefile is unavailable") from exc
+    fn.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint32]
+    fn.restype = ctypes.c_int
+    if fn(os.fsencode(source), os.fsencode(target), 0) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), source)
+
+
+def _copy(source: str, dest: Path, root: Path) -> tuple[os.stat_result, int, str]:
+    """Put a copy of ``source`` at ``dest`` atomically: a clone where the
+    filesystem can, else a streamed copy. Returns ``(stat, bytes, how)``
+    with ``how`` ``"cloned"`` or ``"copied"``.
+
+    The stat is what the manifest records, and it never claims more than
+    the copy holds. Cloning: the source is stat'ed *before* the clone, so
+    a source that grew in between yields a clone with more than the
+    recorded size, and the next pass sees a changed stat and clones
+    again. Streaming: the stat comes from the open handle before the
+    first byte is read, for the same reason. ``bytes`` is the copy's own
+    size (``mirror_size``), never the source's."""
+    _ensure_dir(dest.parent, root)
+    # A name nothing has created: clonefile refuses an existing target.
+    tmp = str(dest.parent / f".{dest.name}.{os.getpid()}-{uuid.uuid4().hex}.tmp")
+    try:
+        try:
+            st = os.stat(source)
+            _clone(source, tmp)
+            how = "cloned"
+            written = os.stat(tmp).st_size
+        except OSError:
+            # No clone here: stream it, exactly as before.
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)  # our own temp name, if a clone half-made it
+            how = "copied"
+            with open(source, "rb") as src, open(tmp, "xb") as out:
+                st = os.fstat(src.fileno())
+                written = 0
+                while True:
+                    chunk = src.read(1 << 20)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    written += len(chunk)
+                out.flush()
+                os.fsync(out.fileno())
+        # A clone carries the source's times already; this pins both
+        # paths to the stat the manifest records.
         os.utime(tmp, ns=(st.st_atime_ns, st.st_mtime_ns))
         os.chmod(tmp, 0o600)
         _keep_shrunk(dest, written)
         os.replace(tmp, dest)
-        return st, written
+        return st, written, how
     except BaseException:
-        # Our own half-written file, never a transcript.
+        # Our own unfinished file, never a transcript.
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
@@ -363,7 +412,7 @@ def sync(home: Path, sources: Iterable, should_stop=None, *, wait: bool = True) 
                     result.unchanged_bytes += entry.get("mirror_size", 0)
                     continue
                 try:
-                    taken, written = _copy(source.path, dest, root)
+                    taken, written, how = _copy(source.path, dest, root)
                 except OSError:
                     result.failed += 1
                     continue
@@ -377,8 +426,12 @@ def sync(home: Path, sources: Iterable, should_stop=None, *, wait: bool = True) 
                     "mirror_size": written,
                     "copied_at": round(time.time(), 3),
                 }
-                result.copied += 1
-                result.copied_bytes += written
+                if how == "cloned":
+                    result.cloned += 1
+                    result.cloned_bytes += written
+                else:
+                    result.copied += 1
+                    result.copied_bytes += written
                 dirty = True
                 pending += 1
                 if pending >= FLUSH_EVERY:

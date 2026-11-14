@@ -9,6 +9,7 @@ read or searched twice.
 
 import json
 import os
+import sys
 import threading
 import unittest
 from pathlib import Path
@@ -65,6 +66,12 @@ class MirrorCase(unittest.TestCase):
     def setUp(self):
         self.home = temp_dir(self).resolve()
         self.mirror_root = transcripts_dir_for(self.home)
+        # The streamed path everywhere by default, so results do not
+        # depend on the filesystem; CloneTests turn the clone back on.
+        self.clone_patch = mock.patch.object(
+            mirror, "_clone", side_effect=OSError(95, "no clone"))
+        self.clone_patch.start()
+        self.addCleanup(self.clone_patch.stop)
 
     def claude(self, session_id=CLAUDE_ID, **kw) -> Path:
         return write_jsonl(
@@ -193,6 +200,89 @@ class CopyTests(MirrorCase):
         row = self.sessions()[0]
         self.assertEqual(row["account_home"], str(account))
         self.assertTrue(row["mirrored"])
+
+
+@unittest.skipUnless(sys.platform == "darwin", "clonefile is macOS only")
+class CloneTests(MirrorCase):
+    def setUp(self):
+        super().setUp()
+        self.clone_patch.stop()  # the real clonefile (cleanup stop is a no-op then)
+        keep = mock.patch.object(mirror, "_clone", mirror._clone)
+        keep.start()
+        self.addCleanup(keep.stop)
+
+    def test_a_clone_holds_the_same_bytes_and_is_reported(self):
+        claude = self.claude()
+        result = self.sync()
+        self.assertEqual((result.cloned, result.copied), (1, 0))
+        self.assertEqual(result.cloned_bytes, claude.stat().st_size)
+        copy = self.mirror_root / "claude/-work-proj" / claude.name
+        self.assertEqual(copy.read_bytes(), claude.read_bytes())
+        self.assertEqual(copy.stat().st_mtime_ns, claude.stat().st_mtime_ns)
+        self.assertEqual(oct(copy.stat().st_mode & 0o777), "0o600")
+        self.assertNotEqual(copy.stat().st_ino, claude.stat().st_ino)
+
+    def test_deleting_the_source_leaves_the_clone_readable(self):
+        claude = self.claude()
+        body = claude.read_bytes()
+        self.sync()
+        claude.unlink()
+        copy = self.mirror_root / "claude/-work-proj" / claude.name
+        self.assertEqual(copy.read_bytes(), body)
+        self.assertEqual(self.sync().orphaned, 1)
+
+    def test_a_changed_source_is_cloned_again_not_streamed(self):
+        claude = self.claude()
+        self.sync()
+        with open(claude, "a") as handle:
+            handle.write("{}\n")
+        os.utime(claude, (MTIME + 5, MTIME + 5))
+        second = self.sync()
+        self.assertEqual((second.cloned, second.copied), (1, 0))
+        copy = self.mirror_root / "claude/-work-proj" / claude.name
+        self.assertEqual(copy.read_bytes(), claude.read_bytes())
+
+    def test_a_clone_interrupted_leaves_no_partial_file(self):
+        self.claude()
+        with mock.patch.object(mirror.os, "replace", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                self.sync()
+        self.assertEqual([p for p in (self.mirror_root / "claude").rglob("*") if p.is_file()], [])
+
+    def test_the_recorded_size_is_the_clones_own(self):
+        claude = self.claude()
+        self.sync()
+        entry = mirror.load_manifest(self.home)[f"claude/-work-proj/{claude.name}"]
+        self.assertEqual(entry["mirror_size"], claude.stat().st_size)
+
+
+class FallbackTests(MirrorCase):
+    def test_a_failing_clone_streams_with_the_same_result(self):
+        # setUp already forces the clone to raise.
+        claude = self.claude()
+        result = self.sync()
+        self.assertEqual((result.copied, result.cloned), (1, 0))
+        self.assertEqual(result.copied_bytes, claude.stat().st_size)
+        copy = self.mirror_root / "claude/-work-proj" / claude.name
+        self.assertEqual(copy.read_bytes(), claude.read_bytes())
+        self.assertEqual(copy.stat().st_mtime_ns, claude.stat().st_mtime_ns)
+
+    def test_a_clone_that_half_made_its_target_is_cleaned_up(self):
+        claude = self.claude()
+
+        def partial(source, target):
+            Path(target).write_bytes(b"partial")
+            raise OSError(18, "cross-device")
+
+        with mock.patch.object(mirror, "_clone", side_effect=partial):
+            self.assertEqual(self.sync().copied, 1)
+        copy = self.mirror_root / "claude/-work-proj" / claude.name
+        self.assertEqual(copy.read_bytes(), claude.read_bytes())
+
+    def test_clone_errors_other_than_oserror_are_not_swallowed_as_data_loss(self):
+        with mock.patch.object(mirror.sys, "platform", "linux"):
+            with self.assertRaises(OSError):
+                mirror._clone("a", "b")
 
 
 class SafetyTests(MirrorCase):
@@ -513,13 +603,15 @@ class CommandTests(MirrorCase):
         result = run_swe(self.home, "session", "mirror", "--json")
         self.assertEqual(result.returncode, 0, result.stderr)
         data = decode(result)["data"]
-        self.assertEqual(data["pass"]["copied"], 1)
-        self.assertEqual(data["pass"]["copied_bytes"], claude.stat().st_size)
+        self.assertEqual(data["pass"]["copied"] + data["pass"]["cloned"], 1)
+        self.assertEqual(data["pass"]["copied_bytes"] + data["pass"]["cloned_bytes"],
+                         claude.stat().st_size)
         self.assertEqual((data["entries"], data["bytes"], data["enabled"]),
                          (1, claude.stat().st_size, True))
         claude.unlink()
         again = decode(run_swe(self.home, "session", "mirror", "--json"))["data"]
-        self.assertEqual((again["pass"]["copied"], again["pass"]["orphaned"]), (0, 1))
+        self.assertEqual((again["pass"]["copied"] + again["pass"]["cloned"],
+                          again["pass"]["orphaned"]), (0, 1))
         self.assertEqual(again["pass"]["orphaned_bytes"], data["bytes"])
 
     def test_status_runs_no_pass(self):
@@ -535,7 +627,7 @@ class CommandTests(MirrorCase):
     def test_the_index_command_runs_the_mirror_too(self):
         self.claude()
         data = decode(run_swe(self.home, "session", "index", "--json"))["data"]
-        self.assertEqual(data["mirror"]["copied"], 1)
+        self.assertEqual(data["mirror"]["copied"] + data["mirror"]["cloned"], 1)
 
 
 class HubLoopTests(MirrorCase):
